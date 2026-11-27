@@ -2,7 +2,7 @@ import type { Locator } from "playwright";
 import type { Stage } from "./stage.ts";
 
 /**
- * Moving around the app as a person would, for the video: a drawn cursor that
+ * Moving around the app as a member would, for the video: a drawn cursor that
  * glides to what it clicks, and typing at a typing pace. Playwright's own
  * clicks don't draw a cursor, so the stage draws one over the window.
  */
@@ -106,30 +106,19 @@ export async function click(stage: Stage, locator: Locator) {
 	await stage.page.mouse.up();
 }
 
-/** Opens the thread titled `title` from its line under the message it was started from. */
-export async function openThread(stage: Stage, title: string) {
-	const line = stage.app
-		.getByRole("button", { name: new RegExp(`^Open thread: ${escapeRegExp(title)}`) })
-		.last();
-	await line.waitFor({ timeout: 20_000 });
-	await wait(stage, 600);
-	await click(stage, line);
+/**
+ * Opens the bot named `bot` from its row in the sidebar, whose page starts a
+ * new chat with it, and waits for that page's composer.
+ */
+export async function openNewChat(stage: Stage, bot: string) {
+	const row = stage.app.getByRole("link", { name: bot, exact: true }).first();
+	await row.waitFor({ timeout: 20_000 });
+	await click(stage, row);
+	await stage.app.getByPlaceholder(`Ask ${bot} to…`).waitFor();
 	await wait(stage, 800);
 }
 
-function escapeRegExp(text: string) {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Closes the panel open over the chat, as its close button does. */
-export async function closePanel(stage: Stage) {
-	const close = stage.app.getByRole("button", { name: /^close/i }).last();
-	if (await close.isVisible().catch(() => false)) await click(stage, close);
-	else await stage.page.keyboard.press("Escape");
-	await wait(stage, 800);
-}
-
-/** A steady typing pace a viewer can read along with, and uneven, so it reads as a person's. */
+/** A steady typing pace a viewer can read along with, and uneven, so it reads as a member's. */
 const TYPING_MILLISECONDS = { least: 38, spread: 40 };
 /** How far the camera moves in on the composer while a message is typed. */
 const TYPING_ZOOM = 1.5;

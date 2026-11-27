@@ -23,7 +23,8 @@
 	"scripts": {
 		"prepare": "effect-tsgo patch --typescript --no-oxlint",
 		"check": "bun run lint && bun run typecheck && bun run test",
-		"lint": "biome ci .",
+		"lint": "biome ci . && node lint/check-glossary.ts && node lint/check-package-boundaries.ts && node lint/check-proof-boundaries.ts && node lint/check-service-tiers.ts && node lint/check-type-mistakes.ts && node lint/check-tailwind-values.ts",
+		"glossary:report": "node lint/check-glossary.ts --report",
 		"format": "biome check --write .",
 		"typecheck": "tsc --noEmit && bun run --filter '*' typecheck",
 		"test": "vitest run",
@@ -34,12 +35,12 @@
 		"build:storybook": "bun run --cwd packages/web build:storybook",
 		"test:storybook": "bun run --cwd packages/web test:storybook",
 		"db:generate": "bun run --cwd packages/core db:generate",
-		"db:push": "bun run --cwd packages/core db:push",
 		"db:migrate": "bun run --cwd packages/core db:migrate",
+		"db:compare-migrations": "bun run --cwd packages/core db:compare-migrations",
 		"db:studio": "bun run --cwd packages/core db:studio",
 		"db:seed": "node --env-file-if-exists=.env packages/demo/src/development.ts",
 		"db:seed:showcase": "node --env-file-if-exists=.env packages/demo/src/showcase/seed.ts",
-		"build:sandbox": "docker build -t ghcr.io/nitrictech/sugabots-sandbox:latest -t sugabots-sandbox:dev docker/sandbox && node packages/core/src/conversations/tools/browser/list-tools.ts && biome format --write packages/core/src/conversations/tools/browser/playwright-tools.json"
+		"build:computer": "docker build -t ghcr.io/nitrictech/sugabots-sandbox:latest -t sugabots-computer:dev docker/computer && node packages/core/src/chats/tools/browser/list-tools.ts && biome format --write packages/core/src/chats/tools/browser/playwright-tools.json"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",
@@ -47,9 +48,13 @@
 		"@types/node": "^26.6.6",
 		"@vitejs/plugin-react": "^6.3.0",
 		"drizzle-kit": "1.0.0-rc.5",
+		"oxc-parser": "0.127.0",
 		"portless": "^0.17.0",
 		"typescript": "^7.0.2",
 		"vite": "catalog:",
 		"vitest": "^5.0.5"
+	},
+	"patchedDependencies": {
+		"e2b@2.64.0": "patches/e2b@2.64.0.patch"
 	}
 }

@@ -80,7 +80,9 @@ export const ImageOpened = meta.story({
 	play: async ({ canvas, canvasElement }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Open pricing-page-new.png" }));
 		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
-		await expect(within(viewer).getByRole("img", { name: "pricing-page-new.png" })).toBeVisible();
+		await waitFor(() =>
+			expect(within(viewer).getByRole("img", { name: "pricing-page-new.png" })).toBeVisible(),
+		);
 		await expect(
 			within(viewer).getByRole("link", { name: "Download pricing-page-new.png" }),
 		).toHaveAttribute("download", "pricing-page-new.png");
@@ -110,7 +112,7 @@ export const ImagesSteppedThrough = meta.story({
 	play: async ({ canvas, canvasElement }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Open pricing-page-new.png" }));
 		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
-		await expect(within(viewer).getByText("2 of 3")).toBeVisible();
+		await waitFor(() => expect(within(viewer).getByText("2 of 3")).toBeVisible());
 
 		await userEvent.click(within(viewer).getByRole("button", { name: "Next image" }));
 		await expect(within(viewer).getByRole("img", { name: "acme-email.png" })).toBeVisible();
@@ -140,7 +142,7 @@ export const UnavailableImages = meta.story({
 		await expect(canvas.queryByRole("button", { name: "Open pricing-page-old.png" })).toBeNull();
 		await userEvent.click(canvas.getByRole("button", { name: "Open holiday.heic" }));
 		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
-		await expect(await within(viewer).findByText(/can't be shown here/)).toBeVisible();
+		await waitFor(() => expect(within(viewer).getByText(/can't be shown here/)).toBeVisible());
 		await expect(within(viewer).getByText("1 of 2")).toBeVisible();
 		await userEvent.click(within(viewer).getByRole("button", { name: "Next image" }));
 		await expect(within(viewer).getByRole("img", { name: "pricing-page-new.png" })).toBeVisible();
@@ -176,6 +178,6 @@ export const ImageThatWontDraw = meta.story({
 
 		await userEvent.click(open);
 		const viewer = within(canvasElement.ownerDocument.body).getByRole("dialog");
-		await expect(await within(viewer).findByText(/can't be shown here/)).toBeVisible();
+		await waitFor(() => expect(within(viewer).getByText(/can't be shown here/)).toBeVisible());
 	},
 });

@@ -1,30 +1,22 @@
-import type { Pod } from "@sugabots/contracts";
 import { projectLinks } from "@sugabots/contracts/project-links";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Plus } from "lucide-react";
-import { podSettingsPageLink } from "@/lib/links.ts";
-import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
 import { useSignOut } from "@/lib/session.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { chooseWorkspace, useWorkspace, useWorkspaces } from "@/lib/workspace.ts";
-import { podSettingsPagesOf } from "@/lib/workspace-settings.ts";
-import { SettingsListGroups, usePodCounts } from "@/screens/SettingsLayout.tsx";
+import { SettingsListGroups } from "@/screens/SettingsLayout.tsx";
 import { PageHeader } from "@/shell/Page.tsx";
-import { PodInitial } from "@/shell/SidebarPod.tsx";
-import { BACK_BUTTON, BackChevron, usePhoneBack } from "@/ui/back-button.tsx";
-import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
+import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
 
 /**
  * Settings, as a phone's last tab, You: you first, on a card that opens your
- * own settings, then the list of settings, where each pod opens a page of its
- * own pages, then any other workspace you belong to, help, and signing out.
- * Each leads to its page, whose Back returns here.
+ * own settings, then the list of settings, then any other workspace you belong to, help, and signing out.
+ * Each opens its page of the settings over this one, whose Back returns here.
  */
 export function You() {
 	const signOut = useSignOut();
 	const { workspace } = useWorkspace();
 	const { data: workspaces } = useWorkspaces();
-	const settingsBack = useBackToHere("Settings");
 	if (!workspace) return null;
 	const others = (workspaces ?? []).filter((one) => one.id !== workspace.id);
 
@@ -35,22 +27,22 @@ export function You() {
 				data-scroll-restoration-id="settings-tab"
 				className="tab-bar-clearance flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 pt-1.5 pb-6 md:mx-auto md:w-full md:max-w-xl md:pt-6"
 			>
-				<SettingsListGroups
-					linkState={settingsBack}
-					podLink={(pod) => (
-						<Link from="/$workspace" to="./you/pods/$pod" params={{ pod: pod.slug }} />
-					)}
-				/>
+				<SettingsListGroups />
 				<SettingsGroup label={others.length > 0 ? "Other workspaces" : undefined} headingLevel={2}>
 					{others.map((other) => (
 						<SettingsRow
 							key={other.id}
-							icon={<LetterTile letter={other.name} />}
+							icon={
+								<LetterTile
+									name={other.name}
+									className="size-6 rounded-md border-0 bg-foreground text-background"
+								/>
+							}
 							label={other.name}
 							chevron
 							render={
 								<Link
-									to="/$workspace/agents"
+									to="/$workspace"
 									params={{ workspace: other.slug }}
 									onClick={() => chooseWorkspace(other.id)}
 								/>
@@ -68,7 +60,7 @@ export function You() {
 						}
 						label="New workspace"
 						chevron
-						render={<Link to="/onboarding" />}
+						render={<Link to="/workspace-setup" />}
 					/>
 				</SettingsGroup>
 				<SettingsGroup>
@@ -93,62 +85,5 @@ export function You() {
 				</SettingsGroup>
 			</div>
 		</section>
-	);
-}
-/**
- * A pod's settings as a phone opens them from You: its pages, each with how
- * much it holds, and each a page of its own whose Back returns here.
- */
-export function YouPod({ pod }: { pod: Pod }) {
-	const computers = useSandboxAccess().data?.enabled === true;
-	const counts = usePodCounts(pod, true);
-	const settingsBack = useBackToHere(pod.name);
-	const backToYou = usePhoneBack(
-		<Link from="/$workspace" to="./you" aria-label="Back to Settings" className={BACK_BUTTON}>
-			<BackChevron />
-		</Link>,
-	);
-	return (
-		<section aria-label={pod.name} className="flex min-h-0 min-w-0 flex-1 flex-col">
-			<header className="flex shrink-0 items-center gap-3 px-4 pt-safe-or-3 pb-2">
-				{backToYou}
-			</header>
-			<div
-				data-scroll-restoration-id="settings-tab-pod"
-				className="tab-bar-clearance flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 pt-1.5 pb-6 md:mx-auto md:w-full md:max-w-xl"
-			>
-				<div className="flex items-center gap-3 px-1">
-					<PodInitial pod={pod} />
-					<h1 className="m-0 min-w-0 truncate font-semibold text-3xl text-foreground tracking-tight">
-						{pod.name}
-					</h1>
-				</div>
-				<SettingsGroup>
-					{podSettingsPagesOf(pod, computers).map((page) => (
-						<SettingsRow
-							key={page.id}
-							label={page.label}
-							trailing={
-								counts[page.id] !== undefined && <SettingsValue>{counts[page.id]}</SettingsValue>
-							}
-							chevron
-							render={<Link {...podSettingsPageLink(pod, page.id)} state={settingsBack} />}
-						/>
-					))}
-				</SettingsGroup>
-			</div>
-		</section>
-	);
-}
-
-/** A workspace's mark: the first letter of its name on a light square. */
-function LetterTile({ letter }: { letter: string }) {
-	return (
-		<span
-			aria-hidden
-			className="grid size-6 shrink-0 place-items-center rounded-md bg-foreground font-semibold text-xs text-background"
-		>
-			{Array.from(letter.trim())[0]?.toUpperCase() ?? "?"}
-		</span>
 	);
 }

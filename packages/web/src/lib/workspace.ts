@@ -10,20 +10,22 @@ import {
 	queryOptions,
 	skipToken,
 	useMutation,
+	useMutationState,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { useSyncExternalStore } from "react";
 import { client } from "@/api.ts";
+import { failureMessage, NotReadyError } from "@/lib/failure.ts";
 import { loadFailure } from "@/lib/query.ts";
 
 /**
  * Which workspace is being looked at, and what the caller may do in it.
  *
  * Under `/$workspace` the address decides. Elsewhere — the landing page and
- * onboarding — it is the one last chosen, kept in a module-level store because
+ * workspace setup — it is the one last chosen, kept in a module-level store because
  * every `useWorkspace` has to agree on it within one render.
  *
  * It is the client's choice and not the server's: every scoped route names its
@@ -33,7 +35,7 @@ import { loadFailure } from "@/lib/query.ts";
 
 const KEY = "sugabots-workspace";
 
-/** Every workspace this person belongs to, in the order the API lists them. */
+/** Every workspace this member belongs to, in the order the API lists them. */
 export const workspacesQuery = queryOptions({
 	queryKey: ["workspaces"],
 	queryFn: ({ signal }) => Effect.runPromise(client.api.workspaces.list(), { signal }),
@@ -43,15 +45,24 @@ export function useWorkspaces() {
 	return useQuery(workspacesQuery);
 }
 
-/** The people in a workspace. Asks for nobody's roster until there is a workspace. */
-export function useWorkspaceMembers(workspaceId: string | undefined) {
+/** The members in a workspace. Asks for nobody's roster until there is a workspace. */
+const membershipsKey = (workspaceId: string | undefined) => [
+	"workspaces",
+	workspaceId,
+	"memberships",
+];
+
+export function useMemberships(workspaceId: string | undefined) {
 	return useQuery({
-		queryKey: ["workspaces", workspaceId, "members"],
+		queryKey: membershipsKey(workspaceId),
 		queryFn: workspaceId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.workspaces.members({ params: { workspace: workspaceId } }), {
-						signal,
-					})
+					Effect.runPromise(
+						client.api.workspaces.memberships({ params: { workspace: workspaceId } }),
+						{
+							signal,
+						},
+					)
 			: skipToken,
 	});
 }
@@ -72,7 +83,7 @@ export function useCreateWorkspace() {
 
 /**
  * Deletes a workspace for good. It leaves the list at once, so `/` opens
- * another one, or onboarding when there is none.
+ * another one, or workspace setup when there is none.
  */
 export function useDeleteWorkspace() {
 	const queries = useQueryClient();
@@ -113,7 +124,7 @@ export function useUpdateWorkspace(workspaceId: string | undefined) {
 	});
 }
 
-/** The workspace's time zone, and how many routines' schedules would move with it. */
+/** The workspace's time zone, and how many automations have routines that would move with it. */
 export function useWorkspaceTimeZone(workspaceId: string, enabled: boolean) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "time-zone"],
@@ -125,7 +136,7 @@ export function useWorkspaceTimeZone(workspaceId: string, enabled: boolean) {
 	});
 }
 
-/** Moves the workspace, and the routine schedules in its old zone, to another time zone. */
+/** Moves the workspace, and the routines in its old zone, to another time zone. */
 export function useChangeWorkspaceTimeZone(workspaceId: string) {
 	const queries = useQueryClient();
 	return useMutation({
@@ -139,12 +150,12 @@ export function useChangeWorkspaceTimeZone(workspaceId: string) {
 		onSuccess: () =>
 			Promise.all([
 				queries.invalidateQueries({ queryKey: ["workspaces"] }),
-				queries.invalidateQueries({ queryKey: ["routines"] }),
+				queries.invalidateQueries({ queryKey: ["automations"] }),
 			]),
 	});
 }
 
-export function useInviteWorkspaceMember(workspaceId: string) {
+export function useSendInvitation(workspaceId: string) {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: ({
@@ -167,7 +178,34 @@ export function useInviteWorkspaceMember(workspaceId: string) {
 	});
 }
 
-/** The invitations still outstanding, which the roster lists beside its people. */
+/** An invitation that did not go out, and why, in words fit for members. */
+export interface InvitationFailure {
+	email: string;
+	reason: string;
+}
+
+/**
+ * Sends an invitation to each of `emails`, one at a time, with `send`, such
+ * as `useSendInvitation`'s `mutateAsync`. One failing does not stop the rest;
+ * those that failed are returned, so only they need fixing and sending again.
+ */
+export async function sendInvitations(
+	emails: readonly string[],
+	role: AssignableWorkspaceRole,
+	send: (invitation: { email: string; role: AssignableWorkspaceRole }) => Promise<unknown>,
+): Promise<InvitationFailure[]> {
+	const failures: InvitationFailure[] = [];
+	for (const email of emails) {
+		try {
+			await send({ email, role });
+		} catch (error) {
+			failures.push({ email, reason: failureMessage(error) });
+		}
+	}
+	return failures;
+}
+
+/** The invitations still outstanding, which the roster lists beside its members. */
 export function useWorkspaceInvitations(workspaceId: string) {
 	return useQuery({
 		queryKey: ["workspaces", workspaceId, "invites"],
@@ -189,9 +227,9 @@ export function useCancelWorkspaceInvitation(workspaceId: string) {
 }
 
 /**
- * Leaving takes the whole client with it: every pod, agent and conversation on
- * screen belonged to a workspace this person is no longer in, so the cache is
- * cleared rather than refetched.
+ * Leaving makes everything cached stale: every project, bot and chat on
+ * screen belonged to a workspace this member is no longer in. So every query is
+ * invalidated, and those on screen are fetched again.
  */
 export function useLeaveWorkspace(workspaceId: string) {
 	const queries = useQueryClient();
@@ -207,59 +245,114 @@ export function useLeaveWorkspace(workspaceId: string) {
 /**
  * Changing what somebody may do, and taking them out of the workspace.
  *
- * Both invalidate more than the roster: a role decides which pods somebody
- * reaches and what each pod's `permissions` say, so when the person changed is
+ * Both invalidate more than the roster: a role decides which projects somebody
+ * reaches and what each project's `permissions` say, so when the member changed is
  * the one looking, everything scoped to them is stale. Invalidating on every
  * change rather than working out whether it was you keeps that correct for one
  * refetch nobody will notice.
  */
-function useMemberChange<Input>(workspaceId: string, change: (input: Input) => Promise<unknown>) {
+function invalidateMembershipChange(
+	queries: ReturnType<typeof useQueryClient>,
+	workspaceId: string,
+) {
+	return Promise.all([
+		queries.invalidateQueries({ queryKey: membershipsKey(workspaceId) }),
+		queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
+		queries.invalidateQueries({ queryKey: ["projects"] }),
+		queries.invalidateQueries({ queryKey: ["project-members"] }),
+		queries.invalidateQueries({ queryKey: ["bots"] }),
+	]);
+}
+
+function useMembershipChange<Input>(
+	workspaceId: string,
+	change: (input: Input) => Promise<unknown>,
+) {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: change,
-		onSuccess: () =>
-			Promise.all([
-				queries.invalidateQueries({ queryKey: ["workspaces", workspaceId, "members"] }),
-				queries.invalidateQueries({ queryKey: ["workspace-standing"] }),
-				queries.invalidateQueries({ queryKey: ["pods"] }),
-				// Making somebody an administrator or the owner puts them in every shared pod.
-				queries.invalidateQueries({ queryKey: ["pod-members"] }),
-				queries.invalidateQueries({ queryKey: ["agents"] }),
-			]),
+		onSuccess: () => invalidateMembershipChange(queries, workspaceId),
 	});
 }
 
-export function useUpdateWorkspaceMemberRole(workspaceId: string) {
-	return useMemberChange(
+export function useChangeRole(workspaceId: string) {
+	return useMembershipChange(
 		workspaceId,
-		({ memberId, role }: { memberId: string; role: AssignableWorkspaceRole }) =>
+		({ membershipId, role }: { membershipId: string; role: AssignableWorkspaceRole }) =>
 			Effect.runPromise(
-				client.api.workspaces.updateMember({
-					params: { workspace: workspaceId, memberId },
+				client.api.workspaces.changeRole({
+					params: { workspace: workspaceId, membershipId },
 					payload: { role },
 				}),
 			),
 	);
 }
 
-/** Hands the workspace to another member. The caller stays on as an administrator. */
-export function useTransferWorkspaceOwnership(workspaceId: string) {
-	return useMemberChange(workspaceId, (memberId: string) =>
+/** Hands the workspace to another member in it. The caller stays on as an administrator. */
+export function useHandOverOwnership(workspaceId: string) {
+	return useMembershipChange(workspaceId, (membershipId: string) =>
 		Effect.runPromise(
-			client.api.workspaces.transferOwnership({
+			client.api.workspaces.handOverOwnership({
 				params: { workspace: workspaceId },
-				payload: { memberId },
+				payload: { membershipId },
 			}),
 		),
 	);
 }
 
-export function useRemoveWorkspaceMember(workspaceId: string) {
-	return useMemberChange(workspaceId, (memberId: string) =>
-		Effect.runPromise(
-			client.api.workspaces.removeMember({ params: { workspace: workspaceId, memberId } }),
-		),
+const removeMembershipKey = (workspaceId: string) => ["remove-membership", workspaceId];
+
+export function useRemoveMembership(workspaceId: string) {
+	const queries = useQueryClient();
+	return useMutation({
+		mutationKey: removeMembershipKey(workspaceId),
+		mutationFn: async (membershipId: string) => {
+			const departure = await Effect.runPromise(
+				client.api.workspaces.removeMembership({
+					params: { workspace: workspaceId, membershipId },
+				}),
+			);
+			await invalidateMembershipChange(queries, workspaceId);
+			return {
+				cleanupPending: departure.cleanupPending,
+				membershipsUpdatedAt:
+					queries.getQueryState(membershipsKey(workspaceId))?.dataUpdatedAt ?? 0,
+			};
+		},
+	});
+}
+
+const removalOutcome = Schema.Struct({
+	cleanupPending: Schema.Boolean,
+	membershipsUpdatedAt: Schema.Number,
+});
+
+export function useMembershipCleanupPending(workspaceId: string, membershipsUpdatedAt: number) {
+	const outcomes = useMutationState({
+		filters: { mutationKey: removeMembershipKey(workspaceId), status: "success" },
+		select: ({ state }) => Schema.decodeUnknownOption(removalOutcome)(state.data),
+	});
+	const latest = outcomes.at(-1);
+	return (
+		latest !== undefined &&
+		Option.exists(
+			latest,
+			(outcome) => outcome.cleanupPending && membershipsUpdatedAt <= outcome.membershipsUpdatedAt,
+		)
 	);
+}
+
+/**
+ * The id of the workspace being looked at, for a mutation to send. Its getter
+ * throws `NotReadyError` while the workspace is still loading, which the
+ * mutation then fails with.
+ */
+export function useRequiredWorkspaceId(): () => string {
+	const workspaceId = useWorkspace().workspace?.id;
+	return () => {
+		if (!workspaceId) throw new NotReadyError();
+		return workspaceId;
+	};
 }
 
 /**
@@ -310,7 +403,7 @@ export function chooseWorkspace(workspaceId: string): void {
  * already decided it.
  *
  * Asked so that a control nobody can use is not *drawn* for them. Drawing it
- * and letting the request fail is worse than not drawing it: it teaches people
+ * and letting the request fail is worse than not drawing it: it teaches members
  * that things in this app sometimes do not work.
  *
  * Every answer is `false` while it is in flight, so the moment before the
@@ -330,14 +423,15 @@ export function useWorkspaceRole(): WorkspaceRole | undefined {
 }
 
 const NOTHING_YET: WorkspacePermissions = {
-	createPods: false,
+	createProjects: false,
+	createBots: false,
 	updateWorkspace: false,
 	manageProviders: false,
 	manageMembers: false,
-	configureBuiltInAgents: false,
+	chooseSystemModel: false,
 	manageUsage: false,
 	manageAdmins: false,
-	transferOwnership: false,
+	handOverOwnership: false,
 	deleteWorkspace: false,
 };
 

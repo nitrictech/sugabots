@@ -1,12 +1,13 @@
+import { ProviderSignInFailed } from "@sugabots/contracts/errors/providers";
 import { userText } from "@sugabots/errors";
 import { Clock, Effect, Schema } from "effect";
 import type { EgressHttpClient } from "../../network/egress.ts";
 import {
 	decodeSignInBody,
 	type OAuthTokens,
-	ProviderSignInFailed,
 	postToSignIn,
 	type SubscriptionSignIn,
+	TokenRefused,
 	unverifiedClaims,
 } from "./sign-in.ts";
 
@@ -137,6 +138,7 @@ function requestTokens(
 		if (!response.ok) {
 			return yield* new ProviderSignInFailed({
 				userMessage: userText`ChatGPT would not issue a token (${response.status}); sign in again`,
+				cause: new TokenRefused({ status: response.status }),
 			});
 		}
 		const tokens = yield* decodeSignInBody(response, SERVICE, TokenResponse);

@@ -7,7 +7,7 @@ import { copyTemplateIfMissing } from "./test-setup.ts";
  * Points this Vitest worker at a database of its own, copied from the template
  * `test-setup.ts` prepared, before the test file loads and reads
  * `DATABASE_URL`. A worker runs one file at a time, so files that clear or
- * claim from shared tables, such as the routine queue, can run beside files in
+ * claim from shared tables, such as the automation queue, can run beside files in
  * other workers.
  */
 

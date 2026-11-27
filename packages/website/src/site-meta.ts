@@ -8,7 +8,7 @@ export const siteMeta = {
 	headline,
 	title: `Sugabots | ${headline}`,
 	description:
-		"A place where people and bots work together. Give each team its own bots, on the models you choose. Open source and self-hosted.",
+		"A place where members and bots work together. Give each team its own bots, on the models you choose. Open source and self-hosted.",
 	/** Written by scripts/generate-og-image.tsx. */
 	ogImagePath: "/og.png",
 } as const;
@@ -16,7 +16,7 @@ export const siteMeta = {
 /** What the docs home says about the docs, in its page head and in its Markdown version. */
 export const docsMeta = {
 	title: "Sugabots docs",
-	description: "How Sugabots works: pods, agents, tools and models, and how to run it yourself.",
+	description: "How Sugabots works: bots, projects, tools and models, and how to run it yourself.",
 } as const;
 
 /**

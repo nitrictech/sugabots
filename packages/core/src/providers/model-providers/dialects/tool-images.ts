@@ -17,11 +17,8 @@ export const IMAGE_MOVED_NOTE = "(The image is in the next message.)";
  * The message starts with text, as one with only an image is refused the same
  * way.
  *
- * Every model through OpenRouter reads an image sent this way, so this keeps
- * working once OpenRouter takes images in Gemini's tool results. It can go
- * then: the test of this in `models.recording.test.ts` shows what is sent, and
- * a Gemini model with reasoning answering a tool result with an image, sent
- * without this, shows whether it is still refused.
+ * Every model through OpenRouter reads an image sent this way. The test of
+ * this in `models.recording.test.ts` shows what is sent.
  */
 export const toolImagesFromUser: LanguageModelMiddleware = {
 	transformParams: async ({ params }) => ({

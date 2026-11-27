@@ -6,7 +6,7 @@ import { ResetPassword } from "./ResetPassword.tsx";
 /*
  * Where a reset email's link lands: choosing the new password, and asking
  * again when the link has run out. Asking the first time starts from the log
- * in form, in Views/Login › Forgot Password.
+ * in form, in Views/SignIn › Forgot Password.
  */
 
 const auth = `${import.meta.env.VITE_API_URL}/auth`;

@@ -1,401 +1,141 @@
-import type { ToolApprovalDeciders, WorkspaceRole } from "@sugabots/contracts";
-import { userText } from "@sugabots/errors";
-import { and, asc, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
-import { Data, Effect } from "effect";
-import type { Executor } from "../database/database.ts";
-import type * as schema from "../database/schema.ts";
-import {
-	agent,
-	directMember,
-	pod,
-	podMember,
-	thread,
-	workspace,
-	workspaceMember,
-} from "../database/schema.ts";
-import { isUuid } from "../ids/ids.ts";
-import type { UserFacing } from "../user-message.ts";
-import {
-	type Actor,
-	mayInPod,
-	type PodFacts,
-	type PodPermission,
-	rolesGrantedInPod,
-	type WorkspacePermission,
-} from "./permissions.ts";
+import type { WorkspaceRole } from "@sugabots/contracts";
+import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { bot, membership, project, projectMember } from "../database/schema.ts";
+import { outerColumn } from "../database/sql.ts";
+import { rolesGrantedInProject } from "./permissions.ts";
 
 /**
- * The facts every decision about who may do what is made from: the caller's
- * workspace role, the pod a resource belongs to, and whether a `pod_member`
- * row exists. `Authorization` and `Visibility` load them here and decide with
- * the pure grants in `permissions.ts`; nothing else loads them or turns them
- * into a decision. Standings are only built in this module, so a caller cannot
- * pair a pod with somebody else's membership.
+ * SQL for "`memberId` reaches the project `projectId` names", `memberId` being an
+ * id or the column holding one: what `mayInProject(actor, "project.read", …)`
+ * decides for one project, written again as a `where` clause. In a project
+ * members made, a project member whose role reads projects; in a bot's default project,
+ * whoever reaches the bot. The roles come from `rolesGrantedInProject`, but the
+ * shape of the rule is repeated here, so a change to `mayInProject`'s shape
+ * must be made here too.
  *
- * **Reach** is a stored `pod_member` row in a shared pod, or ownership of a
- * Personal pod. No role reaches a shared pod without a row: administrators are
- * put in every one instead, by the triggers described on `podMember`. A
- * direct message between people is in no pod: a `direct_member` row reaches
- * it while its person is in the workspace, whatever their role.
- *
- * **Hidden** and **forbidden** are different refusals. A resource the caller
- * cannot reach is hidden, so an id cannot be probed for; a resource they can
- * reach but may not change is forbidden.
+ * Aliased throughout, so it composes with a query that already joins any of
+ * these tables, and it names the tables of the outer columns it is given, so
+ * it can be selected from a query over one table.
  */
-
-/** The caller's standing in a workspace they belong to, so their role is known. */
-export interface WorkspaceStanding {
-	workspaceId: string;
-	actor: Actor & { workspaceRole: WorkspaceRole };
-}
-
-/** The caller's standing towards a pod. */
-export interface PodStanding {
-	pod: schema.PodRow;
-	actor: Actor;
-	/** What the decision was made from, including whether a `pod_member` row exists. */
-	facts: PodFacts;
-	/** Whether the caller may also take `permission` on this same pod. */
-	may(permission: PodPermission): boolean;
-}
-
-/** The caller's standing towards an agent, which is their standing in its pod. */
-export interface AgentStanding extends PodStanding {
-	agent: schema.AgentRow;
+export function reachesProjectFor(
+	projectId: SQLWrapper,
+	memberId: string | SQLWrapper,
+): SQL<boolean> {
+	return sql`exists (
+		select 1
+		from ${project} as reach_project
+		inner join workspace as reach_workspace
+			on reach_workspace.id = reach_project.workspace_id and not reach_workspace.deleting
+		inner join ${membership} as reach_membership
+			on reach_membership.workspace_id = reach_project.workspace_id
+			and reach_membership.member_id = ${outerColumn(memberId)}
+			and not reach_membership.leaving
+		where reach_project.id = ${outerColumn(projectId)}
+			and not reach_project.deleting
+			and case when reach_project.default_of_bot_id is null
+				then ${roleIsOneOf(ROLES_READING_PROJECTS)} and exists (
+					select 1
+					from ${projectMember} as reach_project_member
+					where reach_project_member.project_id = reach_project.id
+						and reach_project_member.member_id = ${outerColumn(memberId)}
+				)
+				else ${reachesBotFor(sql`reach_project.default_of_bot_id`, memberId)}
+			end
+	)`;
 }
 
 /**
- * The caller's standing towards a thread they reach: in a pod, their standing
- * there, which decides what else they may do in it; a direct message is in no
- * pod, and being in it permits only reading it and writing in it.
+ * SQL selecting the ids of the members who reach the project `projectId`
+ * names (see `reachesProjectFor`), one `member_id` column, for an `in (…)`: in a
+ * project members made, its members; in a bot's default project, which has
+ * none, the workspace's members who reach the bot.
  */
-export type ThreadStanding =
-	| { kind: "pod"; thread: schema.ThreadRow; standing: PodStanding }
-	| { kind: "direct"; thread: schema.ThreadRow };
-
-/**
- * The resource is not there, or the caller may not know that it is. Answered
- * as `not_found` over HTTP: telling the two apart lets a stranger enumerate
- * ids.
- */
-export class ResourceHidden
-	extends Data.TaggedError("ResourceHidden")<{
-		readonly resource:
-			| "workspace"
-			| "pod"
-			| "agent"
-			| "thread"
-			| "conversation"
-			| "routine"
-			| "message"
-			| "turn"
-			| "member"
-			| "invitation"
-			| "artifact";
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		return userText`No such ${this.resource}`;
-	}
-}
-
-/** The caller can see the resource and may not take this action on it. */
-export class ActionForbidden
-	extends Data.TaggedError("ActionForbidden")<{
-		readonly permission: WorkspacePermission | PodPermission;
-	}>
-	implements UserFacing
-{
-	override get message() {
-		return `Lacks the ${this.permission} permission`;
-	}
-	get userMessage() {
-		return userText`You are not allowed to do that`;
-	}
-}
-
-export type AuthorizationDenied = ResourceHidden | ActionForbidden;
-
-/**
- * The standing, when there is one and its caller reaches the pod; otherwise
- * `resource` is hidden, so a refusal never confirms an id. Every read of
- * something in a pod, and every action on one, is refused this way first.
- */
-export function requireReach<Standing extends PodStanding>(
-	standing: Standing | undefined,
-	resource: ResourceHidden["resource"],
-): Effect.Effect<Standing, ResourceHidden> {
-	return standing?.may("pod.read")
-		? Effect.succeed(standing)
-		: Effect.fail(new ResourceHidden({ resource }));
+export function membersReachingProject(projectId: SQLWrapper): SQL<string> {
+	return sql`select reaching_member.member_id
+		from ${membership} as reaching_member
+		inner join ${project} as reached_project
+			on reached_project.workspace_id = reaching_member.workspace_id
+		where reached_project.id = ${outerColumn(projectId)}
+			and ${reachesProjectFor(sql`reached_project.id`, sql`reaching_member.member_id`)}`;
 }
 
 /**
- * The standing of `actor` towards `row`, a pod they have just created: they
- * own it if it is a Personal pod, and are its member if it is shared, because
- * creating a shared pod adds its creator to it.
+ * SQL for "`memberId` reaches the bot `botId` names": what `reachesBot`
+ * decides for one bot, written again as a `where` clause, so a change to it
+ * must be made here too. System bots are reached by nobody.
  */
-export function creatorStanding(row: schema.PodRow, actor: Actor): PodStanding {
-	return podStanding(row, actor, true);
-}
-
-/** One person's standing towards one pod, from facts already in hand. */
-function podStanding(row: schema.PodRow, actor: Actor, isMember: boolean): PodStanding {
-	const facts: PodFacts = { kind: row.kind, ownerId: row.ownerId, isMember };
-	return { pod: row, actor, facts, may: (permission) => mayInPod(actor, permission, facts) };
-}
-
-/**
- * What a standing is built from, for a query that has `pod`: the columns to
- * select, and the two joins onto the caller's membership of the pod's
- * workspace and of the pod itself. Left joins, so a pod the caller has no
- * part in is still found, with a standing that permits nothing.
- */
-const standingColumns = {
-	pod,
-	role: workspaceMember.role,
-	membershipId: podMember.id,
-};
-
-const workspaceMembershipOf = (userId: string) =>
-	and(eq(workspaceMember.workspaceId, pod.workspaceId), eq(workspaceMember.userId, userId));
-
-const podMembershipOf = (userId: string) =>
-	and(eq(podMember.podId, pod.id), eq(podMember.userId, userId));
-
-type StandingRow = {
-	pod: schema.PodRow;
-	role: WorkspaceRole | null;
-	membershipId: string | null;
-};
-
-function standingFromRow(row: StandingRow, userId: string): PodStanding {
-	return podStanding(
-		row.pod,
-		{ userId, workspaceRole: row.role ?? undefined },
-		row.membershipId !== null,
+export function reachesBotFor(botId: SQLWrapper, memberId: string | SQLWrapper): SQL<boolean> {
+	return reachedBotFor(
+		botId,
+		memberId,
+		sql`not exists (
+				select 1
+				from ${project} as reach_bot_default_project
+				where reach_bot_default_project.default_of_bot_id = reach_bot.id
+					and reach_bot_default_project.workspace_id = reach_bot.workspace_id
+					and reach_bot_default_project.deleting
+			)`,
 	);
 }
 
 /**
- * The workspace `workspaceRef` names, by its id or its slug, and `userId`'s
- * role in it. `undefined` when there is no such workspace or they are not in
- * it, which are answered alike.
+ * SQL for "`memberId` reaches the bot `botId` names, or did until its deletion
+ * began": who hears that it is going, so their lists drop it.
  */
-export const workspaceStandingFor = Effect.fn("Access.workspaceStandingFor")(function* (
-	db: Executor,
-	workspaceRef: string,
-	userId: string,
-) {
-	// A uuid is compared as an id, and anything else as a slug, so a malformed
-	// id is never handed to Postgres as a uuid.
-	const named = isUuid(workspaceRef)
-		? eq(workspace.id, workspaceRef)
-		: eq(workspace.slug, workspaceRef);
-	const [row] = yield* db
-		.select({ workspaceId: workspace.id, role: workspaceMember.role })
-		.from(workspaceMember)
-		.innerJoin(workspace, eq(workspace.id, workspaceMember.workspaceId))
-		.where(and(named, eq(workspaceMember.userId, userId)))
-		.limit(1);
-	return row
-		? { workspaceId: row.workspaceId, actor: { userId, workspaceRole: row.role } }
-		: undefined;
-});
-
-/**
- * Everything a decision about one pod needs, in one query: the pod, the
- * caller's workspace role and whether a `pod_member` row puts them in it.
- *
- * `undefined` only when there is no such pod. Somebody outside the workspace
- * gets a standing that permits nothing, because "there is no such pod" and
- * "you are in no position here" are answered differently.
- */
-export const podStandingFor = Effect.fn("Access.podStandingFor")(function* (
-	db: Executor,
-	podId: string,
-	userId: string,
-) {
-	if (!isUuid(podId)) return undefined;
-	const [row] = yield* db
-		.select(standingColumns)
-		.from(pod)
-		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(podMember, podMembershipOf(userId))
-		.where(eq(pod.id, podId))
-		.limit(1);
-	return row ? standingFromRow(row, userId) : undefined;
-});
-
-/**
- * An agent and `userId`'s standing in its pod, in one query. `undefined` when
- * there is no such agent or it is in no pod, as a system agent is.
- */
-export const agentStandingFor = Effect.fn("Access.agentStandingFor")(function* (
-	db: Executor,
-	agentId: string,
-	userId: string,
-) {
-	if (!isUuid(agentId)) return undefined;
-	const [row] = yield* db
-		.select({ agent, ...standingColumns })
-		.from(agent)
-		.innerJoin(pod, eq(pod.id, agent.podId))
-		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(podMember, podMembershipOf(userId))
-		.where(eq(agent.id, agentId))
-		.limit(1);
-	return row ? { ...standingFromRow(row, userId), agent: row.agent } : undefined;
-});
-
-/**
- * A thread `userId` reaches, with their standing towards it, in one query.
- * `undefined` when there is no such thread or they do not reach it, which are
- * answered alike.
- */
-export const threadStandingFor = Effect.fn("Access.threadStandingFor")(function* (
-	db: Executor,
-	threadId: string,
-	userId: string,
-) {
-	if (!isUuid(threadId)) return undefined;
-	const [row] = yield* db
-		.select({
-			thread,
-			pod,
-			role: workspaceMember.role,
-			membershipId: podMember.id,
-			inDirect: reachesDirectFor(thread, userId),
-		})
-		.from(thread)
-		.leftJoin(pod, eq(pod.id, thread.podId))
-		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(podMember, podMembershipOf(userId))
-		.where(eq(thread.id, threadId))
-		.limit(1);
-	if (!row) return undefined;
-	if (!row.pod) {
-		const direct: ThreadStanding = { kind: "direct", thread: row.thread };
-		return row.inDirect ? direct : undefined;
-	}
-	const inPod: ThreadStanding = {
-		kind: "pod",
-		thread: row.thread,
-		standing: standingFromRow({ ...row, pod: row.pod }, userId),
-	};
-	return inPod.standing.may("pod.read") ? inPod : undefined;
-});
-
-/**
- * The pods in a workspace that `userId` reaches, by name, each with their
- * standing in it, in one query.
- */
-export const reachedPodStandingsFor = Effect.fn("Access.reachedPodStandingsFor")(function* (
-	db: Executor,
-	workspaceId: string,
-	userId: string,
-) {
-	const rows = yield* db
-		.select(standingColumns)
-		.from(pod)
-		.leftJoin(workspaceMember, workspaceMembershipOf(userId))
-		.leftJoin(podMember, podMembershipOf(userId))
-		.where(and(eq(pod.workspaceId, workspaceId), reachesPodFor(pod.id, userId)))
-		.orderBy(asc(pod.name));
-	return rows.map((row) => standingFromRow(row, userId));
-});
-
-/**
- * Whether `standing` may decide a tool call's approval that `deciders` decide.
- * For `pod`: `approval.decide`, and `approval.routine.decide` as well for one
- * raised while a routine runs. For `sandbox-managers`: deciding what the
- * pod's sandbox may reach and has installed, wherever it was raised.
- */
-export function mayDecideApprovals(
-	standing: Pick<PodStanding, "may">,
-	inRoutine: boolean,
-	deciders: ToolApprovalDeciders,
-): boolean {
-	if (deciders === "sandbox-managers") return standing.may("sandbox.manage");
-	const needed: readonly PodPermission[] = inRoutine
-		? ["approval.decide", "approval.routine.decide"]
-		: ["approval.decide"];
-	return needed.every((permission) => standing.may(permission));
+export function reachedBotUntilDeletionFor(
+	botId: SQLWrapper,
+	memberId: string | SQLWrapper,
+): SQL<boolean> {
+	return reachedBotFor(botId, memberId, sql`true`);
 }
 
-/**
- * SQL for "`userId` reaches the pod `podId` names", `userId` being an id or
- * the column holding one: what `mayInPod(actor, "pod.read", …)` decides for
- * one pod, written again as a `where` clause. A
- * Personal pod is reached by its owner and by nobody else, and a shared pod by
- * a membership row held by a role granted `pod.read`. The roles come from
- * `rolesGrantedInPod`, but the shape of the rule is repeated here, so a change
- * to `mayInPod`'s shape must be made here too.
- *
- * Aliased throughout, so it composes with a query that already joins any of
- * these tables.
- */
-export function reachesPodFor(podId: SQLWrapper, userId: string | SQLWrapper): SQL<boolean> {
+/** The rule `reachesBotFor` and `reachedBotUntilDeletionFor` share, given what a deletion leaves. */
+function reachedBotFor(
+	botId: SQLWrapper,
+	memberId: string | SQLWrapper,
+	notBeingDeleted: SQL<boolean>,
+): SQL<boolean> {
 	return sql`exists (
 		select 1
-		from ${pod} as reach_pod
-		inner join ${workspaceMember} as reach_workspace_member
-			on reach_workspace_member.workspace_id = reach_pod.workspace_id
-			and reach_workspace_member.user_id = ${userId}
-		left join ${podMember} as reach_pod_member
-			on reach_pod_member.pod_id = reach_pod.id
-			and reach_pod_member.user_id = ${userId}
-		where reach_pod.id = ${podId}
-			and (
-				(reach_pod.kind = 'personal' and reach_pod.owner_id = ${userId})
-				or (
-					reach_pod.kind = 'shared'
-					and reach_pod_member.id is not null
-					and ${roleIsOneOf(ROLES_READING_SHARED_PODS)}
-				)
-			)
+		from ${bot} as reach_bot
+		inner join ${membership} as reach_bot_membership
+			on reach_bot_membership.workspace_id = reach_bot.workspace_id
+			and reach_bot_membership.member_id = ${outerColumn(memberId)}
+			and not reach_bot_membership.leaving
+		where reach_bot.id = ${outerColumn(botId)}
+			and reach_bot.system_bot_key is null
+			and ${notBeingDeleted}
+			and case
+				when reach_bot.visibility = 'personal' then reach_bot.created_by_id = ${outerColumn(memberId)}
+				else true
+			end
 	)`;
 }
 
 /**
- * SQL for "`userId` reaches the thread `row`": the pod rule for a thread in a
- * pod, and membership of the direct message for one in none. Written as SQL
- * for lists, as `threadStandingFor` decides it for one thread.
+ * The columns of a placed chat, or an alias of it, that whether
+ * somebody reaches it is decided from.
  */
-export function reachesThreadFor(
-	row: { id: SQLWrapper; workspaceId: SQLWrapper; podId: SQLWrapper },
-	userId: string | SQLWrapper,
-): SQL<boolean> {
-	return sql`(${reachesPodFor(row.podId, userId)} or ${reachesDirectFor(row, userId)})`;
+interface ChatReachColumns {
+	projectId: SQLWrapper;
 }
 
 /**
- * SQL for "`userId` is in the direct message `row` and still in its
- * workspace". False for every other thread, which has no `direct_member` rows.
+ * SQL for "`memberId` reaches the chat `row`": the project rule for a
+ * project's chat, an automation feed and a run, a bot's default project
+ * included. A system bot's chat is in no project, so nobody reaches it.
  */
-function reachesDirectFor(
-	row: { id: SQLWrapper; workspaceId: SQLWrapper },
-	userId: string | SQLWrapper,
-): SQL<boolean> {
-	return sql`exists (
-		select 1
-		from ${directMember} as reach_direct_member
-		inner join ${workspaceMember} as reach_direct_workspace_member
-			on reach_direct_workspace_member.user_id = reach_direct_member.user_id
-			and reach_direct_workspace_member.workspace_id = ${row.workspaceId}
-		where reach_direct_member.thread_id = ${row.id}
-			and reach_direct_member.user_id = ${userId}
-	)`;
+export function reachesChatFor(row: ChatReachColumns, memberId: string | SQLWrapper): SQL<boolean> {
+	return reachesProjectFor(row.projectId, memberId);
 }
 
-/** Roles that reach a shared pod once they have been added to it. */
-const ROLES_READING_SHARED_PODS = rolesGrantedInPod("pod.read");
+/** Roles that reach a project once they have been added to it. */
+const ROLES_READING_PROJECTS = rolesGrantedInProject("project.read");
 
 /** `false` rather than an empty `in ()`, which is not valid SQL. */
 function roleIsOneOf(roles: readonly WorkspaceRole[]): SQL {
 	if (roles.length === 0) return sql`false`;
-	return sql`reach_workspace_member.role in (${sql.join(
+	return sql`reach_membership.role in (${sql.join(
 		roles.map((role) => sql`${role}`),
 		sql`, `,
 	)})`;

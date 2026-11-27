@@ -1,13 +1,12 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, builtInAgents, MODELS, modelProviders, mount } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+import { apiAnswers, MODELS, modelProviders, mount, systemBots } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 beforeEach(() => {
-	vi.clearAllMocks();
 	apiAnswers();
 });
 
@@ -20,14 +19,14 @@ describe("a provider's API key", () => {
 	it("is masked, and replaced without being shown", async () => {
 		mount(`/suga/settings/providers/${openai.id}`);
 
-		expect(await screen.findByText("••••••••")).toBeDefined();
+		await screen.findByText("••••••••");
 		fireEvent.click(screen.getByRole("button", { name: "Replace" }));
 		const field = screen.getByLabelText("OpenAI API key") as HTMLInputElement;
 		expect(field.type).toBe("password");
 		expect(field.value).toBe("");
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-		expect(screen.getByText("••••••••")).toBeDefined();
+		screen.getByText("••••••••");
 	});
 });
 
@@ -36,23 +35,38 @@ describe("when a provider was added", () => {
 		const gateway = {
 			...openai,
 			id: "0199a3a0-0000-7000-8000-0000000000cf",
-			preset: null,
+			builtIn: null,
 			name: "Company gateway",
-			connectedBy: "Sam",
+			connectedBy: {
+				id: "0199a3a0-0000-7000-8000-0000000000c1",
+				name: "Sam",
+				email: "sam@example.com",
+				image: null,
+			},
 		};
 		client.api.modelProviders.list.mockReturnValue(Effect.succeed([gateway]));
 		mount(`/suga/settings/providers/${gateway.id}`);
 
-		expect(await screen.findByText(/^Added .+ · Connected by Sam$/)).toBeDefined();
+		await screen.findByText(/^Added .+ · Connected by Sam$/);
 	});
 
-	it("is not said for a preset every workspace starts with, which nobody added", async () => {
+	it("is not said for a built-in provider every workspace starts with, which nobody added", async () => {
 		client.api.modelProviders.list.mockReturnValue(
-			Effect.succeed([{ ...openai, connectedBy: "Sam" }]),
+			Effect.succeed([
+				{
+					...openai,
+					connectedBy: {
+						id: "0199a3a0-0000-7000-8000-0000000000c1",
+						name: "Sam",
+						email: "sam@example.com",
+						image: null,
+					},
+				},
+			]),
 		);
 		mount(`/suga/settings/providers/${openai.id}`);
 
-		expect(await screen.findByText("Connected by Sam")).toBeDefined();
+		await screen.findByText("Connected by Sam");
 		expect(screen.queryByText(/^Added /)).toBeNull();
 	});
 });
@@ -68,7 +82,9 @@ describe("switching a provider on", () => {
 		fireEvent.click(await screen.findByRole("switch", { name: `Use ${openai.name}` }));
 
 		await waitFor(() =>
-			expect(providers.update.mock.calls[0]?.[0]).toMatchObject({ payload: { active: true } }),
+			expect(providers.update.mock.calls[0]?.[0]).toMatchObject({
+				payload: { changes: { active: true } },
+			}),
 		);
 		expect(providers.test).not.toHaveBeenCalled();
 	});
@@ -79,7 +95,7 @@ describe("a model's capabilities", () => {
 	const gateway = {
 		...openai,
 		id: "0199a3a0-0000-7000-8000-0000000000cf",
-		preset: null,
+		builtIn: null,
 		name: "Company gateway",
 	};
 
@@ -96,18 +112,18 @@ describe("a model's capabilities", () => {
 		});
 		mount(`/suga/settings/providers/${gateway.id}`);
 
-		expect(await screen.findByRole("img", { name: "Vision" })).toBeDefined();
+		await screen.findByRole("img", { name: "Vision" });
 		fireEvent.click(await screen.findByRole("button", { name: "What gpt-5 can do" }));
 		const dialog = await screen.findByRole("dialog", { name: "What it can do" });
 		// gpt-5 reports tools, vision and images: those can go off, the rest are not offered.
-		expect(within(dialog).queryByRole("switch", { name: "Reasoning" })).toBeNull();
+		expect(within(dialog).queryByRole("switch", { name: "Thinking" })).toBeNull();
 		fireEvent.click(within(dialog).getByRole("switch", { name: "Vision" }));
 		fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
 		await waitFor(() =>
 			expect(providers.updateModel).toHaveBeenCalledWith({
 				params: { workspace: expect.any(String), providerId: gateway.id, modelId: gpt.id },
-				payload: { disabledCapabilities: ["vision"] },
+				payload: { changes: { disabledCapabilities: ["vision"] } },
 			}),
 		);
 		await waitFor(() =>
@@ -117,10 +133,10 @@ describe("a model's capabilities", () => {
 	});
 });
 
-/** Puts the system agents, which make summaries, on `model`. */
-function summariesOn(model: string) {
-	client.api.systemAgents.list.mockReturnValue(
-		Effect.succeed(builtInAgents.map((agent) => ({ ...agent, model }))),
+/** Puts the system bots, such as Compaction, on `model`. */
+function systemBotsOn(model: string) {
+	client.api.systemBots.list.mockReturnValue(
+		Effect.succeed(systemBots.map((bot) => ({ ...bot, model }))),
 	);
 }
 
@@ -136,8 +152,7 @@ describe("switching off a model bots run on", () => {
 				models: [opus, sonnet].map((modelId) => ({
 					providerId: anthropic.id,
 					providerName: anthropic.name,
-					providerPreset: "anthropic" as const,
-					providerActive: true,
+					providerBuiltIn: "anthropic" as const,
 					modelId,
 					displayName: null,
 					capabilities: ["tools" as const],
@@ -146,7 +161,7 @@ describe("switching off a model bots run on", () => {
 			}),
 		);
 		providers.switchOffModel.mockReturnValue(Effect.succeed({ moved: 2 }));
-		summariesOn(sonnet);
+		systemBotsOn(sonnet);
 		mount(`/suga/settings/providers/${anthropic.id}`);
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Bots can use ${opus}` }));
@@ -157,7 +172,7 @@ describe("switching off a model bots run on", () => {
 				.getAllByRole("img")
 				.map((face) => face.getAttribute("aria-label")),
 		).toEqual(["Issue Triager", "Linear Handler"]);
-		expect(within(dialog).getByRole("button", { name: sonnet, pressed: true })).toBeDefined();
+		within(dialog).getByRole("button", { name: sonnet, pressed: true });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move bots and switch off" }));
 
 		await waitFor(() =>
@@ -187,8 +202,7 @@ describe("switching off a provider whose models bots run on", () => {
 		const offered = (providerId: string, modelId: string) => ({
 			providerId,
 			providerName: providerId === anthropic.id ? anthropic.name : openai.name,
-			providerPreset: null,
-			providerActive: true,
+			providerBuiltIn: null,
 			modelId,
 			displayName: null,
 			capabilities: ["tools" as const],
@@ -200,17 +214,15 @@ describe("switching off a provider whose models bots run on", () => {
 			}),
 		);
 		providers.switchOff.mockReturnValue(Effect.succeed({ moved: 2 }));
-		summariesOn(sonnet);
+		systemBotsOn(sonnet);
 		mount(`/suga/settings/providers/${anthropic.id}`);
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Use ${anthropic.name}` }));
 		const dialog = await screen.findByRole("dialog", { name: `Switch off ${anthropic.name}` });
 		const faces = within(dialog).getByRole("list", { name: `Bots on ${opus}` });
-		expect(within(faces).getByRole("img", { name: "Issue Triager" })).toBeDefined();
-		expect(within(faces).getByRole("img", { name: "Linear Handler" })).toBeDefined();
-		expect(
-			within(dialog).getByRole("button", { name: `Move ${opus} bots to: ${sonnet}` }),
-		).toBeDefined();
+		within(faces).getByRole("img", { name: "Issue Triager" });
+		within(faces).getByRole("img", { name: "Linear Handler" });
+		within(dialog).getByRole("button", { name: `Move ${opus} bots to: ${sonnet}` });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move bots and switch off" }));
 
 		await waitFor(() =>
@@ -223,20 +235,19 @@ describe("switching off a provider whose models bots run on", () => {
 	});
 });
 
-describe("switching off the model summaries run on", () => {
+describe("switching off the model system bots run on", () => {
 	const [, anthropic] = modelProviders;
 	const [opus, sonnet] = MODELS;
 	if (!anthropic || !opus || !sonnet) throw new Error("fixture");
 
-	it("moves summaries with the bots as it switches the model off", async () => {
+	it("moves the system bots with the bots as it switches the model off", async () => {
 		const providers = client.api.modelProviders;
 		providers.listEnabledModels.mockReturnValue(
 			Effect.succeed({
 				models: [opus, sonnet].map((modelId) => ({
 					providerId: anthropic.id,
 					providerName: anthropic.name,
-					providerPreset: "anthropic" as const,
-					providerActive: true,
+					providerBuiltIn: "anthropic" as const,
 					modelId,
 					displayName: null,
 					capabilities: ["tools" as const],
@@ -245,14 +256,12 @@ describe("switching off the model summaries run on", () => {
 			}),
 		);
 		providers.switchOffModel.mockReturnValue(Effect.succeed({ moved: 2 }));
-		summariesOn(opus);
+		systemBotsOn(opus);
 		mount(`/suga/settings/providers/${anthropic.id}`);
 
 		fireEvent.click(await screen.findByRole("switch", { name: `Bots can use ${opus}` }));
 		const dialog = await screen.findByRole("dialog", { name: `Switch off ${opus}` });
-		expect(
-			within(dialog).getByRole("button", { name: `Move summaries to: ${sonnet}` }),
-		).toBeDefined();
+		within(dialog).getByRole("button", { name: `Move system bots to: ${sonnet}` });
 		fireEvent.click(within(dialog).getByRole("button", { name: "Move and switch off" }));
 
 		await waitFor(() =>
@@ -262,7 +271,7 @@ describe("switching off the model summaries run on", () => {
 					providerId: anthropic.id,
 					modelId: anthropic.models[0]?.id,
 				},
-				payload: { moveBotsTo: sonnet, newBotsTo: undefined, summariesTo: sonnet },
+				payload: { moveBotsTo: sonnet, newBotsTo: undefined, systemBotsTo: sonnet },
 			}),
 		);
 	});

@@ -1,5 +1,6 @@
 import {
 	type ApiFailure,
+	apiFailureSchema,
 	BadRequest,
 	Conflict,
 	Forbidden,
@@ -7,22 +8,13 @@ import {
 	NotFound,
 	PayloadTooLarge,
 	Unauthorized,
+	UnsupportedMediaType,
 } from "@sugabots/contracts/http";
 import { type UserText, userText } from "@sugabots/errors";
 import { Schema } from "effect";
 
-const failureSchema = Schema.Union([
-	BadRequest,
-	Unauthorized,
-	Forbidden,
-	NotFound,
-	Conflict,
-	PayloadTooLarge,
-	InternalServerError,
-]);
-
 /** Whether `failure` is the API answering, rather than a request that never got there. */
-export const isApiFailure = Schema.is(failureSchema);
+export const isApiFailure = Schema.is(apiFailureSchema);
 
 /**
  * The failure a status means, for the parts of the API the generated client
@@ -43,6 +35,8 @@ export function failureForStatus(status: number, message: UserText, details?: un
 			return new Conflict(fields);
 		case 413:
 			return new PayloadTooLarge(fields);
+		case 415:
+			return new UnsupportedMediaType(fields);
 		default:
 			return status >= 500 ? new InternalServerError(fields) : new BadRequest(fields);
 	}
@@ -50,7 +44,7 @@ export function failureForStatus(status: number, message: UserText, details?: un
 
 /** The API's own failure if `body` is one, or the one its status means. */
 export function failureFromResponse(body: unknown, status: number): ApiFailure {
-	const decoded = Schema.decodeUnknownResult(failureSchema)(body);
+	const decoded = Schema.decodeUnknownResult(apiFailureSchema)(body);
 	if (decoded._tag === "Success") {
 		return decoded.success;
 	}
@@ -58,7 +52,7 @@ export function failureFromResponse(body: unknown, status: number): ApiFailure {
 	return failureForStatus(status, refusedBeforeTheApi(status));
 }
 
-/** What a refusal that never reached the API means, for the person who made the request. */
+/** What a refusal that never reached the API means, for the member who made the request. */
 function refusedBeforeTheApi(status: number): UserText {
 	// The API says when something is over its own limits, so a bare 413 is
 	// the web server in front of it, such as nginx at its 1 MB default.

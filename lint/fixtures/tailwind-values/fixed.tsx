@@ -1,0 +1,16 @@
+export const classes = [
+	"hover:bg-red-500",
+	"bg-red-500/50",
+	"!bg-red-500",
+	"sm:focus-visible:bg-red-500/50!",
+	"[@media(hover:none)]:text-blue-600",
+	"[&[data-label=']']]:border-rose-400",
+	"[--brand-tone:blue]",
+	"[color:var(--brand)] font-medium",
+	"md:[--brand-tone:blue]",
+	"w-[theme(spacing[2.5])]",
+	"text-sm/[1.4]",
+	"p-\x5b12px]",
+	`\n md:gap-\x5b7px] ${"p-2"}`,
+	<div className="w-[16px]" />,
+];

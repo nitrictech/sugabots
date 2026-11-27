@@ -1,12 +1,13 @@
 import {
+	type BuiltInProviderId,
 	newProviderModelSchema,
 	type ProviderApiFormat,
 	type ProviderModelCapability,
-	type ProviderPresetId,
 	providerModelCapabilitySchema,
 } from "@sugabots/contracts";
+import { type DomainError, userText } from "@sugabots/errors";
 import type { LanguageModel, ModelMessage } from "ai";
-import { Data, Effect, Schema, SchemaGetter } from "effect";
+import { Effect, ErrorReporter, Schema, SchemaGetter } from "effect";
 import type { RecognizeFailure } from "../../models/request-failures.ts";
 import type { EgressHttpClient } from "../../network/egress.ts";
 
@@ -17,7 +18,7 @@ import type { EgressHttpClient } from "../../network/egress.ts";
  * somewhere: a key sent in a header of its own, a listing that pages, a
  * native API beside the compatible one that says what the listing leaves
  * out. A dialect is that departure written as code, one file beside this one
- * per provider that has one, so a preset can name it and the code that talks
+ * per provider that has one, so a built-in provider can name it and the code that talks
  * to a provider never asks which one it is.
  *
  * A dialect handles discovery (listing a provider's models and reading their
@@ -33,12 +34,12 @@ export interface DiscoveredModel {
 }
 
 /**
- * The part of a provider's connection that says which provider it is: the
- * preset it was made from, or, for a custom endpoint, where it is and what it
+ * The part of a provider's access that says which provider it is: the
+ * built-in provider it was made from, or, for a custom model provider, where it is and what it
  * claims to speak.
  */
 export interface ProviderIdentity {
-	preset: ProviderPresetId | null;
+	builtIn: BuiltInProviderId | null;
 	baseUrl: string;
 	apiFormat: ProviderApiFormat;
 }
@@ -54,8 +55,6 @@ export interface RequestEndpoint {
 }
 
 export interface ProviderDialect {
-	/** Named in tests and in what a person is told. */
-	readonly name: string;
 	/**
 	 * The URL discovery is confined to, given the base URL without its
 	 * trailing slash; the base URL itself when absent. The HTTP client is
@@ -103,6 +102,7 @@ export interface ProviderDialect {
 		endpoint: RequestEndpoint,
 		modelId: string,
 		fetch: EgressHttpClient,
+		thinkingOptions?: ProviderOptions,
 	): Exclude<LanguageModel, string>;
 	/**
 	 * For a provider that won't take the system prompt as a message: the
@@ -117,10 +117,19 @@ export interface ProviderDialect {
 	recognizeFailure?: RecognizeFailure;
 }
 
-export class ModelInspectionFailed extends Data.TaggedError("ModelInspectionFailed")<{
-	readonly message: string;
-	readonly cause?: unknown;
-}> {}
+export class ModelInspectionFailed
+	extends Schema.TaggedError<ModelInspectionFailed>()("ModelInspectionFailed", {
+		message: Schema.String,
+		cause: Schema.optional(Schema.Defect()),
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	get userMessage() {
+		return userText`Sugabots couldn't read the model's details from its provider. Check the provider's settings and try again.`;
+	}
+}
 
 /** A listing whose entries sit under `data`: OpenAI's shape, and the one most providers copy. */
 export const dataListing = Schema.Struct({
@@ -131,6 +140,29 @@ export const dataListing = Schema.Struct({
 		encode: SchemaGetter.forbiddenEncoding,
 	}),
 );
+
+/**
+ * An optional field read leniently: a value of the wrong type is read as
+ * absent rather than failing the model it describes.
+ */
+export const lenientOptional = <S extends Schema.Top>(schema: S) =>
+	Schema.optional(schema).pipe(Schema.catchDecoding(() => Effect.succeedSome(undefined)));
+
+/** What a model's listing says it can do, as the capabilities this API names. */
+export function capabilitiesFrom(features: {
+	readonly tools: boolean;
+	readonly thinking: boolean;
+	readonly inputs: readonly string[];
+	readonly outputs: readonly string[];
+}): ProviderModelCapability[] {
+	const capabilities: ProviderModelCapability[] = [];
+	if (features.tools) capabilities.push("tools");
+	if (features.thinking) capabilities.push("thinking");
+	if (features.inputs.includes("image")) capabilities.push("vision");
+	if (features.inputs.includes("audio")) capabilities.push("audio");
+	if (features.outputs.includes("image")) capabilities.push("images");
+	return capabilities;
+}
 
 /** What a provider calls each capability, in the word this API uses for it. */
 export type CapabilityVocabulary = Record<string, ProviderModelCapability>;

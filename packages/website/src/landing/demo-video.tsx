@@ -82,8 +82,8 @@ function PosterFrame() {
 				/>
 			)}
 			<div className="pointer-events-none absolute bottom-3.5 left-4 flex items-center gap-2.5">
-				<span className="grid size-12 place-items-center rounded-full border border-white/14 bg-landing-page/72 backdrop-blur-sm">
-					<PlayIcon className="size-4.5 fill-white text-white" />
+				<span className="grid size-12 place-items-center rounded-full landing-glass">
+					<PlayIcon className="size-4.5 fill-landing-text-strong text-landing-text-strong" />
 				</span>
 				<span className="rounded-md bg-landing-page/72 px-2.5 py-1.25 text-sm font-medium text-landing-text">
 					Watch the demo

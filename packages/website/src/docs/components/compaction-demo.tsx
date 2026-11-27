@@ -1,23 +1,23 @@
-import type { BotLook } from "@sugabots/avatars";
+import type { AvatarParts } from "@sugabots/avatars";
 import { cn } from "cn";
 import { ChevronLeftIcon, ChevronRightIcon, PauseIcon, PlayIcon, SearchIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
+import { type CastName, cast } from "@/cast";
 import { BotAvatar } from "@/components/bot-avatar";
+import { DemoCard } from "@/components/demo-card";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { type CastName, cast } from "@/docs/cast";
 import { Say } from "@/docs/components/chat-demo";
 
-/** How the system agent that compacts a bot's history looks, as packages/core/src/workspaces/agents/system-agents.ts defines it. */
-const compactorLook: BotLook = { color: "purple", face: "square" };
+/** How the system bot that compacts a bot's history looks, as packages/core/src/workspaces/bots/system-bots.ts defines it. */
+const compactorLook: AvatarParts = { color: "purple", eyes: "square" };
 
 /** Where a message ends up once the chat has been compacted. */
 type Band =
-	/** Older than what the first compaction summarises: left out of what the bot reads, but it can search for it. */
+	/** Older than what the first compaction condenses: left out of what the bot reads, but it can search for it. */
 	| "left-out"
-	/** Folded into the summary at the head of what the bot reads. */
-	| "summarised"
+	/** Folded into the condensed account at the head of what the bot reads. */
+	| "condensed"
 	/** Kept word for word. */
 	| "kept";
 
@@ -29,7 +29,7 @@ interface Line {
 }
 
 /**
- * Where the messages the bot reads word for word start, as the summary gives
+ * Where the messages the bot reads word for word start, as the condensed account gives
  * it: the day as well as the time, since long chats span days. Everything
  * before it can be searched.
  */
@@ -60,24 +60,24 @@ const lines: readonly Line[] = [
 		text: "Friday 15th to Monday 18th it is.",
 		band: "left-out",
 	},
-	{ from: "you", time: "17:48", text: "Can you find flights Friday after 5?", band: "summarised" },
+	{ from: "you", time: "17:48", text: "Can you find flights Friday after 5?", band: "condensed" },
 	{
 		from: "tripPlanner",
 		time: "17:52",
 		text: "Two options under €180 each: 17:55 and 18:40.",
-		band: "summarised",
+		band: "condensed",
 	},
 	{
 		from: "dad",
 		time: "18:10",
 		text: "18:40. Nobody is doing a 6am flight again.",
-		band: "summarised",
+		band: "condensed",
 	},
 	{
 		from: "tripPlanner",
 		time: "18:21",
 		text: "Holding the 18:40 for four. €220 left in the pot.",
-		band: "summarised",
+		band: "condensed",
 	},
 	{ from: "sam", time: "18:30", text: "Can I have a window seat?", band: "kept" },
 	{ from: "tripPlanner", time: "18:32", text: "Asked for a window seat for Sam.", band: "kept" },
@@ -90,7 +90,7 @@ const lines: readonly Line[] = [
 	},
 ];
 
-const summary = [
+const condensedAccount = [
 	"Decisions: On 14 May, Dad chose the 18:40 flight on Friday 15th, and Trip Planner held it for four.",
 	"Key facts: €220 left in the pot.",
 	`This covers the chat up to ${KEPT_FROM}. Anything it leaves out can be searched.`,
@@ -142,7 +142,7 @@ const steps: readonly Step[] = [
 	{
 		title: "Compacted",
 		caption:
-			"Trip Planner now rereads a short summary, then the latest messages word for word. Everyone still sees the whole chat.",
+			"Trip Planner now rereads a short condensed account, then the latest messages word for word. Everyone still sees the whole chat.",
 		said: 10,
 		contextUsed: 26,
 		compaction: "done",
@@ -150,7 +150,7 @@ const steps: readonly Step[] = [
 	{
 		title: "Looking further back",
 		caption:
-			"Mum's budget isn't in the summary, so Trip Planner searches the earlier messages and finds it.",
+			"Mum's budget isn't in the condensed account, so Trip Planner searches the earlier messages and finds it.",
 		said: 12,
 		contextUsed: 33,
 		compaction: "done",
@@ -165,7 +165,7 @@ const CONTEXT_LIMIT = 100;
 /** How long each step stays up while playing. */
 const STEP_MS = 3200;
 
-/** Steps through how a long chat gets compacted: what people see, and what the bot reads. */
+/** Steps through how a long chat gets compacted: what members see, and what the bot reads. */
 export function CompactionDemo() {
 	const [index, setIndex] = useState(0);
 	const [playing, setPlaying] = useState(false);
@@ -195,7 +195,7 @@ export function CompactionDemo() {
 	}
 
 	return (
-		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
+		<DemoCard>
 			<div className="flex flex-wrap items-center gap-2 border-b px-5 py-3">
 				<span className="flex-1 text-sm font-semibold">
 					{index + 1}. {step.title}
@@ -225,14 +225,14 @@ export function CompactionDemo() {
 			</div>
 
 			<div className="grid grid-cols-1 md:grid-cols-2 md:divide-x">
-				<PeopleView said={step.said} />
+				<MembersView said={step.said} />
 				<BotView step={step} />
 			</div>
 
 			<p aria-live="polite" className="m-4 mt-0 rounded-2xl bg-muted px-4 py-3 text-sm text-pretty">
 				{step.caption}
 			</p>
-		</Card>
+		</DemoCard>
 	);
 }
 
@@ -242,8 +242,8 @@ function PanelTitle({ children }: { children: string }) {
 	);
 }
 
-/** The chat as people see it: every message, however long it gets. */
-function PeopleView({ said }: { said: number }) {
+/** The chat as members see it: every message, however long it gets. */
+function MembersView({ said }: { said: number }) {
 	return (
 		<div className="flex flex-col gap-3 p-4 sm:p-5">
 			<PanelTitle>What everyone sees</PanelTitle>
@@ -278,7 +278,7 @@ function BotView({ step }: { step: Step }) {
 			<CompactionStatus state={step.compaction} />
 			<div className="flex min-h-72 flex-col gap-1.5">
 				<AnimatePresence initial={false} mode="popLayout">
-					{compacted && <SummaryHead key="summary" />}
+					{compacted && <CondensedAccountHead key="condensed-account" />}
 					{read.map((line) => (
 						<motion.div
 							key={line.time}
@@ -306,8 +306,8 @@ function ReadLine({ line }: { line: Line }) {
 	);
 }
 
-/** The summary at the head of the bot's history. */
-function SummaryHead() {
+/** The condensed account at the head of the bot's history. */
+function CondensedAccountHead() {
 	return (
 		<motion.div
 			layout
@@ -317,8 +317,8 @@ function SummaryHead() {
 		>
 			<BotAvatar size="sm" {...compactorLook} />
 			<span className="flex flex-col gap-0.5 text-xs">
-				<span className="font-semibold">Summary</span>
-				{summary.map((paragraph) => (
+				<span className="font-semibold">Compacted history</span>
+				{condensedAccount.map((paragraph) => (
 					<span key={paragraph} className="text-muted-foreground text-pretty">
 						{paragraph}
 					</span>
@@ -352,11 +352,11 @@ function CompactionStatus({ state }: { state: Step["compaction"] }) {
 			<motion.span
 				animate={state === "working" ? { rotate: [0, -8, 8, 0] } : { rotate: 0 }}
 				transition={state === "working" ? { repeat: Infinity, duration: 1.2 } : undefined}
-				className={cn(state === "idle" && "opacity-40")}
+				className={state === "idle" ? "opacity-40" : undefined}
 			>
 				<BotAvatar size="xs" {...compactorLook} />
 			</motion.span>
-			<span className={cn(state === "idle" && "text-muted-foreground")}>{text}</span>
+			<span className={state === "idle" ? "text-muted-foreground" : undefined}>{text}</span>
 		</div>
 	);
 }

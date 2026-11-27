@@ -1,8 +1,6 @@
 import { streamEvent } from "@sugabots/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { isApiFailure } from "./errors.ts";
 import { createEventsApi } from "./events.ts";
-import { memoryTokenStore } from "./tokens.ts";
 
 /**
  * The client end of a stream. The API is not involved: `fetch` is replaced by
@@ -32,6 +30,7 @@ function frame({
 }
 
 interface Call {
+	startedAtMs: number;
 	url: string;
 	headers: Headers;
 	credentials?: RequestCredentials;
@@ -46,6 +45,7 @@ function scripted(...responses: (string | number)[]) {
 
 	const fetch = (async (url: string | URL, init?: RequestInit) => {
 		calls.push({
+			startedAtMs: Date.now(),
 			url: String(url),
 			headers: new Headers(init?.headers),
 			credentials: init?.credentials,
@@ -61,9 +61,6 @@ function scripted(...responses: (string | number)[]) {
 					headers: { "content-type": "text/event-stream" },
 				});
 			}
-			if (scene === 204) {
-				return new Response(null, { status: 204 });
-			}
 			return new Response(JSON.stringify({ message: "no" }), {
 				status: scene,
 			});
@@ -78,8 +75,8 @@ function scripted(...responses: (string | number)[]) {
 	return { fetch, calls };
 }
 
-function events(fetch: typeof globalThis.fetch, token = "t0") {
-	return createEventsApi({ baseUrl: BASE, tokens: memoryTokenStore(token), fetch, retryMs: 1 });
+function events(fetch: typeof globalThis.fetch) {
+	return createEventsApi({ baseUrl: BASE, fetch, retryMs: 1 });
 }
 
 /** Reads `count` events, then closes the stream. */
@@ -95,33 +92,22 @@ async function take(stream: AsyncIterable<{ type: string }>, count: number) {
 }
 
 describe("requests", () => {
-	it("asks for the right route with the bearer token", async () => {
-		const { fetch, calls } = scripted(frame({ event: "thread.created", id: 1 }));
+	it("asks for the right route with the session cookie", async () => {
+		const { fetch, calls } = scripted(frame({ event: "chat.created", id: 1 }));
 		const stream = events(fetch).workspace("w1");
 
 		await take(stream, 1);
 
 		expect(calls[0]?.url).toBe(`${BASE}/workspaces/w1/events`);
-		expect(calls[0]?.headers.get("authorization")).toBe("Bearer t0");
 		expect(calls[0]?.headers.get("accept")).toBe("text/event-stream");
-		expect(calls[0]?.credentials).toBe("omit");
-	});
-
-	it("includes browser cookies when no bearer store is supplied", async () => {
-		const { fetch, calls } = scripted(frame({ event: "thread.created", id: 1 }));
-		const stream = createEventsApi({ baseUrl: BASE, fetch }).workspace("w1");
-
-		await take(stream, 1);
-
 		expect(calls[0]?.credentials).toBe("include");
-		expect(calls[0]?.headers.get("authorization")).toBeNull();
 	});
 
 	it("escapes an id rather than pasting it into the path", async () => {
 		const { fetch, calls } = scripted(frame({ event: "message.created", id: 1 }));
-		await take(events(fetch).thread("a/../b"), 1);
+		await take(events(fetch).chat("a/../b"), 1);
 
-		expect(calls[0]?.url).toBe(`${BASE}/threads/a%2F..%2Fb/events`);
+		expect(calls[0]?.url).toBe(`${BASE}/chats/a%2F..%2Fb/events`);
 	});
 });
 
@@ -133,7 +119,7 @@ describe("parsing", () => {
 				frame({ event: "message.completed", id: 2 }),
 		);
 
-		const seen = await take(events(fetch).thread("c1"), 3);
+		const seen = await take(events(fetch).chat("c1"), 3);
 
 		expect(seen.map((event) => event.type)).toEqual([
 			"message.created",
@@ -145,16 +131,16 @@ describe("parsing", () => {
 	it("keeps a payload field it has no schema for", async () => {
 		const { fetch } = scripted(
 			frame({
-				event: "thread.created",
+				event: "chat.created",
 				id: 1,
-				data: { v: 1, type: "thread.created", threadId: "c1" },
+				data: { v: 1, type: "chat.created", chatId: "c1" },
 			}),
 		);
 
 		expect((await take(events(fetch).workspace("w1"), 1))[0]).toEqual({
 			v: 1,
-			type: "thread.created",
-			threadId: "c1",
+			type: "chat.created",
+			chatId: "c1",
 		});
 	});
 
@@ -165,7 +151,7 @@ describe("parsing", () => {
 				frame({ event: "message.created", id: 1 }),
 		);
 
-		expect((await take(events(fetch).thread("c1"), 1)).map((e) => e.type)).toEqual([
+		expect((await take(events(fetch).chat("c1"), 1)).map((e) => e.type)).toEqual([
 			"message.created",
 		]);
 	});
@@ -181,7 +167,7 @@ describe("parsing", () => {
 			})),
 		);
 		const toolCallCompleted = streamEvent("tool_call.completed", {
-			threadId: "c1",
+			chatId: "c1",
 			messageId: "m1",
 			toolCall: {
 				type: "tool_call",
@@ -195,7 +181,7 @@ describe("parsing", () => {
 				},
 				status: "completed",
 				error: null,
-				mutating: false,
+				approval: null,
 				atOffset: 0,
 				startedAt: "2026-10-06T02:50:51.000Z",
 				finishedAt: "2026-10-06T02:50:51.027Z",
@@ -206,7 +192,7 @@ describe("parsing", () => {
 				frame({ event: "message.delta", id: 2 }),
 		);
 
-		expect((await take(events(fetch).thread("c1"), 2)).map((e) => e.type)).toEqual([
+		expect((await take(events(fetch).chat("c1"), 2)).map((e) => e.type)).toEqual([
 			"tool_call.completed",
 			"message.delta",
 		]);
@@ -215,7 +201,7 @@ describe("parsing", () => {
 	it("bounds an unfinished frame", async () => {
 		const { fetch } = scripted(`data: ${"x".repeat(1024 * 1024)}\n`);
 
-		await expect(take(events(fetch).thread("c1"), 1)).rejects.toMatchObject({
+		await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({
 			_tag: "InternalServerError",
 		});
 	});
@@ -223,32 +209,34 @@ describe("parsing", () => {
 	it("ignores the server's keep-alive comments", async () => {
 		const { fetch } = scripted(`: ping\n\n: ping\n\n${frame({ event: "turn.started", id: 1 })}`);
 
-		expect(await take(events(fetch).thread("c1"), 1)).toHaveLength(1);
+		expect(await take(events(fetch).chat("c1"), 1)).toHaveLength(1);
 	});
 });
 
 describe("resume", () => {
 	it("backs off when successful responses keep ending without events", async () => {
 		vi.useFakeTimers();
+		const jitter = vi.spyOn(Math, "random").mockReturnValue(0.5);
 		const { fetch, calls } = scripted("", "", 401);
-		const stream = createEventsApi({
-			baseUrl: BASE,
-			tokens: memoryTokenStore(),
-			fetch,
-			retryMs: 100,
-		}).workspace("w1");
-		const finished = expect(take(stream, 1)).rejects.toMatchObject({ _tag: "Unauthorized" });
+		const stream = createEventsApi({ baseUrl: BASE, fetch, retryMs: 100 }).workspace("w1");
+		const finished = expect(take(stream, 2)).rejects.toMatchObject({ _tag: "Unauthorized" });
 
 		try {
 			await vi.advanceTimersByTimeAsync(0);
 			expect(calls).toHaveLength(1);
-			await vi.advanceTimersByTimeAsync(49);
-			expect(calls).toHaveLength(1);
 			await vi.runAllTimersAsync();
 			await finished;
 			expect(calls).toHaveLength(3);
+			const [initial, firstRetry, secondRetry] = calls.map((call) => call.startedAtMs) as [
+				number,
+				number,
+				number,
+			];
+			expect(firstRetry).toBeGreaterThan(initial);
+			expect(secondRetry - firstRetry).toBeGreaterThan(firstRetry - initial);
 		} finally {
 			stream.close();
+			jitter.mockRestore();
 			vi.useRealTimers();
 		}
 	});
@@ -259,13 +247,24 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 8 }),
 		);
 
-		const stream = events(fetch).thread("c1");
-		const seen = await take(stream, 2);
+		const seen = await take(events(fetch).chat("c1"), 2);
 
 		expect(seen.map((event) => event.type)).toEqual(["message.created", "message.completed"]);
 		expect(calls[0]?.headers.get("last-event-id")).toBeNull();
 		expect(calls[1]?.headers.get("last-event-id")).toBe("7");
-		expect(stream.lastEventId).toBe("8");
+	});
+
+	it("leaves the refetch after a reconnect with nothing to resume from to the server's ready", async () => {
+		const ready = frame({ event: "ready", data: { v: 1, type: "ready" } });
+		const { fetch, calls } = scripted(
+			`${ready}: ping\n\n`,
+			ready + frame({ event: "message.completed", id: 8 }),
+		);
+
+		const seen = await take(events(fetch).chat("c1"), 3);
+
+		expect(seen.map((event) => event.type)).toEqual(["ready", "ready", "message.completed"]);
+		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
 	});
 
 	it("does not let a delta move the resume point", async () => {
@@ -277,16 +276,9 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 8 }),
 		);
 
-		await take(events(fetch).thread("c1"), 3);
+		await take(events(fetch).chat("c1"), 3);
 
 		expect(calls[1]?.headers.get("last-event-id")).toBe("7");
-	});
-
-	it("starts from a remembered id", async () => {
-		const { fetch, calls } = scripted(frame({ event: "message.created", id: 12 }));
-		await take(events(fetch).thread("c1", { lastEventId: "11" }), 1);
-
-		expect(calls[0]?.headers.get("last-event-id")).toBe("11");
 	});
 
 	it("preserves an empty id as a cleared checkpoint", async () => {
@@ -296,7 +288,7 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 8 }),
 		);
 
-		await take(events(fetch).thread("c1"), 3);
+		await take(events(fetch).chat("c1"), 3);
 
 		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
 	});
@@ -307,7 +299,7 @@ describe("resume", () => {
 			frame({ event: "message.completed", id: 9 }),
 		);
 
-		const seen = await take(events(fetch).thread("c1"), 2);
+		const seen = await take(events(fetch).chat("c1"), 2);
 
 		expect(seen.map((event) => event.type)).toEqual(["reset", "message.completed"]);
 		expect(calls[1]?.headers.get("last-event-id")).toBeNull();
@@ -318,63 +310,75 @@ describe("resume", () => {
 		// this stream is feeding — so `reset` is delivered like any other event.
 		const { fetch } = scripted(frame({ event: "reset", data: { v: 1, type: "reset" } }));
 
-		expect((await take(events(fetch).thread("c1"), 1))[0]?.type).toBe("reset");
+		expect((await take(events(fetch).chat("c1"), 1))[0]?.type).toBe("reset");
 	});
 });
 
 describe("failure", () => {
-	it("ends permanently when the server returns 204", async () => {
-		const { fetch, calls } = scripted(204, frame({ event: "message.created", id: 1 }));
-
-		expect(await take(events(fetch).thread("c1"), 1)).toEqual([]);
-		expect(calls).toHaveLength(1);
-	});
-
 	it("rejects a successful response that is not an event stream", async () => {
 		const fetch = vi.fn(async () => Response.json({ status: "ok" })) as typeof globalThis.fetch;
 
-		await expect(take(events(fetch).thread("c1"), 1)).rejects.toMatchObject({
+		await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({
 			_tag: "InternalServerError",
 		});
 	});
 
-	it("retries a server error", async () => {
-		const { fetch, calls } = scripted(503, frame({ event: "message.created", id: 1 }));
+	it.each([503, 429, 408])("retries HTTP %s and delivers the next event", async (status) => {
+		const { fetch, calls } = scripted(status, frame({ event: "message.created", id: 1 }));
 
-		await take(events(fetch).thread("c1"), 1);
-
+		expect((await take(events(fetch).chat("c1"), 1)).map((event) => event.type)).toEqual([
+			"message.created",
+		]);
 		expect(calls).toHaveLength(2);
 	});
 
-	it("gives up when the token is refused, rather than retrying forever", async () => {
-		const { fetch, calls } = scripted(401);
+	it.each([
+		["a number of seconds", "120"],
+		["an HTTP date", new Date(Date.UTC(2026, 10, 25, 12, 2)).toUTCString()],
+	])("waits at least as long as Retry-After asks, given as %s", async (_form, retryAfter) => {
+		vi.useFakeTimers({ now: Date.UTC(2026, 10, 25, 12, 0) });
+		let calls = 0;
+		const fetch = (async () => {
+			calls++;
+			return calls === 1
+				? new Response(JSON.stringify({ message: "restarting" }), {
+						status: 503,
+						headers: { "retry-after": retryAfter },
+					})
+				: new Response(new TextEncoder().encode(frame({ event: "message.created", id: 1 })), {
+						headers: { "content-type": "text/event-stream" },
+					});
+		}) as typeof globalThis.fetch;
+		const stream = events(fetch).chat("c1");
 
-		const failure = await take(events(fetch).thread("c1"), 1).catch((error: unknown) => error);
-		expect(isApiFailure(failure)).toBe(true);
+		try {
+			const first = take(stream, 1);
+			await vi.advanceTimersByTimeAsync(119_999);
+			expect(calls).toBe(1);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(calls).toBe(2);
+			expect((await first).map((event) => event.type)).toEqual(["message.created"]);
+		} finally {
+			stream.close();
+			vi.useRealTimers();
+		}
+	});
+
+	it.each([
+		[401, "Unauthorized"],
+		[404, "NotFound"],
+	])("ends on HTTP %s with %s", async (status, tag) => {
+		const { fetch, calls } = scripted(status);
+
+		await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({ _tag: tag });
 		expect(calls).toHaveLength(1);
-	});
-
-	it("gives up on a resource that is not there", async () => {
-		const { fetch } = scripted(404);
-
-		await expect(take(events(fetch).thread("gone"), 1)).rejects.toMatchObject({ _tag: "NotFound" });
-	});
-
-	it("waits out a rate limit instead of giving up on it", async () => {
-		// 429 and 408 are the two 4xx that mean "later", not "never". Treating
-		// the whole range as fatal left a rate-limited tab with no live
-		// updates until it was reloaded.
-		const { fetch, calls } = scripted(429, 408, frame({ event: "message.created", id: 1 }));
-
-		expect(await take(events(fetch).thread("c1"), 1)).toHaveLength(1);
-		expect(calls).toHaveLength(3);
 	});
 });
 
 describe("closing", () => {
 	it("ends the iteration without throwing", async () => {
 		const { fetch } = scripted(frame({ event: "message.created", id: 1 }));
-		const stream = events(fetch).thread("c1");
+		const stream = events(fetch).chat("c1");
 
 		const seen: unknown[] = [];
 		for await (const event of stream) {
@@ -383,16 +387,5 @@ describe("closing", () => {
 		}
 
 		expect(seen).toHaveLength(1);
-	});
-
-	it("stops reconnecting once the caller's signal aborts", async () => {
-		const abort = new AbortController();
-		const { fetch, calls } = scripted(frame({ event: "message.created", id: 1 }));
-
-		for await (const _event of events(fetch).thread("c1", { signal: abort.signal })) {
-			abort.abort();
-		}
-
-		expect(calls).toHaveLength(1);
 	});
 });

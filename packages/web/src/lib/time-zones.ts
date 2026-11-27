@@ -3,15 +3,15 @@ import { DEFAULT_TIME_ZONE, type TimeZone } from "@sugabots/contracts";
 /** A time zone as a list of them shows it. */
 export interface TimeZoneChoice {
 	readonly zone: TimeZone;
-	/** Where it is, as people name it: "Buenos Aires", or "UTC". */
+	/** Where it is, as members name it: "Buenos Aires", or "UTC". */
 	readonly place: string;
 	/** How far it is from UTC now, such as "UTC+11", or "UTC" itself. */
 	readonly offset: string;
 }
 
 /**
- * Every time zone this browser knows, by name. Routines run only in these,
- * so a workspace moved to one can keep its schedules.
+ * Every time zone this browser knows, by name. Automations run only in these,
+ * so a workspace moved to one can keep its routines.
  */
 export function timeZoneChoices(now: Date): TimeZoneChoice[] {
 	const zones = Intl.supportedValuesOf("timeZone");
@@ -19,7 +19,7 @@ export function timeZoneChoices(now: Date): TimeZoneChoice[] {
 	return named.map((zone) => timeZoneChoice(zone, now));
 }
 
-export function timeZoneChoice(zone: TimeZone, now: Date): TimeZoneChoice {
+function timeZoneChoice(zone: TimeZone, now: Date): TimeZoneChoice {
 	return { zone, place: timeZonePlace(zone), offset: utcOffset(zone, now) };
 }
 
@@ -30,7 +30,7 @@ export interface TimeZoneRegion {
 	readonly choices: readonly TimeZoneChoice[];
 }
 
-/** The regions a zone's first part names, as people call them, in the order they are listed. */
+/** The regions a zone's first part names, as members call them, in the order they are listed. */
 const NAMED_REGIONS: readonly (readonly [prefix: string, name: string])[] = [
 	["Africa", "Africa"],
 	["America", "Americas"],
@@ -63,7 +63,7 @@ export function timeZonePlace(zone: string): string {
 }
 
 /** How far `zone` is from UTC at `now`: "UTC+11", "UTC-2:30", or "UTC" itself. */
-export function utcOffset(zone: string, now: Date): string {
+function utcOffset(zone: string, now: Date): string {
 	const offset = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "shortOffset" })
 		.formatToParts(now)
 		.find((part) => part.type === "timeZoneName")?.value;

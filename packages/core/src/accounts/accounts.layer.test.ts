@@ -1,7 +1,7 @@
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { noDatabase } from "../database/testing.ts";
-import { Installation } from "../installation/installation.ts";
+import { ServerSettings } from "../server-settings/server-settings.ts";
 import { Accounts } from "./accounts.ts";
 
 function accountsFor(env: Record<string, string>) {
@@ -9,7 +9,7 @@ function accountsFor(env: Record<string, string>) {
 		Accounts.Service.pipe(
 			Effect.provide(
 				Accounts.layer.pipe(
-					Layer.provide([noDatabase, Installation.layer]),
+					Layer.provide([noDatabase, ServerSettings.layer]),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),
 			),
@@ -18,7 +18,7 @@ function accountsFor(env: Record<string, string>) {
 }
 
 describe("Accounts.layer", () => {
-	it("leaves email verification off unless the installation asks for it", async () => {
+	it("leaves email verification off unless the server asks for it", async () => {
 		const off = await accountsFor({});
 		const on = await accountsFor({ REQUIRE_EMAIL_VERIFICATION: "true" });
 

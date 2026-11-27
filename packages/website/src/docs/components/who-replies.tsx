@@ -1,69 +1,63 @@
-import { cn } from "cn";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import { ChatMessage, ChatText } from "@/components/chat";
+import { cast } from "@/cast";
+import { type ChatBot, ChatMessage, ChatText } from "@/components/chat";
+import { DemoCard } from "@/components/demo-card";
 import { riseIn } from "@/components/reveal";
-import { Card } from "@/components/ui/card";
-import { cast } from "@/docs/cast";
+import { ChoiceChips } from "@/components/ui/choice-chips";
 
 interface Scenario {
 	label: string;
 	message: string;
-	/** The bot that answers, or none when the message is for people. */
-	replier?: typeof cast.tripPlanner;
+	/** The bot that answers, or none when it reads the message and leaves it to the members. */
+	replier?: ChatBot;
 	why: string;
 }
 
-const scenarios: readonly Scenario[] = [
-	{
+const scenarios = {
+	justWrite: {
 		label: "Just write",
 		message: "Can you find flights to Lisbon on Friday?",
 		replier: cast.tripPlanner,
-		why: "You're in Trip Planner's chat, so Trip Planner answers.",
+		why: "You're in a chat with Trip Planner, so Trip Planner answers.",
 	},
-	{
+	mentionAnotherBot: {
 		label: "Mention another bot",
 		message: "Find flights, and check them with @budget-keeper",
 		replier: cast.tripPlanner,
 		why: "The chat's own bot still answers. It can bring Budget Keeper in itself, and you can read that exchange.",
 	},
-	{
-		label: "Mention only people",
+	mentionOnlyMembers: {
+		label: "Mention only members",
 		message: "@sam are you free that weekend?",
-		why: "A message that mentions only people is for them. No bot jumps in.",
+		why: "A message that mentions only members is likely for them. Trip Planner reads it, and answers only if it can help; otherwise it leaves a 👀 to show it read it.",
 	},
-];
+} satisfies Record<string, Scenario>;
 
-/** Pick a message to send in Trip Planner's chat and see who answers it. */
+type ScenarioName = keyof typeof scenarios;
+
+const scenarioLabels = Object.fromEntries(
+	Object.entries(scenarios).map(([name, scenario]) => [name, scenario.label]),
+) as Record<ScenarioName, string>;
+
+/** Pick a message to send in a chat with Trip Planner and see who answers it. */
 export function WhoReplies() {
-	const [index, setIndex] = useState(0);
-	const scenario = scenarios[index] ?? scenarios[0];
-	if (!scenario) return null;
+	const [picked, setPicked] = useState<ScenarioName>("justWrite");
+	const scenario: Scenario = scenarios[picked];
 
 	return (
-		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
-			<div className="flex flex-wrap items-center gap-2 border-b px-5 py-3">
-				<span className="pr-1 text-sm font-semibold">In Trip Planner's chat:</span>
-				{scenarios.map((option, optionIndex) => (
-					<button
-						key={option.label}
-						type="button"
-						aria-pressed={optionIndex === index}
-						onClick={() => setIndex(optionIndex)}
-						className={cn(
-							"rounded-full border-2 px-3 py-0.5 text-sm font-semibold transition-colors",
-							optionIndex === index
-								? "border-foreground bg-foreground text-background"
-								: "border-input text-muted-foreground hover:text-foreground",
-						)}
-					>
-						{option.label}
-					</button>
-				))}
-			</div>
+		<DemoCard>
+			<ChoiceChips
+				label="In a chat with Trip Planner:"
+				labelClassName="float-left pr-1 text-sm font-semibold"
+				className="border-b px-5 py-3"
+				options={scenarioLabels}
+				value={picked}
+				onChange={setPicked}
+			/>
 			<AnimatePresence mode="wait" initial={false}>
 				<motion.div
-					key={index}
+					key={picked}
 					initial="hidden"
 					animate="visible"
 					exit="hidden"
@@ -82,7 +76,7 @@ export function WhoReplies() {
 							</ChatMessage>
 						) : (
 							<p className="text-center text-sm font-semibold text-muted-foreground">
-								The bots stay quiet
+								Trip Planner reacts 👀 and stays quiet
 							</p>
 						)}
 					</motion.div>
@@ -94,6 +88,6 @@ export function WhoReplies() {
 					</motion.p>
 				</motion.div>
 			</AnimatePresence>
-		</Card>
+		</DemoCard>
 	);
 }

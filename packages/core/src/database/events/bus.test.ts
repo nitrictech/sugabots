@@ -1,7 +1,14 @@
-import { EVENT_VERSION, type EventType, type StreamEvent, streamEvent } from "@sugabots/contracts";
-import { describe, expect, it } from "vitest";
+import {
+	type DurableEventType,
+	EVENT_VERSION,
+	type EventStream,
+	type EventType,
+	type StreamEvent,
+} from "@sugabots/contracts";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "./bus.ts";
-import { EventStore } from "./store.ts";
+import type { EventRelay } from "./relay.ts";
+import { inMemoryEventStore } from "./testing.ts";
 
 /**
  * The bus, without an HTTP layer. `events.test.ts` beside the routes proves the
@@ -9,9 +16,12 @@ import { EventStore } from "./store.ts";
  * provoke through a socket.
  */
 
-const CHANNEL = "thread:c1";
+const STREAM = "chat:c1";
 
-function rawEvent(type: EventType, data: Record<string, unknown> = {}): StreamEvent {
+function rawEvent<const T extends EventType>(
+	type: T,
+	data: Record<string, unknown> = {},
+): StreamEvent & { type: T } {
 	return { ...data, v: EVENT_VERSION, type };
 }
 
@@ -57,99 +67,103 @@ function take(
 const types = (deliveries: EventBus.Delivery[]) =>
 	deliveries.map((delivery) => delivery.event.type);
 
-function bus(): EventBus.Interface {
-	return EventBus.inProcess({ store: EventStore.inMemory() });
+/** A bus over a memory store, and `commit`, which stores an event and delivers it as the outbox does. */
+function bus() {
+	const store = inMemoryEventStore();
+	const events = EventBus.inProcess({ store });
+	const commit = (stream: EventStream, event: StreamEvent & { type: DurableEventType }) =>
+		events.publishCommitted([store.record(stream, event)]);
+	return { events, store, commit };
 }
 
 describe("publish and subscribe", () => {
 	it("fans out an already committed event without storing it twice", async () => {
-		const store = EventStore.inMemory();
-		const events = EventBus.inProcess({ store });
-		const live = take(events.subscribe(CHANNEL), 1);
-		const event = streamEvent("agent.updated", { id: "m1" });
-		const seq = await store.append(CHANNEL, event);
+		const { events, store, commit } = bus();
+		const live = take(events.subscribe(STREAM), 1);
+		const event = rawEvent("chat.changed", { chatId: "c1" });
 
-		await events.publishCommitted([{ channel: CHANNEL, seq, event }]);
+		await commit(STREAM, event);
 
-		expect(await live).toEqual([{ seq, event }]);
-		expect(await store.replay(CHANNEL, 0, 10)).toEqual([{ seq, event }]);
+		expect(await live).toEqual([{ seq: 1, event }]);
+		expect(await store.replay(STREAM, 0, 10)).toEqual([{ seq: 1, event }]);
 	});
 
 	it("delivers to every live subscriber", async () => {
-		const events = bus();
-		const first = take(events.subscribe(CHANNEL), 1);
-		const second = take(events.subscribe(CHANNEL), 1);
+		const { events } = bus();
+		const first = take(events.subscribe(STREAM), 1);
+		const second = take(events.subscribe(STREAM), 1);
 
-		await events.publish(CHANNEL, rawEvent("message.created", { id: "m1" }));
+		await events.publish(STREAM, rawEvent("message.delta", { id: "m1" }));
 
 		expect((await first)[0]?.event.id).toBe("m1");
 		expect((await second)[0]?.event.id).toBe("m1");
 	});
 
-	it("keeps channels apart", async () => {
-		const events = bus();
-		const thread = take(events.subscribe(CHANNEL), 1);
+	it("keeps streams apart", async () => {
+		const { events } = bus();
+		const chat = take(events.subscribe(STREAM), 1);
 
-		await events.publish("workspace:w1", rawEvent("thread.created"));
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		await events.publish("workspace:w1", rawEvent("message.delta", { id: "elsewhere" }));
+		await events.publish(STREAM, rawEvent("message.delta", { id: "here" }));
 
-		expect(types(await thread)).toEqual(["message.created"]);
+		expect((await chat).map((delivery) => delivery.event.id)).toEqual(["here"]);
 	});
 
-	it("numbers durable events and leaves deltas unnumbered", async () => {
-		const events = bus();
-		const stream = take(events.subscribe(CHANNEL), 3);
+	it("numbers committed events and leaves live-only ones unnumbered", async () => {
+		const { events, commit } = bus();
+		const stream = take(events.subscribe(STREAM), 2);
 
-		await events.publish(CHANNEL, rawEvent("message.created"));
-		await events.publish(CHANNEL, rawEvent("message.delta", { text: "hi" }));
-		await events.publish(CHANNEL, rawEvent("message.completed"));
+		await events.publish(STREAM, rawEvent("message.delta", { text: "hi" }));
+		await commit(STREAM, rawEvent("message.completed"));
 
-		const [created, delta, completed] = await stream;
-		expect(created?.seq).toBe(1);
+		const [delta, completed] = await stream;
 		expect(delta?.seq).toBeUndefined();
-		// The delta took no sequence number, so the next state change is 2.
-		expect(completed?.seq).toBe(2);
+		expect(completed?.seq).toBe(1);
 	});
 
-	it("holds ordering within a channel when publishes overlap", async () => {
-		const events = bus();
-		const stream = take(events.subscribe(CHANNEL), 5);
+	it("holds ordering within a stream when publishes overlap", async () => {
+		const { events } = bus();
+		const stream = take(events.subscribe(STREAM), 5);
 
 		await Promise.all(
-			[1, 2, 3, 4, 5].map((n) => events.publish(CHANNEL, rawEvent("turn.started", { n }))),
+			[1, 2, 3, 4, 5].map((n) => events.publish(STREAM, rawEvent("message.delta", { n }))),
 		);
 
 		expect((await stream).map((delivery) => delivery.event.n)).toEqual([1, 2, 3, 4, 5]);
 	});
 
-	it("queues committed fan-out behind an in-flight publish on the same channel", async () => {
-		let releaseAppend = () => {};
-		const appendBlocked = new Promise<void>((resolve) => {
-			releaseAppend = resolve;
+	it("relays committed events behind an in-flight publish on the same stream", async () => {
+		let releaseFirst = () => {};
+		const firstBlocked = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
 		});
-		const store = EventStore.inMemory();
-		const append = store.append.bind(store);
-		store.append = async (channel, event) => {
-			await appendBlocked;
-			return append(channel, event);
-		};
-		const events = EventBus.inProcess({ store });
-		const stream = take(events.subscribe(CHANNEL), 2);
-		const first = events.publish(CHANNEL, rawEvent("message.created", { n: 1 }));
+		const relayed: unknown[] = [];
+		const store = inMemoryEventStore();
+		const events = EventBus.inProcess({
+			store,
+			relay: {
+				async broadcast(_stream, delivery) {
+					if (delivery.event.n === 1) await firstBlocked;
+					relayed.push(delivery.event.n);
+				},
+				listen: async () => async () => {},
+			},
+		});
+		const first = events.publish(STREAM, rawEvent("message.delta", { n: 1 }));
 		const second = events.publishCommitted([
-			{ channel: CHANNEL, seq: 2, event: streamEvent("agent.updated", { n: 2 }) },
+			store.record(STREAM, rawEvent("chat.changed", { n: 2 })),
 		]);
 
-		releaseAppend();
+		releaseFirst();
 		await Promise.all([first, second]);
 
-		expect((await stream).map((delivery) => delivery.event.n)).toEqual([1, 2]);
+		expect(relayed).toEqual([1, 2]);
 	});
 
 	it("stops when the caller aborts", async () => {
-		const events = bus();
+		const { events } = bus();
 		const abort = new AbortController();
-		const stream = events.subscribe(CHANNEL, { signal: abort.signal });
+		const stream = events.subscribe(STREAM, { signal: abort.signal });
 
 		const drained = (async () => {
 			const seen: EventBus.Delivery[] = [];
@@ -160,7 +174,7 @@ describe("publish and subscribe", () => {
 			return seen;
 		})();
 
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		await events.publish(STREAM, rawEvent("message.delta"));
 
 		expect(await drained).toHaveLength(1);
 	});
@@ -168,15 +182,15 @@ describe("publish and subscribe", () => {
 
 describe("resume", () => {
 	it("replays what a subscriber missed, then goes live", async () => {
-		const events = bus();
+		const { events, commit } = bus();
 
-		await events.publish(CHANNEL, rawEvent("message.created", { id: "m1" }));
-		await events.publish(CHANNEL, rawEvent("message.completed", { id: "m1" }));
+		await commit(STREAM, rawEvent("message.created", { id: "m1" }));
+		await commit(STREAM, rawEvent("message.completed", { id: "m1" }));
 
 		// Resuming after the first: the second is replayed from the table, the
 		// third arrives live, and there is no gap between them.
-		const resumed = take(events.subscribe(CHANNEL, { since: 1 }), 2);
-		await events.publish(CHANNEL, rawEvent("message.created", { id: "m2" }));
+		const resumed = take(events.subscribe(STREAM, { since: 1 }), 2);
+		await commit(STREAM, rawEvent("message.created", { id: "m2" }));
 
 		const [replayed, live] = await resumed;
 		expect(replayed).toEqual({ seq: 2, event: { v: 1, type: "message.completed", id: "m1" } });
@@ -184,40 +198,39 @@ describe("resume", () => {
 	});
 
 	it("never replays a delta", async () => {
-		const events = bus();
+		const { events, commit } = bus();
 
-		await events.publish(CHANNEL, rawEvent("message.created"));
-		await events.publish(CHANNEL, rawEvent("message.delta", { text: "gone" }));
-		await events.publish(CHANNEL, rawEvent("message.completed"));
+		await commit(STREAM, rawEvent("message.created"));
+		await events.publish(STREAM, rawEvent("message.delta", { text: "gone" }));
+		await commit(STREAM, rawEvent("message.completed"));
 
-		expect(types(await take(events.subscribe(CHANNEL, { since: 1 }), 1))).toEqual([
+		expect(types(await take(events.subscribe(STREAM, { since: 1 }), 1))).toEqual([
 			"message.completed",
 		]);
 	});
 
-	it("delivers an event published during the replay exactly once", async () => {
-		const events = bus();
-		await events.publish(CHANNEL, rawEvent("message.created", { n: 1 }));
+	it("delivers an event committed during the replay exactly once", async () => {
+		const { events, commit } = bus();
+		await commit(STREAM, rawEvent("message.created", { n: 1 }));
 
-		// Subscribing and publishing without yielding in between is the race
+		// Subscribing and committing without yielding in between is the race
 		// the subscriber registers early to close: the new event is buffered
 		// live *and* readable from the table, and must arrive once.
-		const stream = take(events.subscribe(CHANNEL, { since: 1 }), 2);
-		await events.publish(CHANNEL, rawEvent("message.created", { n: 2 }));
-		await events.publish(CHANNEL, rawEvent("message.created", { n: 3 }));
+		const stream = take(events.subscribe(STREAM, { since: 1 }), 2);
+		await commit(STREAM, rawEvent("message.created", { n: 2 }));
+		await commit(STREAM, rawEvent("message.created", { n: 3 }));
 
 		expect((await stream).map((delivery) => delivery.seq)).toEqual([2, 3]);
 	});
 
 	it("resets a resume point that has been pruned away", async () => {
-		const store = EventStore.inMemory();
-		const events = EventBus.inProcess({ store });
+		const { events, store, commit } = bus();
 
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		await commit(STREAM, rawEvent("message.created"));
 		await store.prune(new Date(Date.now() + 1000));
 
-		const stream = take(events.subscribe(CHANNEL, { since: 1 }), 2);
-		await events.publish(CHANNEL, rawEvent("message.completed"));
+		const stream = take(events.subscribe(STREAM, { since: 1 }), 2);
+		await commit(STREAM, rawEvent("message.completed"));
 
 		const [first, second] = await stream;
 		expect(first?.event.type).toBe("reset");
@@ -226,20 +239,20 @@ describe("resume", () => {
 		expect(second?.event.type).toBe("message.completed");
 	});
 
-	it("resets an id that was never on this channel", async () => {
-		const events = bus();
-		await events.publish("workspace:w1", rawEvent("thread.created"));
+	it("resets an id that was never on this stream", async () => {
+		const { events, commit } = bus();
+		await commit("workspace:w1", rawEvent("chat.changed"));
 
-		const stream = take(events.subscribe(CHANNEL, { since: 1 }), 1);
+		const stream = take(events.subscribe(STREAM, { since: 1 }), 1);
 		expect(types(await stream)).toEqual(["reset"]);
 	});
 
 	it("starts live when there is nothing to resume from", async () => {
-		const events = bus();
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		const { events, commit } = bus();
+		await commit(STREAM, rawEvent("message.created"));
 
-		const stream = take(events.subscribe(CHANNEL), 1);
-		await events.publish(CHANNEL, rawEvent("message.completed"));
+		const stream = take(events.subscribe(STREAM), 1);
+		await commit(STREAM, rawEvent("message.completed"));
 
 		expect(types(await stream)).toEqual(["message.completed"]);
 	});
@@ -247,18 +260,18 @@ describe("resume", () => {
 
 describe("slow subscribers", () => {
 	it("are dropped with a reset rather than buffered forever", async () => {
-		const events = EventBus.inProcess({ store: EventStore.inMemory(), maxBuffered: 3 });
-		const iterator = events.subscribe(CHANNEL)[Symbol.asyncIterator]();
+		const events = EventBus.inProcess({ store: inMemoryEventStore(), maxBuffered: 3 });
+		const iterator = events.subscribe(STREAM)[Symbol.asyncIterator]();
 
 		// One read, so the subscriber exists and is registered. It then sits on
 		// the yield without asking for another, which is a consumer that has
 		// stopped keeping up.
 		const first = iterator.next();
-		await events.publish(CHANNEL, rawEvent("message.delta", { n: 0 }));
+		await events.publish(STREAM, rawEvent("message.delta", { n: 0 }));
 		expect((await first).value?.event.n).toBe(0);
 
 		for (const n of [1, 2, 3, 4]) {
-			await events.publish(CHANNEL, rawEvent("message.delta", { n }));
+			await events.publish(STREAM, rawEvent("message.delta", { n }));
 		}
 
 		expect((await iterator.next()).value?.event.type).toBe("reset");
@@ -270,12 +283,12 @@ describe("slow subscribers", () => {
 
 describe("a resume point that cannot be trusted", () => {
 	it("does not let an invented id swallow the events that follow", async () => {
-		const events = bus();
+		const { events, commit } = bus();
 
 		// An id far beyond anything issued. The reset is the easy part; what
 		// matters is that live events, whose seq is far below it, still arrive.
-		const stream = take(events.subscribe(CHANNEL, { since: 9_999_999 }), 2);
-		await events.publish(CHANNEL, rawEvent("message.created"));
+		const stream = take(events.subscribe(STREAM, { since: 9_999_999 }), 2);
+		await commit(STREAM, rawEvent("message.created"));
 
 		expect(types(await stream)).toEqual(["reset", "message.created"]);
 	});
@@ -283,13 +296,13 @@ describe("a resume point that cannot be trusted", () => {
 
 describe("a long replay", () => {
 	it("is sent in full when it is worth sending", async () => {
-		const events = bus();
+		const { events, commit } = bus();
 		for (let n = 0; n < 600; n += 1) {
-			await events.publish(CHANNEL, rawEvent("message.created", { n }));
+			await commit(STREAM, rawEvent("message.created", { n }));
 		}
 
 		// Comfortably more than a handful, and well under the reset threshold.
-		const replayed = await take(events.subscribe(CHANNEL, { since: 1 }), 599);
+		const replayed = await take(events.subscribe(STREAM, { since: 1 }), 599);
 
 		expect(replayed.map((delivery) => delivery.seq)).toEqual(
 			Array.from({ length: 599 }, (_, index) => index + 2),
@@ -302,13 +315,116 @@ describe("closing the bus", () => {
 		// Behind a parked subscriber is an open response holding a socket. Left
 		// parked, they keep the server from closing and the process from exiting,
 		// which is a restart that never finishes.
-		const bus = EventBus.inProcess({ store: EventStore.inMemory() });
-		const stream = bus.subscribe(CHANNEL)[Symbol.asyncIterator]();
+		const { events } = bus();
+		const stream = events.subscribe(STREAM)[Symbol.asyncIterator]();
 		// Parks it: nothing has been published, so it is waiting for the first event.
 		const parked = stream.next();
 
-		await bus.close();
+		await events.close();
 
 		expect(await parked).toEqual({ done: true, value: undefined });
+	});
+});
+
+describe("listening to other processes", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/**
+	 * A relay whose first `failures` starts fail, as Postgres refusing
+	 * connections while it restarts does, and which then hands over what
+	 * other processes broadcast through `broadcastFromElsewhere`.
+	 */
+	function relayFailingFirst(failures: number) {
+		let receive: Parameters<EventRelay["listen"]>[0] | undefined;
+		const starts = { tried: 0, stopped: 0 };
+		const relay: EventRelay = {
+			broadcast: async () => {},
+			async listen(onDelivery) {
+				starts.tried++;
+				if (starts.tried <= failures) throw new Error("connection refused");
+				receive = onDelivery;
+				return async () => {
+					starts.stopped++;
+				};
+			},
+		};
+		const broadcastFromElsewhere = (stream: EventStream, delivery: EventBus.Delivery) =>
+			receive?.(stream, delivery);
+		return { relay, starts, broadcastFromElsewhere };
+	}
+
+	it("keeps trying to start, waiting longer each time, and delivers once it has", async () => {
+		vi.useFakeTimers();
+		const { relay, starts, broadcastFromElsewhere } = relayFailingFirst(2);
+		const logged: string[] = [];
+		const events = EventBus.inProcess({
+			store: inMemoryEventStore(),
+			relay,
+			log: (message) => logged.push(message),
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect(starts.tried).toBe(1);
+
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(starts.tried).toBe(2);
+		await vi.advanceTimersByTimeAsync(1999);
+		expect(starts.tried).toBe(2);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(starts.tried).toBe(3);
+
+		const subscription = events.subscribe(STREAM)[Symbol.asyncIterator]();
+		const next = subscription.next();
+		broadcastFromElsewhere(STREAM, { seq: 7, event: rawEvent("message.created", { id: "m1" }) });
+
+		expect((await next).value).toEqual({
+			seq: 7,
+			event: rawEvent("message.created", { id: "m1" }),
+		});
+		expect(logged).toEqual([
+			"Listening for other processes' events failed; live updates are local only until it starts. Trying again in 1 s",
+			"Listening for other processes' events failed; live updates are local only until it starts. Trying again in 2 s",
+		]);
+		await events.close();
+		expect(starts.stopped).toBe(1);
+	});
+
+	it("closes without waiting to retry a start that fails after it was asked to close", async () => {
+		vi.useFakeTimers();
+		const { promise: refused, reject: refuse } = Promise.withResolvers<never>();
+		let tried = 0;
+		const relay: EventRelay = {
+			broadcast: async () => {},
+			listen: () => {
+				tried++;
+				return refused;
+			},
+		};
+		const events = EventBus.inProcess({ store: inMemoryEventStore(), relay, log: () => {} });
+		await vi.advanceTimersByTimeAsync(0);
+		let closed = false;
+		const closing = events.close().then(() => {
+			closed = true;
+		});
+
+		refuse(new Error("connection refused"));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(closed).toBe(true);
+		expect(tried).toBe(1);
+		await closing;
+	});
+
+	it("stops trying once the bus closes", async () => {
+		vi.useFakeTimers();
+		const { relay, starts } = relayFailingFirst(Number.POSITIVE_INFINITY);
+		const events = EventBus.inProcess({ store: inMemoryEventStore(), relay, log: () => {} });
+		await vi.advanceTimersByTimeAsync(0);
+
+		await events.close();
+		await vi.advanceTimersByTimeAsync(120_000);
+
+		expect(starts.tried).toBe(1);
 	});
 });

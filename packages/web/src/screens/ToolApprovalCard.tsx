@@ -1,23 +1,27 @@
 import { botColorVariables } from "@sugabots/avatars";
-import type { ThreadParticipant, ToolCallPart } from "@sugabots/contracts";
+import type { BotParticipant, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { Check, ChevronDown, Globe, X } from "lucide-react";
-import { Fragment, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
-import type { ConnectionLook } from "@/lib/connections.ts";
-import { failureMessage } from "@/lib/failure.ts";
-import { useReviewToolCall } from "@/lib/threads.ts";
-import { awaitedDeciders } from "@/lib/tool-approvals.ts";
+import { Check, ChevronDown, type LucideIcon, X } from "lucide-react";
 import {
-	connectionLabel,
-	NETWORK_REQUEST_TOOL,
-	splitToolKey,
-	stepLabel,
-	wordsFromKey,
-} from "@/lib/tool-names.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+	type CSSProperties,
+	Fragment,
+	type ReactNode,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
+import { hostRequestPresentation } from "@/lib/approval-tool-source.ts";
+import { awaitedApprovers } from "@/lib/approvals.ts";
+import { useReviewToolCall } from "@/lib/chat-query.ts";
+import type { MarkedConnector } from "@/lib/connectors.ts";
+import { failureMessage } from "@/lib/failure.ts";
+import { countOf } from "@/lib/name-list.ts";
+import { connectorLabel, splitToolKey, stepLabel, wordsFromKey } from "@/lib/tool-names.ts";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { Button } from "@/ui/button.tsx";
 import { CloseButton } from "@/ui/close-button.tsx";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { Dialog, DialogClose, DialogContent } from "@/ui/dialog.tsx";
 import { ScrollArea } from "@/ui/scroll-area.tsx";
 import { awaitsApproval } from "./tool-activity.ts";
@@ -34,44 +38,39 @@ import { awaitsApproval } from "./tool-activity.ts";
  * request is read as a page rather than in a box inside the chat.
  */
 
-type AgentParticipant = Extract<ThreadParticipant, { kind: "agent" }>;
-type Asker = Pick<AgentParticipant, "name" | "color" | "face" | "shape">;
+type Asker = Pick<BotParticipant, "name" | "color" | "eyes" | "shape">;
 type Decision = "allow_once" | "deny";
 
 export function ToolApprovalCard({
 	call,
-	agent,
-	threadId,
-	podId,
+	bot,
+	chatId,
 	canApprove,
-	look,
+	connector,
 }: {
 	call: ToolCallPart;
 	/** The bot whose reply is waiting on this. */
-	agent: Asker;
-	threadId: string;
-	podId: string;
+	bot: Asker;
+	chatId: string;
 	/** Whether the reader may answer it. */
 	canApprove: boolean;
-	look?: ConnectionLook;
+	connector?: MarkedConnector;
 }) {
-	const review = useReviewToolCall(threadId, podId);
+	const review = useReviewToolCall(chatId);
 	const [reviewing, setReviewing] = useState(false);
 	const { handle, name } = splitToolKey(call.tool);
-	const where = handle ? connectionLabel(handle, look?.name) : "";
+	const where = handle ? connectorLabel(handle, connector?.name) : "";
 	const action = stepLabel(call.tool, name);
-	const networkRequest = call.tool === NETWORK_REQUEST_TOOL;
+	const hostRequest = hostRequestPresentation(call.tool, bot.name);
 	const step: Step = {
 		action,
-		who: networkRequest
-			? `${agent.name} wants its sandbox to reach a new host`
-			: `${agent.name} wants to use ${where || "a tool"}`,
+		who: hostRequest?.description ?? `${bot.name} wants to use ${where || "a tool"}`,
 		where,
-		look,
-		networkRequest,
+		connector,
+		icon: hostRequest?.icon,
 	};
 	const answerable = awaitsApproval(call) && canApprove;
-	// The answer stays given from when it is sent until the thread's events say
+	// The answer stays given from when it is sent until the chat's events say
 	// the call is decided, a moment after the decision is accepted.
 	const sent = review.isPending || review.isSuccess;
 	const decide = (decision: Decision) =>
@@ -82,7 +81,7 @@ export function ToolApprovalCard({
 	const status =
 		awaitsApproval(call) && !canApprove ? (
 			<p className="m-0 text-pretty text-muted-foreground text-xs leading-normal">
-				{awaitedDeciders(call)}
+				{awaitedApprovers(call)}
 			</p>
 		) : decided?.status === "allowed" ? (
 			<Outcome announced={announced} icon={<Check aria-hidden size={12} strokeWidth={2.8} />}>
@@ -90,8 +89,7 @@ export function ToolApprovalCard({
 			</Outcome>
 		) : decided?.status === "denied" ? (
 			<Outcome announced={announced} icon={<X aria-hidden size={12} strokeWidth={2.8} />}>
-				Denied{decided.decidedByName && ` by ${decided.decidedByName}`}. {agent.name} won't go
-				ahead.
+				Denied{decided.decidedByName && ` by ${decided.decidedByName}`}. {bot.name} won't go ahead.
 			</Outcome>
 		) : null;
 
@@ -100,7 +98,7 @@ export function ToolApprovalCard({
 			aria-label={`Approval request: ${where ? `${action} in ${where}` : action}`}
 			className="flex animate-rise motion-reduce:animate-none"
 		>
-			<div className="flex min-w-0 max-w-115 flex-1 flex-col gap-2.5 rounded-bubble rounded-tl-tail bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
+			<div className="flex min-w-0 max-w-115 flex-1 flex-col gap-2.5 rounded-bubble bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
 				<StepHeading step={step} />
 				<div className="min-w-0 md:ml-8.5">
 					<FoldedRequest input={call.input} />
@@ -120,13 +118,13 @@ export function ToolApprovalCard({
 					)}
 					<div className="md:hidden">
 						{answerable ? (
-							<Button className="h-11 w-full text-sm" onClick={() => setReviewing(true)}>
+							<Button className={cn(TOUCH_BUTTON, "w-full")} onClick={() => setReviewing(true)}>
 								Review
 							</Button>
 						) : (
 							<Button
 								variant="secondary"
-								className="h-11 w-full text-sm"
+								className={cn(TOUCH_BUTTON, "w-full")}
 								onClick={() => setReviewing(true)}
 							>
 								See request
@@ -140,7 +138,7 @@ export function ToolApprovalCard({
 				step={step}
 				open={reviewing}
 				onOpenChange={setReviewing}
-				agent={agent}
+				bot={bot}
 			>
 				{answerable ? (
 					<Answer
@@ -157,6 +155,9 @@ export function ToolApprovalCard({
 		</section>
 	);
 }
+
+/** A button sized for a thumb, for the phone's Review and its pinned answer. */
+const TOUCH_BUTTON = "h-11 text-sm";
 
 /**
  * What became of an answered request, with a mark for which way it went.
@@ -187,35 +188,23 @@ interface Step {
 	action: string;
 	who: string;
 	where: string;
-	look: ConnectionLook | undefined;
-	/** A request for the sandbox to reach another host, which no connection makes. */
-	networkRequest: boolean;
+	connector: MarkedConnector | undefined;
+	icon: LucideIcon | undefined;
 }
 
-const MARK_SIZES = {
-	md: { box: "size-6 rounded-sm", icon: 14 },
-	sm: { box: "size-8 rounded-lg", icon: 16 },
-} as const;
-
-/** What the step uses: the connection's mark, or a globe for a network request. */
-function StepMark({ step, size }: { step: Step; size: keyof typeof MARK_SIZES }) {
-	if (!step.networkRequest) {
-		return (
-			<ConnectionMark presetId={step.look?.presetId} name={step.where || step.action} size={size} />
-		);
-	}
-	const { box, icon } = MARK_SIZES[size];
+/** What the step uses: the connector's mark, or a globe for a host request. */
+function StepMark({ step, size }: { step: Step; size: "md" | "sm" }) {
 	return (
-		<span
-			aria-hidden
-			className={cn("grid shrink-0 place-items-center bg-border-strong text-foreground", box)}
-		>
-			<Globe size={icon} strokeWidth={2} />
-		</span>
+		<ConnectorMark
+			markId={step.connector?.markId}
+			name={step.where || step.action}
+			icon={step.icon}
+			size={size}
+		/>
 	);
 }
 
-/** The connection's mark beside who wants to use it, and what they would do. */
+/** The connector's mark beside who wants to use it, and what they would do. */
 function StepHeading({ step }: { step: Step }) {
 	return (
 		<div className="flex min-w-0 items-start gap-2.5">
@@ -234,6 +223,9 @@ function StepHeading({ step }: { step: Step }) {
 
 /** How tall a folded request stands: about three of its rows. */
 const FOLDED_HEIGHT_PX = 66;
+
+/** The folded classes cap the request at `--folded-height`, so it folds at the height it is measured against. */
+const FOLDED_HEIGHT_VARIABLE = { "--folded-height": `${FOLDED_HEIGHT_PX}px` } as CSSProperties;
 
 /**
  * The request on its hairline rule. Past about three rows it folds, fading
@@ -262,6 +254,7 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 				id={bodyId}
 				// Unfolded, it scrolls, so a keyboard needs to reach it.
 				tabIndex={foldable && open ? 0 : undefined}
+				style={FOLDED_HEIGHT_VARIABLE}
 				className={cn(
 					"focus-ring w-full min-w-0 border-border-dashed border-l-2 pl-2.5",
 					foldable && FOLDED_CLASSES_ON_PHONE,
@@ -276,12 +269,13 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 				</div>
 			</div>
 			{foldable && (
-				<button
-					type="button"
+				<Button
+					variant="link"
+					size="text"
 					aria-expanded={open}
 					aria-controls={bodyId}
 					onClick={() => setOpen(!open)}
-					className="focus-ring flex cursor-pointer items-center gap-1.25 rounded-md py-1.5 font-medium text-link text-xs max-md:hidden"
+					className="gap-1.25 py-1.5 max-md:hidden"
 				>
 					{open ? "See less" : "See more"}
 					<ChevronDown
@@ -289,14 +283,15 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 						className={cn("size-3 transition-transform", open && "rotate-180")}
 						strokeWidth={3}
 					/>
-				</button>
+				</Button>
 			)}
 		</div>
 	);
 }
 
-const FOLDED_CLASSES = "max-h-16.5 overflow-hidden mask-b-from-55%";
-const FOLDED_CLASSES_ON_PHONE = "max-md:max-h-16.5 max-md:overflow-hidden max-md:mask-b-from-55%";
+const FOLDED_CLASSES = "max-h-(--folded-height) overflow-hidden mask-b-from-55%";
+const FOLDED_CLASSES_ON_PHONE =
+	"max-md:max-h-(--folded-height) max-md:overflow-hidden max-md:mask-b-from-55%";
 
 /**
  * The whole request on a phone, full screen: what is asked at the top, every
@@ -309,7 +304,7 @@ function ReviewSheet({
 	step,
 	open,
 	onOpenChange,
-	agent,
+	bot,
 	children,
 }: {
 	input: ToolCallPart["input"];
@@ -317,7 +312,7 @@ function ReviewSheet({
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	/** The bot asking, whose face heads the request. */
-	agent: Asker;
+	bot: Asker;
 	/** The answer, or what became of the request. */
 	children: ReactNode;
 }) {
@@ -331,7 +326,7 @@ function ReviewSheet({
 				showCloseButton={false}
 				initialFocus={top}
 				aria-labelledby={headingId}
-				style={botColorVariables(agent.color)}
+				style={botColorVariables(bot.color)}
 				className="inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none p-0 sm:max-w-none md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-approval md:max-w-144 md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-dialog"
 			>
 				<div
@@ -343,7 +338,7 @@ function ReviewSheet({
 				</div>
 				<ScrollArea className="min-h-0 flex-1">
 					<div className="flex flex-col gap-4 px-4 py-4">
-						<ReviewHeading step={step} agent={agent} headingId={headingId} />
+						<ReviewHeading step={step} bot={bot} headingId={headingId} />
 						<RequestValue value={input} depth={0} />
 					</div>
 				</ScrollArea>
@@ -360,19 +355,11 @@ function ReviewSheet({
  * mark on its corner, what it would do as the heading, and who wants to use
  * what under it.
  */
-function ReviewHeading({
-	step,
-	agent,
-	headingId,
-}: {
-	step: Step;
-	agent: Asker;
-	headingId: string;
-}) {
+function ReviewHeading({ step, bot, headingId }: { step: Step; bot: Asker; headingId: string }) {
 	return (
 		<div className="flex flex-col items-center gap-1 pb-2 text-center">
 			<span aria-hidden className="relative mb-2.5 inline-flex">
-				<AgentAvatar color={agent.color} face={agent.face} shape={agent.shape} size={64} />
+				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={64} />
 				<span className="absolute -right-2 -bottom-1 rounded-lg ring-3 ring-panel">
 					<StepMark step={step} size="sm" />
 				</span>
@@ -407,12 +394,13 @@ export function Answer({
 	actionLabel: string;
 	pinned?: boolean;
 }) {
+	const buttonSize = pinned ? cn(TOUCH_BUTTON, "flex-1") : "h-7.75 px-4 text-xs";
 	const allow = (
 		<Button
 			disabled={pending}
 			onClick={() => onDecide("allow_once")}
 			aria-label={`Allow: ${actionLabel}`}
-			className={pinned ? "h-11 flex-1 text-sm" : "h-7.75 px-4 text-xs"}
+			className={buttonSize}
 		>
 			Allow
 		</Button>
@@ -423,7 +411,7 @@ export function Answer({
 			disabled={pending}
 			onClick={() => onDecide("deny")}
 			aria-label={`Deny: ${actionLabel}`}
-			className={pinned ? "h-11 flex-1 text-sm" : "h-7.75 px-4 text-xs"}
+			className={buttonSize}
 		>
 			Deny
 		</Button>
@@ -465,10 +453,6 @@ export function fieldsOf(value: unknown): Fields | undefined {
 /** A list with nothing structured in it, which reads well enough as its items in a row. */
 function isPlainList(value: unknown): value is unknown[] {
 	return Array.isArray(value) && value.every((item) => item === null || typeof item !== "object");
-}
-
-function count(amount: number, one: string, many: string): string {
-	return `${amount} ${amount === 1 ? one : many}`;
 }
 
 /** A list with records in it, which is laid out as entries rather than in a row. */
@@ -522,7 +506,7 @@ function FieldList({ fields, depth }: { fields: Fields; depth: number }) {
 						{nested ? (
 							<dd className="col-span-2 m-0 min-w-0">
 								{Array.isArray(value) && (
-									<span className="sr-only">{count(value.length, "entry", "entries")}</span>
+									<span className="sr-only">{countOf(value.length, "entry", "entries")}</span>
 								)}
 								<div className="mt-1 ml-1 border-border-subtle border-l pl-3">
 									<RequestValue value={value} depth={depth + 1} />
@@ -552,13 +536,14 @@ function EntryList({ entries, depth }: { entries: unknown[]; depth: number }) {
 		<div className="flex flex-col items-start gap-2">
 			<Entries entries={showAll ? entries : entries.slice(0, ENTRIES_SHOWN)} depth={depth} />
 			{entries.length > ENTRIES_SHOWN && (
-				<button
-					type="button"
+				<Button
+					variant="link"
+					size="text"
 					onClick={() => setShowAll((was) => !was)}
-					className="focus-ring ml-7 cursor-pointer rounded-md font-semibold text-link text-xs"
+					className="ml-7 font-semibold"
 				>
 					{showAll ? "Show fewer" : `Show all ${entries.length}`}
-				</button>
+				</Button>
 			)}
 		</div>
 	);

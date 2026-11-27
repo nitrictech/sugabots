@@ -52,7 +52,7 @@ export function MessageMarkdown({
 	text: string;
 	/** Everyone a mention in the text could name. */
 	mentionable: readonly MentionTarget[];
-	/** A bot, routine or artifact writes markdown on purpose; a person writes chat. See `WRITERS`. */
+	/** A bot, an automation or a file a bot wrote is markdown on purpose; a member writes chat. See `WRITERS`. */
 	writer: MarkdownWriter;
 }) {
 	const { className, remarkPlugins, components, completesUnclosedMarkup } = WRITERS[writer];
@@ -89,7 +89,7 @@ const BREAK_LONG_WORDS = "break-words";
  * rehypeFocusableCodeBlocks makes fenced code scrollers keyboard-focusable
  * and labels them for assistive technology. Streamdown forwards these props
  * from the `code` element to its scroller. A group provides a label without
- * adding every code block in the conversation to landmark navigation.
+ * adding every code block in the chat to landmark navigation.
  */
 const rehypeFocusableCodeBlocks: Plugin<[], Root> = () => (tree) => {
 	visit(tree, "element", (node) => {
@@ -127,7 +127,7 @@ const rehypeSoftBreaks: Plugin<[], Root> = () => (tree) => {
 
 /*
  * An image is drawn as a link to it, never loaded: a bot led by planted
- * instructions could write one whose address carries the conversation, sent
+ * instructions could write one whose address carries the chat, sent
  * out as soon as anyone read the reply. Sugabots' own addresses are no
  * exception. Inside a link already, an image is only its words.
  */
@@ -149,11 +149,11 @@ const rehypeImagesAsLinks: Plugin<[], Root> = () => (tree) => {
 /** The element `rehypeImagesAsLinks` puts in an image's place; `MarkdownImageLink` draws it. */
 const IMAGE_LINK_TAG = "image-link";
 
-/* What a link in a person's message may lead to: a web page, or an email to write. */
-const PERSON_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+/* What a link in a member's message may lead to: a web page, or an email to write. */
+const MEMBER_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
 /*
- * A person's link or image that leads anywhere else is shown as they wrote it,
+ * A member's link or image that leads anywhere else is shown as they wrote it,
  * brackets and all. A relative one leads into Sugabots, where a link opens
  * unasked, under words that can say it goes somewhere else; another scheme can
  * open an app on the reader's computer. A reference's definition is shown as
@@ -172,7 +172,7 @@ const remarkOnlyWebLinks: Plugin<[], MdastRoot> = () => (tree, file) => {
 	visit(tree, (node, index, parent) => {
 		if (node.type !== "link" && node.type !== "image") return;
 		if (!parent || index === undefined) return;
-		if (PERSON_LINK_SCHEMES.has(URL.parse(node.url)?.protocol ?? "")) return;
+		if (MEMBER_LINK_SCHEMES.has(URL.parse(node.url)?.protocol ?? "")) return;
 		parent.children[index] = { type: "text", value: asWritten(node) };
 		return SKIP;
 	});
@@ -183,7 +183,7 @@ const remarkOnlyWebLinks: Plugin<[], MdastRoot> = () => (tree, file) => {
  * nothing strips the `<mention>` elements `remarkMentions` adds. Streamdown's
  * `allowedTags` only reaches the sanitiser when its own plugins are in use.
  * Without its `rehype-raw` either, HTML in a message is drawn as text, which
- * keeps anyone in a pod from putting markup in front of the others: never
+ * keeps anyone in a project from putting markup in front of the others: never
  * add it. Nothing filters link addresses; React refuses `javascript:` ones.
  * `rehypeImagesAsLinks` keeps every writer's images from loading, so never
  * drop it either.
@@ -320,20 +320,20 @@ function heading(tag: "h1" | "h2" | "h3", size: string) {
 		createElement(tag, { className: `mt-4 mb-1 font-semibold ${size}` }, children as ReactNode);
 }
 
-type MarkdownWriter = "bot" | "person";
+type MarkdownWriter = "bot" | "member";
 
-/** Whose markdown `author`'s text is: a person's, or else a bot's, as a routine's is. */
+/** Whose markdown `author`'s text is: a member's, or else a bot's, as an automation's is. */
 export function writerOf(author: MessageAuthor): MarkdownWriter {
-	return author.kind === "person" ? "person" : "bot";
+	return author.kind === "member" ? "member" : "bot";
 }
 
 /*
- * How each writer's markdown differs. A person presses Shift+Enter to start a
+ * How each writer's markdown differs. A member presses Shift+Enter to start a
  * new line and expects to see one, so their single line breaks are kept. What
  * they send is finished as written: a lone backtick or `**` stays as typed
  * rather than being closed for them, and a single `~`, as in "~5 min", is not
- * strikethrough. A bot's page colours, which reach a person's message in its
- * channel, are kept off their links and code.
+ * strikethrough. A bot's page colours, which reach a member's message in its
+ * project, are kept off their links and code.
  *
  * Links are `MarkdownLink`s, as Streamdown's own becomes a button when it
  * warns before leaving, losing middle-click and the hover preview.
@@ -345,8 +345,8 @@ const WRITERS = {
 		components: { ...COMPONENTS, a: (props) => <MarkdownLink {...props} asks="always" /> },
 		completesUnclosedMarkup: true,
 	},
-	person: {
-		className: "[--bot-mono:initial] [--bot-tint:initial]",
+	member: {
+		className: "member-markdown",
 		remarkPlugins: [...remarkPluginsWith({ singleTilde: false }), remarkOnlyWebLinks, remarkBreaks],
 		components: {
 			...COMPONENTS,

@@ -1,47 +1,61 @@
 export * as Authentication from "./authentication.ts";
 
 import {
+	type CurrentUser,
 	httpUrlSchema,
-	type SessionUser,
-	USER_NAME_MAX_LENGTH,
-	userNameSchema,
+	MEMBER_NAME_MAX_LENGTH,
+	memberNameSchema,
 } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
+import { recordEnded } from "@sugabots/core/authentication/session";
 import { type Database, effectRunner } from "@sugabots/core/database/database";
+import type { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { Email } from "@sugabots/core/email/email";
-import { Installation } from "@sugabots/core/installation/installation";
-import { account, session, user, verification } from "@sugabots/core/workspaces/sql";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { processLayer, Tier } from "@sugabots/core/tiers";
+import { account, member, session, verification } from "@sugabots/core/workspaces/sql";
+import { type DomainError, userText } from "@sugabots/errors";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
-import { bearer } from "better-auth/plugins/bearer";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Config, Context, Data, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Config, Context, Effect, ErrorReporter, Layer, Option, Redacted, Schema } from "effect";
 import { Cookies } from "effect/unstable/http";
 import { Pool } from "pg";
 
 /**
- * How the HTTP API proves who is calling: better-auth's users, credentials,
- * sessions, email verification and password resets, under its own routes at
+ * How the HTTP API proves who is calling: better-auth's accounts (the members
+ * it calls users, kept in `member`), credentials, sessions, email verification and password resets, under its own routes at
  * `/api/auth`.
- * Everything else in the API asks `identify` who holds the request's cookie or
- * bearer token. What the caller may then do is core's to decide.
- *
- * Browsers use better-auth's HttpOnly cookie. The `bearer` plugin also makes
- * every session token usable as `Authorization: Bearer …`, for Electron, React
- * Native and scripts.
+ * Everything else in the API asks `identify` whose session the request's
+ * HttpOnly cookie holds. What the caller may then do is core's to decide.
  */
 export interface Interface {
 	/** Answers a request to better-auth's own routes under `/api/auth`. */
 	readonly handler: (request: Request) => Effect.Effect<Response>;
-	/** Who holds the cookie or bearer token in `headers`, or `undefined` when nobody does. */
+	/** Whose session the cookie in `headers` holds, or `undefined` when nobody's does. */
 	readonly identify: (headers: Headers) => Effect.Effect<Identified | undefined>;
+	/**
+	 * The cookies that renew the session cache of the cookie in `headers` from
+	 * the database, for a response to a change of who the member is, such as
+	 * their name, which the cache would otherwise show as it was for minutes.
+	 * None for a request with no session cookie.
+	 */
+	readonly refreshedCookies: (headers: Headers) => Effect.Effect<Cookies.Cookies>;
+	/**
+	 * The member `memberId` as the API names them, for a request whose session
+	 * came as a bearer token, with no cookie to read them from; `undefined` when
+	 * there is no such member.
+	 */
+	readonly member: (memberId: string) => Effect.Effect<CurrentUser | undefined>;
 }
 
 /** The holder of a request's credentials. */
-export interface Identified {
-	readonly user: SessionUser;
+interface Identified {
+	readonly member: CurrentUser;
+	/** The session's id. */
+	readonly session: string;
 	/**
 	 * Cookies better-auth set while checking the credentials, such as a renewed
 	 * session cache. They belong on the response, or the browser never gets them.
@@ -51,20 +65,12 @@ export interface Identified {
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/server/Authentication",
-) {}
+) {
+	declare readonly [Tier]: "process";
+}
 
-/**
- * The most connections better-auth's pool opens. Each is one fewer of the
- * database's `max_connections` for the main pool, and the session cookie cache
- * keeps most requests off it.
- */
+/** Bounds the connections better-auth uses alongside the main pool. */
 const AUTH_POOL_SIZE = 2;
-
-/**
- * How long a browser's session is taken from its signed cookie before the
- * database is asked again. Signing out elsewhere or a revoked session takes
- * this long to reach requests that carry the cookie.
- */
 const SESSION_COOKIE_CACHE_SECONDS = 5 * 60;
 
 /** Sign-up attempts one address may make per window, which an office sharing an address still fits in. */
@@ -77,9 +83,9 @@ const RESET_PASSWORD_LINK_SECONDS = 60 * 60;
 
 /** better-auth's drizzle adapter speaks only node-postgres, so it gets a pool of its own. */
 export const make = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
+	const serverSettings = yield* ServerSettings.Service;
 	const email = yield* Email.Service;
-	const database = yield* Effect.context<Database>();
+	const database = yield* Effect.context<Database | EventOutbox.Service>();
 	const secret = yield* signingSecret;
 	const accounts = yield* Accounts.Service;
 	const sender = yield* Email.transactionalSender;
@@ -96,44 +102,55 @@ export const make = Effect.gen(function* () {
 	const auth = betterAuth({
 		appName: "Sugabots",
 		secret: Redacted.value(secret),
-		baseURL: installation.publicUrl,
+		baseURL: serverSettings.publicUrl,
 		basePath: `${API_BASE_PATH}/auth`,
-		trustedOrigins: [...installation.trustedOrigins],
+		trustedOrigins: [...serverSettings.trustedOrigins],
 
 		database: drizzleAdapter(drizzle({ client: pool }), {
 			provider: "pg",
-			schema: { user, session, account, verification },
+			schema: { member, session, account, verification },
 		}),
 
 		// Postgres mints the id of every row better-auth inserts, as it does
 		// every other table's, so better-auth leaves the column alone.
 		advanced: { database: { generateId: false } },
 
+		// better-auth calls a member a user; ours are kept in `member`, and
+		// sessions and accounts name theirs by `memberId`.
 		user: {
+			modelName: "member",
 			additionalFields: {
 				// Set from the referral link the account signed up with, never by the caller.
 				referredBy: { type: "string", required: false, input: false },
 			},
 		},
 
+		// A member's name, which others see, changes through an operation that tells them.
+		disabledPaths: ["/update-user"],
+
 		// better-auth stores whatever name it is sent, at sign-up and after.
 		databaseHooks: {
+			// Signing out, revoking a session or resetting a password ends sessions
+			// here, and their streams and desktop viewers end with them.
+			session: {
+				delete: {
+					after: async (ended) => {
+						await run(recordEnded({ session: ended.id, member: ended.userId }));
+					},
+				},
+			},
 			user: {
 				create: {
 					before: async (creating, context) => {
-						const name = validUserName(creating.name);
-						const image = validUserImage(creating.image);
+						const name = validMemberName(creating.name);
+						const image = validMemberImage(creating.image);
 						const { referredBy } = await run(
 							Effect.mapError(
 								accounts.admit({
 									email: creating.email,
 									referralCode: referralCodeIn(context?.body),
 								}),
-								(refused) =>
-									new APIError("FORBIDDEN", {
-										code: refusalCodes[refused._tag],
-										message: refused.userMessage,
-									}),
+								(refused) => new APIError("FORBIDDEN", { message: refused.userMessage }),
 							),
 						);
 						return { data: { ...creating, name, image, referredBy } };
@@ -144,14 +161,16 @@ export const make = Effect.gen(function* () {
 						return {
 							data: {
 								...updating,
-								...(updating.name !== undefined && { name: validUserName(updating.name) }),
-								...(updating.image !== undefined && { image: validUserImage(updating.image) }),
+								...(updating.name !== undefined && { name: validMemberName(updating.name) }),
+								...(updating.image !== undefined && { image: validMemberImage(updating.image) }),
 							},
 						};
 					},
 				},
 			},
 		},
+
+		account: { fields: { userId: "memberId" } },
 
 		emailAndPassword: {
 			enabled: true,
@@ -174,7 +193,7 @@ export const make = Effect.gen(function* () {
 			// email is not a dead end.
 			sendOnSignIn: true,
 			// The link proves the address, and the password was already given, so
-			// it lands in the app rather than back at a login form.
+			// it lands in the app rather than back at the sign-in form.
 			autoSignInAfterVerification: true,
 			sendVerificationEmail: async ({ user, url }) => {
 				await send({
@@ -187,6 +206,7 @@ export const make = Effect.gen(function* () {
 		},
 
 		session: {
+			fields: { userId: "memberId" },
 			cookieCache: { enabled: true, maxAge: SESSION_COOKIE_CACHE_SECONDS },
 		},
 
@@ -198,8 +218,6 @@ export const make = Effect.gen(function* () {
 				"/sign-up/email": { window: SIGN_UP_WINDOW_SECONDS, max: SIGN_UP_ATTEMPTS_PER_WINDOW },
 			},
 		},
-
-		plugins: [bearer()],
 	});
 
 	return Service.of({
@@ -211,49 +229,61 @@ export const make = Effect.gen(function* () {
 				({ headers: responseHeaders, response }): Identified | undefined =>
 					response
 						? {
-								user: {
-									id: response.user.id,
-									email: response.user.email,
-									name: response.user.name,
-									image: response.user.image ?? null,
-								},
+								member: currentUserOf(response.user),
+								session: response.session.id,
 								refreshedCookies: Cookies.fromSetCookie(responseHeaders.getSetCookie()),
 							}
 						: undefined,
 			).pipe(Effect.withSpan("Authentication.identify")),
+		refreshedCookies: (headers) =>
+			Effect.map(
+				Effect.promise(() =>
+					auth.api.getSession({
+						headers,
+						query: { disableCookieCache: true },
+						returnHeaders: true,
+					}),
+				),
+				({ headers: responseHeaders }) => Cookies.fromSetCookie(responseHeaders.getSetCookie()),
+			).pipe(Effect.withSpan("Authentication.refreshedCookies")),
+		member: (memberId) =>
+			Effect.promise(async () => {
+				const context = await auth.$context;
+				const found = await context.internalAdapter.findUserById(memberId);
+				return found ? currentUserOf(found) : undefined;
+			}).pipe(Effect.withSpan("Authentication.member")),
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
-/** The codes a refused sign-up answers with, which clients tell apart. */
-const refusalCodes = {
-	SignUpClosed: "SIGN_UP_CLOSED",
-	ReferralLinkInvalid: "REFERRAL_LINK_INVALID",
-} as const;
+/** better-auth's user, which it keeps in `member`, as the API names a member. */
+function currentUserOf(user: {
+	readonly id: string;
+	readonly email: string;
+	readonly name: string;
+	readonly image?: string | null | undefined;
+}): CurrentUser {
+	return { id: user.id, email: user.email, name: user.name, image: user.image ?? null };
+}
 
 /** `name` trimmed, or a refusal the caller is shown when it is blank or too long. */
-function validUserName(name: unknown): string {
+function validMemberName(name: unknown): string {
 	return Option.getOrThrowWith(
-		Schema.decodeUnknownOption(userNameSchema)(name),
+		Schema.decodeUnknownOption(memberNameSchema)(name),
 		() =>
 			new APIError("BAD_REQUEST", {
-				code: "INVALID_NAME",
-				message: `Your name needs 1 to ${USER_NAME_MAX_LENGTH} characters.`,
+				message: `Your name needs 1 to ${MEMBER_NAME_MAX_LENGTH} characters.`,
 			}),
 	);
 }
 
 /** `image` as an HTTP address, or a refusal the caller is shown. Null, or none, is no picture. */
-function validUserImage(image: unknown): string | null | undefined {
+function validMemberImage(image: unknown): string | null | undefined {
 	if (image === null || image === undefined) return image;
 	return Option.getOrThrowWith(
 		Schema.decodeUnknownOption(httpUrlSchema)(image),
-		() =>
-			new APIError("BAD_REQUEST", {
-				code: "INVALID_IMAGE",
-				message: "Your picture needs to be an HTTP address.",
-			}),
+		() => new APIError("BAD_REQUEST", { message: "Your picture needs to be an HTTP address." }),
 	);
 }
 
@@ -272,9 +302,16 @@ function referralCodeIn(body: unknown): string | undefined {
 	);
 }
 
-export class InvalidConfig extends Data.TaggedError("InvalidAuthConfig")<{
-	message: string;
-}> {}
+class InvalidConfig
+	extends Schema.TaggedError<InvalidConfig>()("InvalidAuthConfig", { message: Schema.String })
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	get userMessage() {
+		return userText`Sign-in is unavailable. Ask whoever runs Sugabots to check its sign-in settings.`;
+	}
+}
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
 const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
@@ -287,7 +324,7 @@ const PRODUCTION_SECRET_PLACEHOLDERS = new Set([
 
 /** `BETTER_AUTH_SECRET`, which production refuses when it is short or a placeholder. */
 const signingSecret = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
+	const serverSettings = yield* ServerSettings.Service;
 	const secret = yield* Config.option(Config.Redacted("BETTER_AUTH_SECRET"));
 	if (Option.isNone(secret)) {
 		return yield* new InvalidConfig({
@@ -296,7 +333,7 @@ const signingSecret = Effect.gen(function* () {
 	}
 	const value = Redacted.value(secret.value).trim();
 	if (
-		installation.isProduction &&
+		serverSettings.isProduction &&
 		(value.length < MIN_PRODUCTION_SECRET_LENGTH ||
 			PRODUCTION_SECRET_PLACEHOLDERS.has(value.toLowerCase()))
 	) {

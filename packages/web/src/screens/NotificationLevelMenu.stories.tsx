@@ -2,22 +2,23 @@ import type { NotificationLevel, NotificationSettings } from "@sugabots/contract
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { appHandlers, chatPath, StoryApp, storyBots, storyPods } from "@/story-app.tsx";
+import { storyBots } from "@/shell/story-fixtures.test-support.ts";
+import { appHandlers, StoryApp, storyProjects, storyWorkspace } from "@/story-app.test-support.tsx";
 
 const API = import.meta.env.VITE_API_URL as string;
 
-const [bot] = storyBots;
-const pod = storyPods.find((one) => one.id === bot?.podId);
-if (!bot || !pod) throw new Error("The story app has no bot in a pod");
+const bot = storyBots.find((one) => !one.assistant);
+const [project] = storyProjects;
+if (!bot || !project) throw new Error("The story app has no bot or project");
 
 /**
  * Right-clicks `row` until its notifications menu opens: a row only has the
- * menu once the person's notification settings have loaded.
+ * menu once the member's notification settings have loaded.
  */
 async function openMenuOf(row: Element) {
 	await waitFor(async () => {
 		await userEvent.pointer({ keys: "[MouseRight]", target: row });
-		await expect(screen.getByRole("menu")).toBeVisible();
+		await waitFor(() => expect(screen.getByRole("menu")).toBeVisible());
 	});
 }
 
@@ -30,6 +31,12 @@ async function chooseAndClose(item: HTMLElement) {
 	await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 }
 
+/*
+ * Approvals, as a page with the whole sidebar: on a bot's or project's own pages
+ * the sidebar narrows to their icons, which have no menu.
+ */
+const approvalsPath = `/${storyWorkspace.slug}/approvals`;
+
 const meta = preview.meta({
 	title: "Views/NotificationLevelMenu",
 	parameters: { layout: "fullscreen" },
@@ -39,13 +46,13 @@ const meta = preview.meta({
 			pausedUntil: null,
 			quietHours: null,
 			turnFailures: true,
-			routineRuns: "failures",
-			pods: {},
+			automationRuns: "failures",
+			projects: {},
 			bots: {},
-			mutedUntil: { pods: {}, bots: {} },
+			mutedUntil: { projects: {}, bots: {} },
 		};
-		type Field = "pods" | "bots";
-		const fieldOf = (kind: unknown): Field => (kind === "pod" ? "pods" : "bots");
+		type Field = "projects" | "bots";
+		const fieldOf = (kind: unknown): Field => (kind === "project" ? "projects" : "bots");
 		const without = <T,>(record: Record<string, T>, id: string) => {
 			const { [id]: _previous, ...others } = record;
 			return others;
@@ -85,15 +92,17 @@ const meta = preview.meta({
 
 /**
  * Right-clicking a bot in the sidebar offers what it notifies about. Choosing
- * Nothing marks it muted, until it goes back to following its pod.
+ * Nothing marks it muted, until it goes back to following its project.
  */
 export const MutingABot = meta.story({
-	render: () => <StoryApp path={chatPath(bot)} />,
+	render: () => <StoryApp path={approvalsPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);
 		await openMenuOf(row);
-		await expect(await screen.findByRole("group", { name: "Notify you about…" })).toBeVisible();
+		await waitFor(() =>
+			expect(screen.getByRole("group", { name: "Notify you about…" })).toBeVisible(),
+		);
 		await chooseAndClose(await screen.findByRole("menuitemradio", { name: "Nothing" }));
 		await expect(await sidebar.findByRole("img", { name: "Muted" })).toBeVisible();
 
@@ -110,7 +119,7 @@ export const MutingABot = meta.story({
  * and the same menu then offers to unmute it.
  */
 export const MutingABotForAWhile = meta.story({
-	render: () => <StoryApp path={chatPath(bot)} />,
+	render: () => <StoryApp path={approvalsPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);
@@ -128,7 +137,7 @@ export const MutingABotForAWhile = meta.story({
 
 /** More options ends with the way to every notification setting. */
 export const OpeningNotificationSettings = meta.story({
-	render: () => <StoryApp path={chatPath(bot)} />,
+	render: () => <StoryApp path={approvalsPath} />,
 	play: async ({ canvas }) => {
 		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
 		const row = await sidebar.findByText(bot.name);
@@ -136,27 +145,5 @@ export const OpeningNotificationSettings = meta.story({
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
 		await chooseAndClose(await screen.findByRole("menuitem", { name: "Notification settings" }));
 		await expect(await canvas.findByRole("heading", { name: "Notifications" })).toBeVisible();
-	},
-});
-
-/**
- * A pod's menu chooses its level, and a bot in it then defaults to the pod's
- * rather than the person's own.
- */
-export const ChoosingAPodsLevel = meta.story({
-	render: () => <StoryApp path={chatPath(bot)} />,
-	play: async ({ canvas }) => {
-		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
-		const podRow = within(await sidebar.findByRole("group", { name: pod.name })).getByRole(
-			"button",
-			{ name: pod.name },
-		);
-		await openMenuOf(podRow);
-		await chooseAndClose(await screen.findByRole("menuitemradio", { name: "Everything" }));
-
-		await openMenuOf(sidebar.getByText(bot.name));
-		await expect(
-			await screen.findByRole("menuitemradio", { name: "Default (everything)" }),
-		).toHaveAttribute("aria-checked", "true");
 	},
 });

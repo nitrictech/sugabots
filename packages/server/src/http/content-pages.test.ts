@@ -1,5 +1,7 @@
-import { ArtifactPages } from "@sugabots/core/artifacts/pages";
-import { Installation } from "@sugabots/core/installation/installation";
+import { PageAuthentication } from "@sugabots/core/authentication/page";
+import { pageAddressForTests } from "@sugabots/core/authentication/testing";
+import { Operations } from "@sugabots/core/operations/registry";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
@@ -15,19 +17,30 @@ const withPages = (contentOrigin: string | undefined = CONTENT_ORIGIN) =>
 	createTestApp(
 		Layer.mergeAll(
 			Layer.succeed(
-				Installation.Service,
-				Installation.fromUrls({
+				ServerSettings.Service,
+				ServerSettings.fromUrls({
 					isProduction: false,
 					publicUrl: BASE_URL,
 					webAppUrl: WEB_ORIGIN,
 					...(contentOrigin ? { contentOrigin } : {}),
 				}),
 			),
-			unimplemented(ArtifactPages.Service, {
+			unimplemented(PageAuthentication.Service, {
 				open: (token) =>
 					token === SEALED
-						? Effect.succeed({ title: "Chart", html: "<!doctype html><p>chart</p>" })
-						: Effect.fail(new ArtifactPages.PageUnavailable()),
+						? Effect.succeed(
+								pageAddressForTests({
+									workspace: "0199a3a0-0000-7000-8000-000000000001",
+									file: "0199a3a0-0000-7000-8000-000000000002",
+									version: 1,
+									expiresAt: 60_000,
+								}),
+							)
+						: Effect.fail(new PageAuthentication.PageAddressUnavailable()),
+			}),
+			unimplemented(Operations.Service, {
+				"files.servePage": () =>
+					Effect.succeed({ title: "Chart", html: "<!doctype html><p>chart</p>" }),
 			}),
 		),
 	);

@@ -2,6 +2,7 @@ export * as Ids from "./ids.ts";
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { Clock, Context, Effect, Layer } from "effect";
+import { processLayer, Tier } from "../tiers.ts";
 
 /**
  * Identifiers minted in code. The database mints a row's id when it is
@@ -16,12 +17,14 @@ export interface Interface {
 	/**
 	 * A new UUID v4, all random bits: for an id that names no row, such as a
 	 * process's, or one that must not be guessed, such as an invitation's,
-	 * which is also a link a person holds.
+	 * which is also a link a member holds.
 	 */
 	readonly random: Effect.Effect<string>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Ids") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Ids") {
+	declare readonly [Tier]: "process";
+}
 
 /** UUIDs from Node's secure random bytes, a v7 stamped with Effect's `Clock`. */
 export const make = Effect.succeed(
@@ -31,7 +34,7 @@ export const make = Effect.succeed(
 	}),
 );
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

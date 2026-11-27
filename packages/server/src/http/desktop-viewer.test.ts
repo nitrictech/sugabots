@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
-import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
-import { answerChallenge } from "@sugabots/core/conversations/tools/browser/vnc-authentication";
-import { Context, Effect, Exit, Layer, Scope } from "effect";
+import { answerChallenge } from "@sugabots/core/chats/tools/browser/vnc-authentication";
+import { Operations } from "@sugabots/core/operations/registry";
+import { unimplemented } from "@sugabots/core/testing";
+import { Context, Effect, Exit, Layer, Scope, Stream } from "effect";
 import {
 	HttpRouter,
 	HttpServer,
@@ -13,32 +14,35 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createTestApp,
 	identifiedBy,
+	type MemberResolver,
 	testRoutes,
-	type UserResolver,
 	WEB_ORIGIN,
 } from "./app.test-support.ts";
+import { DesktopViewerTiming } from "./desktop-viewer.ts";
 
 /**
  * The desktop viewer's WebSocket, served on real ports: the API relays the
- * person's socket to the desktop's, here a stand-in that logs a viewer in as
- * x11vnc does, with VNC authentication, then echoes what it is sent.
+ * member's socket to the desktop's, here a stand-in that signs a viewer in as
+ * Xvnc does, with VNC authentication, then echoes what it is sent.
  */
-const user = {
+const signedIn = {
 	id: "0199a3a0-0000-7000-8000-0000000000ff",
 	email: "sam@example.com",
 	name: "Sam",
 	image: null,
 };
-const resolveUser: UserResolver = async (headers) =>
-	headers.get("cookie") === "session=good" ? user : null;
+const resolveMember: MemberResolver = async (headers) =>
+	headers.get("cookie") === "session=good" ? signedIn : null;
 const PATH =
-	"/api/threads/0199a3a0-0000-7000-8000-000000000001/agents/0199a3a0-0000-7000-8000-000000000002/desktop";
+	"/api/chats/0199a3a0-0000-7000-8000-000000000001/bots/0199a3a0-0000-7000-8000-000000000002/desktop";
 
 const PASSWORD = "Abc-12_x";
 const CHALLENGE = Uint8Array.from({ length: 16 }, (_, index) => index * 7);
 
 const scope = Effect.runSync(Scope.make());
 let apiPort: number;
+/** Where the stand-in desktop listens. */
+let desktopPort: number;
 
 /** Serves `routes` on an ephemeral port until the tests end, and answers the port. */
 const served = <E, R>(routes: Layer.Layer<never, E, R>) =>
@@ -57,7 +61,7 @@ const served = <E, R>(routes: Layer.Layer<never, E, R>) =>
 	);
 
 beforeAll(async () => {
-	const desktopPort = await served(
+	desktopPort = await served(
 		Layer.effectDiscard(
 			Effect.gen(function* () {
 				const router = yield* HttpRouter.HttpRouter;
@@ -97,26 +101,33 @@ beforeAll(async () => {
 			}),
 		),
 	);
-	apiPort = await served(
+	apiPort = await serveViewer(Effect.never);
+});
+
+const serveViewer = (ended: Effect.Effect<void>) =>
+	served(
 		testRoutes(
 			Layer.mergeAll(
-				identifiedBy(resolveUser),
-				Layer.succeed(DesktopViewer.Service, {
-					open: () =>
+				identifiedBy(resolveMember),
+				unimplemented(Operations.LongRunning, {
+					"computers.viewDesktop": () =>
 						Effect.succeed({
-							endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
-							password: PASSWORD,
+							stream: Stream.make({
+								endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
+								password: PASSWORD,
+								control: true,
+							}),
+							ended,
 						}),
 				}),
 			),
 		),
 	);
-});
 
 afterAll(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 
 describe("the desktop viewer's WebSocket", () => {
-	it("logs a signed-in person in to the desktop without its password, then relays both ways", async () => {
+	it("logs a current user in to the desktop without its password, then relays both ways", async () => {
 		const socket = new WebSocket(`ws://127.0.0.1:${apiPort}${PATH}`, {
 			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
 		} as unknown as string[]);
@@ -145,8 +156,51 @@ describe("the desktop viewer's WebSocket", () => {
 		]);
 	});
 
+	it("closes the socket once the member may no longer see the desktop", async () => {
+		const closingPort = await serveViewer(Effect.void);
+		const socket = new WebSocket(`ws://127.0.0.1:${closingPort}${PATH}`, {
+			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
+		} as unknown as string[]);
+		await new Promise<void>((resolve, reject) => {
+			socket.onclose = () => resolve();
+			socket.onerror = () => reject(new Error("The socket failed"));
+			setTimeout(() => reject(new Error("The socket stayed open")), 5_000);
+		});
+	});
+
+	it("closes the socket once the viewer has been open its longest", async () => {
+		const shortLived = await served(
+			testRoutes(
+				Layer.mergeAll(
+					identifiedBy(resolveMember),
+					unimplemented(Operations.LongRunning, {
+						"computers.viewDesktop": () =>
+							Effect.succeed({
+								stream: Stream.make({
+									endpoint: { url: `http://127.0.0.1:${desktopPort}`, headers: {} },
+									password: PASSWORD,
+									control: true,
+								}),
+								ended: Effect.never,
+							}),
+					}),
+					Layer.succeed(DesktopViewerTiming, { maxAge: "200 millis" }),
+				),
+			),
+		);
+		const socket = new WebSocket(`ws://127.0.0.1:${shortLived}${PATH}`, {
+			headers: { origin: WEB_ORIGIN, cookie: "session=good" },
+		} as unknown as string[]);
+
+		await new Promise<void>((resolve, reject) => {
+			socket.onclose = () => resolve();
+			socket.onerror = () => reject(new Error("The socket failed"));
+			setTimeout(() => reject(new Error("The socket stayed open")), 5_000);
+		});
+	});
+
 	it("refuses a page on another origin, cookie or not", async () => {
-		const response = await createTestApp(identifiedBy(resolveUser)).fetch(
+		const response = await createTestApp(identifiedBy(resolveMember)).fetch(
 			new Request(`http://localhost:3000${PATH}`, {
 				headers: { origin: "https://elsewhere.example", cookie: "session=good" },
 			}),
@@ -156,7 +210,7 @@ describe("the desktop viewer's WebSocket", () => {
 	});
 
 	it("refuses somebody who isn't signed in", async () => {
-		const response = await createTestApp(identifiedBy(resolveUser)).fetch(
+		const response = await createTestApp(identifiedBy(resolveMember)).fetch(
 			new Request(`http://localhost:3000${PATH}`, { headers: { origin: WEB_ORIGIN } }),
 		);
 

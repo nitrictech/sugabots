@@ -1,68 +1,81 @@
 import { NodeRuntime } from "@effect/platform-node";
 import type {
-	AgentColor,
-	AgentFace,
-	AgentShape,
-	NewRoutine,
-	PodColor,
-	ProviderPresetId,
+	BotColor,
+	BotEyes,
+	BotShape,
+	BuiltInProviderId,
+	NewAutomation,
+	ProjectColor,
 } from "@sugabots/contracts";
-import { Artifacts } from "@sugabots/core/artifacts/artifacts";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
+import { API_BASE_PATH } from "@sugabots/contracts/http";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
-import { ConversationEvents } from "@sugabots/core/conversations/conversation-events";
-import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
-import { Credentials } from "@sugabots/core/credentials/credentials";
+import { ProjectAutomations } from "@sugabots/core/chats/automations/project-automations";
+import { AutomationRuns } from "@sugabots/core/chats/automations/runs";
+import { ChatEvents } from "@sugabots/core/chats/chat-events";
+import { ComputerSignIn } from "@sugabots/core/computers/computer-sign-in";
 import { layer as databaseLayer, query } from "@sugabots/core/database/database";
+import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import {
-	agent,
+	automationTrigger,
+	bot as botTable,
+	member,
 	modelProvider,
 	modelRequest,
-	pod,
+	project,
 	providerModel,
-	routineTrigger,
-	user,
 	workspace,
 	workspaceDefaultModel,
 } from "@sugabots/core/database/schema";
 import { Email } from "@sugabots/core/email/email";
 import { Ids } from "@sugabots/core/ids/ids";
-import { Installation } from "@sugabots/core/installation/installation";
-import { ModelProviderRepository } from "@sugabots/core/providers/model-providers/model-provider-repository";
+import { automationsOperations } from "@sugabots/core/operations/automations/index";
+import type { MemberSession } from "@sugabots/core/principal";
+import { ModelProviderStore } from "@sugabots/core/providers/model-providers/model-provider-store";
+import { Egress } from "@sugabots/core/providers/network/egress";
+import { SearchProviderStore } from "@sugabots/core/providers/search-providers/search-provider-store";
+import { Secrets } from "@sugabots/core/secrets/secrets";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
-import { AgentRepository } from "@sugabots/core/workspaces/agents/agent-repository";
+import { processLayer } from "@sugabots/core/tiers";
+import { BotStore } from "@sugabots/core/workspaces/bots/bot-store";
+import { PersonalAssistants } from "@sugabots/core/workspaces/bots/personal-assistants";
 import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PersonalPods } from "@sugabots/core/workspaces/pods/personal-pods";
-import { PodRepository } from "@sugabots/core/workspaces/pods/pod-repository";
+import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
+import { ProjectStore } from "@sugabots/core/workspaces/projects/project-store";
+import { WorkspaceSetup } from "@sugabots/core/workspaces/workspace-setup/workspace-setup";
+import { userText } from "@sugabots/errors";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { ensureAccount, seedAccountsLayer } from "../accounts.ts";
 import {
-	type ChatScene,
-	ensureConnections,
-	ensureConversations,
-	type RoutineRun,
-	type Scene,
-	type SeedConnection,
-} from "./conversations.ts";
+	type AutomationRun,
+	type BotChatScene,
+	ensureChats,
+	ensureConnectors,
+	type ProjectChatScene,
+	type SeedConnector,
+	SUPPORT_HANDOVER_CHAT,
+} from "./chats.ts";
 import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
 
 /**
- * Showcase seed: Fieldnote, a small company with the people, pods and bots
- * the website's screenshots and demo video show. Run it with
+ * Showcase seed: Fieldnote, a small company with the members, projects and
+ * bots the website's screenshots and demo video show. Run it with
  * `bun run db:seed:showcase`, against a migrated database.
  *
  * Everyone signs in with `PASSWORD`, and has an Unsplash portrait for a face.
  * Anita owns the workspace; sign in as her.
  *
- * The pods' chats come already written (see `conversations.ts`): people
- * talking, the threads they started there by mentioning a bot, a
- * collaboration, an artifact, and routine runs in their routines' threads.
- * Support's chat holds only the morning queue, where the demo's story starts
- * (see `stage.ts`). The pods' connections are added too, signed out.
+ * Anita made every bot. The team's bots are public, each added to the
+ * project whose work it does and pinned for that project's members; her own
+ * two are private. The chats come already written (see
+ * `chats.ts`): members talking in the projects' chats and the
+ * bots they mention answering there, chats members started with a bot, a
+ * file, and automation runs. Support's chat holds only the
+ * morning's handover, where the demo's story starts (see `stage.ts`). Each
+ * project's bots get its connectors too, signed out.
  *
  * Each bot goes on the first model the workspace offers that it prefers,
  * else the workspace's default. A new workspace offers none, so connect
@@ -72,8 +85,8 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
  * page has a history. Those rows have no turn, which is how a later run
  * knows they are there.
  *
- * Its routines show as on but are held a year from running, since they would
- * otherwise run on schedule and fail without a model.
+ * Its automations show as on but are held a year from running, since they would
+ * otherwise run on their timetables and fail without a model.
  *
  * Every step is idempotent, so it can be run again over its own data.
  */
@@ -81,10 +94,10 @@ import { QUEUE_REPORT, QUEUE_REPORT_TITLE } from "./queue-report.ts";
 const PASSWORD = "showcase";
 const WORKSPACE = { name: "Fieldnote", slug: "fieldnote" };
 
-type PersonKey = "anita" | "gary" | "lorraine" | "doreen" | "rob";
+type MemberKey = "anita" | "gary" | "lorraine" | "doreen" | "rob";
 
-/** Anita owns the workspace, which puts her in every shared pod. */
-const OWNER: PersonKey = "anita";
+/** Anita owns the workspace, which puts her in every project members made. */
+const OWNER: MemberKey = "anita";
 
 /**
  * A face from Unsplash, free to use under the Unsplash License, cropped to it
@@ -93,7 +106,7 @@ const OWNER: PersonKey = "anita";
 const unsplashPortrait = (photo: string) =>
 	`https://images.unsplash.com/${photo}?w=256&h=256&fit=crop&crop=faces&auto=format`;
 
-const PEOPLE: Record<PersonKey, { name: string; email: string; image: string }> = {
+const MEMBERS: Record<MemberKey, { name: string; email: string; image: string }> = {
 	// Pargat Dhillon, unsplash.com/photos/lUwb63aNXoM
 	anita: {
 		name: "Anita Bhatt",
@@ -126,11 +139,11 @@ const PEOPLE: Record<PersonKey, { name: string; email: string; image: string }> 
 	},
 };
 
-type SharedPodKey = "growth" | "support" | "engineering";
+type ProjectKey = "growth" | "support" | "engineering";
 
-const SHARED_PODS: Record<
-	SharedPodKey,
-	{ name: string; color: PodColor; members: readonly PersonKey[] }
+const PROJECTS: Record<
+	ProjectKey,
+	{ name: string; color: ProjectColor; members: readonly MemberKey[] }
 > = {
 	growth: { name: "Growth", color: "green", members: ["gary", "lorraine"] },
 	support: { name: "Support", color: "blue", members: ["lorraine", "doreen"] },
@@ -144,51 +157,51 @@ const SHARED_PODS: Record<
  * Subscription and local providers charge nothing.
  */
 interface ModelChoice {
-	preset: ProviderPresetId;
+	builtIn: BuiltInProviderId;
 	matches: RegExp;
 	ledgerModel: string;
 	usdPerMillion: { input: number; output: number };
 }
 
 const CLAUDE_SONNET: ModelChoice = {
-	preset: "anthropic",
+	builtIn: "anthropic",
 	matches: /^claude-sonnet/,
 	ledgerModel: "claude-sonnet-4-5",
 	usdPerMillion: { input: 3, output: 15 },
 };
 const CLAUDE_HAIKU: ModelChoice = {
-	preset: "anthropic",
+	builtIn: "anthropic",
 	matches: /^claude-haiku/,
 	ledgerModel: "claude-haiku-4-5",
 	usdPerMillion: { input: 1, output: 5 },
 };
 const CHATGPT: ModelChoice = {
-	preset: "chatgpt",
+	builtIn: "chatgpt",
 	matches: /^gpt-5/,
 	ledgerModel: "gpt-5",
 	usdPerMillion: { input: 0, output: 0 },
 };
 const OPENAI_MINI: ModelChoice = {
-	preset: "openai",
+	builtIn: "openai",
 	matches: /^gpt-5.*mini/,
 	ledgerModel: "gpt-5-mini",
 	usdPerMillion: { input: 0.25, output: 2 },
 };
 const GEMINI_FLASH: ModelChoice = {
-	preset: "gemini",
+	builtIn: "gemini",
 	matches: /gemini-.*flash/,
 	ledgerModel: "gemini-2.5-flash",
 	usdPerMillion: { input: 0.3, output: 2.5 },
 };
 const OLLAMA_LLAMA: ModelChoice = {
-	preset: "ollama",
+	builtIn: "ollama",
 	matches: /^llama/,
 	ledgerModel: "llama3.2",
 	usdPerMillion: { input: 0, output: 0 },
 };
 /** Claude through OpenRouter, for a workspace that reaches Anthropic that way. */
 const OPENROUTER_CLAUDE: ModelChoice = {
-	preset: "openrouter",
+	builtIn: "openrouter",
 	matches: /^anthropic\/claude-(sonnet|haiku)/,
 	ledgerModel: "anthropic/claude-sonnet-4.5",
 	usdPerMillion: { input: 3, output: 15 },
@@ -196,15 +209,16 @@ const OPENROUTER_CLAUDE: ModelChoice = {
 
 interface SeedBot {
 	name: string;
-	pod: SharedPodKey | "personal";
-	color: AgentColor;
-	face: AgentFace;
-	shape: AgentShape;
+	/** The project a public bot is in; a personal bot, only Anita's, is in none. */
+	project: ProjectKey | "personal";
+	color: BotColor;
+	eyes: BotEyes;
+	shape: BotShape;
 	description: string;
-	prompt: string;
+	instructions: string;
 	/** In order of preference; the first is what the ledger's history is on. */
 	models: readonly [ModelChoice, ...ModelChoice[]];
-	usesSandbox?: boolean;
+	usesComputer?: boolean;
 	/** Roughly how many model requests it makes on a weekday, for the ledger. */
 	requestsPerWeekday: number;
 }
@@ -212,123 +226,123 @@ interface SeedBot {
 const BOTS: readonly SeedBot[] = [
 	{
 		name: "Growth Desk",
-		pod: "growth",
+		project: "growth",
 		color: "green",
-		face: "pill",
+		eyes: "pill",
 		shape: "leaf",
 		description: "Answers pricing and renewal questions for the sales team.",
-		prompt:
+		instructions:
 			"You help Fieldnote's sales team answer customers about pricing, renewals and discounts. Keep replies short and ready to send. When a discount or a custom quote comes up, ask Pricing Analyst to check the margin before you agree to anything.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 34,
 	},
 	{
 		name: "Pricing Analyst",
-		pod: "growth",
+		project: "growth",
 		color: "sky",
-		face: "square",
+		eyes: "square",
 		shape: "hexagon",
 		description: "Checks discounts against margin and drafts quotes.",
-		prompt:
+		instructions:
 			"You check proposed discounts against Fieldnote's margins and draft quotes. List tiers are Team at $24 per seat a month and Business at $48, with annual plans at 15% off. Never let gross margin fall below 70%. Say plainly whether a deal clears and give the quote number when you draft one.",
 		models: [OPENAI_MINI, CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 12,
 	},
 	{
 		name: "Copywriter",
-		pod: "growth",
+		project: "growth",
 		color: "orange",
-		face: "arc",
+		eyes: "arc",
 		shape: "blob",
 		description: "Drafts replies, posts and invites.",
-		prompt:
+		instructions:
 			"You write for Fieldnote: customer replies, launch posts, newsletters and event invites. Plain, warm and short. Offer one draft, not three, and say what you'd cut if it needs to be shorter.",
 		models: [CHATGPT, CLAUDE_SONNET, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 22,
 	},
 	{
 		name: "Ticket Desk",
-		pod: "support",
+		project: "support",
 		color: "purple",
-		face: "dot",
+		eyes: "dot",
 		shape: "circle",
 		description: "Works the support queue and handles refunds.",
-		prompt:
-			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right person in the pod. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
+		instructions:
+			"You work Fieldnote's support queue. Find the customer, read their history, and either answer or hand the ticket to the right member in the project. Refunds go through Stripe: before you issue one, state the customer, the amount and the reason. When a billing problem needs explaining, ask Billing Engineer why it happened.",
 		models: [CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 41,
 	},
 	{
 		name: "Inbox Sorter",
-		pod: "support",
+		project: "support",
 		color: "yellow",
-		face: "pill",
+		eyes: "pill",
 		shape: "squircle",
 		description: "Triage, reminders and quick jobs.",
-		prompt:
-			"You sort the support inbox. Label each email as bug, billing, how-to or sales, flag anything urgent, and post a short list of what needs a person today.",
+		instructions:
+			"You sort the support inbox. Label each email as bug, billing, how-to or sales, flag anything urgent, and post a short list of what needs a member today.",
 		models: [GEMINI_FLASH, CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 28,
 	},
 	{
 		name: "Billing Engineer",
-		pod: "support",
+		project: "support",
 		color: "red",
-		face: "square",
+		eyes: "square",
 		shape: "antenna",
-		description: "Digs into billing bugs in its sandbox.",
-		prompt:
-			"You find out why billing went wrong for a customer. Reproduce it in your sandbox against the billing code, run the tests, and say plainly what caused it and what fixes it. Open a pull request with the fix, and write the incident up for the team.",
+		description: "Digs into billing bugs on its computer.",
+		instructions:
+			"You find out why billing went wrong for a customer. Reproduce it on your computer against the billing code, run the tests, and say plainly what caused it and what fixes it. Open a pull request with the fix, and write the incident up for the team.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
-		usesSandbox: true,
+		usesComputer: true,
 		requestsPerWeekday: 7,
 	},
 	{
 		name: "Code Reviewer",
-		pod: "engineering",
+		project: "engineering",
 		color: "rose",
-		face: "wink",
+		eyes: "wink",
 		shape: "octagon",
-		description: "Reviews pull requests and runs the tests in its sandbox.",
-		prompt:
-			"You review Fieldnote's pull requests. Check out the branch in your sandbox, run the tests, and reply with what fails, what's risky and what you'd change. Lead with the one thing that matters most.",
+		description: "Reviews pull requests and runs the tests on its computer.",
+		instructions:
+			"You review Fieldnote's pull requests. Check out the branch on your computer, run the tests, and reply with what fails, what's risky and what you'd change. Lead with the one thing that matters most.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
-		usesSandbox: true,
+		usesComputer: true,
 		requestsPerWeekday: 18,
 	},
 	{
 		name: "Researcher",
-		pod: "engineering",
+		project: "engineering",
 		color: "ice",
-		face: "arc",
+		eyes: "arc",
 		shape: "drop",
 		description: "Reads the long stuff so you don't have to.",
-		prompt:
-			"You read papers, docs, changelogs and long threads for the engineering team, and summarise what matters for Fieldnote. Quote the source for every claim. Use your sandbox to try code samples before recommending them.",
+		instructions:
+			"You read papers, docs, changelogs and long chats for the engineering team, and summarise what matters for Fieldnote. Quote the source for every claim. Use your computer to try code samples before recommending them.",
 		models: [CLAUDE_SONNET, OPENROUTER_CLAUDE],
-		usesSandbox: true,
+		usesComputer: true,
 		requestsPerWeekday: 9,
 	},
 	{
 		name: "Journal",
-		pod: "personal",
+		project: "personal",
 		color: "teal",
-		face: "dot",
+		eyes: "dot",
 		shape: "pebble",
 		description: "Private notes that stay private.",
-		prompt:
+		instructions:
 			"You keep Anita's private work journal. When she writes, file it under the day, and when she asks, remind her what she noted before. Never suggest sharing anything from here.",
 		models: [OLLAMA_LLAMA],
 		requestsPerWeekday: 6,
 	},
 	{
 		name: "Trip Planner",
-		pod: "personal",
+		project: "personal",
 		color: "sky",
-		face: "pill",
+		eyes: "pill",
 		shape: "dome",
 		description: "Plans trips and keeps the bookings in one place.",
-		prompt:
+		instructions:
 			"You plan Anita's work trips: flights, hotels near the venue, and a day-by-day plan. Keep every booking reference in one list she can find again.",
 		models: [GEMINI_FLASH, CLAUDE_HAIKU, OPENROUTER_CLAUDE],
 		requestsPerWeekday: 3,
@@ -337,30 +351,37 @@ const BOTS: readonly SeedBot[] = [
 
 const minutes = (hours: number, minutesPastHour = 0) => hours * 60 + minutesPastHour;
 
-const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
+const AUTOMATIONS: readonly { bot: string; automation: NewAutomation }[] = [
 	{
 		bot: "Growth Desk",
-		routine: {
+		automation: {
+			name: "Renewal risk check",
+			instructions:
+				"Each morning, look through HubSpot for renewals in the next 30 days with falling usage, and list them with what to do about each.",
+			triggers: [daily([minutes(8)])],
+		},
+	},
+	{
+		bot: "Growth Desk",
+		automation: {
 			name: "Monday pipeline summary",
 			instructions:
-				"Summarise last week's deals: what closed, what slipped and what needs a reply today. Post it to the pod.",
-			results: "post_to_chat",
+				"Summarise last week's deals: what closed, what slipped and what needs a reply today.",
 			triggers: [weekly(["mon"], [minutes(9)])],
 		},
 	},
 	{
 		bot: "Ticket Desk",
-		routine: {
+		automation: {
 			name: "Morning queue",
 			instructions:
-				"Go through the tickets that came in overnight. Answer what you can and list what needs a person, oldest first.",
-			results: "post_to_chat",
+				"Go through the tickets that came in overnight. Answer what you can and list what needs a member, oldest first.",
 			triggers: [weekly(["mon", "tue", "wed", "thu", "fri"], [minutes(8, 30)])],
 		},
 	},
 	{
 		bot: "Inbox Sorter",
-		routine: {
+		automation: {
 			name: "Inbox triage",
 			instructions: "Label the new support emails and flag anything urgent.",
 			triggers: [daily([minutes(7), minutes(13)])],
@@ -368,17 +389,16 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 	},
 	{
 		bot: "Code Reviewer",
-		routine: {
+		automation: {
 			name: "Review new pull requests",
 			instructions:
 				"A pull request was opened or updated. Review it, run the tests, and post what you find.",
-			results: "post_to_chat",
 			triggers: [{ kind: "webhook", auth: { kind: "github" } }],
 		},
 	},
 	{
 		bot: "Researcher",
-		routine: {
+		automation: {
 			name: "Friday dependency digest",
 			instructions:
 				"Read this week's release notes for our main dependencies and summarise anything that affects us.",
@@ -387,7 +407,7 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 	},
 	{
 		bot: "Journal",
-		routine: {
+		automation: {
 			name: "End-of-day prompt",
 			instructions: "Ask Anita what went well today and what's still on her mind.",
 			state: "paused",
@@ -397,218 +417,388 @@ const ROUTINES: readonly { bot: string; routine: NewRoutine }[] = [
 ];
 
 /**
- * What the pods' people said in their chats, and the threads they started
- * there by mentioning a bot. Times are on the morning of the day they happen
- * (see `conversations.ts`), and a reply quotes by `key`. Support's chat has
- * only Ticket Desk's morning queue, where the demo's story starts.
+ * What the projects' members said in their chats, and what the bots they
+ * mentioned answered there. Times are on the morning of the day they happen
+ * (see `chats.ts`). Support's chat has only the morning's handover,
+ * where the demo's story starts.
  */
-const CHATS: readonly ChatScene<PersonKey>[] = [
+const PROJECT_CHATS: readonly ProjectChatScene<MemberKey>[] = [
 	{
-		pod: "growth",
+		project: "growth",
+		chat: "Pipeline",
 		messages: [
 			{
 				at: { time: "9:02" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				parts: [{ text: "Morning! Pipeline review has moved to 2pm today." }],
 			},
 			{
-				at: { time: "9:12" },
-				from: { person: "gary" },
+				at: { time: "10:40" },
+				from: { member: "lorraine" },
+				parts: [{ text: "@copywriter Can you draft a short post announcing invoices in AUD?" }],
+			},
+			{
+				at: { time: "10:41" },
+				from: { bot: "Copywriter" },
 				parts: [
 					{
-						text: "@growth-desk Fernhill Outfitters replied about pricing. Can you draft the answer?",
+						text: "**Invoices in Australian dollars**\n\nFieldnote now bills in AUD. Teams in Australia can switch their currency in Settings → Billing, and their next invoice arrives in dollars they don't have to convert. No new plan, no price change, just one less line on your bank statement.\n\nIf it needs to be shorter, I'd cut the last sentence.",
 					},
 				],
-				thread: {
-					bot: "Growth Desk",
-					messages: [
-						{
-							key: "fernhill-draft",
-							at: { time: "9:13" },
-							from: { bot: "Growth Desk" },
-							parts: [
-								{
-									text: "Drafted. Their usage is up 40% since March, so I've led with Business:\n\n> Hi Dana, thanks for coming back to us. With 32 people now using Fieldnote every week, Business is the better fit: SSO, audit logs and priority support at $48 a seat, or $40.80 on an annual plan. Happy to walk your team through it this week.\n\nWant me to send it from the shared inbox?",
-								},
-							],
-							reactions: [{ emoji: "👍", by: ["anita", "lorraine"] }],
-						},
-						{
-							at: { time: "9:15" },
-							from: { person: "lorraine" },
-							replyTo: "fernhill-draft",
-							parts: [{ text: "Hold it until I've spoken to their team tomorrow." }],
-						},
-						{
-							at: { time: "9:16" },
-							from: { person: "gary" },
-							parts: [{ text: "Makes sense. I'll leave it in drafts." }],
-						},
-					],
-				},
-			},
-			{
-				at: { time: "10:02" },
-				from: { person: "gary" },
-				parts: [
-					{ text: "@growth-desk Brightwater Supply wants 25% off the annual tier. Can we do it?" },
-				],
-				thread: {
-					bot: "Growth Desk",
-					messages: [
-						{
-							at: { time: "10:04" },
-							from: { bot: "Growth Desk" },
-							parts: [
-								{ text: "I'll check the margin with Pricing Analyst." },
-								{
-									collaboration: {
-										with: "Pricing Analyst",
-										title: "Margin check for Brightwater Supply",
-										brief:
-											"Brightwater Supply wants 25% off the annual Business tier for 40 seats. Does that clear our 70% margin floor? If it does, draft the quote.",
-										answer:
-											"It clears. 25% off list puts Business at $36 a seat, which leaves a 72% gross margin at 40 seats. I've drafted quote Q-1182: 40 seats, annual, $17,280 a year.",
-										answeredAt: { time: "10:04" },
-									},
-								},
-								{
-									text: "Yes. At 25% off, Business comes to $36 a seat and still clears our margin floor. Pricing Analyst has drafted quote Q-1182 for 40 seats at $17,280 a year. Want me to send it to Brightwater?",
-								},
-							],
-							reactions: [{ emoji: "🎉", by: ["gary"] }],
-						},
-						{
-							at: { time: "10:06" },
-							from: { person: "lorraine" },
-							parts: [{ text: "Nice. Send it, and copy me in." }],
-						},
-					],
-				},
-			},
-			{
-				at: { time: "10:40" },
-				from: { person: "lorraine" },
-				parts: [{ text: "@copywriter Can you draft a short post announcing invoices in AUD?" }],
-				thread: {
-					bot: "Copywriter",
-					messages: [
-						{
-							at: { time: "10:41" },
-							from: { bot: "Copywriter" },
-							parts: [
-								{
-									text: "**Invoices in Australian dollars**\n\nFieldnote now bills in AUD. Teams in Australia can switch their currency in Settings → Billing, and their next invoice arrives in dollars they don't have to convert. No new plan, no price change, just one less line on your bank statement.\n\nIf it needs to be shorter, I'd cut the last sentence.",
-								},
-							],
-							reactions: [{ emoji: "❤️", by: ["lorraine"] }],
-						},
-					],
-				},
+				reactions: [{ emoji: "❤️", by: ["lorraine"] }],
 			},
 			{
 				at: { time: "10:52" },
-				from: { person: "gary" },
+				from: { member: "gary" },
 				parts: [{ text: "Brightwater signed! Quote's accepted, 40 seats annual." }],
 				reactions: [{ emoji: "🎉", by: ["lorraine", "anita"] }],
 			},
 			{
 				at: { time: "10:55" },
-				from: { person: "lorraine" },
+				from: { member: "lorraine" },
 				parts: [{ text: "Great work. I'll book their onboarding call for next week." }],
 			},
 		],
 	},
 	{
-		pod: "engineering",
+		project: "engineering",
+		chat: "Export queue",
 		messages: [
 			{
 				at: { time: "9:40" },
-				from: { person: "rob" },
+				from: { member: "rob" },
 				parts: [{ text: "The new export queue is live on staging." }],
 				reactions: [{ emoji: "🚀", by: ["gary"] }],
 			},
 			{
 				at: { time: "10:20" },
-				from: { person: "rob" },
+				from: { member: "rob" },
 				parts: [
 					{
 						text: "@code-reviewer Can you review PR #482 before I merge? It moves the export job onto the new queue.",
 					},
 				],
-				thread: {
-					bot: "Code Reviewer",
-					messages: [
-						{
-							at: { time: "10:26" },
-							from: { bot: "Code Reviewer" },
-							parts: [
-								{
-									text: "Reviewed #482 and ran the tests in my sandbox: 212 passed, 1 failed.\n\n**Fix before merging**\n- `export.test.ts` fails: the job now retries 5 times, but the test still expects 3.\n\n**Worth a look**\n- `ExportJob.run` sets no timeout, so a stuck export holds a worker for good.\n- The queue name is written out in two places. A constant would keep them in step.\n\nThe rest looks good, and the new retry backoff is a clear improvement.",
-								},
-							],
-							reactions: [{ emoji: "👀", by: ["gary"] }],
-						},
-						{
-							at: { time: "10:31" },
-							from: { person: "rob" },
-							parts: [{ text: "Good catch on the timeout. Fixing both now." }],
-						},
-					],
-				},
 			},
 			{
-				at: { time: "11:05" },
-				from: { person: "gary" },
-				parts: [{ text: "@researcher What changed in Postgres 18 that matters for us?" }],
-				thread: {
-					bot: "Researcher",
-					messages: [
-						{
-							at: { time: "11:07" },
-							from: { bot: "Researcher" },
-							parts: [
-								{
-									text: "Three things, from the release notes:\n\n1. **Asynchronous I/O.** Sequential scans and vacuum read ahead in parallel. Our nightly export scans should get faster with no changes.\n2. **`uuidv7()` built in.** We generate v7 ids in the app today; the database can now do it, and they sort by time.\n3. **Upgrades keep planner statistics.** No slow queries for the first hour after a major upgrade.\n\nNothing in it breaks our schema. I'd try it on staging first for the I/O change.",
-								},
-							],
-						},
-						{
-							at: { time: "11:12" },
-							from: { person: "gary" },
-							parts: [
-								{
-									text: "Can you compare pg-boss, Graphile Worker and pgmq for the export queue? One page is plenty.",
-								},
-							],
-						},
-						{
-							at: { time: "11:16" },
-							from: { bot: "Researcher" },
-							parts: [
-								{ artifact: { kind: "html", title: QUEUE_REPORT_TITLE, content: QUEUE_REPORT } },
-								{
-									text: "Graphile Worker fits best: it picks up jobs over LISTEN/NOTIFY, has cron built in, and retries with backoff, all on the Postgres we already run. pg-boss is a close second. The comparison and next steps are in the page below.",
-								},
-							],
-							reactions: [{ emoji: "🙌", by: ["rob"] }],
-						},
-					],
-				},
+				at: { time: "10:26" },
+				from: { bot: "Code Reviewer" },
+				parts: [
+					{
+						text: "Reviewed #482 and ran the tests on my computer: 212 passed, 1 failed.\n\n**Fix before merging**\n- `export.test.ts` fails: the job now retries 5 times, but the test still expects 3.\n\n**Worth a look**\n- `ExportJob.run` sets no timeout, so a stuck export holds a worker for good.\n- The queue name is written out in two places. A constant would keep them in step.\n\nThe rest looks good, and the new retry backoff is a clear improvement.",
+					},
+				],
+				reactions: [{ emoji: "👀", by: ["gary"] }],
+			},
+			{
+				at: { time: "10:31" },
+				from: { member: "rob" },
+				parts: [{ text: "Good catch on the timeout. Fixing both now." }],
+			},
+		],
+	},
+	{
+		project: "support",
+		chat: SUPPORT_HANDOVER_CHAT,
+		messages: [
+			{
+				at: { time: "8:41" },
+				from: { member: "doreen" },
+				parts: [
+					{
+						text: "Morning queue's in. Brightline can't sign in since the SSO change, so I'm taking that one.",
+					},
+				],
+			},
+			{
+				at: { time: "8:44" },
+				from: { member: "lorraine" },
+				parts: [
+					{
+						text: "Thanks. Kestrel Freight says they were charged twice on 3 Oct, so that needs a refund today.",
+					},
+				],
 			},
 		],
 	},
 ];
 
-/** Conversations with a bot alone, outside any pod's chat: a personal pod has no chat. */
-const CONVERSATIONS: readonly Scene<PersonKey>[] = [
+/**
+ * Chats members started with a bot. Anyone who can see the bot can read them
+ * and join in, as Lorraine does in Gary's.
+ */
+const BOT_CHATS: readonly BotChatScene<MemberKey>[] = [
 	{
-		pod: "personal",
+		bot: "Growth Desk",
+		messages: [
+			{
+				at: { time: "9:12" },
+				from: { member: "gary" },
+				parts: [{ text: "Fernhill Outfitters replied about pricing. Can you draft the answer?" }],
+			},
+			{
+				key: "fernhill-draft",
+				at: { time: "9:13" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						text: "Drafted. Their usage is up 40% since March, so I've led with Business:\n\n> Hi Dana, thanks for coming back to us. With 32 members now using Fieldnote every week, Business is the better fit: SSO, audit logs and priority support at $48 a seat, or $40.80 on an annual plan. Happy to walk your team through it this week.\n\nWant me to send it from the shared inbox?",
+					},
+				],
+				reactions: [{ emoji: "👍", by: ["anita", "lorraine"] }],
+			},
+			{
+				at: { time: "9:15" },
+				from: { member: "lorraine" },
+				replyTo: "fernhill-draft",
+				parts: [{ text: "Hold it until I've spoken to their team tomorrow." }],
+			},
+			{
+				at: { time: "9:16" },
+				from: { member: "gary" },
+				parts: [{ text: "Makes sense. I'll leave it in drafts." }],
+			},
+			{
+				at: { time: "9:20" },
+				from: { member: "anita" },
+				parts: [
+					{
+						text: "Before Lorraine's call, can you pull together what we know about Fernhill? Seats, usage, anything open.",
+					},
+				],
+			},
+			{
+				key: "fernhill-brief",
+				at: { time: "9:21" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{ text: "Pulling their account and deals from HubSpot, and checking their site.\n\n" },
+					{
+						toolCall: {
+							connector: "hubspot",
+							tool: "search_companies",
+							input: { query: "Fernhill Outfitters" },
+							output: {
+								results: [
+									{
+										id: "18842",
+										name: "Fernhill Outfitters",
+										domain: "fernhilloutfitters.co.nz",
+										plan: "Team",
+										seats: 25,
+									},
+								],
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							connector: "hubspot",
+							tool: "search_deals",
+							input: { companyId: "18842", stage: "open" },
+							output: {
+								results: [
+									{
+										name: "Fernhill: Business upgrade",
+										amount: 13824,
+										stage: "Proposal",
+										owner: "Lorraine Delgado",
+									},
+								],
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "web_fetch",
+							input: { url: "https://fernhilloutfitters.co.nz/news" },
+							output: {
+								title: "News | Fernhill Outfitters",
+								excerpt:
+									"This spring we opened two new stores in Wellington, bringing us to six across the North Island.",
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "Here's Fernhill at a glance:\n\n| | Now | In March |\n|---|---|---|\n| Weekly active members | 32 | 23 |\n| Seats on Team | 25 | 25 |\n| Monthly spend | $500 | $500 |\n\n**Open deal:** *Fernhill: Business upgrade*, $13,824 a year at list, at the *Proposal* stage with Lorraine.\n\n**Worth knowing before the call:**\n\n1. They're 7 members over their 25 Team seats, so they already hit the seat limit most weeks.\n2. Dana Whitfield, their operations lead, decides. Their CFO, Marcus Ng, joined the last two calls.\n3. Their site says they opened two stores in Wellington this spring, which lines up with the jump in usage.\n\nIf they push back on Business, 30 seats on Team at `$20/seat` keeps them at $600 a month.",
+					},
+				],
+				reactions: [{ emoji: "🙌", by: ["anita"] }],
+			},
+			{
+				at: { time: "9:24" },
+				from: { member: "lorraine" },
+				replyTo: "fernhill-brief",
+				parts: [
+					{
+						text: "This is great. Did they ask about SSO anywhere? I have a feeling that's the real blocker.",
+					},
+				],
+			},
+			{
+				key: "fernhill-sso",
+				at: { time: "9:25" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						toolCall: {
+							connector: "hubspot",
+							tool: "search_notes",
+							input: { companyId: "18842", query: "SSO" },
+							output: {
+								results: [
+									{
+										date: "2026-10-14",
+										author: "Lorraine Delgado",
+										text: "Dana asked whether Team has SSO.",
+									},
+									{
+										date: "2026-11-02",
+										author: "Ari (IT contractor)",
+										text: "We'd need Okta SSO before rolling Fieldnote out to the store teams.",
+									},
+								],
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "Twice. Dana asked about it on the 14 October call, and their IT contractor emailed on 2 November:\n\n> We'd need Okta SSO before rolling Fieldnote out to the store teams.\n\nSo SSO is likely what decides it. Business includes it and Team doesn't.",
+					},
+				],
+				reactions: [{ emoji: "💯", by: ["lorraine", "anita"] }],
+			},
+			{
+				at: { time: "9:27" },
+				from: { member: "anita" },
+				parts: [
+					{
+						text: "Good catch. Lorraine, lead with SSO tomorrow, and offer the annual price if they commit before the end of the month.",
+					},
+				],
+				reactions: [{ emoji: "👍", by: ["lorraine"] }],
+			},
+			{
+				at: { time: "9:28" },
+				from: { member: "lorraine" },
+				parts: [{ text: "Will do 👌" }],
+			},
+			{
+				at: { time: "9:31" },
+				from: { member: "anita" },
+				parts: [{ text: "Update the draft so it mentions Okta, and keep it short." }],
+			},
+			{
+				at: { time: "9:32" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						text: "Updated:\n\n> Hi Dana, thanks for coming back to us. Business includes Okta SSO, so your store teams can sign in with the accounts they already have. With 32 members on Fieldnote each week it's $48 a seat, or $40.80 on an annual plan if you go ahead before the end of the month.\n\nIt's still in drafts until Lorraine's call.",
+					},
+				],
+			},
+			{
+				at: { time: "9:40" },
+				from: { member: "gary" },
+				parts: [{ text: "Long shot, but do we know when their current plan renews?" }],
+			},
+			{
+				at: { time: "9:41" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						toolCall: {
+							connector: "hubspot",
+							tool: "get_company",
+							input: { companyId: "18842", properties: ["renewal_date", "billing_cycle"] },
+							output: { renewal_date: "2027-01-14", billing_cycle: "monthly" },
+							readOnly: true,
+						},
+					},
+					{
+						text: "Their Team plan renews on **14 January**, billed monthly. Moving to Business before then prorates the rest of the month, so the first Business invoice would carry a credit of about $410.",
+					},
+				],
+			},
+			{
+				at: { time: "9:44" },
+				from: { member: "anita" },
+				parts: [{ text: "Perfect, thanks. That's everything we need for tomorrow." }],
+			},
+		],
+	},
+	{
+		bot: "Growth Desk",
+		messages: [
+			{
+				at: { time: "10:02" },
+				from: { member: "gary" },
+				parts: [{ text: "Brightwater Supply wants 25% off the annual tier. Can we do it?" }],
+			},
+			{
+				at: { time: "10:04" },
+				from: { bot: "Growth Desk" },
+				parts: [
+					{
+						text: "Yes. At 25% off, Business comes to $36 a seat, which still clears our 70% margin floor at 40 seats. I've drafted quote Q-1182 for 40 seats at $17,280 a year. Want me to send it to Brightwater?",
+					},
+				],
+				reactions: [{ emoji: "🎉", by: ["gary"] }],
+			},
+			{
+				at: { time: "10:06" },
+				from: { member: "lorraine" },
+				parts: [{ text: "Nice. Send it, and copy me in." }],
+			},
+		],
+	},
+	{
+		bot: "Researcher",
+		messages: [
+			{
+				at: { time: "11:05" },
+				from: { member: "gary" },
+				parts: [{ text: "What changed in Postgres 18 that matters for us?" }],
+			},
+			{
+				at: { time: "11:07" },
+				from: { bot: "Researcher" },
+				parts: [
+					{
+						text: "Three things, from the release notes:\n\n1. **Asynchronous I/O.** Sequential scans and vacuum read ahead in parallel. Our nightly export scans should get faster with no changes.\n2. **`uuidv7()` built in.** We generate v7 ids in the app today; the database can now do it, and they sort by time.\n3. **Upgrades keep planner statistics.** No slow queries for the first hour after a major upgrade.\n\nNothing in it breaks our schema. I'd try it on staging first for the I/O change.",
+					},
+				],
+			},
+			{
+				at: { time: "11:12" },
+				from: { member: "gary" },
+				parts: [
+					{
+						text: "Can you compare pg-boss, Graphile Worker and pgmq for the export queue? One page is plenty.",
+					},
+				],
+			},
+			{
+				at: { time: "11:16" },
+				from: { bot: "Researcher" },
+				parts: [
+					{ file: { kind: "html", title: QUEUE_REPORT_TITLE, content: QUEUE_REPORT } },
+					{
+						text: "Graphile Worker fits best: it picks up jobs over LISTEN/NOTIFY, has cron built in, and retries with backoff, all on the Postgres we already run. pg-boss is a close second. The comparison and next steps are in the page below.",
+					},
+				],
+				reactions: [{ emoji: "🙌", by: ["rob"] }],
+			},
+		],
+	},
+	{
 		bot: "Journal",
 		messages: [
 			{
 				at: { time: "8:05" },
-				from: { person: "anita" },
+				from: { member: "anita" },
 				parts: [
 					{
 						text: "Big day: Brightwater pricing and the Kestrel refund. Remind me to check in on Doreen's SSO ticket.",
@@ -626,32 +816,214 @@ const CONVERSATIONS: readonly Scene<PersonKey>[] = [
 			},
 		],
 	},
+	{
+		bot: "Code Reviewer",
+		messages: [
+			{
+				at: { time: "11:02" },
+				from: { member: "rob" },
+				parts: [
+					{
+						text: "The nightly export took 3 hours last night instead of the usual 40 minutes. Can you find out why?",
+					},
+				],
+			},
+			{
+				at: { time: "11:05" },
+				from: { bot: "Code Reviewer" },
+				parts: [
+					{ text: "I'll start with last night's run in the job log.\n\n" },
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: 'grep -n "ExportJob" logs/jobs-2026-11-17.log | tail -20' },
+							output: {
+								stdout:
+									"4812: ExportJob started  batch=1/38  rows=50000\n4977: ExportJob finished batch=1/38  took=41s\n...\n9120: ExportJob started  batch=38/38 rows=50000\n9188: ExportJob finished batch=38/38 took=7m12s\n9189: ExportJob done total=3h02m",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: 'grep -c "retrying" logs/jobs-2026-11-17.log' },
+							output: { stdout: "0", exitCode: 0 },
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: {
+								command:
+									"awk '/ExportJob finished/ {print $5}' logs/jobs-2026-11-17.log | head -40",
+							},
+							output: {
+								stdout:
+									"took=41s\ntook=44s\ntook=52s\ntook=1m09s\ntook=1m31s\ntook=1m58s\ntook=2m40s\ntook=3m22s\ntook=4m05s\n...",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "No retries, but every batch is slower than the one before it, which points at the query rather than the queue. Reading how a batch is fetched.\n\n",
+					},
+					{
+						toolCall: {
+							tool: "read_file",
+							input: { path: "src/exports/export-job.ts" },
+							output: {
+								content:
+									"export async function runBatch(cursor: number) {\n  const rows = await db.query(\n    `select * from events order by created_at offset $1 limit $2`,\n    [cursor, BATCH_SIZE],\n  );\n  ...",
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "read_file",
+							input: { path: "src/exports/batch-size.ts" },
+							output: { content: "export const BATCH_SIZE = 50_000;" },
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: "git log --oneline -5 -- src/exports/" },
+							output: {
+								stdout:
+									"a91c2e4 feat(exports): page events by offset, not created_at\n6f03b11 fix(exports): retry 5 times with backoff\n2d7e9a0 feat(exports): move the export job onto the new queue",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: "git show a91c2e4 --stat" },
+							output: {
+								stdout:
+									"src/exports/export-job.ts | 12 +++++-------\n1 file changed, 5 insertions(+), 7 deletions(-)",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "That commit swapped keyset paging for `offset`. Checking what Postgres does with it on a copy of production.\n\n",
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: {
+								command:
+									'psql $STAGING_URL -c "explain analyze select * from events order by created_at offset 1850000 limit 50000"',
+							},
+							output: {
+								stdout:
+									"Limit  (actual time=402113.2..412480.9 rows=50000)\n  ->  Index Scan using events_created_at_idx on events  (rows=1900000)\nExecution Time: 412491.7 ms",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: {
+								command:
+									"psql $STAGING_URL -c \"explain analyze select * from events where created_at > '2026-11-17 02:14' order by created_at limit 50000\"",
+							},
+							output: {
+								stdout:
+									"Limit  (actual time=0.09..388.4 rows=50000)\n  ->  Index Scan using events_created_at_idx on events\nExecution Time: 391.2 ms",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: 'psql $STAGING_URL -c "select count(*) from events"' },
+							output: { stdout: " count\n---------\n 1900412", exitCode: 0 },
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "run_command",
+							input: { command: 'grep -rn "offset" src/exports/ src/reports/' },
+							output: {
+								stdout:
+									"src/exports/export-job.ts:4:    `select * from events order by created_at offset $1 limit $2`,\nsrc/reports/monthly.ts:18:  .offset(page * PAGE_SIZE)",
+								exitCode: 0,
+							},
+							readOnly: true,
+						},
+					},
+					{
+						toolCall: {
+							tool: "read_file",
+							input: { path: "src/reports/monthly.ts" },
+							output: {
+								content:
+									"export const monthly = (page: number) =>\n  db.select().from(invoices).orderBy(invoices.issuedAt)\n    .limit(PAGE_SIZE)\n    .offset(page * PAGE_SIZE);",
+							},
+							readOnly: true,
+						},
+					},
+					{
+						text: "Found it. a91c2e4 (Tuesday) moved the export from keyset paging to `offset`. With `offset`, Postgres reads and throws away every row before the page it wants, so batch 38 reads 1.9M rows to return 50k. That's why each batch was slower than the last, and the whole run took **3h02m** instead of 40m.\n\n**Fix**\n- Go back to paging by `created_at`, starting each batch after the last row of the one before. On staging that batch went from **412s to 0.4s**.\n\n**Worth a look**\n- `src/reports/monthly.ts` pages with `offset` too. It's small today, but it'll slow down the same way as invoices grow.\n\nWant me to open a PR reverting the paging in `export-job.ts`?",
+					},
+				],
+			},
+		],
+	},
 ];
 
-/** Past runs of routines, so their threads, run lists and the pods' chats have history. */
-const ROUTINE_RUNS: readonly RoutineRun[] = [
+/** Past runs of automations, so their chats and run lists have history. */
+const AUTOMATION_RUNS: readonly AutomationRun[] = [
 	{
-		pod: "support",
+		bot: "Growth Desk",
+		automation: "Renewal risk check",
+		scheduledAt: { time: "8:00", day: "previous weekday" },
+		finishedAt: { time: "8:03", day: "previous weekday" },
+		result:
+			"Two renewals at risk this month:\n\n- **Fernhill Outfitters** (14 Jan): usage up, but they're 7 over their seats. Offer Business before renewal.\n- **Parcel & Co** (22 Jan): weekly active members down from 12 to 5. Worth a check-in call.",
+	},
+	{
+		bot: "Growth Desk",
+		automation: "Renewal risk check",
+		scheduledAt: { time: "8:00" },
+		finishedAt: { time: "8:01" },
+		result: "I started on this morning's renewals but couldn't read the deals.",
+		failed: userText`HubSpot's sign-in has expired, so the renewals couldn't be read. Sign in to HubSpot again in Growth Desk's connectors, then run it again.`,
+	},
+	{
 		bot: "Ticket Desk",
-		routine: "Morning queue",
+		automation: "Morning queue",
 		scheduledAt: { time: "8:30", day: "previous weekday" },
 		finishedAt: { time: "8:32", day: "previous weekday" },
 		result:
-			"Morning queue: 4 new tickets overnight.\n\n- Answered 3 how-to questions (exports, seat changes, SSO setup)\n- Oakridge: asking about invoices in AUD. Needs a person\n\nOldest waiting: Oakridge, 9 hours.",
+			"Morning queue: 4 new tickets overnight.\n\n- Answered 3 how-to questions (exports, seat changes, SSO setup)\n- Oakridge: asking about invoices in AUD. Needs a member\n\nOldest waiting: Oakridge, 9 hours.",
 	},
 	{
-		pod: "support",
 		bot: "Ticket Desk",
-		routine: "Morning queue",
+		automation: "Morning queue",
 		scheduledAt: { time: "8:30" },
 		finishedAt: { time: "8:33" },
 		result:
-			"Morning queue: 7 new tickets overnight.\n\n- Answered 4 how-to questions (exports, SSO setup, seat changes)\n- Kestrel Freight: charged twice on 3 Oct. Needs a refund\n- Brightline: can't sign in since the SSO change. Handed to Doreen\n- Oakridge: still waiting on AUD invoices. Needs a person\n\nOldest waiting: Oakridge, 33 hours.",
+			"Morning queue: 7 new tickets overnight.\n\n- Answered 4 how-to questions (exports, SSO setup, seat changes)\n- Kestrel Freight: charged twice on 3 Oct. Needs a refund\n- Brightline: can't sign in since the SSO change. Handed to Doreen\n- Oakridge: still waiting on AUD invoices. Needs a member\n\nOldest waiting: Oakridge, 33 hours.",
 	},
 	{
-		pod: "growth",
 		bot: "Growth Desk",
-		routine: "Monday pipeline summary",
+		automation: "Monday pipeline summary",
 		scheduledAt: { time: "9:00", day: "previous monday" },
 		finishedAt: { time: "9:02", day: "previous monday" },
 		result:
@@ -659,8 +1031,7 @@ const ROUTINE_RUNS: readonly RoutineRun[] = [
 	},
 ];
 
-/** The pods' MCP servers, signed out: sign in to one in Settings to use it for real. */
-/** Linear's own MCP tools, so its connection's permissions look as they do when signed in for real. */
+/** Linear's own connector tools, so its tool access looks as it does when signed in for real. */
 const LINEAR_READING = [
 	"list_issues",
 	"get_issue",
@@ -715,7 +1086,7 @@ const LINEAR_OFF = [
 ] as const;
 
 /** A tool described as its name reads: `save_issue` is "Save issue". */
-function connectionTool(name: string, { readOnly }: { readOnly: boolean }) {
+function connectorTool(name: string, { readOnly }: { readOnly: boolean }) {
 	const words = name.replaceAll("_", " ");
 	return {
 		name,
@@ -725,9 +1096,23 @@ function connectionTool(name: string, { readOnly }: { readOnly: boolean }) {
 	};
 }
 
-const CONNECTIONS: readonly SeedConnection[] = [
+/** The projects' MCP servers, signed out: sign in to one in Settings to use it for real. */
+const CONNECTORS: readonly SeedConnector[] = [
 	{
-		pod: "support",
+		project: "growth",
+		name: "HubSpot",
+		handle: "hubspot",
+		url: "https://mcp.hubspot.com",
+		tools: [
+			...["search_companies", "get_company", "search_deals", "search_notes"].map((name) =>
+				connectorTool(name, { readOnly: true }),
+			),
+			connectorTool("create_note", { readOnly: false }),
+		],
+		toolAccess: { create_note: "ask" },
+	},
+	{
+		project: "support",
 		name: "Stripe",
 		handle: "stripe",
 		url: "https://mcp.stripe.com",
@@ -761,13 +1146,13 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		toolAccess: { create_refund: "ask", create_invoice: "ask" },
 	},
 	{
-		pod: "engineering",
+		project: "engineering",
 		name: "Linear",
 		handle: "linear",
 		url: "https://mcp.linear.app/mcp",
 		tools: [
-			...LINEAR_READING.map((name) => connectionTool(name, { readOnly: true })),
-			...LINEAR_CHANGES.map((name) => connectionTool(name, { readOnly: false })),
+			...LINEAR_READING.map((name) => connectorTool(name, { readOnly: true })),
+			...LINEAR_CHANGES.map((name) => connectorTool(name, { readOnly: false })),
 		],
 		toolAccess: {
 			save_issue: "ask",
@@ -780,7 +1165,7 @@ const CONNECTIONS: readonly SeedConnection[] = [
 		},
 	},
 	{
-		pod: "engineering",
+		project: "engineering",
 		name: "Notion",
 		handle: "notion",
 		url: "https://mcp.notion.com/mcp",
@@ -795,90 +1180,85 @@ const CONNECTIONS: readonly SeedConnection[] = [
 ];
 
 const seed = Effect.gen(function* () {
-	const installation = yield* Installation.Service;
-	if (installation.isProduction) {
+	const serverSettings = yield* ServerSettings.Service;
+	if (serverSettings.isProduction) {
 		return yield* Effect.die(new Error("The showcase seed cannot run in production."));
 	}
 
-	const people = yield* Effect.forEach(
-		Object.entries(PEOPLE) as [PersonKey, (typeof PEOPLE)[PersonKey]][],
-		([key, person]) =>
+	const members = yield* Effect.forEach(
+		Object.entries(MEMBERS) as [MemberKey, (typeof MEMBERS)[MemberKey]][],
+		([key, seed]) =>
 			Effect.gen(function* () {
 				const id = yield* ensureAccount({
-					name: person.name,
-					email: person.email,
+					name: seed.name,
+					email: seed.email,
 					password: PASSWORD,
 				});
-				yield* query((db) => db.update(user).set({ image: person.image }).where(eq(user.id, id)));
+				yield* query((db) => db.update(member).set({ image: seed.image }).where(eq(member.id, id)));
 				return [key, id] as const;
 			}),
-	).pipe(Effect.map((entries) => Object.fromEntries(entries) as Record<PersonKey, string>));
+	).pipe(Effect.map((entries) => Object.fromEntries(entries) as Record<MemberKey, string>));
 
-	const workspaceId = yield* ensureWorkspace(people[OWNER]);
-	yield* Onboarding.recordSetupCompleted(workspaceId);
+	const workspaceId = yield* ensureWorkspace(members[OWNER]);
+	yield* WorkspaceSetup.recordSetUp(workspaceId);
 	yield* Effect.forEach(
-		(Object.keys(PEOPLE) as PersonKey[]).filter((key) => key !== OWNER),
-		(key) =>
-			joinWorkspace({
-				workspaceId,
-				ownerId: people[OWNER],
-				email: PEOPLE[key].email,
-				userId: people[key],
-			}),
+		(Object.keys(MEMBERS) as MemberKey[]).filter((key) => key !== OWNER),
+		(key) => joinWorkspace({ workspaceId, memberId: members[key] }),
 		{ discard: true },
 	);
 
-	const podIds = yield* ensurePods(workspaceId, people);
-	yield* ensureProviders(workspaceId, people[OWNER]);
+	yield* ensureProviders(workspaceId, members[OWNER]);
 	const offered = yield* offeredModels(workspaceId);
 	const botIds = yield* Effect.forEach(BOTS, (bot) =>
 		Effect.map(
 			ensureBot({
 				workspaceId,
-				podId: podIds[bot.pod],
-				createdById: people[OWNER],
+				createdById: members[OWNER],
 				bot,
 				model: chooseModel(bot, offered),
 			}),
 			(id) => [bot.name, id] as const,
 		),
 	).pipe(Effect.map((entries) => new Map(entries)));
+	const projectIds = yield* ensureProjects(workspaceId, members, botIds);
+	yield* placeBots({ workspaceId, members, projectIds, botIds });
 
+	const owner = yield* signInOwner;
 	yield* Effect.forEach(
-		ROUTINES,
-		({ bot, routine }) => {
-			const agentId = botIds.get(bot);
-			return agentId
-				? ensureRoutine({ agentId, routine })
+		AUTOMATIONS,
+		({ bot, automation }) => {
+			const botId = botIds.get(bot);
+			return botId
+				? ensureAutomation(owner, { botId, automation })
 				: Effect.die(new Error(`No bot is named ${bot}`));
 		},
 		{ discard: true },
-	).pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(people[OWNER])));
-	yield* holdScheduledRoutines(workspaceId);
+	);
+	yield* holdScheduledAutomations(workspaceId);
 
-	yield* ensureConnections({
+	yield* ensureConnectors({
 		workspaceId,
-		podIds,
-		createdById: people[OWNER],
-		connections: CONNECTIONS,
+		projectIds,
+		createdById: members[OWNER],
+		connectors: CONNECTORS,
 	});
-	const conversations = yield* ensureConversations(
+	const chats = yield* ensureChats(
 		{
 			workspaceId,
-			people,
-			podIds,
+			members,
+			projectIds,
 			botIds,
 			botModels: new Map(BOTS.map((bot) => [bot.name, chooseModel(bot, offered)])),
 		},
-		{ chats: CHATS, conversations: CONVERSATIONS, runs: ROUTINE_RUNS },
+		{ projectChats: PROJECT_CHATS, botChats: BOT_CHATS, runs: AUTOMATION_RUNS },
 	);
 
-	const ledgerRows = yield* fillLedger({ workspaceId, podIds, botIds });
+	const ledgerRows = yield* fillLedger({ workspaceId, botIds });
 
-	console.log(`workspace ${WORKSPACE.slug}, owned by ${PEOPLE[OWNER].email}`);
+	console.log(`workspace ${WORKSPACE.slug}, owned by ${MEMBERS[OWNER].email}`);
 	console.log(
-		`people: ${Object.values(PEOPLE)
-			.map((person) => person.email)
+		`members: ${Object.values(MEMBERS)
+			.map((member) => member.email)
 			.join(", ")} (password: ${PASSWORD})`,
 	);
 	console.log(
@@ -887,9 +1267,9 @@ const seed = Effect.gen(function* () {
 			: `bots on: ${BOTS.map((bot) => `${bot.name} → ${chooseModel(bot, offered)}`).join(", ")}`,
 	);
 	console.log(
-		conversations === 0
-			? "conversations already there"
-			: `conversations: ${conversations} chats and routine runs written`,
+		chats === 0
+			? "chats already there"
+			: `chats: ${chats} projects' chats, bots' chats and automation runs written`,
 	);
 	console.log(
 		ledgerRows === 0
@@ -898,120 +1278,120 @@ const seed = Effect.gen(function* () {
 	);
 });
 
-/** Made the way the app makes one, so it has its system agents, preset providers and the owner's Personal pod. */
+/** Made the way the app makes one, so it has its system bots, built-in providers and the owner's Personal Assistant. */
 const ensureWorkspace = (ownerId: string) =>
-	Effect.gen(function* () {
-		const membership = yield* Membership.Service;
-		return yield* membership
-			.create({
-				details: {
-					...WORKSPACE,
-					timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-				},
-			})
-			.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(ownerId)),
-				Effect.map((created) => created.id),
-				Effect.catchTag("SlugTaken", () =>
-					Effect.flatMap(
-						query((db) =>
-							db
-								.select({ id: workspace.id })
-								.from(workspace)
-								.where(eq(workspace.slug, WORKSPACE.slug)),
-						),
-						([row]) =>
-							row ? Effect.succeed(row.id) : Effect.die(new Error("The workspace is missing")),
-					),
+	Membership.createWorkspace(ownerId, {
+		...WORKSPACE,
+		timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+	}).pipe(
+		Effect.map((created) => created.id),
+		Effect.catchTag("SlugTaken", () =>
+			Effect.flatMap(
+				query((db) =>
+					db.select({ id: workspace.id }).from(workspace).where(eq(workspace.slug, WORKSPACE.slug)),
 				),
-			);
-	});
+				([row]) =>
+					row ? Effect.succeed(row.id) : Effect.die(new Error("The workspace is missing")),
+			),
+		),
+	);
 
-/** By invitation, the way a teammate joins, which also gives them their Personal pod. */
-const joinWorkspace = (input: {
-	workspaceId: string;
-	ownerId: string;
-	email: string;
-	userId: string;
-}) =>
-	Effect.gen(function* () {
-		const membership = yield* Membership.Service;
-		const invite = (resend: boolean) =>
-			membership
-				.invite({
-					workspace: input.workspaceId,
-					invitation: { email: input.email, role: "member", resend },
-				})
-				.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(input.ownerId)));
-		const invitation = yield* invite(false).pipe(
-			Effect.catchTag("AlreadyInvited", () => invite(true)),
-			Effect.catchTag("AlreadyMember", () => Effect.succeed(undefined)),
-			Effect.orDie,
-		);
-		if (!invitation) return;
-		yield* membership
-			.accept({ invitationId: invitation.id })
-			.pipe(
-				CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(input.userId)),
-				Effect.orDie,
-			);
-	});
+/** As an accepted invitation lets a teammate in, with their Personal Assistant. */
+const joinWorkspace = (input: { workspaceId: string; memberId: string }) =>
+	Membership.join(input.workspaceId, input.memberId, "editor");
 
-/** The shared pods with their members, and the owner's Personal pod, by key. */
-const ensurePods = (workspaceId: string, people: Record<PersonKey, string>) =>
+/** The projects with their members, by key, each led by the first of its bots. */
+const ensureProjects = (
+	workspaceId: string,
+	memberIds: Record<MemberKey, string>,
+	botIds: ReadonlyMap<string, string>,
+) =>
 	Effect.gen(function* () {
-		const pods = yield* PodRepository.Service;
-		const personalPods = yield* PersonalPods.Service;
-		const personal = yield* personalPods.provision({ workspaceId, userId: people[OWNER] });
-		const shared = yield* Effect.forEach(
-			Object.entries(SHARED_PODS) as [SharedPodKey, (typeof SHARED_PODS)[SharedPodKey]][],
+		const projectStore = yield* ProjectStore.Service;
+		const projects = yield* Effect.forEach(
+			Object.entries(PROJECTS) as [ProjectKey, (typeof PROJECTS)[ProjectKey]][],
 			([key, { name, color, members }]) =>
 				Effect.gen(function* () {
-					const podId = yield* pods
-						.create(workspaceId, { creatorId: people[OWNER], name, slug: key, color })
+					const lead = BOTS.find((bot) => bot.project === key);
+					const leadBotId = lead && botIds.get(lead.name);
+					if (!leadBotId)
+						return yield* Effect.die(new Error(`Project ${key} has no bot to lead it`));
+					const projectId = yield* projectStore
+						.create(workspaceId, { creatorId: memberIds[OWNER], name, slug: key, color, leadBotId })
 						.pipe(
 							Effect.map((created) => created.id),
-							Effect.catchTag("PodSlugTaken", () => podIdBySlug(workspaceId, key)),
+							Effect.catchTag("ProjectSlugTaken", () => projectIdBySlug(workspaceId, key)),
+							Effect.catchTag("BotNotPublic", Effect.die),
 						);
 					yield* Effect.forEach(
 						members,
-						(member) => pods.addMember(workspaceId, podId, people[member]),
+						(member) => projectStore.addMember(workspaceId, projectId, memberIds[member]),
 						{ discard: true },
 					);
-					return [key, podId] as const;
+					return [key, projectId] as const;
 				}),
 		);
-		return { ...Object.fromEntries(shared), personal: personal.id } as Record<
-			SharedPodKey | "personal",
-			string
-		>;
+		return Object.fromEntries(projects) as Record<ProjectKey, string>;
 	});
 
-const podIdBySlug = (workspaceId: string, slug: string) =>
+const projectIdBySlug = (workspaceId: string, slug: string) =>
 	Effect.flatMap(
 		query((db) =>
 			db
-				.select({ id: pod.id })
-				.from(pod)
-				.where(and(eq(pod.workspaceId, workspaceId), eq(pod.slug, slug), eq(pod.kind, "shared"))),
+				.select({ id: project.id })
+				.from(project)
+				.where(and(eq(project.workspaceId, workspaceId), eq(project.slug, slug))),
 		),
-		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error(`Pod ${slug} is missing`))),
+		([row]) => (row ? Effect.succeed(row.id) : Effect.die(new Error(`Project ${slug} is missing`))),
 	);
 
 /**
- * The catalog providers the bots prefer that a new workspace isn't given,
+ * Adds each public bot to its project, and pins it for the project's members.
+ * Anita made them all, so they are already pinned for her.
+ */
+const placeBots = (input: {
+	workspaceId: string;
+	members: Record<MemberKey, string>;
+	projectIds: Record<ProjectKey, string>;
+	botIds: ReadonlyMap<string, string>;
+}) =>
+	Effect.gen(function* () {
+		const projects = yield* ProjectStore.Service;
+		const bots = yield* BotStore.Service;
+		for (const bot of BOTS) {
+			const botId = input.botIds.get(bot.name);
+			if (bot.project === "personal" || !botId) continue;
+			yield* projects
+				.addBot(input.workspaceId, input.projectIds[bot.project], botId)
+				.pipe(Effect.orDie);
+			yield* Effect.forEach(
+				PROJECTS[bot.project].members,
+				(member) =>
+					bots.setPinned({
+						workspaceId: input.workspaceId,
+						memberId: input.members[member],
+						botId,
+						pinned: true,
+					}),
+				{ discard: true },
+			);
+		}
+	});
+
+/**
+ * The built-in providers the bots prefer that a new workspace isn't given,
  * added switched off and without a key, so the ledger's history names them.
  * Connecting one is left to Settings.
  */
 const ensureProviders = (workspaceId: string, createdById: string) =>
 	Effect.gen(function* () {
-		const providers = yield* ModelProviderRepository.Service;
-		const presets = new Set(BOTS.flatMap((bot) => bot.models.map((choice) => choice.preset)));
+		const providers = yield* ModelProviderStore.Service;
+		const builtIns = new Set(BOTS.flatMap((bot) => bot.models.map((choice) => choice.builtIn)));
 		yield* Effect.forEach(
-			presets,
-			(preset) =>
+			builtIns,
+			(builtIn) =>
 				providers
-					.create(workspaceId, { createdById, provider: { preset } })
+					.create(workspaceId, { createdById, provider: { builtIn } })
 					.pipe(Effect.catchTag("ModelProviderNameConflict", () => Effect.void)),
 			{ discard: true },
 		);
@@ -1019,7 +1399,7 @@ const ensureProviders = (workspaceId: string, createdById: string) =>
 
 interface OfferedModel {
 	modelId: string;
-	preset: ProviderPresetId | null;
+	builtIn: BuiltInProviderId | null;
 	isDefault: boolean;
 }
 
@@ -1029,7 +1409,7 @@ const offeredModels = (workspaceId: string) =>
 		db
 			.select({
 				modelId: providerModel.modelId,
-				preset: modelProvider.preset,
+				builtIn: modelProvider.builtIn,
 				defaultModel: workspaceDefaultModel.modelId,
 			})
 			.from(providerModel)
@@ -1047,7 +1427,7 @@ const offeredModels = (workspaceId: string) =>
 			rows
 				.map((row) => ({
 					modelId: row.modelId,
-					preset: row.preset,
+					builtIn: row.builtIn,
 					isDefault: row.modelId === row.defaultModel,
 				}))
 				// Newest first among a provider's matches, as model ids carry their version.
@@ -1059,7 +1439,7 @@ const offeredModels = (workspaceId: string) =>
 function chooseModel(bot: SeedBot, offered: readonly OfferedModel[]): string {
 	for (const choice of bot.models) {
 		const match = offered.find(
-			(model) => model.preset === choice.preset && choice.matches.test(model.modelId),
+			(model) => model.builtIn === choice.builtIn && choice.matches.test(model.modelId),
 		);
 		if (match) return match.modelId;
 	}
@@ -1069,99 +1449,126 @@ function chooseModel(bot: SeedBot, offered: readonly OfferedModel[]): string {
 /** Creates the bot, or moves the one a previous run made onto `model`. */
 const ensureBot = (input: {
 	workspaceId: string;
-	podId: string;
 	createdById: string;
 	bot: SeedBot;
 	model: string;
 }) =>
 	Effect.gen(function* () {
-		const agents = yield* AgentRepository.Service;
+		const bots = yield* BotStore.Service;
 		const { bot } = input;
-		const created = yield* agents
+		const created = yield* bots
 			.create(input.workspaceId, {
 				createdById: input.createdById,
-				agent: {
-					podId: input.podId,
+				bot: {
 					name: bot.name,
+					visibility: bot.project === "personal" ? "personal" : "public",
 					color: bot.color,
-					face: bot.face,
+					eyes: bot.eyes,
 					shape: bot.shape,
 					description: bot.description,
-					prompt: bot.prompt,
+					instructions: bot.instructions,
 					model: input.model,
-					usesSandbox: bot.usesSandbox ?? false,
+					usesComputer: bot.usesComputer ?? false,
 				},
 			})
 			.pipe(
 				Effect.map((row) => row.id),
-				Effect.catchTag("AgentNameTaken", () => Effect.succeed(undefined)),
+				Effect.catchTag("BotNameTaken", () => Effect.succeed(undefined)),
 				Effect.orDie,
 			);
 		if (created) return created;
 		const [existing] = yield* query((db) =>
 			db
-				.select({ id: agent.id })
-				.from(agent)
-				.where(and(eq(agent.podId, input.podId), eq(agent.name, bot.name))),
+				.select({ id: botTable.id })
+				.from(botTable)
+				.where(and(eq(botTable.workspaceId, input.workspaceId), eq(botTable.name, bot.name))),
 		);
-		if (!existing) {
-			return yield* Effect.die(new Error(`${bot.name} is named by another pod's bot`));
-		}
-		yield* agents
-			.update(input.workspaceId, existing.id, { model: input.model, shape: bot.shape })
-			.pipe(Effect.orDie);
+		if (!existing) return yield* Effect.die(new Error(`${bot.name} was not made`));
+		yield* bots.update(input.workspaceId, existing.id, { model: input.model }).pipe(Effect.orDie);
 		return existing.id;
 	});
 
-const ensureRoutine = (input: { agentId: string; routine: NewRoutine }) =>
+const signInOwner = Effect.gen(function* () {
+	const { publicUrl } = yield* ServerSettings.Service;
+	const authentication = yield* Authentication.Service;
+	const sessions = yield* SessionAuthentication.Service;
+	const response = yield* authentication.handler(
+		new Request(`${publicUrl}${API_BASE_PATH}/auth/sign-in/email`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: new URL(publicUrl).origin,
+			},
+			body: JSON.stringify({ email: MEMBERS[OWNER].email, password: PASSWORD }),
+		}),
+	);
+	if (!response.ok) return yield* Effect.die(new Error("Could not sign in the showcase owner"));
+	const body: unknown = yield* Effect.promise(() => response.json());
+	const { token } = yield* Schema.decodeUnknownEffect(Schema.Struct({ token: Schema.String }))(
+		body,
+	);
+	return yield* sessions.authenticate(new Headers({ authorization: `Bearer ${token}` })).pipe(
+		Effect.provideService(SessionAuthentication.Cookies, {
+			read: () => Effect.succeed(undefined),
+		}),
+	);
+}).pipe(Effect.orDie);
+
+const ensureAutomation = (
+	owner: MemberSession,
+	input: { botId: string; automation: NewAutomation },
+) =>
 	Effect.gen(function* () {
-		const routines = yield* Routines.Service;
-		yield* routines.create({ agentId: input.agentId }, input.routine).pipe(
-			Effect.asVoid,
-			Effect.catchTag("RoutineNameTaken", () => Effect.void),
-			Effect.orDie,
-		);
+		const projectId = yield* defaultProjectOf(input.botId);
+		const ids = yield* Ids.Service;
+		yield* automationsOperations["automations.create"]
+			.run(owner, { projectId, ...input.automation }, { kind: "request", request: yield* ids.next })
+			.pipe(
+				Effect.asVoid,
+				Effect.catchTag("AutomationNameTaken", () => Effect.void),
+				Effect.orDie,
+			);
 	});
 
-/** How far off the seeded routines' next runs are put. */
-const ROUTINE_HOLD_DAYS = 365;
+/** How far off the seeded automations' next runs are put. */
+const AUTOMATION_HOLD_DAYS = 365;
 
 /**
- * Puts every scheduled trigger's next run a year out, so the routines show as
- * on, with their schedules, but never come due while the showcase is in use.
- * Due, they would run, and fail where the workspace offers no model. A paused
- * routine's schedule has no next run, and keeps none.
+ * Puts every routine's next run a year out, so the automations show as on,
+ * with their routines, but never come due while the showcase is in use. Due,
+ * they would run, and fail where the workspace offers no model. A paused
+ * automation's routine has no next run, and keeps none.
  */
-const holdScheduledRoutines = (workspaceId: string) =>
+const holdScheduledAutomations = (workspaceId: string) =>
 	query((db) =>
 		db
-			.update(routineTrigger)
-			.set({ nextScheduledAt: new Date(Date.now() + ROUTINE_HOLD_DAYS * MILLISECONDS_PER_DAY) })
+			.update(automationTrigger)
+			.set({ nextScheduledAt: new Date(Date.now() + AUTOMATION_HOLD_DAYS * MILLISECONDS_PER_DAY) })
 			.where(
 				and(
-					eq(routineTrigger.workspaceId, workspaceId),
-					eq(routineTrigger.kind, "cron"),
-					isNotNull(routineTrigger.nextScheduledAt),
+					eq(automationTrigger.workspaceId, workspaceId),
+					eq(automationTrigger.kind, "routine"),
+					isNotNull(automationTrigger.nextScheduledAt),
 				),
 			),
 	);
 
-type ScheduledTrigger = Extract<NewRoutine["triggers"][number], { kind: "cron" }>;
+type RoutineTrigger = Extract<NewAutomation["triggers"][number], { kind: "routine" }>;
 
 function weekly(
 	days: readonly ("mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun")[],
 	times: readonly number[],
-): ScheduledTrigger {
+): RoutineTrigger {
 	return {
-		kind: "cron",
+		kind: "routine",
 		schedule: { repeat: "weekly", every: 1, days, times, startsOn: today() },
 		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 	};
 }
 
-function daily(times: readonly number[]): ScheduledTrigger {
+function daily(times: readonly number[]): RoutineTrigger {
 	return {
-		kind: "cron",
+		kind: "routine",
 		schedule: { repeat: "daily", every: 1, times, startsOn: today() },
 		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 	};
@@ -1181,14 +1588,10 @@ const LEDGER_INSERT_BATCH = 500;
 
 /**
  * Six weeks of the bots' model requests, quieter at weekends, so the Usage
- * page has days, bots, models and pods to show. Skipped when an earlier run
- * wrote them: seeded rows are the only agent turns with no turn.
+ * page has days, bots and models to show. Skipped when an earlier run
+ * wrote them: seeded rows are the only bot turns with no turn.
  */
-const fillLedger = (input: {
-	workspaceId: string;
-	podIds: Record<SharedPodKey | "personal", string>;
-	botIds: ReadonlyMap<string, string>;
-}) =>
+const fillLedger = (input: { workspaceId: string; botIds: ReadonlyMap<string, string> }) =>
 	Effect.gen(function* () {
 		const [seeded] = yield* query((db) =>
 			db
@@ -1197,7 +1600,7 @@ const fillLedger = (input: {
 				.where(
 					and(
 						eq(modelRequest.workspaceId, input.workspaceId),
-						eq(modelRequest.purpose, "agent-turn"),
+						eq(modelRequest.purpose, "bot-turn"),
 						isNull(modelRequest.turnId),
 					),
 				)
@@ -1207,11 +1610,11 @@ const fillLedger = (input: {
 
 		const providers = yield* query((db) =>
 			db
-				.select({ id: modelProvider.id, preset: modelProvider.preset })
+				.select({ id: modelProvider.id, builtIn: modelProvider.builtIn })
 				.from(modelProvider)
 				.where(eq(modelProvider.workspaceId, input.workspaceId)),
 		);
-		const providerIdByPreset = new Map(providers.map((row) => [row.preset, row.id]));
+		const providerIdByBuiltIn = new Map(providers.map((row) => [row.builtIn, row.id]));
 		const random = seededRandom(LEDGER_DAYS);
 		const now = Date.now();
 		const rows: (typeof modelRequest.$inferInsert)[] = [];
@@ -1222,9 +1625,9 @@ const fillLedger = (input: {
 			const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 			for (const bot of BOTS) {
 				const [choice] = bot.models;
-				const providerId = providerIdByPreset.get(choice.preset);
-				const agentId = input.botIds.get(bot.name);
-				if (!providerId || !agentId) continue;
+				const providerId = providerIdByBuiltIn.get(choice.builtIn);
+				const botId = input.botIds.get(bot.name);
+				if (!providerId || !botId) continue;
 				const busyness = (isWeekend ? WEEKEND_SHARE : 1) * (0.6 + random() * 0.8);
 				const requests = Math.round(bot.requestsPerWeekday * busyness);
 				for (let request = 0; request < requests; request++) {
@@ -1240,12 +1643,11 @@ const fillLedger = (input: {
 						1_000_000;
 					rows.push({
 						workspaceId: input.workspaceId,
-						purpose: "agent-turn",
-						podId: input.podIds[bot.pod],
-						agentId,
+						purpose: "bot-turn",
+						botId,
 						step: 0,
 						providerId,
-						preset: choice.preset,
+						builtIn: choice.builtIn,
 						model: choice.ledgerModel,
 						outcome: "completed",
 						inputTokens,
@@ -1271,8 +1673,8 @@ const fillLedger = (input: {
 
 /** As `request-cost.ts` would have named it. */
 function costSourceOf(choice: ModelChoice): string {
-	if (choice.preset === "ollama") return "local";
-	if (choice.preset === "chatgpt") return "subscription";
+	if (choice.builtIn === "ollama") return "local";
+	if (choice.builtIn === "chatgpt") return "subscription";
 	return "showcase-seed";
 }
 
@@ -1292,29 +1694,37 @@ seed.pipe(
 	Effect.provide(
 		Layer.mergeAll(
 			Authentication.layer,
-			Membership.layer,
-			PersonalPods.layer,
-			PodRepository.layer,
-			AgentRepository.layer,
-			ModelProviderRepository.layer,
-			Artifacts.authoringLayer,
-			// The seed defines routines and never runs one, which is all these are for.
-			Routines.layer.pipe(
+			SessionAuthentication.layer,
+			ProjectStore.layer,
+			BotStore.layer,
+			ModelProviderStore.layer,
+			// What a workspace is made with, and a member let in with: providers and Personal Assistants.
+			PersonalAssistants.layer,
+			SearchProviderStore.layer,
+			// The seed defines automations and never runs one, which is all these are for.
+			ProjectAutomations.layer.pipe(
 				Layer.provide([
-					unimplemented(RoutineRuns.Service, {}),
-					unimplemented(ConversationEvents.Service, {}),
+					unimplemented(AutomationRuns.Service, {}),
+					unimplemented(ChatEvents.Service, {}),
 				]),
 			),
 		).pipe(
 			Layer.provideMerge(
 				Layer.mergeAll(
-					Credentials.layer,
+					Secrets.layer,
+					// Leaving and deleting go through the bots' computers; the seed never makes one.
+					Egress.layer,
+					ComputerSignIn.none,
 					seedAccountsLayer,
+					// No server runs, so no stream follows a session to hear it end.
+					Layer.succeed(EventOutbox.Service, { publish: () => Effect.void }).pipe(processLayer),
 					BlobStore.layer,
-					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })),
+					Layer.succeed(Email.Service, Email.Service.of({ send: () => Effect.void })).pipe(
+						processLayer,
+					),
 				).pipe(
 					Layer.provideMerge(Ids.layer),
-					Layer.provideMerge(Installation.layer),
+					Layer.provideMerge(ServerSettings.layer),
 					Layer.provideMerge(databaseLayer),
 				),
 			),

@@ -9,7 +9,7 @@ by yourself.
 
 <Tip title="Setting it up for a team?">
 
-Other people can't reach an installation on your computer, and its emails only
+Other members can't reach a server on your computer, and its emails only
 go to its logs. To work with others, host Sugabots somewhere they can reach, with
 email set up: [Deploy with Docker](/docs/deploy-with-docker) covers that.
 
@@ -53,7 +53,7 @@ docker compose version
 2. Say hello
 
    Open [http://localhost:3000](http://localhost:3000) and create your account.
-   You're the first one in, so the installation is yours. Emails, such as your
+   You're the first one in, so the server is yours. Emails, such as your
    verification link, are printed in the logs:
 
    ```sh
@@ -65,8 +65,11 @@ docker compose version
 
 <Careful title="Keep .env safe">
 
-Back it up, and keep it private. Losing `CREDENTIALS_ENCRYPTION_KEY` makes every
+Back it up, and keep it private. Losing `SECRETS_ENCRYPTION_KEY` makes every
 saved API key unreadable. Changing `BETTER_AUTH_SECRET` signs everybody out.
+
+If your `.env` still uses `CREDENTIALS_ENCRYPTION_KEY`, see how to
+[rename it while keeping the same key](/docs/deploy-with-docker#updating).
 
 </Careful>
 

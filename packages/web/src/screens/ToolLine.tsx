@@ -1,218 +1,32 @@
-import type { MessagePart, ToolCallPart } from "@sugabots/contracts";
+import type { Message, ToolCallPart } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ChevronRight, Wrench } from "lucide-react";
+import { Brain, Wrench } from "lucide-react";
 import { useId, useState } from "react";
-import type { ConnectionLook } from "@/lib/connections.ts";
+import type { MarkedConnector } from "@/lib/connectors.ts";
+import { useNow } from "@/lib/now.ts";
 import { BUILT_IN_HANDLE, splitToolKey } from "@/lib/tool-names.ts";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
-import { ToolCallValue } from "./ToolCallValue.tsx";
-import { durationOf, formatDuration } from "./tool-activity.ts";
 import {
-	appOf,
+	Activity,
+	ActivityCollapsible,
+	ActivityCollapsibleContent,
+	ActivityCollapsibleTrigger,
+	ActivityDescription,
+	ActivityIcon,
+	ActivityLine,
+	ActivityTitle,
+} from "@/ui/activity.tsx";
+import { Button } from "@/ui/button.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
+import { ToolCallValue } from "./ToolCallValue.tsx";
+import { awaitsApproval, formatElapsed } from "./tool-activity.ts";
+import {
 	describeStep,
 	noteOf,
-	type StepDetails,
 	stepDetails,
 	toolLineText,
+	toolSourceOf,
 	toolStepRuns,
 } from "./tool-steps.ts";
-
-/**
- * What a bot used on the way to a reply, as one line above it: "Used HubSpot
- * for 4s", or "Used Sentry, waiting on Linear approval". Opening it lists the
- * calls under what the bot said it was doing, each as what it did to what, with
- * anything worth knowing about how it went and how long it took.
- */
-export function ToolLine({
-	parts,
-	looks,
-	fileNames,
-	className,
-}: {
-	/** The reply's parts: its calls, and the narration that introduced them. */
-	parts: readonly MessagePart[];
-	looks: ReadonlyMap<string, ConnectionLook>;
-	/** The thread's files by id, for the calls that read them. */
-	fileNames: ReadonlyMap<string, string>;
-	className?: string;
-}) {
-	const [open, setOpen] = useState(false);
-	const listId = useId();
-	const runs = toolStepRuns(parts);
-	const calls = runs.flatMap((run) => run.calls);
-	if (calls.length === 0) return null;
-
-	return (
-		<div className={cn("flex min-w-0 flex-col items-start", className)}>
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-controls={listId}
-				onClick={() => setOpen(!open)}
-				className="focus-ring flex max-w-full items-center gap-1.5 rounded-md pb-1.5 font-medium text-muted-foreground text-xs transition-colors hover:text-soft-foreground"
-			>
-				<span className="min-w-0 truncate">{toolLineText(calls, looks)}</span>
-				<ChevronRight
-					aria-hidden
-					size={10}
-					strokeWidth={3}
-					className={cn(
-						"shrink-0 text-subtle-foreground transition-transform duration-150 motion-reduce:transition-none",
-						open && "rotate-90",
-					)}
-				/>
-			</button>
-			{open && (
-				<ul
-					id={listId}
-					className="m-0 mb-2 flex w-full max-w-140 list-none flex-col border-hover border-l-2 py-0.5 pl-3.5"
-				>
-					{runs.flatMap((run, index) => [
-						run.narration && (
-							<li
-								key={`narration@${run.calls[0]?.id}`}
-								className={cn(
-									"text-xs text-muted-foreground leading-snug",
-									index > 0 && "pt-2",
-									"pb-0.5",
-								)}
-							>
-								{run.narration}
-							</li>
-						),
-						...run.calls.map((call) => (
-							<ToolCallRow
-								key={call.id}
-								call={call}
-								look={looks.get(splitToolKey(call.tool).handle)}
-								fileNames={fileNames}
-							/>
-						)),
-					])}
-				</ul>
-			)}
-		</div>
-	);
-}
-
-/** One call: what it did to what, how it went and how long it took; opened, what it was given and what came back. */
-function ToolCallRow({
-	call,
-	look,
-	fileNames,
-}: {
-	call: ToolCallPart;
-	look?: ConnectionLook;
-	fileNames: ReadonlyMap<string, string>;
-}) {
-	const [open, setOpen] = useState(false);
-	const detailsId = useId();
-	const { handle } = splitToolKey(call.tool);
-	const { action, subject } = describeStep(call, fileNames);
-	const note = noteOf(call);
-	const details = stepDetails(call);
-	return (
-		<li className="flex min-w-0 flex-col">
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-controls={detailsId}
-				onClick={() => setOpen(!open)}
-				className="focus-ring -mx-1.5 flex min-w-0 items-center gap-2 rounded-md px-1.5 py-0.75 text-left transition-colors hover:bg-hover"
-			>
-				{handle === BUILT_IN_HANDLE ? (
-					// Built into every bot, so it has no app's mark: a tool's.
-					<span
-						aria-hidden
-						className="grid size-4 shrink-0 place-items-center rounded-xs bg-border-strong text-soft-foreground"
-					>
-						<Wrench size={10} strokeWidth={2.4} />
-					</span>
-				) : (
-					<ConnectionMark presetId={look?.presetId} name={appOf(call, look)} size="xs" />
-				)}
-				<span className="flex min-w-0 items-baseline gap-1.5 text-xs">
-					<span className="shrink-0 font-medium text-soft-foreground">{action}</span>
-					{subject && (
-						<span
-							title={subject.text}
-							className={cn(
-								"min-w-0 truncate",
-								subject.asCode
-									? "font-mono text-xs text-subtle-foreground"
-									: "text-muted-foreground",
-							)}
-						>
-							{subject.text}
-						</span>
-					)}
-				</span>
-				{note && (
-					<span
-						title={note.text}
-						className={cn(
-							"min-w-0 max-w-2/5 shrink-0 truncate text-xs",
-							note.failed ? "text-destructive-text" : "text-subtle-foreground",
-						)}
-					>
-						{note.text}
-					</span>
-				)}
-				<span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
-					{call.finishedAt && (
-						<span className="font-mono text-2xs text-subtle-foreground">
-							{formatDuration(durationOf(call))}
-						</span>
-					)}
-					<ChevronRight
-						aria-hidden
-						size={10}
-						strokeWidth={3}
-						className={cn(
-							"text-subtle-foreground transition-transform duration-150 motion-reduce:transition-none",
-							open && "rotate-90",
-						)}
-					/>
-				</span>
-			</button>
-			{open && <CallDetails id={detailsId} call={call} details={details} />}
-		</li>
-	);
-}
-
-function CallDetails({
-	id,
-	call,
-	details,
-}: {
-	id: string;
-	call: ToolCallPart;
-	details: StepDetails;
-}) {
-	return (
-		<div id={id} className="flex flex-col gap-2 pt-1 pb-2 pl-6">
-			<p className="m-0 flex items-baseline gap-1.5 text-2xs text-subtle-foreground">
-				<span className="font-medium">Tool</span>
-				<code className="font-mono text-soft-foreground">{call.tool}</code>
-			</p>
-			{details.input !== undefined && (
-				<DetailBlock label="Input" value={details.input} otherArguments={details.otherArguments} />
-			)}
-			{call.error ? (
-				<DetailBlock label="Error" value={call.error} failed />
-			) : (
-				details.output !== undefined && (
-					<DetailBlock label="Output" value={details.output} footnote={details.outputCut} />
-				)
-			)}
-			{details.input === undefined && details.output === undefined && !call.error && (
-				<p className="m-0 text-xs text-subtle-foreground">
-					{call.status === "running" ? "Still running" : "Nothing to show"}
-				</p>
-			)}
-		</div>
-	);
-}
 
 /** A labelled part of a call: its input, its output or its error. */
 function DetailBlock({
@@ -220,14 +34,11 @@ function DetailBlock({
 	value,
 	otherArguments,
 	failed,
-	footnote,
 }: {
 	label: string;
 	value: unknown;
 	otherArguments?: unknown;
 	failed?: boolean;
-	/** What a reader should know about the value, under it: that it is not all of it. */
-	footnote?: string;
 }) {
 	const labelId = useId();
 	return (
@@ -236,7 +47,344 @@ function DetailBlock({
 				{label}
 			</figcaption>
 			<ToolCallValue value={value} otherArguments={otherArguments} failed={failed} />
-			{footnote && <p className="m-0 text-2xs text-subtle-foreground">{footnote}</p>}
 		</figure>
+	);
+}
+
+/**
+ * How long a bot worked on a reply, as one line over it: "Working for 12s",
+ * counting, while it does, and "Worked for 4m 1s" once it is done. Opening it
+ * lists what the bot did on the way, step by step: what it thought, which
+ * opens to the whole thought; what it said it was doing; then a line for each
+ * tool source it used, which opens to its calls, each of which opens to what
+ * came back. Every level sits flush with the one above.
+ */
+export function WorkedFor({
+	message,
+	markedConnectors,
+	fileNames,
+	className,
+}: {
+	message: Message;
+	markedConnectors: ReadonlyMap<string, MarkedConnector>;
+	/** The chat's files by id, for the calls that read them. */
+	fileNames: ReadonlyMap<string, string>;
+	className?: string;
+}) {
+	// Open while the bot works, so its steps show as it takes them; shut once it is done, unless toggled.
+	const [toggled, setToggled] = useState<boolean>();
+	// A reply stopped on a call someone has to approve isn't being worked on.
+	const waiting = message.parts.some((part) => part.type === "tool_call" && awaitsApproval(part));
+	const working = message.status === "writing" && !waiting;
+	const now = useNow(SECOND_MS, working);
+	const runs = toolStepRuns(message.parts);
+	const calls = runs.flatMap((run) => run.calls);
+	const thoughts = (message.thinking ?? []).toSorted((a, b) => a.step - b.step);
+	const label = waiting
+		? "Waiting for approval"
+		: workedForText(message, now, calls, markedConnectors);
+	const thoughtFor = (step: number) =>
+		thoughts
+			.filter((thought) => thought.step === step)
+			.map((thought) => <Thought key={`thought@${thought.step}`} text={thought.text} />);
+	// With no time or calls to tell, there is nothing to open: its thoughts stand on their own.
+	if (!label) {
+		if (thoughts.length === 0) return null;
+		return (
+			<Activity className={cn("border-border border-b pb-2.5", className)}>
+				{thoughts.map((thought) => (
+					<Thought key={`thought@${thought.step}`} text={thought.text} />
+				))}
+			</Activity>
+		);
+	}
+	// A step's thought comes before the calls it made; a step that made none, as the last
+	// usually doesn't, thought after them all.
+	const laterThoughts = thoughts
+		.filter((thought) => thought.step >= runs.length)
+		.map((thought) => <Thought key={`thought@${thought.step}`} text={thought.text} />);
+	const line = (
+		<ActivityLine status={working ? "running" : undefined}>
+			<ActivityTitle className="tabular-nums">{label}</ActivityTitle>
+		</ActivityLine>
+	);
+	return (
+		<Activity className={cn("border-border border-b pb-2.5", className)}>
+			{calls.length === 0 && thoughts.length === 0 ? (
+				line
+			) : (
+				<ActivityCollapsible open={toggled ?? working} onOpenChange={setToggled}>
+					<ActivityCollapsibleTrigger>{line}</ActivityCollapsibleTrigger>
+					<ActivityCollapsibleContent className={FLUSH}>
+						<Activity>
+							{runs.flatMap((run, index) => {
+								const sections = byToolSource(run.calls);
+								return [
+									...thoughtFor(index),
+									run.narration && (
+										<p
+											key={`narration@${run.calls[0]?.id}`}
+											className="m-0 text-body-foreground text-sm leading-relaxed"
+										>
+											{run.narration}
+										</p>
+									),
+									...sections.map((section, sectionIndex) => (
+										<ToolSourceSection
+											key={`steps@${section[0]?.id}`}
+											calls={section}
+											markedConnectors={markedConnectors}
+											fileNames={fileNames}
+											current={
+												working && index === runs.length - 1 && sectionIndex === sections.length - 1
+											}
+										/>
+									)),
+								];
+							})}
+							{laterThoughts}
+						</Activity>
+					</ActivityCollapsibleContent>
+				</ActivityCollapsible>
+			)}
+		</Activity>
+	);
+}
+
+/**
+ * One step's thought, in a reply's work: shut, a brain and its first line,
+ * cut short; opened, "Thought" over the whole of it.
+ */
+function Thought({ text }: { text: string }) {
+	const [open, setOpen] = useState(false);
+	const firstLine = text.trim().split("\n", 1)[0];
+	return (
+		<ActivityCollapsible open={open} onOpenChange={setOpen}>
+			<ActivityCollapsibleTrigger>
+				<ActivityLine>
+					<ActivityIcon>
+						<Brain />
+					</ActivityIcon>
+					<ActivityTitle>
+						{open ? (
+							"Thought"
+						) : (
+							<>
+								{/* Read as what it is, not only as its first words. */}
+								<span className="sr-only">Thought: </span>
+								{firstLine}
+							</>
+						)}
+					</ActivityTitle>
+				</ActivityLine>
+			</ActivityCollapsibleTrigger>
+			<ActivityCollapsibleContent className={cn(FLUSH, "text-body-foreground text-sm")}>
+				<p className="m-0 whitespace-pre-wrap">{text}</p>
+			</ActivityCollapsibleContent>
+		</ActivityCollapsible>
+	);
+}
+
+/** What a collapsible's contents lose of `Activity`'s indent and rule, so each level sits flush with the one above. */
+const FLUSH = "ml-0 border-l-0 pl-0 pr-0";
+
+/**
+ * The work line's words. A reply with no `finishedAt` has no time to give, so
+ * says what it used instead, or nothing.
+ */
+function workedForText(
+	message: Message,
+	now: number,
+	calls: readonly ToolCallPart[],
+	markedConnectors: ReadonlyMap<string, MarkedConnector>,
+): string | undefined {
+	const startedAt = Date.parse(message.createdAt);
+	if (message.status === "writing") return `Working for ${formatElapsed(now - startedAt)}`;
+	const workedMs = message.finishedAt ? Date.parse(message.finishedAt) - startedAt : 0;
+	// A reply recorded as done the moment it began has no time worth telling.
+	if (workedMs >= SECOND_MS) return `Worked for ${formatElapsed(workedMs)}`;
+	return calls.length > 0 ? toolLineText(calls, markedConnectors) : undefined;
+}
+
+const SECOND_MS = 1_000;
+
+/**
+ * Calls made one after another, split wherever the tool source changes, so
+ * each section is one tool source's. Tools built into every bot share no
+ * tool source, so each of them is its own: commands with commands, page reads with page reads.
+ */
+function byToolSource(calls: readonly ToolCallPart[]): ToolCallPart[][] {
+	const toolSourceKey = (call: ToolCallPart) => {
+		const { handle } = splitToolKey(call.tool);
+		return handle === BUILT_IN_HANDLE ? call.tool : handle;
+	};
+	const sections: ToolCallPart[][] = [];
+	for (const call of calls) {
+		const last = sections.at(-1);
+		const previous = last?.at(-1);
+		if (last && previous && toolSourceKey(previous) === toolSourceKey(call)) last.push(call);
+		else sections.push([call]);
+	}
+	return sections;
+}
+
+/**
+ * Calls a bot made one after another in one tool source, as one line saying so:
+ * "Used HubSpot for 4s · 3 steps". Opened, the calls, in a list that scrolls
+ * once it is long. A single call needs no summary, so is shown as itself.
+ */
+function ToolSourceSection({
+	calls,
+	markedConnectors,
+	fileNames,
+	current,
+}: {
+	calls: readonly ToolCallPart[];
+	markedConnectors: ReadonlyMap<string, MarkedConnector>;
+	fileNames: ReadonlyMap<string, string>;
+	/** The calls the bot is making now, open so the running one shows. */
+	current: boolean;
+}) {
+	const [toggled, setToggled] = useState<boolean>();
+	const first = calls[0];
+	if (!first) return null;
+	if (calls.length === 1)
+		return <CallLine call={first} markedConnectors={markedConnectors} fileNames={fileNames} />;
+	const failed = calls.some((call) => call.status === "failed");
+	return (
+		<ActivityCollapsible open={toggled ?? current} onOpenChange={setToggled}>
+			<ActivityCollapsibleTrigger>
+				<ActivityLine status={lineStatus(calls)}>
+					<CallMark
+						call={first}
+						connector={markedConnectors.get(splitToolKey(first.tool).handle)}
+					/>
+					<ActivityTitle>{toolLineText(calls, markedConnectors)}</ActivityTitle>
+					<ActivityDescription className={failed ? "text-destructive-text" : undefined}>
+						{calls.length} steps
+					</ActivityDescription>
+				</ActivityLine>
+			</ActivityCollapsibleTrigger>
+			<ActivityCollapsibleContent className={FLUSH}>
+				<Activity className="scrollbar-on-hover max-h-80 overflow-y-auto overscroll-contain">
+					{calls.map((call) => (
+						<CallLine
+							key={call.id}
+							call={call}
+							markedConnectors={markedConnectors}
+							fileNames={fileNames}
+						/>
+					))}
+				</Activity>
+			</ActivityCollapsibleContent>
+		</ActivityCollapsible>
+	);
+}
+
+/** How a line for `calls` reads: shimmering while one runs, red once one has failed. */
+function lineStatus(calls: readonly ToolCallPart[]): "running" | "error" | undefined {
+	if (calls.some((call) => call.status === "running")) return "running";
+	if (calls.some((call) => call.status === "failed")) return "error";
+	return undefined;
+}
+
+/** A call's tool source's mark, or a tool's for one built into every bot. */
+function CallMark({ call, connector }: { call: ToolCallPart; connector?: MarkedConnector }) {
+	return (
+		<ActivityIcon>
+			{splitToolKey(call.tool).handle === BUILT_IN_HANDLE ? (
+				<Wrench strokeWidth={1.75} />
+			) : (
+				<ConnectorMark markId={connector?.markId} name={toolSourceOf(call, connector)} size="xs" />
+			)}
+		</ActivityIcon>
+	);
+}
+
+/** One call: its mark, what it did to what, and how it went; opened, what came back. */
+function CallLine({
+	call,
+	markedConnectors,
+	fileNames,
+}: {
+	call: ToolCallPart;
+	markedConnectors: ReadonlyMap<string, MarkedConnector>;
+	fileNames: ReadonlyMap<string, string>;
+}) {
+	const [inputShown, setInputShown] = useState(false);
+	const connector = markedConnectors.get(splitToolKey(call.tool).handle);
+	const { action, subject } = describeStep(call, fileNames);
+	const note = noteOf(call);
+	const details = stepDetails(call);
+	return (
+		<ActivityCollapsible>
+			<ActivityCollapsibleTrigger>
+				<ActivityLine status={lineStatus([call])}>
+					<CallMark call={call} connector={connector} />
+					<ActivityTitle>
+						{action}
+						{subject && (
+							<span
+								title={subject.text}
+								className={cn("text-subtle-foreground", subject.asCode && "font-mono")}
+							>
+								{" "}
+								{subject.text}
+							</span>
+						)}
+					</ActivityTitle>
+					{note && (
+						<ActivityDescription
+							title={note.text}
+							className={cn("max-w-2/5 truncate", note.failed && "text-destructive-text")}
+						>
+							{note.text}
+						</ActivityDescription>
+					)}
+				</ActivityLine>
+			</ActivityCollapsibleTrigger>
+			<ActivityCollapsibleContent className={FLUSH}>
+				<div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-list px-3.5 py-3 text-xs">
+					{call.error ? (
+						<DetailBlock label="Error" value={call.error} failed />
+					) : details.output !== undefined ? (
+						<>
+							<ToolCallValue value={details.output} />
+							{details.outputCut && (
+								<p className="m-0 text-2xs text-subtle-foreground">{details.outputCut}</p>
+							)}
+						</>
+					) : (
+						<p className="m-0 text-subtle-foreground">
+							{call.status === "running" ? "Still running" : "Nothing came back"}
+						</p>
+					)}
+					<Button
+						variant="quiet"
+						size="text"
+						aria-expanded={inputShown}
+						onClick={() => setInputShown(!inputShown)}
+						className="self-start"
+					>
+						{inputShown ? "Hide input" : "Show input"}
+					</Button>
+					{inputShown && (
+						<>
+							<p className="m-0 flex items-baseline gap-1.5 text-2xs text-subtle-foreground">
+								<span className="font-medium">Tool</span>
+								<code className="font-mono text-soft-foreground">{call.tool}</code>
+							</p>
+							{details.input !== undefined && (
+								<DetailBlock
+									label="Input"
+									value={details.input}
+									otherArguments={details.otherArguments}
+								/>
+							)}
+						</>
+					)}
+				</div>
+			</ActivityCollapsibleContent>
+		</ActivityCollapsible>
 	);
 }

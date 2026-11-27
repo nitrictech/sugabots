@@ -1,11 +1,11 @@
-import type { ThreadParticipant } from "@sugabots/contracts";
-import { testPerson } from "@sugabots/contracts/testing";
+import type { Participant } from "@sugabots/contracts";
+import { testMember } from "@sugabots/contracts/testing";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { expect, fn, spyOn, waitFor, within } from "storybook/test";
+import { expect, fn, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import type { ComposerAttachment } from "@/lib/composer-attachments.ts";
-import { growthDesk } from "@/shell/story-fixtures.ts";
+import { growthDesk } from "@/shell/story-fixtures.test-support.ts";
 import {
 	acmeRequest,
 	boardPackFailed,
@@ -14,7 +14,7 @@ import {
 	invoicesAtLimit,
 	pricingPageReady,
 	pricingPageUploading,
-} from "./attachment-story-fixtures.ts";
+} from "./attachment-story-fixtures.test-support.ts";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { groupMentionsBy } from "./mentions.tsx";
 
@@ -28,7 +28,7 @@ const issueTriager = {
 	name: "Issue Triager",
 	handle: "issue-triager",
 	color: "green",
-	face: "arc",
+	eyes: "arc",
 	shape: "circle",
 } as const;
 
@@ -38,23 +38,23 @@ const workspace = {
 	name: "Nitric",
 	slug: "nitric",
 	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+	setUpAt: "2026-09-01T00:00:00.000Z",
 };
 
-const sam = testPerson({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" });
+const sam = testMember({ id: "0199a3a0-0000-7000-8000-000000000002", name: "Sam Rivera" });
 
 /** Who is writing the draft: someone other than Sam, so `@here` would notify Sam. */
 const WRITER_ID = "0199a3a0-0000-7000-8000-000000000004";
 
-const mentionable: ThreadParticipant[] = [
-	{ kind: "agent", ...issueTriager },
+const mentionable: Participant[] = [
+	{ kind: "bot", ...issueTriager },
 	{
-		kind: "agent",
+		kind: "bot",
 		id: "0199a3a0-0000-7000-8000-000000000003",
 		name: "Linear Handler",
 		handle: "linear-handler",
 		color: "orange",
-		face: "dot",
+		eyes: "dot",
 		shape: "circle",
 	},
 	sam,
@@ -72,7 +72,7 @@ const meta = preview.meta({
 		submitLabel: "Send message",
 		mentionable: [
 			...mentionable,
-			...groupMentionsBy({ kind: "person", id: WRITER_ID }, [sam], "conversation"),
+			...groupMentionsBy({ kind: "member", id: WRITER_ID }, [sam], "project_chat"),
 		],
 		attachments: withFiles([]),
 	},
@@ -122,7 +122,7 @@ export const LongDraft = meta.story({
 			"Please summarise the customer feedback from the last sprint.",
 			"Highlight anything we should act on today.",
 			"Group the rest by theme so we can plan next week.",
-			"Then post the summary back in this thread.",
+			"Then post the summary back in this chat.",
 			"Mention anyone who already has a fix in flight.",
 			"Finish with the three things you would do first.",
 			"Keep it short enough to read on a phone.",
@@ -147,7 +147,7 @@ export const SelectMention = meta.story({
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Ask @");
 		await expect(canvas.getByRole("listbox", { name: "Who to mention" })).toBeVisible();
-		// The three people and bots, then @here and @channel.
+		// The three members and bots, then @here and @channel.
 		await expect(canvas.getAllByRole("option")).toHaveLength(5);
 		await userEvent.type(input, "ri");
 		await expect(canvas.getAllByRole("option")).toHaveLength(2);
@@ -158,7 +158,7 @@ export const SelectMention = meta.story({
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Ask @sam-rivera ");
-		// The chosen person shows in the draft as a chip of their name.
+		// The chosen member shows in the draft as a chip of their name.
 		await expect(within(input).getByText("@sam-rivera")).toBeVisible();
 		await expect(canvas.queryByRole("listbox")).not.toBeInTheDocument();
 		await expect(args.onSubmit).not.toHaveBeenCalled();
@@ -170,7 +170,7 @@ export const SelectMention = meta.story({
 });
 
 /**
- * `@here` and `@channel` are offered after the people and bots, written as
+ * `@here` and `@channel` are offered after the members and bots, written as
  * typed, like a handle, and shown in the draft as a chip.
  */
 export const SelectGroupMention = meta.story({
@@ -179,8 +179,8 @@ export const SelectGroupMention = meta.story({
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		await userEvent.type(input, "Heads up @cha");
 		await expect(canvas.getAllByRole("option")).toHaveLength(1);
-		// Sam is everyone else in the pod.
-		await expect(canvas.getByRole("option", { name: /Notifies 1 person/ })).toBeVisible();
+		// Sam is everyone else in the project.
+		await expect(canvas.getByRole("option", { name: /Notifies 1 member/ })).toBeVisible();
 		await userEvent.keyboard("{Enter}");
 		await expect(args.onValueChange).toHaveBeenLastCalledWith("Heads up @channel ");
 		await expect(within(input).getByText("@channel")).toHaveAttribute("data-mention", "@channel");
@@ -242,17 +242,6 @@ export const EditMention = meta.story({
 	},
 });
 
-/** The @ starts a mention where the cursor is, opening the same list as typing `@`. */
-export const MentionButton = meta.story({
-	args: { value: "Can you ask" },
-	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("textbox", { name: "Message Growth Desk" }));
-		await userEvent.click(canvas.getByRole("button", { name: "Mention a bot or person" }));
-		await expect(args.onValueChange).toHaveBeenLastCalledWith("Can you ask @");
-		await expect(await canvas.findByRole("listbox", { name: "Who to mention" })).toBeVisible();
-	},
-});
-
 /**
  * Typing `:` and part of a shortcode offers the emoji it names, best match
  * first, and Enter writes the highlighted one without sending. A `:` in a time
@@ -285,27 +274,6 @@ export const ClosedShortcode = meta.story({
 	},
 });
 
-/** The smile opens the emoji picker, and the emoji chosen goes in at the cursor. */
-export const EmojiButton = meta.story({
-	args: { value: "Nice work" },
-	play: async ({ args, canvas, userEvent }) => {
-		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
-		await userEvent.click(canvas.getByRole("button", { name: "Add emoji" }));
-		const page = within(document.body);
-		await page.findByRole("gridcell", { name: "Grinning face" });
-		await userEvent.keyboard("hundred points");
-		await waitFor(() =>
-			expect(page.getByRole("gridcell", { name: "Hundred points" })).toHaveAttribute(
-				"aria-selected",
-				"true",
-			),
-		);
-		await userEvent.keyboard("{Enter}");
-		await expect(args.onValueChange).toHaveBeenLastCalledWith("Nice work💯");
-		await waitFor(() => expect(input).toHaveFocus());
-	},
-});
-
 /** SendWithEnter submits the draft while Shift+Enter preserves a line break. */
 export const SendWithEnter = meta.story({
 	args: { value: "First line\nSecond line" },
@@ -331,6 +299,30 @@ export const Sending = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getByRole("button", { name: "Sending message" })).toBeDisabled();
+	},
+});
+
+/** While a bot replies, the stop button stands in Send's place until there is something to send. */
+export const WhileABotReplies = meta.story({
+	args: {
+		interrupt: { label: "Interrupt the reply", pending: false, onInterrupt: fn() },
+	},
+	play: async ({ args, canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Interrupt the reply" }));
+		await expect(args.interrupt?.onInterrupt).toHaveBeenCalled();
+		await userEvent.type(canvas.getByRole("textbox"), "Check the tests too");
+		await expect(canvas.queryByRole("button", { name: "Interrupt the reply" })).toBeNull();
+		await expect(canvas.getByRole("button", { name: "Send message" })).toBeVisible();
+	},
+});
+
+/** Once asked to stop, the stop button waits, disabled, for the replies to end. */
+export const Interrupting = meta.story({
+	args: {
+		interrupt: { label: "Interrupt the reply", pending: true, onInterrupt: fn() },
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("button", { name: "Interrupt the reply" })).toBeDisabled();
 	},
 });
 
@@ -380,7 +372,7 @@ export const MentionCardsInTheDraft = meta.story({
 				const client = new QueryClient();
 				client.setQueryData(["workspaces"], [workspace]);
 				client.setQueryData(
-					["agents", workspace.id],
+					["bots", workspace.id],
 					[
 						{
 							...growthDesk,
@@ -415,7 +407,7 @@ export const MentionCardsInTheDraft = meta.story({
 		within(input).getByRole("button", { name: "@here" }).focus();
 		await userEvent.keyboard("{Enter}");
 		const hereCard = await page.findByRole("dialog", { name: "@here" });
-		await expect(within(hereCard).getByText("Sam Rivera")).toBeVisible();
+		await waitFor(() => expect(within(hereCard).getByText("Sam Rivera")).toBeVisible());
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() => expect(page.queryByRole("dialog")).toBeNull());
 		await expect(args.onSubmit).not.toHaveBeenCalled();
@@ -473,7 +465,7 @@ export const ReplyingTo = meta.story({
 		replyingTo: {
 			message: {
 				id: "0199a3a0-0000-7000-8000-000000000c11",
-				author: mentionable[0] as Extract<ThreadParticipant, { kind: "agent" }>,
+				author: mentionable[0] as Extract<Participant, { kind: "bot" }>,
 				preview:
 					"The release notes are drafted. Checkout gets the retry fix, and search gets the new filters.",
 			},
@@ -491,32 +483,19 @@ export const ReplyingTo = meta.story({
 	},
 });
 
-/** The paperclip sits left of the @ and opens the system's file picker straight away. */
-export const AttachFiles = meta.story({
-	play: async ({ canvas, canvasElement, userEvent }) => {
-		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
-		if (!picker) throw new Error("The composer has no file picker");
-		// The real picker is the system's own window, which a test cannot close.
-		const openPicker = spyOn(picker, "click").mockImplementation(() => {});
-		await userEvent.click(canvas.getByRole("button", { name: "Attach files" }));
-		await expect(openPicker).toHaveBeenCalledOnce();
-	},
-});
-
 /**
- * Before the chat exists there is nowhere to upload to: the paperclip is off,
- * and a pasted file writes nothing into the draft.
+ * Before a new chat exists there is nowhere to upload to, so the composer
+ * has no attachments: Upload files is off, and a pasted file writes nothing
+ * into the draft.
  */
 export const BeforeTheChatExists = meta.story({
-	args: { attachments: { ...withFiles([]), attach: undefined } },
-	play: async ({ canvas, canvasElement, userEvent }) => {
-		const attachButton = canvas.getByRole("button", { name: "Attach files" });
-		await expect(attachButton).toHaveAttribute("aria-disabled", "true");
-		const picker = canvasElement.querySelector<HTMLInputElement>('input[type="file"]');
-		if (!picker) throw new Error("The composer has no file picker");
-		const openPicker = spyOn(picker, "click").mockImplementation(() => {});
-		await userEvent.click(attachButton);
-		await expect(openPicker).not.toHaveBeenCalled();
+	render: ({ attachments: _attachments, ...args }) => <ChatComposer {...args} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Add" }));
+		await expect(
+			await within(document.body).findByRole("menuitem", { name: "Upload files" }),
+		).toHaveAttribute("aria-disabled", "true");
+		await userEvent.keyboard("{Escape}");
 
 		const input = canvas.getByRole("textbox", { name: "Message Growth Desk" });
 		const pasted = new DataTransfer();
@@ -719,18 +698,19 @@ export const FilesOnly = meta.story({
 
 /**
  * FileLimit: 23 files dropped and the first 20 attached. The note says what
- * was left out, the tray scrolls past two rows, and the paperclip turns off.
+ * was left out, the tray scrolls past two rows, and the + menu's upload turns off.
  */
 export const FileLimit = meta.story({
 	args: { attachments: withFiles(invoicesAtLimit, 3) },
-	play: async ({ canvas }) => {
+	play: async ({ canvas, userEvent }) => {
 		await expect(
 			canvas.getByText("3 files weren't added. A message can have 20 at most."),
 		).toBeVisible();
-		await expect(canvas.getByRole("button", { name: "Attach files" })).toHaveAttribute(
-			"aria-disabled",
-			"true",
-		);
+		await userEvent.click(canvas.getByRole("button", { name: "Add" }));
+		await expect(
+			await within(document.body).findByRole("menuitem", { name: "20 files is the most" }),
+		).toHaveAttribute("aria-disabled", "true");
+		await userEvent.keyboard("{Escape}");
 		await expect(canvas.getByText("20 of 20 files")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Send message" })).toBeEnabled();
 	},

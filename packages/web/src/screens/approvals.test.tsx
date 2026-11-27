@@ -1,20 +1,20 @@
 import type { AnsweredApproval, ApprovalRequest, ToolCallPart } from "@sugabots/contracts";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, linear, mount, pods } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { apiAnswers, linear, mount, projects } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
-const pod = pods[0] as (typeof pods)[number];
+const project = projects[0] as (typeof projects)[number];
 const host = {
-	kind: "agent" as const,
+	kind: "bot" as const,
 	id: linear.id,
 	name: linear.name,
 	handle: linear.handle,
 	color: linear.color,
-	face: linear.face,
+	eyes: linear.eyes,
 	shape: linear.shape,
 };
 
@@ -27,7 +27,6 @@ function call(id: string, approval: ToolCallPart["approval"]): ToolCallPart {
 		output: null,
 		status: approval?.status === "pending" ? "awaiting_approval" : "completed",
 		error: null,
-		mutating: true,
 		atOffset: 0,
 		startedAt: "2026-09-18T09:00:00.000Z",
 		finishedAt: null,
@@ -38,20 +37,22 @@ function call(id: string, approval: ToolCallPart["approval"]): ToolCallPart {
 function request(id: string, approval: ToolCallPart["approval"]): ApprovalRequest {
 	return {
 		call: call(id, approval),
-		agent: host,
-		podId: pod.id,
-		threadId: "0199a3a0-0000-7000-8000-0000000003b1",
-		conversationId: "0199a3a0-0000-7000-8000-0000000003b1",
+		bot: host,
+		projectId: project.id,
+		chatId: "0199a3a0-0000-7000-8000-0000000003b1",
+		rootChatId: "0199a3a0-0000-7000-8000-0000000003b1",
 	};
 }
 
 const waiting = request("0199a3a0-0000-7000-8000-0000000003c1", {
 	status: "pending",
+	approvers: "chat",
 	decidedByName: null,
 	decidedAt: null,
 });
 const decided = {
 	status: "allowed",
+	approvers: "chat",
 	decidedByName: "Mia Chen",
 	decidedAt: "2026-09-18T09:05:00.000Z",
 } as const;
@@ -60,19 +61,14 @@ const answered: AnsweredApproval = {
 	answer: decided,
 };
 
-function inbox(contents: { waiting: ApprovalRequest[]; answered: AnsweredApproval[] }) {
+function serveApprovals(contents: { waiting: ApprovalRequest[]; answered: AnsweredApproval[] }) {
 	client.api.chats.approvals.mockReturnValue(Effect.succeed(contents));
 }
 
 beforeEach(() => {
 	apiAnswers();
-	inbox({ waiting: [waiting], answered: [answered] });
-	client.api.toolApprovals.decide.mockReturnValue(Effect.undefined);
-});
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
+	serveApprovals({ waiting: [waiting], answered: [answered] });
+	client.api.approvals.decide.mockReturnValue(Effect.undefined);
 });
 
 describe("Approvals", () => {
@@ -82,7 +78,7 @@ describe("Approvals", () => {
 		const article = await screen.findByRole("article", {
 			name: /^Approval request/,
 		});
-		expect(within(article).getByText(/Allowed by Mia Chen/)).toBeDefined();
+		within(article).getByText(/Allowed by Mia Chen/);
 		expect(within(article).queryByRole("button", { name: /^Allow/ })).toBeNull();
 		expect(
 			within(article).getByRole("link", { name: "Back to Approvals" }).getAttribute("href"),
@@ -93,21 +89,44 @@ describe("Approvals", () => {
 		mount("/suga/approvals");
 
 		const card = await screen.findByRole("article", { name: /Update issue/ });
-		inbox({
+		serveApprovals({
 			waiting: [],
 			answered: [{ ...waiting, answer: { ...decided, decidedByName: "Sam" } }, answered],
 		});
 		fireEvent.click(within(card).getByRole("button", { name: /^Allow/ }));
 
-		await waitFor(() => expect(client.api.toolApprovals.decide).toHaveBeenCalled());
+		await waitFor(() => expect(client.api.approvals.decide).toHaveBeenCalled());
 		await waitFor(() => expect(screen.queryByRole("article", { name: /Update issue/ })).toBeNull());
 		expect(screen.getAllByRole("link", { name: /Update issue/ })).toHaveLength(2);
-		expect(screen.getByText(/^Nothing waiting/)).toBeDefined();
+		screen.getByText(/^Nothing waiting/);
 	});
 
-	it("says a request is gone when the inbox no longer holds it", async () => {
-		mount("/suga/approvals/0199a3a0-0000-7000-8000-0000000003c9");
+	it("opens a request raised in an automation's run at the automation's feed, naming the run", async () => {
+		const run = "0199a3a0-0000-7000-8000-0000000003d1";
+		const feed = "0199a3a0-0000-7000-8000-0000000003d2";
+		const inChat = {
+			...waiting,
+			projectId: null,
+			chatId: run,
+			rootChatId: feed,
+		};
+		const inProject = {
+			...request("0199a3a0-0000-7000-8000-0000000003c3", waiting.call.approval),
+			chatId: run,
+			rootChatId: feed,
+		};
 
-		expect(await screen.findByText("This request is no longer here")).toBeDefined();
+		serveApprovals({ waiting: [inChat], answered: [] });
+		mount(`/suga/approvals/${inChat.call.id}`);
+		expect((await screen.findByRole("link", { name: "Open chat" })).getAttribute("href")).toBe(
+			`/suga/chats/${feed}?runChat=${run}`,
+		);
+		cleanup();
+
+		serveApprovals({ waiting: [inProject], answered: [] });
+		mount(`/suga/approvals/${inProject.call.id}`);
+		expect((await screen.findByRole("link", { name: "Open chat" })).getAttribute("href")).toBe(
+			`/suga/projects/${project.slug}/${feed}?runChat=${run}`,
+		);
 	});
 });

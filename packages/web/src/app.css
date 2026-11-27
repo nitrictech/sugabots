@@ -14,21 +14,25 @@
 	color-scheme: dark;
 
 	/*
-	 * Surfaces. The thread and the sidebar share the ground in dark; light gives
-	 * the sidebar its own grey so the white thread reads as the working area.
+	 * Surfaces. The chat and the sidebar share the ground in dark; light gives
+	 * the sidebar its own grey so the white chat reads as the working area.
 	 */
-	--background: light-dark(#ffffff, #0a0a0a);
-	--rail: light-dark(#f7f7f8, #000000);
-	/* The conversation list column, and the grouped rows in settings. */
-	--list: light-dark(#f7f7f8, #0f0f11);
-	/* The column beside a chat: Details, or a collaboration or run. */
-	--aside: light-dark(#ffffff, #0a0a0a);
-	/* Behind a page opened beside a chat, such as an artifact. */
-	--stage: light-dark(#f1f1f3, #0f0f11);
+	--background: light-dark(#ffffff, var(--color-zinc-950));
+	--rail: light-dark(var(--color-zinc-100), var(--color-black));
+	/* The chat list column, and the grouped rows in settings. */
+	--list: light-dark(var(--color-zinc-50), var(--color-zinc-900));
+	/* The column beside a chat: Details, or an automation's panel. */
+	--aside: light-dark(#ffffff, var(--color-zinc-950));
+	/* Behind a page opened beside a chat, such as a file. */
+	--stage: light-dark(var(--color-zinc-100), var(--color-zinc-900));
+	/* Another member's message bubble. */
+	--bubble: light-dark(var(--color-zinc-100), var(--color-zinc-900));
+	/* The composer, one rounded line under a chat. */
+	--composer: light-dark(var(--color-zinc-50), var(--color-zinc-800));
 	/* A card among the messages, such as an approval request. */
-	--card: light-dark(#f7f7f8, #111113);
+	--card: light-dark(var(--color-zinc-50), var(--color-zinc-900));
 	/* A raised panel: a dialog, the composer's input. */
-	--panel: light-dark(#ffffff, #111113);
+	--panel: light-dark(#ffffff, var(--color-zinc-900));
 	/*
 	 * A settings card: barely lifted off the page in dark, held by its border
 	 * rather than its fill, so a page of them stays calm.
@@ -46,30 +50,31 @@
 	/* A control already filled with `--hover`, such as Deny, under the pointer. */
 	--hover-strong: light-dark(#d4d4d8, #26262a);
 	/* Rows sit on the list column, which is already a step up, so their hover is quieter. */
-	--row-hover: light-dark(#f1f1f3, #151518);
+	--row-hover: light-dark(var(--color-zinc-200), var(--color-zinc-900));
 	/* A message row under the pointer, barely lifted off the chat. */
 	--message-hover: light-dark(#f7f7f8, #111113);
-	/* The open conversation in the list. */
-	--row-selected: light-dark(#e4e4e7, #17171a);
+	/* The open chat in the list. */
+	--row-selected: light-dark(var(--color-zinc-200), var(--color-zinc-800));
 
-	--foreground: light-dark(#111113, #ededed);
+	--foreground: light-dark(var(--color-zinc-900), var(--color-zinc-100));
 	/* A message's words: as strong as a name in dark, a step softer in light. */
-	--body-foreground: light-dark(#1c1c1f, #ededed);
-	--soft-foreground: light-dark(#3f3f46, #c4c4ca);
-	--muted-foreground: light-dark(#52525b, #a1a1aa);
+	--body-foreground: light-dark(var(--color-zinc-800), var(--color-zinc-200));
+	--soft-foreground: light-dark(var(--color-zinc-700), var(--color-zinc-300));
+	--muted-foreground: light-dark(var(--color-zinc-600), var(--color-zinc-400));
 	/*
-	 * Times, section labels, hints. A shade lighter in dark than the design's
-	 * #6b6b73, and darker in light than its #71717a, so both pass AA on a chip.
+	 * Times, section labels, hints. Lighter in dark than the design's #6b6b73 so
+	 * it passes AA on the lightest surface it sits on there, a selected row or
+	 * the composer (zinc-800); zinc-500 in light passes on a chip.
 	 */
-	--subtle-foreground: light-dark(#6b6b73, #808089);
+	--subtle-foreground: light-dark(var(--color-zinc-500), #8e8e97);
 	--disabled-foreground: light-dark(#a1a1aa, #52525b);
 	/* A text action, such as Cancel or Create in a dialog header. */
 	--link: light-dark(#111113, #ededed);
 
 	/* Hairlines, faintest first; `border-strong` edges a field or the composer. */
-	--border-subtle: light-dark(#f1f1f3, #1c1c1f);
-	--border: light-dark(#e4e4e7, #1c1c1f);
-	--border-strong: light-dark(#d4d4d8, #26262a);
+	--border-subtle: light-dark(var(--color-zinc-100), var(--color-zinc-900));
+	--border: light-dark(var(--color-zinc-200), var(--color-zinc-800));
+	--border-strong: light-dark(var(--color-zinc-300), var(--color-zinc-700));
 	--border-dashed: light-dark(#d4d4d8, #3f3f46);
 	/*
 	 * The `glass` of a phone's floating controls, over whatever scrolls under
@@ -79,9 +84,8 @@
 	--glass-edge: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
 	/* The send button with nothing to send. */
 	--chip-strong: light-dark(#e4e4e7, #1f1f23);
-	/* A pod tile, and a slot in one with no bot in it. */
+	/* The fill of a tile with no colour of its own: a project's, a workspace's, an icon's or a file's. */
 	--tile: light-dark(#e4e4e7, #26262a);
-	--tile-empty: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.06));
 
 	/*
 	 * There is no hue: the accent is the strongest ink, near-black in light and
@@ -91,6 +95,7 @@
 	--primary-foreground: light-dark(#ffffff, #0a0a0a);
 	--primary-hover: light-dark(#26262a, #d4d4d8);
 	--switch-on: var(--primary);
+	--switch-thumb: light-dark(#ffffff, var(--subtle-foreground));
 	--primary-tint-border: light-dark(#a1a1aa, #52525b);
 	/*
 	 * `--ring` is a solid colour, because that is what a shadcn-registry
@@ -103,33 +108,29 @@
 	--ring-shadow: 0 0 0 3px var(--ring-halo);
 	/* How full a bot's short-term memory is. */
 	--meter: var(--primary);
-	/* The count of what is unread or waiting, on Inbox, a menu row or a tab, and the hand when a chat waits for your approval. */
+	/* The count of what is unread or waiting, on a menu row or a tab. */
 	--rail-count: var(--primary);
-	--approval-marker: var(--primary);
 	/* A reaction you are among, under a message: a grey wash edged in the accent. Others' are a card on a chip's edge. */
 	--reaction-mine: light-dark(#f1f1f3, #1f1f23);
 	--reaction-mine-foreground: var(--foreground);
 
 	/* Red is only for errors and delete. */
 	--destructive: #f0505e;
+	/* Text and marks on a destructive fill, such as the ! on a failed run. */
+	--destructive-foreground: #fff;
 	/*
-	 * Red text, such as Delete pod, and the wash behind it on hover. Light is a
+	 * Red text, such as Delete project, and the wash behind it on hover. Light is a
 	 * shade darker than the design's #d6384e so it passes AA on a chip.
 	 */
 	--destructive-text: light-dark(#c42d45, #f08a94);
-	--destructive-hover: light-dark(
-		#fde8ea,
-		#2a1a1e
-	); /* A routine's failed run: its card, its edge, its heading, and why it failed. */
-	--failed-card: light-dark(#fdf1f3, oklch(0.19 0.03 20));
-	--failed-card-border: light-dark(#f3c4cc, oklch(0.36 0.09 20));
-	--failed-card-heading: light-dark(#8e1f31, #fbd5da);
-	--failed-card-text: light-dark(#7a2b38, #e3c3c8);
+	--destructive-hover: light-dark(#fde8ea, #2a1a1e);
 	--warning: light-dark(#8a5a12, oklch(0.8 0.09 75));
 	/* A dot for something that went ahead, such as an allowed request. */
 	--success: #3fcb6b;
 	/* Green text for something that worked. Both pass AA on a panel. */
 	--success-text: light-dark(#1a7f37, #4ade80);
+	/* A bot working on a reply, the one blue: its spinner and time in a chat's row. Both pass AA on the rail and on a selected row. */
+	--working: light-dark(#1d4ed8, #60a5fa);
 
 	/*
 	 * A file attached in the composer: the page drawn for a document and the badge
@@ -140,16 +141,31 @@
 	--file-page-heading: light-dark(#9a9ea8, #8b8f99);
 	--file-badge-sheet: #1a7a43;
 	--file-badge-other: light-dark(#52525b, #3f3f46);
+	--file-badge-foreground: #fff;
 	/* Over the chat while files are dragged onto it, and the wash inside its dashed edge. */
 	--drop-veil: light-dark(rgba(255, 255, 255, 0.8), rgba(10, 10, 10, 0.8));
 	--drop-target: light-dark(rgba(241, 241, 243, 0.7), rgba(23, 23, 26, 0.6));
 
-	/* A person with no photo: initials on a grey disc. */
-	--person-avatar: light-dark(#e4e4e7, #26262a);
-	--person-avatar-foreground: light-dark(#3f3f46, #ededed);
+	/* A member with no photo: initials on a grey disc. */
+	--member-avatar: light-dark(#e4e4e7, #26262a);
+	--member-avatar-foreground: light-dark(#3f3f46, #ededed);
+
+	/* The colours members' names are set in within a chat, one picked for each member: a hue's 700 when light, its 400 when dark. */
+	--name-1: light-dark(oklch(52.5% 0.223 3.958), oklch(71.8% 0.202 349.761)); /* pink */
+	--name-2: light-dark(oklch(48.8% 0.243 264.376), oklch(70.7% 0.165 254.624)); /* blue */
+	--name-3: light-dark(oklch(50.8% 0.118 165.612), oklch(76.5% 0.177 163.223)); /* emerald */
+	--name-4: light-dark(oklch(55.5% 0.163 48.998), oklch(82.8% 0.189 84.429)); /* amber */
+	--name-5: light-dark(oklch(49.1% 0.27 292.581), oklch(70.2% 0.183 293.541)); /* violet */
+	--name-6: light-dark(oklch(50.5% 0.213 27.518), oklch(70.4% 0.191 22.216)); /* red */
+	--name-7: light-dark(oklch(52% 0.105 223.128), oklch(78.9% 0.154 211.53)); /* cyan */
+	--name-8: light-dark(oklch(53.2% 0.157 131.589), oklch(84.1% 0.238 128.85)); /* lime */
+	--name-9: light-dark(oklch(55.3% 0.195 38.402), oklch(75% 0.183 55.934)); /* orange */
+	--name-10: light-dark(oklch(51.8% 0.253 323.949), oklch(74% 0.238 322.16)); /* fuchsia */
 
 	/* Separation is by colour and hairline, not shadow; only floating things cast one. */
 	--scrim: rgba(0, 0, 0, 0.55);
+	--dialog-max-width: calc(100% - 20px);
+	--dialog-compact-max-width: min(360px, var(--dialog-max-width));
 	--dialog-shadow:
 		0 30px 80px rgba(0, 0, 0, 0.6),
 		0 0 0 1px light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
@@ -166,6 +182,8 @@
 }
 
 @theme inline {
+	--color-bubble: var(--bubble);
+	--color-composer: var(--composer);
 	--color-background: var(--background);
 	--color-rail: var(--rail);
 	--color-list: var(--list);
@@ -191,14 +209,10 @@
 	--color-border-dashed: var(--border-dashed);
 	--color-chip-strong: var(--chip-strong);
 	--color-tile: var(--tile);
-	--color-tile-empty: var(--tile-empty);
 	--color-switch-on: var(--switch-on);
+	--color-switch-thumb: var(--switch-thumb);
 	--color-destructive-text: var(--destructive-text);
 	--color-destructive-hover: var(--destructive-hover);
-	--color-failed-card: var(--failed-card);
-	--color-failed-card-border: var(--failed-card-border);
-	--color-failed-card-heading: var(--failed-card-heading);
-	--color-failed-card-text: var(--failed-card-text);
 	--color-scrim: var(--scrim);
 	--color-glass: var(--glass);
 	--color-glass-edge: var(--glass-edge);
@@ -215,22 +229,34 @@
 	--color-ring: var(--ring);
 	--color-meter: var(--meter);
 	--color-rail-count: var(--rail-count);
-	--color-approval-marker: var(--approval-marker);
 	--color-reaction-mine: var(--reaction-mine);
 	--color-reaction-mine-foreground: var(--reaction-mine-foreground);
 	--color-warning: var(--warning);
 	--color-success-text: var(--success-text);
 	--color-success: var(--success);
+	--color-working: var(--working);
 	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
 	--color-file-page: var(--file-page);
 	--color-file-page-line: var(--file-page-line);
 	--color-file-page-heading: var(--file-page-heading);
 	--color-file-badge-sheet: var(--file-badge-sheet);
 	--color-file-badge-other: var(--file-badge-other);
+	--color-file-badge-foreground: var(--file-badge-foreground);
 	--color-drop-veil: var(--drop-veil);
 	--color-drop-target: var(--drop-target);
-	--color-person-avatar: var(--person-avatar);
-	--color-person-avatar-foreground: var(--person-avatar-foreground);
+	--color-member-avatar: var(--member-avatar);
+	--color-member-avatar-foreground: var(--member-avatar-foreground);
+	--color-name-1: var(--name-1);
+	--color-name-2: var(--name-2);
+	--color-name-3: var(--name-3);
+	--color-name-4: var(--name-4);
+	--color-name-5: var(--name-5);
+	--color-name-6: var(--name-6);
+	--color-name-7: var(--name-7);
+	--color-name-8: var(--name-8);
+	--color-name-9: var(--name-9);
+	--color-name-10: var(--name-10);
 	/* Set on an element by `botColorVariables()` from `@sugabots/avatars`. */
 	--color-bot-tint: var(--bot-tint);
 	--color-bot-text: var(--bot-text);
@@ -253,8 +279,7 @@
 	--radius-lg: 10px;
 	--radius-xl: 12px;
 	--radius-2xl: 16px;
-	/* Named radii from the design. A bubble's tail corner is `tail`. */
-	--radius-tail: 6px;
+	/* Named radii from the design. */
 	--radius-tile: 14px;
 	--radius-panel: 16px;
 	--radius-bubble: 20px;
@@ -307,7 +332,7 @@
  * move; back runs it in reverse. The router names which way each navigation
  * goes (`phoneSlide` in router.tsx). The tabs stay where they are.
  */
-@media (width < 48rem) and (prefers-reduced-motion: no-preference) {
+@media (width < 48rem) {
 	html:active-view-transition-type(forward, back)::view-transition-group(root) {
 		animation-duration: 320ms;
 		animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
@@ -324,6 +349,85 @@
 	}
 	html:active-view-transition-type(back)::view-transition-new(root) {
 		animation: 320ms cubic-bezier(0.32, 0.72, 0, 1) both slide-in-behind;
+	}
+}
+
+/*
+ * From a tablet up, opening a bot or a project folds the sidebar to the icon
+ * rail, and All projects and bots unfolds it: each bot's face and project's
+ * tile moves between its row and its place on the rail, while the rest
+ * changes at once.
+ */
+@media (width >= 48rem) {
+	html:active-view-transition-type(rail)::view-transition-old(root),
+	html:active-view-transition-type(rail)::view-transition-new(root) {
+		animation: none;
+	}
+	html:active-view-transition-type(rail)::view-transition-group(*) {
+		animation-duration: 280ms;
+		animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+	}
+	/*
+	 * The marks move over both sidebars. Otherwise the sidebar sliding in,
+	 * drawn after them, covers a mark with its row's shading, as the open
+	 * bot's row has, until it is in place.
+	 */
+	html:active-view-transition-type(rail)::view-transition-group(.owner-mark) {
+		z-index: 1;
+	}
+	/*
+	 * A mark is drawn a little differently in a row and on the rail, so rather
+	 * than fade one into the other, which flickers where a mark barely moves, it
+	 * is the mark it is going to be all the way. One on only one side, as under
+	 * a folded section, fades as the browser fades it.
+	 */
+	html:active-view-transition-type(rail)::view-transition-old(.owner-mark) {
+		animation: none;
+		opacity: 0;
+	}
+	html:active-view-transition-type(rail)::view-transition-new(.owner-mark) {
+		animation: none;
+	}
+	html:active-view-transition-type(rail)::view-transition-old(.owner-mark):only-child,
+	html:active-view-transition-type(rail)::view-transition-new(.owner-mark):only-child {
+		animation: revert;
+		opacity: revert;
+	}
+	/* The sidebar coming in slides out from behind the rail; the one going slides back under it. */
+	html:active-view-transition-type(rail)::view-transition-new(owner-sidebar):only-child,
+	html:active-view-transition-type(rail)::view-transition-new(workspace-sidebar):only-child {
+		animation: 280ms cubic-bezier(0.32, 0.72, 0, 1) both sidebar-slide-in;
+	}
+	html:active-view-transition-type(rail)::view-transition-old(owner-sidebar):only-child,
+	html:active-view-transition-type(rail)::view-transition-old(workspace-sidebar):only-child {
+		animation: 200ms cubic-bezier(0.32, 0.72, 0, 1) both sidebar-slide-out;
+	}
+}
+
+/*
+ * Under reduced motion the router starts no view transition (`pageTransition`
+ * in router.tsx), but a browser that cannot tell a transition's types starts
+ * one on every page and cross-fades it; that is left out too.
+ */
+@media (prefers-reduced-motion: reduce) {
+	::view-transition-group(*),
+	::view-transition-old(*),
+	::view-transition-new(*) {
+		animation: none;
+	}
+}
+
+@keyframes sidebar-slide-in {
+	from {
+		transform: translateX(-2rem);
+		opacity: 0;
+	}
+}
+
+@keyframes sidebar-slide-out {
+	to {
+		transform: translateX(-2rem);
+		opacity: 0;
 	}
 }
 
@@ -486,18 +590,78 @@
 }
 
 /*
- * A notch cut from an element's top right corner, for a lock of `--lock-size`
- * laid over that corner and reaching `--lock-overhang` past it, as `Locked`
- * sets both. Cut rather than backed with a colour, so it reads on whatever the
- * element sits on.
+ * Room on the right of a bot's chat for Details' floating cards (17rem), only
+ * as much as its centred column (50rem, `max-w-200`) needs to clear them: none
+ * while the chat is wide enough for both, all of them once it is not.
  */
-@utility lock-notch {
-	--lock-centre: calc(var(--lock-size) / 2 - var(--lock-overhang));
-	mask-image: radial-gradient(
-		circle at calc(100% - var(--lock-centre)) var(--lock-centre),
-		transparent calc(var(--lock-size) / 2 + 1px),
-		#000 calc(var(--lock-size) / 2 + 1.5px)
-	);
+@utility pr-clear-details {
+	padding-right: clamp(0px, 2 * 17rem + 50rem - 100%, 17rem);
+}
+
+/*
+ * Your own bubble: Tailwind's indigo, with everything in it white, its words and what is
+ * set in them (links, code, mentions, its time) alike, in either theme.
+ */
+@utility bubble-mine {
+	/* The theme is inline, so its utilities read these, not the `--color-` names. */
+	background-color: var(--color-indigo-500);
+	color: #ffffff;
+	--foreground: #ffffff;
+	--body-foreground: #ffffff;
+	--soft-foreground: rgb(255 255 255 / 0.92);
+	--muted-foreground: rgb(255 255 255 / 0.82);
+	--subtle-foreground: rgb(255 255 255 / 0.72);
+	--link: #ffffff;
+	--chip: rgb(255 255 255 / 0.18);
+	--hover: rgb(255 255 255 / 0.26);
+	--border-strong: rgb(255 255 255 / 0.4);
+}
+
+/* In your own bubble a mention is a quiet wash of white, not its bot's colour, which fights the indigo. */
+.bubble-mine [data-mention-chip] {
+	background-color: rgb(255 255 255 / 0.16);
+	color: #ffffff;
+}
+
+/* A collapsible panel growing to its content, as `Activity` opens one. */
+@utility transition-height {
+	transition-property: height;
+	transition-timing-function: var(--default-transition-timing-function);
+	transition-duration: var(--default-transition-duration);
+}
+
+/*
+ * Words for something still happening, with a light sweeping across them, as
+ * `Activity` draws a running line. Still, under reduced motion, they keep their colour.
+ */
+@utility shimmer {
+	@media (prefers-reduced-motion: no-preference) {
+		background-image: linear-gradient(
+			90deg,
+			currentColor 35%,
+			var(--foreground) 50%,
+			currentColor 65%
+		);
+		background-size: 300% 100%;
+		background-clip: text;
+		-webkit-text-fill-color: transparent;
+		animation: shimmer 2.2s linear infinite;
+	}
+}
+
+@utility shimmer-none {
+	background-image: none;
+	-webkit-text-fill-color: currentColor;
+	animation: none;
+}
+
+@keyframes shimmer {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: 0% 0;
+	}
 }
 
 /* A row that scrolls sideways under a swipe or its own arrows, without a bar. */
@@ -523,8 +687,42 @@
 
 @theme {
 	--animate-rise: rise 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-	--animate-sheet-up: sheet-up 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-	--animate-reply-in: reply-in 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+	--animate-copy-confirmation: copy-confirmation 200ms ease-out both;
+	--animate-cards-in: cards-in 240ms cubic-bezier(0.2, 0.6, 0.2, 1) both;
+	--animate-wave: wave 2.4s ease-in-out infinite;
+
+	/* A hand waving from the wrist, then resting a moment before it waves again. */
+	@keyframes wave {
+		0%,
+		60%,
+		100% {
+			rotate: 0deg;
+		}
+		10%,
+		30% {
+			rotate: 16deg;
+		}
+		20% {
+			rotate: -8deg;
+		}
+		40% {
+			rotate: -4deg;
+		}
+		50% {
+			rotate: 10deg;
+		}
+	}
+
+	@keyframes copy-confirmation {
+		from {
+			opacity: 0;
+			scale: 0.5;
+		}
+		to {
+			opacity: 1;
+			scale: 1;
+		}
+	}
 
 	@keyframes rise {
 		from {
@@ -537,24 +735,15 @@
 		}
 	}
 
-	/* Grows out of the typing line it replaces, from the avatar's corner. */
-	@keyframes reply-in {
+	/* Details' floating cards, settling in under the button that opened them. */
+	@keyframes cards-in {
 		from {
 			opacity: 0;
-			transform: translateY(8px) scale(0.96);
+			transform: translateY(-4px);
 		}
 		to {
 			opacity: 1;
 			transform: none;
-		}
-	}
-
-	@keyframes sheet-up {
-		from {
-			transform: translateY(100%);
-		}
-		to {
-			transform: translateY(0);
 		}
 	}
 }
@@ -664,7 +853,7 @@
 	}
 }
 
-/* A bot typing, or a collaboration still talking: three dots that rise in turn. */
+/* A bot typing: three dots that rise in turn. */
 .typing-dots {
 	display: inline-flex;
 	flex: none;
@@ -739,27 +928,24 @@
 @utility pb-tab-bar-offset-3 {
 	padding-bottom: calc(var(--tab-bar-space, 0px) + 0.75rem);
 }
-@utility w-artifact-pane {
+@utility w-file-pane {
 	width: clamp(360px, var(--pane-width, 58%), calc(100% - 320px));
 }
-@utility w-thread-pane {
+@utility w-chat-pane {
 	width: clamp(320px, var(--pane-width, 440px), calc(100% - 360px));
-}
-@utility w-inbox-list {
-	width: clamp(280px, var(--list-width, 380px), 60%);
 }
 @utility w-desktop-screen {
 	/* As large as its container allows while keeping the desktop's 4:3 shape. */
 	width: min(100cqw, calc(100cqh * 4 / 3));
 }
 @utility w-tab {
-	/* One of a phone's four tabs, after the 16px of gaps between them. */
-	width: calc((100% - 16px) / 4);
+	/* One of a phone's three tabs, after the bar's 10px of padding and the 4px of gaps between them. */
+	width: calc((100% - 14px) / 3);
 }
-@utility w-thread-line {
+@utility w-chat-line {
 	width: calc(100% - 8px);
 }
-@utility w-thread-popover {
+@utility w-header-popover {
 	width: min(328px, calc(100vw - 2rem));
 }
 @utility min-w-field {
@@ -771,11 +957,9 @@
 @utility min-w-card-name {
 	min-width: min(10rem, 100%);
 }
-@utility max-w-dialog {
-	max-width: calc(100% - 20px);
-}
-@utility max-w-dialog-sm {
-	max-width: min(360px, calc(100% - 20px));
+@utility member-markdown {
+	--bot-mono: initial;
+	--bot-tint: initial;
 }
 @utility max-w-attachment-preview {
 	max-width: calc(100% - 10px);
@@ -845,4 +1029,10 @@
 }
 @utility view-transition-tabs {
 	view-transition-name: tabs;
+}
+@utility view-transition-owner-sidebar {
+	view-transition-name: owner-sidebar;
+}
+@utility view-transition-workspace-sidebar {
+	view-transition-name: workspace-sidebar;
 }

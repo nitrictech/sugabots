@@ -1,8 +1,7 @@
 import type {
-	NotificationPreferences,
+	AutomationRunNotifications,
 	NotificationSettings,
 	QuietHours,
-	RoutineRunNotifications,
 } from "@sugabots/contracts";
 import { useId } from "react";
 import { failureMessage } from "@/lib/failure.ts";
@@ -10,15 +9,16 @@ import {
 	DEFAULT_QUIET_HOURS,
 	NOTIFICATION_LEVEL_LABELS,
 	NOTIFICATION_LEVEL_NOTES,
+	NOTIFICATION_LEVELS,
 } from "@/lib/notification-choices.ts";
 import {
 	formatUntil,
 	MUTE_DURATIONS,
 	useBrowserNotifications,
+	useChangeNotificationPreferences,
 	useNotificationSettings,
-	useUpdateNotificationPreferences,
 } from "@/lib/notifications.ts";
-import { usePods } from "@/lib/pods.ts";
+import { useProjects } from "@/lib/projects.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import {
@@ -38,7 +38,7 @@ import {
 import { Toggle } from "@/ui/toggle.tsx";
 import { NotificationLevelPicker } from "./NotificationLevelMenu.tsx";
 
-/** What Sugabots notifies the person about, where, and when not. */
+/** What Sugabots notifies the member about, where, and when not. */
 export function NotificationsSettings() {
 	const { data: settings, error } = useNotificationSettings();
 	return (
@@ -51,7 +51,7 @@ export function NotificationsSettings() {
 					<AlsoNotifyAbout settings={settings} />
 					<Pause settings={settings} />
 					<QuietHoursSettings settings={settings} />
-					<PodLevels settings={settings} />
+					<ProjectLevels settings={settings} />
 				</>
 			)}
 		</SettingsPage>
@@ -112,41 +112,30 @@ function ThisBrowser() {
 	);
 }
 
-const LEVEL_OPTIONS = (["all", "mentions", "nothing"] as const).map((value) => ({
+const LEVEL_OPTIONS = NOTIFICATION_LEVELS.map((value) => ({
 	value,
 	label: NOTIFICATION_LEVEL_LABELS[value],
 }));
 
-function preferencesOf(settings: NotificationSettings): NotificationPreferences {
-	return {
-		level: settings.level,
-		pausedUntil: settings.pausedUntil,
-		quietHours: settings.quietHours,
-		turnFailures: settings.turnFailures,
-		routineRuns: settings.routineRuns,
-	};
-}
-
 function NotifyAbout({ settings }: { settings: NotificationSettings }) {
-	const update = useUpdateNotificationPreferences();
+	const change = useChangeNotificationPreferences();
 	return (
 		<SettingsGroup label="Notify me about" note={NOTIFICATION_LEVEL_NOTES[settings.level]}>
 			<SettingsChoiceRow
 				label="Notify me about"
 				options={LEVEL_OPTIONS}
 				value={settings.level}
-				onChange={(level) => update.mutate({ ...preferencesOf(settings), level })}
+				onChange={(level) => change({ level })}
 			/>
 		</SettingsGroup>
 	);
 }
 
 function Pause({ settings }: { settings: NotificationSettings }) {
-	const update = useUpdateNotificationPreferences();
+	const change = useChangeNotificationPreferences();
 	const pausedUntil = settings.pausedUntil ? new Date(settings.pausedUntil) : null;
 	const paused = pausedUntil !== null && pausedUntil > new Date();
-	const pauseUntil = (until: Date | null) =>
-		update.mutate({ ...preferencesOf(settings), pausedUntil: until?.toISOString() ?? null });
+	const pauseUntil = (until: Date | null) => change({ pausedUntil: until?.toISOString() ?? null });
 
 	return (
 		<SettingsGroup>
@@ -181,19 +170,19 @@ function Pause({ settings }: { settings: NotificationSettings }) {
 	);
 }
 
-const ROUTINE_RUN_OPTIONS: { value: RoutineRunNotifications; label: string }[] = [
+const AUTOMATION_RUN_OPTIONS: { value: AutomationRunNotifications; label: string }[] = [
 	{ value: "failures", label: "Failed" },
 	{ value: "all", label: "Every run" },
 	{ value: "none", label: "None" },
 ];
 
-/** What besides messages the person hears of, unless their level is Nothing. */
+/** What besides messages the member hears of, unless their level is Nothing. */
 function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
-	const update = useUpdateNotificationPreferences();
+	const change = useChangeNotificationPreferences();
 	return (
 		<SettingsGroup
 			label="Also notify me when"
-			note="Runs of routines you made or started. Muting a pod or bot quiets these too."
+			note="Runs of automations you made or started. Muting a project or bot quiets these too."
 		>
 			<SettingsRow
 				label="A bot can't finish its reply to me"
@@ -201,27 +190,26 @@ function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 					<Toggle
 						label="A bot can't finish its reply to me"
 						checked={settings.turnFailures}
-						onChange={(turnFailures) => update.mutate({ ...preferencesOf(settings), turnFailures })}
+						onChange={(turnFailures) => change({ turnFailures })}
 					/>
 				}
 			/>
 			<SettingsChoiceRow
-				label="My routines run"
-				options={ROUTINE_RUN_OPTIONS}
-				value={settings.routineRuns}
-				onChange={(routineRuns) => update.mutate({ ...preferencesOf(settings), routineRuns })}
+				label="My automations run"
+				options={AUTOMATION_RUN_OPTIONS}
+				value={settings.automationRuns}
+				onChange={(automationRuns) => change({ automationRuns })}
 			/>
 		</SettingsGroup>
 	);
 }
 
 function QuietHoursSettings({ settings }: { settings: NotificationSettings }) {
-	const update = useUpdateNotificationPreferences();
+	const change = useChangeNotificationPreferences();
 	const fromId = useId();
 	const toId = useId();
 	const quietHours = settings.quietHours;
-	const save = (next: QuietHours | null) =>
-		update.mutate({ ...preferencesOf(settings), quietHours: next });
+	const save = (next: QuietHours | null) => change({ quietHours: next });
 	const thisDevicesTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 	return (
@@ -283,29 +271,29 @@ function TimeInput({
 			value={value}
 			// A time being typed is empty until it is whole.
 			onChange={(event) => event.target.value && onChange(event.target.value)}
-			className="ml-auto bg-transparent text-sm text-foreground outline-none"
+			className="ml-auto bg-transparent text-sm rounded-sm text-foreground focus-ring"
 		/>
 	);
 }
 
-/** A level for each pod, in place of the person's own, as Slack sets one per channel. */
-function PodLevels({ settings }: { settings: NotificationSettings }) {
-	const { data: pods } = usePods();
-	if (!pods || pods.length === 0) return null;
+/** A level for each project, in place of the member's own. */
+function ProjectLevels({ settings }: { settings: NotificationSettings }) {
+	const { data: projects } = useProjects();
+	if (!projects || projects.length === 0) return null;
 	return (
 		<SettingsGroup
-			label="Pods"
-			note="A pod set to Default follows what you chose above. Right-click a pod or a bot in the sidebar to change it there; a bot's choice wins over its pod's."
+			label="Projects"
+			note="A project or bot set to Default follows what you chose above. Right-click a project or a bot in the sidebar to change it there."
 		>
-			{pods.map((pod) => (
+			{projects.map((project) => (
 				<SettingsRow
-					key={pod.id}
-					label={pod.name}
+					key={project.id}
+					label={project.name}
 					trailing={
 						<NotificationLevelPicker
 							settings={settings}
-							place={{ kind: "pod", id: pod.id }}
-							name={pod.name}
+							place={{ kind: "project", id: project.id }}
+							name={project.name}
 						/>
 					}
 				/>

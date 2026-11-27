@@ -1,14 +1,15 @@
 import type {
 	AnsweredApproval,
-	ApprovalInbox,
 	ApprovalRequest,
 	ToolCallPart,
+	WorkspaceApprovals,
 } from "@sugabots/contracts";
 import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
-import { appHandlers, StoryApp, storyChannelFor, storyWorkspace } from "@/story-app.tsx";
+import { storyApproval } from "@/shell/approval-story.test-support.ts";
+import { revenue } from "@/shell/story-fixtures.test-support.ts";
+import { appHandlers, StoryApp, storyWorkspace } from "@/story-app.test-support.tsx";
 
 /*
  * Every approval across the workspace, opened from the sidebar: what waits on
@@ -17,8 +18,8 @@ import { appHandlers, StoryApp, storyChannelFor, storyWorkspace } from "@/story-
 
 const API = import.meta.env.VITE_API_URL as string;
 
-function call(id: string, tool: string, approval: ToolCallPart["approval"]): ToolCallPart {
-	return {
+function request(id: string, tool: string, approval: ToolCallPart["approval"]) {
+	return storyApproval({
 		type: "tool_call",
 		id: `0199a3a0-0000-7000-8000-0000000007${id}`,
 		tool,
@@ -31,40 +32,22 @@ function call(id: string, tool: string, approval: ToolCallPart["approval"]): Too
 		output: null,
 		status: approval?.status === "pending" ? "awaiting_approval" : "completed",
 		error: null,
-		mutating: true,
 		atOffset: 0,
 		startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
 		finishedAt: null,
 		approval,
-	};
-}
-
-function request(id: string, tool: string, approval: ToolCallPart["approval"]): ApprovalRequest {
-	return {
-		call: call(id, tool, approval),
-		agent: {
-			kind: "agent",
-			id: growthDesk.id,
-			name: growthDesk.name,
-			handle: growthDesk.handle,
-			color: growthDesk.color,
-			face: growthDesk.face,
-			shape: "circle",
-		},
-		podId: revenue.id,
-		threadId: storyChannelFor(growthDesk).id,
-		conversationId: storyChannelFor(growthDesk).id,
-	};
+	});
 }
 
 function answered(id: string, tool: string, answer: AnsweredApproval["answer"]): AnsweredApproval {
-	return { ...request(id, tool, answer), answer };
+	return { ...request(id, tool, { ...answer, approvers: "chat" }), answer };
 }
 
-const inbox: ApprovalInbox = {
+const approvals: WorkspaceApprovals = {
 	waiting: [
 		request("01", "stripe__send_quote", {
 			status: "pending",
+			approvers: "chat",
 			decidedByName: null,
 			decidedAt: null,
 		}),
@@ -89,7 +72,7 @@ const meta = preview.meta({
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
 		msw.use(
-			http.get(`${API}/workspaces/:workspace/chats/approvals`, () => HttpResponse.json(inbox)),
+			http.get(`${API}/workspaces/:workspace/chats/approvals`, () => HttpResponse.json(approvals)),
 			...appHandlers(),
 		);
 	},
@@ -107,9 +90,6 @@ export const Default = meta.story({
 		await expect(within(card).getByRole("button", { name: /^Allow/ })).toBeVisible();
 		await expect(within(card).getByRole("button", { name: /^Deny/ })).toBeVisible();
 		await expect(canvas.getByRole("link", { name: /Delete deal/ })).toHaveTextContent("Denied");
-		const approvals = canvas.getByRole("link", { name: /^Approvals/ });
-		await expect(approvals).toHaveAttribute("aria-current", "page");
-		await expect(approvals).toHaveTextContent("1 waiting on you");
 	},
 });
 
@@ -123,10 +103,8 @@ export const Opened = meta.story({
 			name: "Approval request: Send quote in Stripe",
 		});
 		await expect(page).toHaveTextContent("Acme Retail");
-		// The link waits for the pods and bots too, which can answer after the request.
-		await expect(
-			await canvas.findByRole("link", { name: "Open conversation" }),
-		).toBeInTheDocument();
+		// The link waits for the projects and bots too, which can answer after the request.
+		await expect(await canvas.findByRole("link", { name: "Open chat" })).toBeInTheDocument();
 	},
 });
 
@@ -142,12 +120,43 @@ export const Clear = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${API}/workspaces/:workspace/chats/approvals`, () =>
-				HttpResponse.json({ ...inbox, waiting: [] }),
+				HttpResponse.json({ ...approvals, waiting: [] }),
 			),
 		);
 	},
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText(/^Nothing waiting/)).toBeVisible();
 		await expect(canvas.getByRole("link", { name: /Send email/ })).toHaveTextContent("Allowed");
+	},
+});
+
+/** HostRequestOutsideTheChat shows what the computer needs to reach and where it was requested. */
+export const HostRequestOutsideTheChat = meta.story({
+	beforeEach({ msw }) {
+		const pending = request("04", "request_host", {
+			status: "pending",
+			approvers: "computer-managers",
+			decidedByName: null,
+			decidedAt: null,
+		});
+		const outside: ApprovalRequest = {
+			...pending,
+			chatId: null,
+			rootChatId: null,
+			projectName: revenue.name,
+			call: { ...pending.call, input: { host: "api.acme.example" } },
+		};
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats/approvals`, () =>
+				HttpResponse.json({ waiting: [outside], answered: [] } satisfies WorkspaceApprovals),
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		const card = within(await canvas.findByRole("article", { name: "Growth Desk: Request host" }));
+		await expect(
+			card.getByText(/Growth Desk wants the project's computer to reach a new host/),
+		).toBeVisible();
+		await expect(card.getByText("api.acme.example")).toBeVisible();
 	},
 });

@@ -1,7 +1,7 @@
 import type { Modality, ModelCost } from "@opencode-ai/models";
 import { generatedAt, providers } from "@opencode-ai/models/snapshot";
-import type { ProviderModelCapability, ProviderPresetId } from "@sugabots/contracts";
-import type { DiscoveredModel, ProviderIdentity } from "./dialect.ts";
+import type { BuiltInProviderId, ProviderModelCapability } from "@sugabots/contracts";
+import { capabilitiesFrom, type DiscoveredModel, type ProviderIdentity } from "./dialect.ts";
 
 /**
  * What is known about a model whose provider does not say.
@@ -12,9 +12,6 @@ import type { DiscoveredModel, ProviderIdentity } from "./dialect.ts";
  * OpenCode reads, through the snapshot its package ships: the API never calls
  * out for it, and a dependency bump is what brings in new models. A provider
  * that does report something about a model is always believed over it.
- *
- * Not the catalog: that is our list of presets, this is models.dev's list of
- * models.
  */
 
 /** The part of models.dev the registry reads; the package's `ProviderMap` is one. */
@@ -52,10 +49,10 @@ export interface ModelRegistry {
 }
 
 /**
- * models.dev's id for each preset that it lists, where the two differ or the
+ * models.dev's id for each built-in provider that it lists, where the two differ or the
  * registry gives no address to match on. Anything else is matched by host.
  */
-const MODELS_DEV_PROVIDER: Partial<Record<ProviderPresetId, string>> = {
+const MODELS_DEV_PROVIDER: Partial<Record<BuiltInProviderId, string>> = {
 	anthropic: "anthropic",
 	openai: "openai",
 	chatgpt: "openai",
@@ -108,7 +105,7 @@ export function registryFrom(source: RegistrySource, version: string): ModelRegi
 
 	const ownEntry = (modelId: string, provider: ProviderIdentity): RegistryModel | undefined => {
 		const providerId =
-			(provider.preset && MODELS_DEV_PROVIDER[provider.preset]) ??
+			(provider.builtIn && MODELS_DEV_PROVIDER[provider.builtIn]) ??
 			providerByHost.get(new URL(provider.baseUrl).hostname);
 		return providerId ? source[providerId]?.models[modelId] : undefined;
 	};
@@ -138,24 +135,15 @@ export function registryFrom(source: RegistrySource, version: string): ModelRegi
  * named for it, and the picker relies on the capability to leave them out.
  */
 function capabilitiesOf(modelId: string, known: RegistryModel): ProviderModelCapability[] {
-	const capabilities: ProviderModelCapability[] = [];
-	const input = known.modalities?.input ?? [];
-	const output = known.modalities?.output ?? [];
-	if (known.tool_call) capabilities.push("tools");
-	if (known.reasoning) capabilities.push("reasoning");
-	if (input.includes("image")) capabilities.push("vision");
-	if (input.includes("audio")) capabilities.push("audio");
-	if (output.includes("image")) capabilities.push("images");
+	const capabilities = capabilitiesFrom({
+		tools: known.tool_call === true,
+		thinking: known.reasoning === true,
+		inputs: known.modalities?.input ?? [],
+		outputs: known.modalities?.output ?? [],
+	});
 	if (/embed/.test(bare(modelId))) capabilities.push("embeddings");
 	return capabilities;
 }
-
-/** Fills nothing in, for a test about something else. */
-export const emptyRegistry: ModelRegistry = {
-	complete: (model) => model,
-	cost: () => undefined,
-	version: "empty",
-};
 
 /** The registry over the models.dev snapshot shipped with the installed package. */
 export const modelsDev: ModelRegistry = registryFrom(providers, `models.dev@${generatedAt}`);

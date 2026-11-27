@@ -1,0 +1,86 @@
+import { Turns } from "../turns/turns.ts";
+
+/**
+ * Where the Compaction bot cuts a chat when it gets long. Every limit is a
+ * share of the window of the model reading the chat.
+ */
+
+/** Past this share of the window in a turn's prompt, the Compaction bot compacts the chat. */
+const COMPACTION_LINE_SHARE = 0.7;
+
+/** How much of the newest history the bot keeps reading word for word after compacting. */
+const KEPT_SHARE = 0.25;
+
+/**
+ * How much of its own window the model compacting a chat may be given to
+ * condense. The rest holds its instructions, the previous condensed account, the
+ * condensed account it writes, and the error in estimating tokens.
+ */
+const COMPACTOR_INPUT_SHARE = 0.6;
+
+/** Past this many tokens in a turn's prompt, the Compaction bot compacts the chat. */
+export function compactionLineTokens(windowTokens: number): number {
+	return Math.floor(windowTokens * COMPACTION_LINE_SHARE);
+}
+
+/**
+ * Whether a turn whose prompt measured `contextTokens`, read by a model with
+ * this window, should have its chat compacted.
+ */
+export function needsCompaction(contextTokens: number | undefined, windowTokens: number): boolean {
+	return contextTokens !== undefined && contextTokens >= compactionLineTokens(windowTokens);
+}
+
+export interface CompactionPlan<Message> {
+	/** The messages the Compaction bot condenses, oldest first. */
+	toCondense: Message[];
+	/** When the first condensed message was written: history before it is left out. */
+	historyStartsAt: Date;
+	/** When the first message kept word for word was written. */
+	keptFrom: Date;
+}
+
+/**
+ * Where to cut a chat's history, oldest first: the newest messages are kept
+ * word for word, and the ones just before them are condensed. Nothing before
+ * `previousKeptFrom` is condensed again, since the last compaction already
+ * folded it into its condensed account. Nothing is planned when there is nothing to
+ * condense, such as when the newest messages alone fill what is kept.
+ *
+ * What is kept and condensed is sized to the window of the bot reading the
+ * chat: at the compaction line, the bot read about what is kept plus what is
+ * condensed. What is condensed is also capped to what the model condensing
+ * it can read.
+ */
+export function planCompaction<Message extends { createdAt: Date; tokens: number }>(
+	history: readonly Message[],
+	previousKeptFrom: Date | undefined,
+	windows: { readerTokens: number; compactorTokens: number },
+): CompactionPlan<Message> | undefined {
+	const keptTokens = Math.floor(windows.readerTokens * KEPT_SHARE);
+	const condensedTokens = Math.min(
+		compactionLineTokens(windows.readerTokens) - keptTokens,
+		Math.floor(windows.compactorTokens * COMPACTOR_INPUT_SHARE),
+	);
+	const kept = Turns.newestWithinLimit(history, (message) => message.tokens, keptTokens);
+	const beforeKept = history
+		.slice(0, history.length - kept.length)
+		.filter((message) => !previousKeptFrom || message.createdAt >= previousKeptFrom);
+	const toCondense = Turns.newestWithinLimit(
+		beforeKept,
+		(message) => message.tokens,
+		condensedTokens,
+	);
+	const [firstCondensed] = toCondense;
+	const [firstKept] = kept;
+	// The newest message before what is kept is always taken, so a single one
+	// larger than the Compaction bot may read leaves it nothing it can condense.
+	if (!firstCondensed || !firstKept || firstCondensed.tokens > condensedTokens) {
+		return undefined;
+	}
+	return {
+		toCondense,
+		historyStartsAt: firstCondensed.createdAt,
+		keptFrom: firstKept.createdAt,
+	};
+}

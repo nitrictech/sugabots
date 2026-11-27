@@ -6,13 +6,12 @@ import { noDatabase } from "../../database/testing.ts";
 import {
 	anthropic,
 	chatgpt,
-	emptyRegistry,
 	gemini,
 	ollama,
 	openaiCompatible,
 	openrouter,
 	type ProviderDialect,
-} from "../../providers/model-providers/dialects/index.ts";
+} from "../model-providers/dialects/index.ts";
 import { EgressRefused } from "../network/egress.ts";
 
 const sdk = vi.hoisted(() => ({
@@ -22,7 +21,7 @@ const sdk = vi.hoisted(() => ({
 	openAiChatModel: vi.fn(),
 	openAiResponsesModel: vi.fn(),
 	streamText: vi.fn(() => ({
-		textStream: [],
+		fullStream: [],
 		usage: Promise.resolve({
 			inputTokens: 0,
 			outputTokens: 0,
@@ -52,9 +51,9 @@ vi.mock("ai", async (importOriginal) => {
 });
 
 import { APICallError, TypeValidationError } from "ai";
-import type { ModelProviderRepository } from "../model-providers/model-provider-repository.ts";
+import type { ModelProviderStore } from "../model-providers/model-provider-store.ts";
 import { Models } from "./models.ts";
-import { resolvedModel } from "./testing.ts";
+import { emptyRegistry, resolvedModel } from "./testing.ts";
 
 /** The fake resolver never queries, so nothing here reaches the database. */
 const run = effectRunner(ManagedRuntime.make(noDatabase));
@@ -73,104 +72,16 @@ describe("models", () => {
 		});
 	});
 
-	it.each(["openai", "anthropic"] as const)(
-		"injects the provider's http client into the %s SDK",
-		async (apiFormat) => {
-			const httpClient = vi.fn<typeof fetch>();
-			const model = Models.make({
-				modelProviders: {
-					renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
-					resolve: () =>
-						Effect.succeed(
-							resolvedModel({
-								providerId: "provider-id",
-								preset: null,
-								baseUrl: "https://models.example/v1",
-								apiFormat,
-								apiKey: "secret",
-								headers: { "x-workspace": "workspace" },
-								configurationUpdatedAt: new Date(),
-							}),
-						),
-				},
-				httpClients: { for: () => httpClient },
-				requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
-				registry: emptyRegistry,
-			});
-
-			await run(
-				Effect.scoped(
-					model.stream({
-						workspaceId: "workspace-id",
-						activity: { purpose: "provider-check" },
-						model: "model-id",
-						system: "",
-						messages: [],
-						maxSteps: 1,
-					}),
-				),
-			);
-
-			const createProvider = apiFormat === "anthropic" ? sdk.createAnthropic : sdk.createOpenAI;
-			expect(createProvider).toHaveBeenCalledWith(expect.objectContaining({ fetch: httpClient }));
-		},
-	);
-
-	const prompt = {
-		workspaceId: "workspace-id",
-		activity: { purpose: "provider-check" },
-		system: "",
-		messages: [],
-		maxSteps: 1,
-	} as const;
-
-	it.each([
-		["openai", "https://models.example/v1/", "https://models.example/v1", sdk.createOpenAI],
-		["anthropic", "https://models.example", "https://models.example/v1", sdk.createAnthropic],
-		["anthropic", "https://models.example/v1/", "https://models.example/v1", sdk.createAnthropic],
-	] as const)(
-		"binds the %s SDK's client to where its requests go, from %s",
-		async (apiFormat, baseUrl, requestRoot, createProvider) => {
-			const boundTo = vi.fn((_endpoint: { baseUrl: string }) => vi.fn<typeof fetch>());
-			const model = Models.make({
-				modelProviders: {
-					renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
-					resolve: () =>
-						Effect.succeed(
-							resolvedModel({
-								providerId: "provider-id",
-								preset: null,
-								baseUrl,
-								apiFormat,
-								headers: {},
-								configurationUpdatedAt: new Date(),
-							}),
-						),
-				},
-				httpClients: { for: boundTo },
-				requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
-				registry: emptyRegistry,
-			});
-
-			await run(Effect.scoped(model.stream({ ...prompt, model: "model-id" })));
-
-			expect(boundTo).toHaveBeenCalledExactlyOnceWith({ baseUrl: requestRoot });
-			expect(createProvider).toHaveBeenCalledWith(
-				expect.objectContaining({ baseURL: requestRoot }),
-			);
-		},
-	);
-
-	const endpoint = {
+	const access = {
 		providerId: "provider-id",
-		preset: null,
+		builtIn: null,
 		baseUrl: "https://models.example/v1",
 		apiFormat: "openai" as const,
 		apiKey: "secret",
 		headers: {},
-		configurationUpdatedAt: new Date(),
+		configurationRevision: 0,
 	};
-	const modelResolving = (resolved: ModelProviderRepository.ResolvedModel) =>
+	const modelResolving = (resolved: ModelProviderStore.ResolvedModel) =>
 		Models.make({
 			modelProviders: {
 				renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
@@ -180,23 +91,23 @@ describe("models", () => {
 			requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
 			registry: emptyRegistry,
 		});
-	const ask = (model: Models.Interface) =>
+	const ask = (model: Models.Interface, request: Partial<Models.StreamRequest> = {}) =>
 		Effect.scoped(
 			Effect.flatMap(
 				model.stream({
 					workspaceId: "workspace-id",
-					activity: { purpose: "provider-check" },
+					purpose: { name: "model-test" },
 					model: "model-id",
 					system: "",
 					messages: [],
-					maxSteps: 1,
+					...request,
 				}),
 				(streamed) => streamed.finished,
 			),
 		);
 
 	it("says a provider has no key, rather than that the model was switched off", async () => {
-		const model = modelResolving({ ...resolvedModel(endpoint), endpoint: undefined });
+		const model = modelResolving({ ...resolvedModel(access), access: undefined });
 
 		const failure = await run(Effect.flip(ask(model)));
 
@@ -214,13 +125,13 @@ describe("models", () => {
 				}),
 			});
 			return {
-				textStream: [],
+				fullStream: [],
 				steps: Promise.resolve([]),
 				responseMessages: Promise.resolve([]),
 			};
 		}) as never);
 
-		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(endpoint)))));
+		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(access)))));
 
 		expect(failure).toMatchObject({ _tag: "ProviderOverloaded", isRetryable: true });
 	});
@@ -235,27 +146,53 @@ describe("models", () => {
 		sdk.streamText.mockImplementationOnce(((callbacks: StreamCallbacks) => {
 			events(callbacks);
 			return {
-				textStream: [],
+				fullStream: [],
 				steps: Promise.resolve([]),
 				responseMessages: Promise.resolve([]),
 			};
 		}) as never);
+
+	/** A request continuing a turn, after a step whose tool returned. */
+	const continuing: Partial<Models.StreamRequest> = {
+		continuationMessages: [
+			{
+				role: "tool",
+				content: [
+					{
+						type: "tool-result",
+						toolCallId: "call-1",
+						toolName: "lookup",
+						output: { type: "text", value: "It is here." },
+					},
+				],
+			},
+		],
+	};
 
 	it.each([
 		[
 			"giving the model what its tools returned",
 			(stream: StreamCallbacks) => {
 				stream.prepareStep({ stepNumber: 0, messages: [] });
-				stream.prepareStep({ stepNumber: 1, messages: [] });
 				stream.onError({ error: new Error("socket hang up") });
 			},
 			"after-tools",
+			continuing,
 		],
 		[
 			"the model's reply",
 			(stream: StreamCallbacks) => {
 				stream.prepareStep({ stepNumber: 0, messages: [] });
 				stream.onChunk({ chunk: { type: "text-delta" } });
+				stream.onError({ error: new Error("socket hang up") });
+			},
+			"answering",
+		],
+		[
+			"the model's thinking",
+			(stream: StreamCallbacks) => {
+				stream.prepareStep({ stepNumber: 0, messages: [] });
+				stream.onChunk({ chunk: { type: "reasoning-delta" } });
 				stream.onError({ error: new Error("socket hang up") });
 			},
 			"answering",
@@ -271,67 +208,12 @@ describe("models", () => {
 			},
 			"calling-tool",
 		],
-	])("says a request failed during %s", async (_, events, stage) => {
+	] as const)("says a request failed during %s", async (_, events, stage, request = {}) => {
 		streaming(events);
 
-		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(endpoint)))));
+		const failure = await run(Effect.flip(ask(modelResolving(resolvedModel(access)), request)));
 
 		expect(failure).toMatchObject({ stage });
-	});
-
-	it("asks the Codex backend the way Codex does for a ChatGPT subscription", async () => {
-		const tokens = {
-			access: "access-token",
-			refresh: "refresh-token",
-			expiresAt: Date.now() + 60 * 60_000,
-			accountId: "account-1",
-		};
-		const model = Models.make({
-			modelProviders: {
-				renewOAuthTokens: (_workspaceId, _providerId, renew) => renew(tokens),
-				resolve: () =>
-					Effect.succeed(
-						resolvedModel({
-							providerId: "provider-id",
-							preset: "chatgpt",
-							baseUrl: "https://chatgpt.com/backend-api/codex",
-							apiFormat: "openai",
-							headers: {},
-							oauthTokens: tokens,
-							configurationUpdatedAt: new Date(),
-						}),
-					),
-			},
-			httpClients: { for: () => vi.fn<typeof fetch>() },
-			requests: { start: () => Effect.succeed("request-id"), finish: () => Effect.void },
-			registry: emptyRegistry,
-		});
-
-		await run(
-			Effect.scoped(
-				model.stream({
-					workspaceId: "workspace-id",
-					activity: { purpose: "provider-check" },
-					model: "gpt-5.5",
-					system: "You are Suga.",
-					messages: [{ role: "user", content: "Hello" }],
-					maxSteps: 1,
-				}),
-			),
-		);
-
-		expect(sdk.createOpenAI).toHaveBeenCalledWith(
-			expect.objectContaining({
-				apiKey: "access-token",
-				headers: expect.objectContaining({ "ChatGPT-Account-Id": "account-1" }),
-			}),
-		);
-		expect(sdk.openAiResponsesModel).toHaveBeenCalledWith("gpt-5.5");
-		const request = (sdk.streamText.mock.calls[0] as unknown[])[0];
-		expect(request).toMatchObject({
-			providerOptions: { openai: { instructions: "You are Suga.", store: false } },
-		});
-		expect(request).not.toHaveProperty("system");
 	});
 });
 
@@ -365,7 +247,7 @@ describe("a failed model request", () => {
 			recognize: dialect.recognizeFailure,
 		});
 
-	it("logs what the provider said, and tells people what it means in the names they know", () => {
+	it("logs what the provider said, and tells members what it means in the names they know", () => {
 		const failure = classify(
 			answered(403, {
 				error: {
@@ -515,8 +397,11 @@ describe("a failed model request", () => {
 	it.each([
 		[
 			"the sentence a provider gives as its error",
-			{ code: "invalid-argument", error: "list_routines: tool parameter root must be an object" },
-			"Provider returned 400: list_routines: tool parameter root must be an object",
+			{
+				code: "invalid-argument",
+				error: "list_automations: tool parameter root must be an object",
+			},
+			"Provider returned 400: list_automations: tool parameter root must be an object",
 		],
 		[
 			"the provider's message over the status words beside it",
@@ -609,7 +494,7 @@ describe("a failed model request", () => {
 		});
 	});
 
-	it("keeps an unreadable response for the logs and tells people only that it failed", () => {
+	it("keeps an unreadable response for the logs and tells members only that it failed", () => {
 		const opaque = answered(502, "<html>upstream timed out</html>");
 
 		expect(classify(opaque)).toMatchObject({

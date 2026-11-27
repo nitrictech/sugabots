@@ -4,8 +4,8 @@ description: Host Sugabots on a server or a hosting platform so your team can us
 ---
 
 The [Quickstart](/docs/quickstart) runs Sugabots on your own computer. To use it
-with other people, host it somewhere they can reach over HTTPS, and set up
-email so they receive their invites.
+with other members, host it somewhere they can reach over HTTPS, and set up
+email so they receive their invitations.
 
 Sugabots is a single Docker image, `ghcr.io/nitrictech/sugabots`, that serves
 both the web app and the API. It stores everything in PostgreSQL 18.
@@ -39,7 +39,8 @@ both the web app and the API. It stores everything in PostgreSQL 18.
          DATABASE_URL: postgres://sugabots:${POSTGRES_PASSWORD}@postgres:5432/sugabots
          PUBLIC_URL: https://sugabots.example.com
          BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set it in .env}
-         CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:?Set it in .env}
+         SECRETS_ENCRYPTION_KEY:
+         CREDENTIALS_ENCRYPTION_KEY:
          EMAIL_PROVIDER: resend
          EMAIL_RESEND_API_KEY: ${EMAIL_RESEND_API_KEY:?Set it in .env}
          EMAIL_TRANSACTIONAL_FROM: Sugabots <no-reply@example.com>
@@ -66,7 +67,7 @@ both the web app and the API. It stores everything in PostgreSQL 18.
      postgres_data:
    ```
 
-   `PUBLIC_URL` must be the address people see in their browser: links in
+   `PUBLIC_URL` must be the address members see in their browser: links in
    emails and sign-in redirects are built from it. Every other setting is in the
    [configuration reference](/docs/configuration).
 
@@ -88,7 +89,7 @@ both the web app and the API. It stores everything in PostgreSQL 18.
    ```sh
    echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)" >> .env
    echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" >> .env
-   echo "CREDENTIALS_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
+   echo "SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
    ```
 
    Then add your Resend API key. If you don't have one yet, follow
@@ -132,7 +133,7 @@ both the web app and the API. It stores everything in PostgreSQL 18.
    Another reverse proxy works too, as long as it:
 
    - passes WebSocket connections, which a bot's live desktop uses
-   - accepts uploads up to 30 MB, the largest file people can attach
+   - accepts uploads up to 30 MB, the largest file members can attach
    - sets `X-Forwarded-For` to the client's address, replacing any the client
      sent, since sign-in limits are counted per address
 
@@ -179,7 +180,7 @@ both the web app and the API. It stores everything in PostgreSQL 18.
 
 5. Create your account
 
-   Open `https://sugabots.example.com` and sign up. A new installation lets its
+   Open `https://sugabots.example.com` and sign up. A new server lets its
    first account in without an invitation, and you own the workspace you create.
 
 </Steps>
@@ -199,7 +200,7 @@ Either way, the service needs these settings:
 
 - `DATABASE_URL`: the database's connection string
 - `PUBLIC_URL`: the service's HTTPS address
-- `BETTER_AUTH_SECRET` and `CREDENTIALS_ENCRYPTION_KEY`: generate each with
+- `BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEY`: generate each with
   `openssl rand -base64 32`
 - The email settings from `compose.yml` above: `EMAIL_PROVIDER`,
   `EMAIL_RESEND_API_KEY` and `EMAIL_TRANSACTIONAL_FROM`
@@ -263,8 +264,8 @@ it's replaced.
 
 ## Email
 
-Sugabots sends email for invites and address verification. Without a provider,
-emails are only printed to the logs, and you have to send people their links
+Sugabots sends email for invitations and address verification. Without a provider,
+emails are only printed to the logs, and you have to send members their links
 yourself.
 
 ### Resend
@@ -301,26 +302,33 @@ Resend is the first provider built in, and more are on the way. Each one is a
 in the Sugabots repository, so if yours isn't supported yet, adding it is a
 welcome contribution.
 
-## Sandboxes
+## Computers
 
-To run your bots' sandboxes on your own server with Docker, the server needs
+Set [`ALLOW_UNSAFE_WORKSPACE_URLS=true`](/docs/configuration#network) in the
+Sugabots container’s environment to use a computer provider on the same server
+or LAN. OpenSandbox’s usual local address and the local addresses it returns
+for computers both need this setting. The quickstart Compose file enables it
+for a server you run yourself. Enable it only on a trusted network where you
+trust the workspaces using this server.
+
+To run your bots' computers on your own server with Docker, the server needs
 Linux 5.9 or later. Check which version it runs with:
 
 ```sh
 uname -r
 ```
 
-On an older version, sandboxes start and bots can run commands in them, but
-nothing opens from the dock on a sandbox's desktop: its apps bounce and never
+On an older version, computers start and bots can run commands on them, but
+nothing opens from the dock on a computer's desktop: its apps bounce and never
 appear. Ubuntu 20.04, for example, comes with 5.4. Install a newer kernel, or a
 newer release of your operating system, and restart the server.
 
 ### What OpenSandbox can see
 
-OpenSandbox adds your connections' credentials to a sandbox's requests as
+OpenSandbox adds your connectors' credentials to a computer's requests as
 they leave it. For secure (HTTPS) connections, it decrypts each one beside the
-sandbox, adds the credentials, and encrypts it again before it goes on to the
-site. So OpenSandbox can read the sandbox's connections, the browser's on its
+computer, adds the credentials, and encrypts it again before it goes on to the
+site. So OpenSandbox can read the computer's connections, the browser's on its
 desktop included, and whoever runs your OpenSandbox can see what's sent
 through them, such as a password typed into a site.
 
@@ -337,6 +345,12 @@ docker compose up -d
 ```
 
 Sugabots applies any database migrations when it starts.
+
+If your installation uses `CREDENTIALS_ENCRYPTION_KEY`, the new image can still
+read it. To switch to `SECRETS_ENCRYPTION_KEY`, rename the variable in `.env`,
+keep its value, and update the `environment` section of `compose.yml` to pass
+`SECRETS_ENCRYPTION_KEY` through as shown above. On a hosting platform, rename
+the variable in the service's settings and keep its value.
 
 To try changes before they're released, use `ghcr.io/nitrictech/sugabots:edge`
 instead of `:latest`. It's rebuilt each time the main branch changes, so it can

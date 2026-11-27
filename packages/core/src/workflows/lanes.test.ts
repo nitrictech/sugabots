@@ -1,9 +1,10 @@
 import { Activities } from "@sugabots/workflow/activities";
+import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { eq, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, ManagedRuntime, Option, Schedule, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { type Database, layer as databaseLayer, query } from "../database/database.ts";
+import { type Database, layer as databaseLayer, query, transaction } from "../database/database.ts";
 import { Lanes } from "./lanes.ts";
 import { lane, laneRequest } from "./sql.ts";
 
@@ -14,7 +15,16 @@ const Held = Workflow.make("test/lane-held", {
 
 // Holds its lane until the test releases it.
 const Forever = DurableDeferred.make("forever");
-const HeldLive = Held.toLayer(() => DurableDeferred.await(Forever));
+const RESUME_ROUND = "approval/1";
+const resumed: string[] = [];
+const HeldLive = Held.toLayer(({ request, key }) =>
+	request === "asking"
+		? DurableDeferred.await(Lanes.laneGranted(RESUME_ROUND)).pipe(
+				Effect.tap(() => Effect.sync(() => resumed.push(key))),
+				Effect.andThen(DurableDeferred.await(Forever)),
+			)
+		: DurableDeferred.await(Forever),
+);
 
 // Finishes at once, without releasing its lane.
 const Done = Workflow.make("test/lane-done", {
@@ -158,6 +168,38 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 		expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
 	});
 
+	it("lets other work run while an approval waits and admits the resumed execution once in order", async () => {
+		const key = crypto.randomUUID();
+		const service = await lanes();
+		const admit = (request: string, whenBusy: Lanes.WhenBusy | "resume") =>
+			run(
+				service.admit({
+					key,
+					workflow: Held,
+					payload: { key, request },
+					...(whenBusy === "resume" ? { whenBusy, resumeRound: RESUME_ROUND } : { whenBusy }),
+				}),
+			);
+		const release = async (request: string) =>
+			run(service.release({ key, executionId: await executionIdOf(key, request) }));
+		await admit("asking", "queue");
+		await admit("other", "queue");
+		await release("asking");
+		expect(await laneOf(key)).toMatchObject({ executionId: await executionIdOf(key, "other") });
+		await admit("older", "queue");
+		expect(await admit("asking", "resume")).toBe("waiting");
+		expect(await admit("asking", "resume")).toBe("waiting");
+		expect(await admit("your next turn", "coalesce")).toBe("coalesced");
+		expect(await waitingIn(key)).toHaveLength(2);
+		await release("other");
+		expect(await laneOf(key)).toMatchObject({ executionId: await executionIdOf(key, "older") });
+		expect(resumed).not.toContain(key);
+		await release("older");
+		await vi.waitFor(() => expect(resumed).toContain(key));
+		expect(await laneOf(key)).toMatchObject({ executionId: await executionIdOf(key, "asking") });
+		expect(await waitingIn(key)).toEqual([]);
+	});
+
 	it("drops a request for the execution that is releasing the lane", async () => {
 		const key = crypto.randomUUID();
 		const service = await lanes();
@@ -209,6 +251,34 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 			state: "running",
 			executionId: await executionIdOf(key, "a"),
 		});
+	});
+
+	it("never hands the lane to an execution queued to resume that ended first, so the lane frees at once", async () => {
+		const key = crypto.randomUUID();
+		const service = await lanes();
+		const admit = (request: string, whenBusy: Lanes.WhenBusy | "resume") =>
+			run(
+				service.admit({
+					key,
+					workflow: Held,
+					payload: { key, request },
+					...(whenBusy === "resume" ? { whenBusy, resumeRound: RESUME_ROUND } : { whenBusy }),
+				}),
+			);
+		const release = async (request: string) =>
+			run(service.release({ key, executionId: await executionIdOf(key, request) }));
+		await admit("asking", "queue");
+		await admit("other", "queue");
+		await release("asking");
+		expect(await admit("asking", "resume")).toBe("waiting");
+
+		// Interrupted while queued, it ends, releasing a lane it doesn't hold,
+		// before its workflow is recorded as complete.
+		await release("asking");
+		expect(await waitingIn(key)).toEqual([]);
+		await release("other");
+
+		expect(await laneOf(key)).toMatchObject({ state: "idle", executionId: null });
 	});
 
 	it("says whether work is under way about a subject", async () => {
@@ -264,6 +334,59 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 		expect(await laneOf(key)).toMatchObject({ state: "running", executionId });
 		const polled = await run(Held.poll(executionId));
 		expect(Option.isSome(polled)).toBe(true);
+	});
+
+	it("repairs the other lanes when one holds a workflow no process runs", async () => {
+		const gone = crypto.randomUUID();
+		const crashed = crypto.randomUUID();
+		const executionId = await executionIdOf(crashed, "a");
+		const longAgo = sql`now() - interval '1 day'`;
+		await runtime.runPromise(
+			query((db) =>
+				db.insert(lane).values([
+					// Left by a workflow since removed, starting and running.
+					{
+						key: `${gone}:starting`,
+						state: "starting",
+						workflow: "routine",
+						executionId: "removed-1",
+						payload: { routineId: gone },
+						updatedAt: longAgo,
+					},
+					{
+						key: `${gone}:running`,
+						state: "running",
+						workflow: "summary",
+						executionId: "removed-2",
+						payload: { sourceMessageId: gone },
+						updatedAt: longAgo,
+					},
+					{
+						key: crashed,
+						state: "starting",
+						workflow: Held._tag,
+						executionId,
+						payload: { key: crashed, request: "a" },
+						updatedAt: longAgo,
+					},
+				]),
+			),
+		);
+
+		await run((await lanes()).reconcile);
+
+		expect(await laneOf(crashed)).toMatchObject({ state: "running", executionId });
+		expect(await laneOf(`${gone}:starting`)).toMatchObject({
+			state: "starting",
+			workflow: "routine",
+		});
+		expect(await laneOf(`${gone}:running`)).toMatchObject({
+			state: "running",
+			workflow: "summary",
+		});
+		await runtime.runPromise(
+			query((db) => db.delete(lane).where(sql`${lane.key} like ${`${gone}:%`}`)),
+		);
 	});
 
 	describe("a lane workflow", () => {
@@ -330,3 +453,62 @@ describe.skipIf(!process.env.DATABASE_URL)("lanes", () => {
 		});
 	});
 });
+
+/**
+ * How long a lane granted in a transaction that stays open after the grant
+ * may take to reach its execution once the transaction commits. The engine
+ * polls for what it missed every ten seconds.
+ */
+const GRANT_DELIVERY_LIMIT = Duration.seconds(2);
+
+describe.skipIf(!process.env.DATABASE_URL)(
+	"lanes on the Postgres engine",
+	{ timeout: 30_000 },
+	() => {
+		it("wakes an execution granted the lane as soon as the transaction granting it commits", async () => {
+			await using durable = ManagedRuntime.make(
+				HeldLive.pipe(
+					Layer.provideMerge(Lanes.layerFor([Held])),
+					Layer.provideMerge(
+						WorkflowEngines.singleRunnerWith({ hostLockWait: Duration.seconds(30) }),
+					),
+					Layer.provideMerge(databaseLayer),
+				),
+			);
+			const key = crypto.randomUUID();
+			const service = await durable.runPromise(Effect.service(Lanes.Service));
+			const executionOf = (request: string) =>
+				durable.runPromise(Held.executionId({ key, request }));
+			const admit = (request: string, resume = false) =>
+				durable.runPromise(
+					service.admit({
+						key,
+						workflow: Held,
+						payload: { key, request },
+						...(resume
+							? { whenBusy: "resume" as const, resumeRound: RESUME_ROUND }
+							: { whenBusy: "queue" as const }),
+					}),
+				);
+			await admit("asking");
+			await admit("other");
+			await durable.runPromise(service.release({ key, executionId: await executionOf("asking") }));
+			expect(await admit("asking", true)).toBe("waiting");
+
+			// Granted in a transaction that goes on, as ending a turn does.
+			const other = await executionOf("other");
+			await durable.runPromise(
+				transaction(
+					Effect.andThen(
+						service.release({ key, executionId: other }),
+						Effect.sleep(Duration.millis(300)),
+					),
+				),
+			);
+			const committed = performance.now();
+			await vi.waitFor(() => expect(resumed).toContain(key), { timeout: 15_000, interval: 20 });
+
+			expect(performance.now() - committed).toBeLessThan(Duration.toMillis(GRANT_DELIVERY_LIMIT));
+		});
+	},
+);

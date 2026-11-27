@@ -8,7 +8,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { ApprovalDemo, HandoffDemo, ModelsDemo, ThreadDemo } from "@/landing/card-demos";
+import { ApprovalDemo, ChatDemo, CollaborationDemo, ModelsDemo } from "@/landing/card-demos";
 import { SectionHeading } from "@/landing/section-heading";
 import { siteColumn } from "@/layout";
 
@@ -24,7 +24,7 @@ const features: readonly [Feature, ...Feature[]] = [
 	{
 		title: "Everyone has the context.",
 		body: "See what was asked, add information, and pick up where someone else left off.",
-		Demo: ThreadDemo,
+		Demo: ChatDemo,
 		bar: "bg-landing-logo-green",
 	},
 	{
@@ -34,9 +34,9 @@ const features: readonly [Feature, ...Feature[]] = [
 		bar: "bg-landing-logo-blue",
 	},
 	{
-		title: "Every handoff is visible.",
+		title: "Every collaboration is visible.",
 		body: "When a bot needs help, it asks another bot on the team. Follow the whole exchange, including what it asked, what came back, and what happens next.",
-		Demo: HandoffDemo,
+		Demo: CollaborationDemo,
 		bar: "bg-landing-logo-red",
 	},
 	{
@@ -163,7 +163,7 @@ export function WorkspaceSection() {
 												aria-controls={panel}
 												onClick={() => pick(index)}
 												className={cn(
-													"w-full cursor-pointer py-5 text-left text-xl/tight font-semibold tracking-normal transition-colors outline-none focus-visible:text-landing-text",
+													"w-full cursor-pointer py-5 text-left text-xl/tight font-semibold tracking-normal transition-colors outline-none focus-visible:text-landing-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-landing-accent focus-visible:outline-solid",
 													isOpen
 														? "text-landing-text"
 														: "text-landing-muted hover:text-landing-text",

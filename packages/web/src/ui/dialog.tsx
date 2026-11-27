@@ -19,13 +19,16 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 }
 
 function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) {
+	const defaults =
+		"fixed inset-0 isolate z-50 bg-scrim motion-safe:transition-opacity motion-safe:duration-100 motion-safe:data-starting-style:opacity-0 motion-safe:data-ending-style:opacity-0";
 	return (
 		<DialogPrimitive.Backdrop
 			data-slot="dialog-overlay"
-			className={cn(
-				"fixed inset-0 isolate z-50 bg-scrim duration-100 data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0",
-				className,
-			)}
+			className={
+				typeof className === "function"
+					? (state) => cn(defaults, className(state))
+					: cn(defaults, className)
+			}
 			{...props}
 		/>
 	);
@@ -46,15 +49,18 @@ function DialogContent({
 	/** On a phone, rise from the bottom edge as a sheet instead of floating in the middle. */
 	sheetOnPhone?: boolean;
 }) {
+	const defaults = cn(
+		"fixed inset-0 z-50 m-auto grid h-fit w-full max-w-(--dialog-max-width) gap-4 rounded-(--radius-dialog) bg-panel p-4 text-foreground text-xs shadow-dialog outline-none sm:max-w-sm motion-safe:transition motion-safe:duration-100 motion-safe:data-starting-style:scale-95 motion-safe:data-starting-style:opacity-0 motion-safe:data-ending-style:scale-95 motion-safe:data-ending-style:opacity-0",
+		sheetOnPhone && sheetOnPhoneClassName,
+	);
 	return (
 		<DialogPortal>
 			{/*
 			 * `forceRender` because Base UI drops a nested dialog's backdrop, on the
-			 * assumption that the dialog above it already dims the page. Settings is
-			 * a dialog now, so every confirmation opened inside it is nested — and
-			 * the settings surface it would be dimming is opaque and fills the
-			 * screen, so without this the confirmation arrives over an undimmed
-			 * page. On a dialog that is not nested the flag changes nothing.
+			 * assumption that the dialog under it already dims the page. A
+			 * confirmation opened from inside another dialog would otherwise sit
+			 * over that dialog undimmed. On a dialog that is not nested the flag
+			 * changes nothing.
 			 */}
 			<DialogOverlay forceRender />
 			{/*
@@ -64,11 +70,11 @@ function DialogContent({
 			 */}
 			<DialogPrimitive.Popup
 				data-slot="dialog-content"
-				className={cn(
-					"fixed inset-0 z-50 m-auto grid h-fit w-full max-w-dialog gap-4 rounded-dialog bg-panel p-4 text-foreground text-xs shadow-dialog duration-100 outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 sm:max-w-sm",
-					sheetOnPhone && sheetOnPhoneClassName,
-					className,
-				)}
+				className={
+					typeof className === "function"
+						? (state) => cn(defaults, className(state))
+						: cn(defaults, className)
+				}
 				{...props}
 			>
 				{children}
@@ -106,4 +112,19 @@ function DialogDescription({ className, ...props }: DialogPrimitive.Description.
 	);
 }
 
-export { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger };
+/** The grab bar at the top of a sheet a phone pulls up from the bottom. `className` places it. */
+function SheetHandle({ className }: { className?: string }) {
+	return (
+		<span aria-hidden className={cn("h-1 w-9 shrink-0 rounded-full bg-border-strong", className)} />
+	);
+}
+
+export {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+	DialogTrigger,
+	SheetHandle,
+};

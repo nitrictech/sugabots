@@ -1,26 +1,19 @@
-import type { ConnectionAccess, ToolAccessCounts } from "@sugabots/contracts";
+import type { ConnectorAccess, ToolAccessCounts } from "@sugabots/contracts";
 import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 
 /*
- * Allowed, Ask first and Off as a connection's settings show them: a line
- * summing up its tools for the pod's list, and a pick-one row for a tool, or
- * a kind of tool, on the connection's own page.
+ * Allowed, Ask first and Off as a connector's settings show them: a line
+ * summing up its tools for the project's list, and a pick-one row for a tool, or
+ * a kind of tool, on the connector's own page.
  */
 
 const ACCESSES = ["allow", "ask", "off"] as const;
 
 const toolOptions = ACCESSES.map((value) => ({ value, label: TOOL_ACCESS_LABELS[value] }));
 
-/** How many of a connection's tools are at each setting, in the order the sentence gives them. */
-const COUNTED: { access: ConnectionAccess; words: string }[] = [
-	{ access: "allow", words: "allowed" },
-	{ access: "ask", words: "ask first" },
-	{ access: "off", words: "off" },
-];
-
 /**
- * What a connection's tools amount to, in a line: the setting they share, or
+ * What a connector's tools amount to, in a line: the setting they share, or
  * how many are at each when they differ. Undefined while it has no tools.
  */
 export function accessSummaryText(counts: ToolAccessCounts): string | undefined {
@@ -34,8 +27,8 @@ export function accessSummaryText(counts: ToolAccessCounts): string | undefined 
 		case "off":
 			return "Off for every bot";
 		case undefined: {
-			const parts = COUNTED.filter(({ access }) => counts[access] > 0).map(
-				({ access, words }) => `${counts[access]} ${words}`,
+			const parts = ACCESSES.filter((access) => counts[access] > 0).map(
+				(access) => `${counts[access]} ${TOOL_ACCESS_LABELS[access].toLowerCase()}`,
 			);
 			return `Custom: ${parts.join(", ")}`;
 		}
@@ -54,9 +47,9 @@ export function AccessToggle({
 }: {
 	/** What it sets, which names the control: a tool's name, or Tools that read. */
 	label: string;
-	value: ConnectionAccess;
+	value: ConnectorAccess;
 	canManage: boolean;
-	onChange: (access: ConnectionAccess) => void;
+	onChange: (access: ConnectorAccess) => void;
 }) {
 	if (!canManage) {
 		return (

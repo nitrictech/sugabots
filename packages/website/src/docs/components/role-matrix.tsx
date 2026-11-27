@@ -8,31 +8,25 @@ import { roleAbilities } from "@sugabots/docs/roles";
 import { cn } from "cn";
 import { CheckIcon, MinusIcon } from "lucide-react";
 import { useState } from "react";
+import { ChoiceChips } from "@/components/ui/choice-chips";
+
+const roleLabels = Object.fromEntries(
+	WORKSPACE_ROLES.map((role) => [role, workspaceRoleLabel(role)]),
+) as Record<WorkspaceRole, string>;
 
 /** Who can do what, with a role to pick out. */
 export function RoleMatrix() {
-	const [picked, setPicked] = useState<WorkspaceRole>("member");
+	const [picked, setPicked] = useState<WorkspaceRole>("editor");
 	return (
 		<div className="my-8 flex flex-col gap-4">
-			<fieldset className="flex flex-wrap gap-2">
-				<legend className="sr-only">Role</legend>
-				{WORKSPACE_ROLES.map((role) => (
-					<button
-						key={role}
-						type="button"
-						aria-pressed={role === picked}
-						onClick={() => setPicked(role)}
-						className={cn(
-							"rounded-full border-2 px-3.5 py-1 text-sm font-semibold transition-colors",
-							role === picked
-								? "border-brand bg-brand text-brand-foreground"
-								: "border-input text-muted-foreground hover:text-foreground",
-						)}
-					>
-						{workspaceRoleLabel(role)}
-					</button>
-				))}
-			</fieldset>
+			<ChoiceChips
+				label="Role"
+				labelClassName="sr-only"
+				tone="brand"
+				options={roleLabels}
+				value={picked}
+				onChange={setPicked}
+			/>
 			<p className="text-sm text-muted-foreground">
 				<span className="font-semibold text-foreground">{workspaceRoleLabel(picked)}:</span>{" "}
 				{workspaceRoleDescription(picked)}
@@ -51,7 +45,7 @@ export function RoleMatrix() {
 							<span
 								className={cn(
 									"flex size-6 shrink-0 items-center justify-center rounded-full",
-									allowed ? "bg-green-500 text-white" : "bg-muted text-muted-foreground",
+									allowed ? "bg-brand text-brand-foreground" : "bg-muted text-muted-foreground",
 								)}
 							>
 								{allowed ? <CheckIcon className="size-3.5" /> : <MinusIcon className="size-3.5" />}

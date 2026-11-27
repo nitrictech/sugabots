@@ -1,4 +1,8 @@
-/** Bot faces, still and lively, and the colours bots wear, shared by the app and the website. */
+/**
+ * Bot faces, still and lively, and the colours bots wear, shared by the app and the website.
+ * The native apps live outside this repository and import from this index and the
+ * `./hop` and `./layer-motion` package exports.
+ */
 
 export * from "./bot-color-variables.ts";
 export * from "./bot-colors.ts";

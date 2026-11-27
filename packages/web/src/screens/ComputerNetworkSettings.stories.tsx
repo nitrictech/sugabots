@@ -1,0 +1,152 @@
+import type { ComputerNetworkSettings } from "@sugabots/contracts";
+import { expect, fn } from "storybook/test";
+import preview from "#storybook/preview";
+import { SettingsPage, SettingsRow } from "@/ui/settings-page.tsx";
+import { ComputerNetworkGroups } from "./ComputerNetworkSettings.tsx";
+
+const trustedHosts = [
+	"github.com",
+	"*.github.com",
+	"*.githubusercontent.com",
+	"registry.npmjs.org",
+	"pypi.org",
+	"files.pythonhosted.org",
+	"deb.debian.org",
+];
+
+const settings: ComputerNetworkSettings = {
+	mode: "allowed-hosts-only",
+	blocking: true,
+	trustedHosts,
+	addedHosts: [
+		{
+			host: "api.stripe.com",
+			addedByName: "Sam Rivera",
+		},
+		{
+			host: "*.internal.example.com",
+			addedByName: "Kim Park",
+		},
+	],
+	blockedHosts: [{ host: "*.pastebin.com", blockedByName: "Kim Park" }],
+};
+
+const meta = preview.meta({
+	title: "Views/ComputerNetworkSettings",
+	component: ComputerNetworkGroups,
+	tags: ["ai-generated"],
+	parameters: { layout: "fullscreen" },
+	args: {
+		modeRow: <SettingsRow label="Allowed hosts only" sub="Only the hosts below" />,
+		settings,
+		pending: false,
+		onAdd: fn(async () => undefined),
+		onRemove: fn(),
+		onBlock: fn(async () => undefined),
+		onUnblock: fn(),
+	},
+	decorators: [
+		(Story) => (
+			<div className="flex min-h-screen flex-col bg-background">
+				<SettingsPage title="Computers" description="Where bots run commands and edit files.">
+					<Story />
+				</SettingsPage>
+			</div>
+		),
+	],
+});
+
+/**
+ * Hosts the workspace added, each with who added it.
+ */
+export const AddedHosts = meta.story({
+	play: async ({ canvas, args, userEvent }) => {
+		await expect(canvas.getByText("api.stripe.com")).toBeVisible();
+		await expect(canvas.getByText(/Added by Sam Rivera/)).toBeVisible();
+
+		await userEvent.type(canvas.getByLabelText("Allow host"), "Docs.Example.com");
+		await userEvent.click(canvas.getByRole("button", { name: "Allow" }));
+		await expect(args.onAdd).toHaveBeenCalledWith("docs.example.com");
+
+		await userEvent.click(canvas.getByRole("button", { name: "Remove api.stripe.com" }));
+		await expect(args.onRemove).toHaveBeenCalledWith("api.stripe.com");
+	},
+});
+
+/** Hosts blocked for every computer, and blocking or unblocking one. */
+export const BlockedHosts = meta.story({
+	play: async ({ canvas, args, userEvent }) => {
+		await expect(canvas.getByText("*.pastebin.com")).toBeVisible();
+		await expect(canvas.getByText("Blocked by Kim Park")).toBeVisible();
+
+		await userEvent.type(canvas.getByLabelText("Block host"), "paste.example.com");
+		await userEvent.click(canvas.getByRole("button", { name: "Block" }));
+		await expect(args.onBlock).toHaveBeenCalledWith("paste.example.com");
+
+		await userEvent.click(canvas.getByRole("button", { name: "Unblock *.pastebin.com" }));
+		await expect(args.onUnblock).toHaveBeenCalledWith("*.pastebin.com");
+	},
+});
+
+/** Only the trusted hosts, listed once asked for. */
+export const TrustedOnly = meta.story({
+	args: {
+		settings: {
+			mode: "allowed-hosts-only",
+			blocking: true,
+			trustedHosts,
+			addedHosts: [],
+			blockedHosts: [],
+		},
+	},
+	play: async ({ canvas, userEvent }) => {
+		await expect(
+			canvas.getByText(
+				/Runs started by a webhook or GitHub event ask for approval before each computer command/,
+			),
+		).toBeVisible();
+		await userEvent.click(canvas.getByText("Trusted hosts"));
+		await expect(canvas.getByText(/registry\.npmjs\.org/)).toBeVisible();
+	},
+});
+
+/** A host the API refused, said under the group. */
+export const Refused = meta.story({
+	args: { error: new Error("Enter a domain name, such as api.example.com or *.example.com") },
+});
+
+/** Open: every host but the blocked ones, which can still be changed; the allowed hosts wait. */
+export const Open = meta.story({
+	args: {
+		modeRow: <SettingsRow label="Open" sub="Any host but the blocked ones below" />,
+		settings: { ...settings, mode: "open" },
+	},
+	play: async ({ canvas, args, userEvent }) => {
+		await expect(
+			canvas.getByText(
+				/Runs started by a webhook or GitHub event ask for approval before each computer command/,
+			),
+		).toBeVisible();
+		await expect(canvas.getByText(/Any host but the blocked ones below/)).toBeVisible();
+		await expect(canvas.queryByLabelText("Allow host")).toBeNull();
+		await expect(canvas.queryByText("api.stripe.com")).toBeNull();
+
+		await userEvent.type(canvas.getByLabelText("Block host"), "paste.example.com");
+		await userEvent.click(canvas.getByRole("button", { name: "Block" }));
+		await expect(args.onBlock).toHaveBeenCalledWith("paste.example.com");
+	},
+});
+
+/** Open at a provider that can't block hosts: the blocked hosts don't apply, so they aren't offered. */
+export const OpenWithoutBlocking = meta.story({
+	args: {
+		modeRow: <SettingsRow label="Open" sub="Any host" />,
+		settings: { ...settings, mode: "open", blocking: false },
+	},
+	play: async ({ canvas }) => {
+		await expect(canvas.getByText("Any host")).toBeVisible();
+		await expect(canvas.getByText(/can't block hosts/)).toBeVisible();
+		await expect(canvas.queryByLabelText("Block host")).toBeNull();
+		await expect(canvas.queryByText("*.pastebin.com")).toBeNull();
+	},
+});

@@ -1,10 +1,10 @@
-import type { BotLook } from "@sugabots/avatars";
+import type { AvatarParts } from "@sugabots/avatars";
 import type { AccentTone } from "@/components/accent";
 
 /** A page's place in the docs: its file in `packages/docs/content/`, and the bot that hosts it. */
-export interface DocLink {
+interface DocLink {
 	slug: string;
-	bot: BotLook;
+	bot: AvatarParts;
 }
 
 export interface DocGroup {
@@ -22,41 +22,41 @@ export const docGroups: readonly DocGroup[] = [
 		tone: "emerald",
 		summary: "What Sugabots is, how to run it, and your first bot.",
 		pages: [
-			{ slug: "introduction", bot: { color: "green", face: "pill" } },
-			{ slug: "quickstart", bot: { color: "sky", face: "dot" } },
-			{ slug: "first-workspace", bot: { color: "purple", face: "wink" } },
+			{ slug: "introduction", bot: { color: "green", eyes: "pill" } },
+			{ slug: "quickstart", bot: { color: "sky", eyes: "dot" } },
+			{ slug: "first-workspace", bot: { color: "purple", eyes: "wink" } },
 		],
 	},
 	{
 		title: "How it works",
 		tone: "sky",
-		summary: "The pieces of a workspace, and how people and bots use them together.",
+		summary: "The pieces of a workspace, and how members and bots use them together.",
 		pages: [
-			{ slug: "pods", bot: { color: "teal", face: "square" } },
-			{ slug: "bots", bot: { color: "orange", face: "dot" } },
-			{ slug: "conversations", bot: { color: "sky", face: "pill" } },
-			{ slug: "tools-and-approvals", bot: { color: "yellow", face: "square" } },
-			{ slug: "connections", bot: { color: "ice", face: "arc" } },
-			{ slug: "models", bot: { color: "rose", face: "wink" } },
-			{ slug: "usage", bot: { color: "amber", face: "square" } },
-			{ slug: "web-search", bot: { color: "teal", face: "wink" } },
-			{ slug: "routines", bot: { color: "yellow", face: "pill" } },
-			{ slug: "people-and-roles", bot: { color: "green", face: "arc" } },
+			{ slug: "bots", bot: { color: "orange", eyes: "dot" } },
+			{ slug: "projects", bot: { color: "teal", eyes: "square" } },
+			{ slug: "chats", bot: { color: "sky", eyes: "pill" } },
+			{ slug: "tools-and-approvals", bot: { color: "yellow", eyes: "square" } },
+			{ slug: "connectors", bot: { color: "ice", eyes: "arc" } },
+			{ slug: "models", bot: { color: "rose", eyes: "wink" } },
+			{ slug: "usage", bot: { color: "amber", eyes: "square" } },
+			{ slug: "web-search", bot: { color: "teal", eyes: "wink" } },
+			{ slug: "automations", bot: { color: "yellow", eyes: "pill" } },
+			{ slug: "members-and-roles", bot: { color: "green", eyes: "arc" } },
 		],
 	},
 	{
 		title: "Run it yourself",
 		tone: "orange",
-		summary: "Keep an installation up to date, or host it for your team.",
+		summary: "Keep a server up to date, or host it for your team.",
 		pages: [
-			{ slug: "run-and-update", bot: { color: "orange", face: "pill" } },
-			{ slug: "deploy-with-docker", bot: { color: "ice", face: "dot" } },
+			{ slug: "run-and-update", bot: { color: "orange", eyes: "pill" } },
+			{ slug: "deploy-with-docker", bot: { color: "ice", eyes: "dot" } },
 		],
 	},
 	{
 		title: "Reference",
 		tone: "purple",
 		summary: "Every setting, in one place.",
-		pages: [{ slug: "configuration", bot: { color: "purple", face: "square" } }],
+		pages: [{ slug: "configuration", bot: { color: "purple", eyes: "square" } }],
 	},
 ];

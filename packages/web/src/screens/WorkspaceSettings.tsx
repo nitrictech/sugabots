@@ -1,35 +1,34 @@
 import { type Liveliness, livelinessLevels } from "@sugabots/avatars";
 import {
-	type Agent,
-	type Pod,
-	USER_NAME_MAX_LENGTH,
+	MEMBER_NAME_MAX_LENGTH,
 	WORKSPACE_NAME_MAX_LENGTH,
 	type WorkspaceRole,
 	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, RotateCcw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { useLivelinessChoice } from "@/lib/liveliness.tsx";
 import { SETTINGS_BESIDE, useMediaQuery } from "@/lib/media.ts";
-import { usePods } from "@/lib/pods.ts";
+import { countOf } from "@/lib/name-list.ts";
+import { type SettingsLocation, sectionOf } from "@/lib/open-settings.ts";
+import { useProjects } from "@/lib/projects.ts";
 import { useReferralLink, useResetReferralLink } from "@/lib/referrals.ts";
 import { useSession, useSignOut, useUpdateName } from "@/lib/session.ts";
-import { useBackToHere } from "@/lib/settings-back.tsx";
 import { type Theme, useTheme } from "@/lib/theme.ts";
 import {
 	useDeleteWorkspace,
+	useMemberships,
 	useUpdateWorkspace,
 	useWorkspace,
-	useWorkspaceMembers,
 	useWorkspacePermissions,
 	useWorkspaceRole,
 	useWorkspaceTimeZone,
 } from "@/lib/workspace.ts";
-import type { PodSettingsPage, WorkspaceSettingSection } from "@/lib/workspace-settings.ts";
 import { Alert } from "@/ui/alert.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
@@ -42,56 +41,38 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { AgentSettingsPage } from "./AgentSettingsPage.tsx";
+import { useCopy } from "@/ui/use-copy.ts";
+import { ComputerSettings } from "./ComputerSettings.tsx";
 import { DefaultModelSettings, ModelsSettings, SystemModelSettings } from "./ModelsSettings.tsx";
 import { NotificationsSettings } from "./NotificationsSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
-import { SandboxSettings } from "./SandboxSettings.tsx";
 import { TimeZoneDialog } from "./TimeZoneDialog.tsx";
 import { UsageSettings } from "./UsageSettings.tsx";
 import { WebSearchSettings } from "./WebSearchSettings.tsx";
-import { WorkspaceMembersSettings } from "./WorkspaceMembersSettings.tsx";
-import { WorkspacePodsSettings } from "./WorkspacePodsSettings.tsx";
+import { WorkspaceMemberSettings } from "./WorkspaceMemberSettings.tsx";
 
 export function WorkspaceSettings({
-	section,
-	selectedAgent,
-	selectedPodId,
-	podPage,
-	selectedConnectionId,
-	connectionSignInError,
-	selectedProviderId,
-	modelChoice,
-	selectedMemberId,
+	page,
 }: {
-	section: WorkspaceSettingSection;
-	/** A bot open on its own page, in place of its pod's. */
-	selectedAgent?: { agent: Agent; pod: Pod };
-	selectedPodId?: string;
-	/** Which of the selected pod's pages is open. */
-	podPage?: PodSettingsPage;
-	/** The connection of the selected pod open on its own page. */
-	selectedConnectionId?: string;
-	connectionSignInError?: string;
-	/** The provider open on the Models page. */
-	selectedProviderId?: string;
-	/** Which model the Models page shows the choice of instead: new bots' or the system bots'. */
-	modelChoice?: "default" | "system";
-	/** The membership open on the Members page. */
-	selectedMemberId?: string;
+	/** The page open: a section, or one of a section's own pages; not the list of them. */
+	page: Exclude<SettingsLocation, { kind: "sections" }>;
 }) {
+	const section = sectionOf(page);
+	const selectedProviderId = page.kind === "provider" ? page.provider : undefined;
+	const modelChoice = page.kind === "model" ? page.choice : undefined;
+	const selectedMembershipId = page.kind === "member" ? page.membership : undefined;
 	const { workspace, isPending } = useWorkspace();
 	const session = useSession();
 	const may = useWorkspacePermissions();
 	const role = useWorkspaceRole();
 
-	// The shell sends somebody in no workspace to onboarding, so there is always one here.
+	// The shell sends somebody in no workspace to workspace setup, so there is always one here.
 	if (isPending || !workspace) return null;
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			{section === "providers" && may.manageProviders ? (
-				modelChoice === "system" && may.configureBuiltInAgents ? (
+				modelChoice === "system" && may.chooseSystemModel ? (
 					<SystemModelSettings />
 				) : modelChoice === "default" ? (
 					<DefaultModelSettings />
@@ -100,20 +81,6 @@ export function WorkspaceSettings({
 				) : (
 					<ModelsSettings />
 				)
-			) : selectedAgent ? (
-				<AgentSettingsPage
-					key={selectedAgent.agent.id}
-					agent={selectedAgent.agent}
-					pod={selectedAgent.pod}
-				/>
-			) : section === "pods" ? (
-				<WorkspacePodsSettings
-					selectedPodId={selectedPodId}
-					podPage={podPage}
-					selectedConnectionId={selectedConnectionId}
-					connectionSignInError={connectionSignInError}
-					canCreatePods={may.createPods}
-				/>
 			) : (
 				<>
 					{section === "general" && (
@@ -123,16 +90,16 @@ export function WorkspaceSettings({
 							canDelete={may.deleteWorkspace}
 						/>
 					)}
-					{section === "profile" && <ProfileSettings />}
+					{section === "account" && <AccountSettings />}
 					{section === "notifications" && <NotificationsSettings />}
 					{section === "members" && (
-						<WorkspaceMembersSettings
+						<WorkspaceMemberSettings
 							workspaceId={workspace.id}
 							canManage={may.manageMembers}
 							canManageAdmins={may.manageAdmins}
-							canTransferOwnership={may.transferOwnership}
-							currentUserId={session.user?.id}
-							selectedMemberId={selectedMemberId}
+							canHandOverOwnership={may.handOverOwnership}
+							currentUserId={session.member?.id}
+							selectedMembershipId={selectedMembershipId}
 						/>
 					)}
 					{section === "search" && (
@@ -147,13 +114,13 @@ export function WorkspaceSettings({
 							)}
 						</SettingsPage>
 					)}
-					{section === "sandboxes" && (
+					{section === "computers" && (
 						<SettingsPage
 							title="Computers"
-							description="Give bots their own computer to run commands, browse and edit files."
+							description="Give each project and each bot a computer to run commands, browse and edit files on."
 						>
 							{may.manageProviders ? (
-								<SandboxSettings />
+								<ComputerSettings />
 							) : (
 								<Alert>Only workspace administrators can manage computers.</Alert>
 							)}
@@ -164,7 +131,9 @@ export function WorkspaceSettings({
 							<UsageSettings />
 						) : (
 							<SettingsPage title="Usage">
-								<Alert>Only workspace administrators can see what the workspace spends.</Alert>
+								<Alert>
+									Only workspace administrators can see what the workspace's models cost.
+								</Alert>
 							</SettingsPage>
 						))}
 					{section === "providers" && (
@@ -180,12 +149,11 @@ export function WorkspaceSettings({
 
 /** What General says the workspace holds, once both counts have loaded. */
 function workspaceSummary(
-	people: number | undefined,
-	pods: number | undefined,
+	members: number | undefined,
+	projects: number | undefined,
 ): string | undefined {
-	if (people === undefined || pods === undefined) return undefined;
-	const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
-	return `Workspace with ${plural(people, "member")} and ${plural(pods, "pod")}`;
+	if (members === undefined || projects === undefined) return undefined;
+	return `Workspace with ${countOf(members, "member", "members")} and ${countOf(projects, "project", "projects")}`;
 }
 
 function GeneralSettings({
@@ -198,10 +166,10 @@ function GeneralSettings({
 	canDelete: boolean;
 }) {
 	const { workspace } = useWorkspace();
-	const { data: members } = useWorkspaceMembers(workspace?.id);
-	const { data: pods } = usePods();
+	const { data: memberships } = useMemberships(workspace?.id);
+	const { data: projects } = useProjects();
 	const [choosingTimeZone, setChoosingTimeZone] = useState(false);
-	// Loaded with the page, so the dialog opens with its routines note already in place.
+	// Loaded with the page, so the dialog opens with its automations note already in place.
 	useWorkspaceTimeZone(workspace?.id ?? "", canUpdate && workspace !== undefined);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const deleteWorkspace = useDeleteWorkspace();
@@ -219,7 +187,10 @@ function GeneralSettings({
 	}
 
 	return (
-		<SettingsPage title="General" description={workspaceSummary(members?.length, pods?.length)}>
+		<SettingsPage
+			title="General"
+			description={workspaceSummary(memberships?.length, projects?.length)}
+		>
 			<SettingsGroup>
 				{canUpdate ? (
 					// Keeps the slug: it is in every link to the workspace, which nothing redirects from.
@@ -235,7 +206,7 @@ function GeneralSettings({
 				)}
 				<SettingsRow
 					label="Time zone"
-					sub="Routines run on this clock"
+					sub="Automations run on this clock"
 					trailing={<SettingsValue>{workspace.timeZone}</SettingsValue>}
 					chevron={canUpdate}
 					onClick={canUpdate ? () => setChoosingTimeZone(true) : undefined}
@@ -257,7 +228,7 @@ function GeneralSettings({
 				<>
 					<SettingsDanger
 						label="Delete workspace"
-						description={`Removes every pod, bot and thread in ${workspace.name}.`}
+						description={`Removes every project, bot and chat in ${workspace.name}.`}
 						action="Delete"
 						onClick={() => setConfirmingDelete(true)}
 					/>
@@ -265,7 +236,7 @@ function GeneralSettings({
 						open={confirmingDelete}
 						onOpenChange={setConfirmingDelete}
 						title={`Delete ${workspace.name}?`}
-						description="Its pods, bots, conversations and connections are deleted, and everyone in it loses it. This can't be undone."
+						description="Its projects, bots, chats and connectors are deleted, and everyone in it loses it. This can't be undone."
 						pending={deleteWorkspace.isPending}
 						error={deleteWorkspace.error ? failureMessage(deleteWorkspace.error) : undefined}
 						onDelete={() => confirmDelete(workspace.id)}
@@ -310,25 +281,24 @@ function LivelinessChoice() {
 	);
 }
 
-function ProfileSettings() {
+function AccountSettings() {
 	const session = useSession();
 	const signOut = useSignOut();
 	const updateName = useUpdateName();
 	const openedFromCard = !useMediaQuery(SETTINGS_BESIDE);
-	const backToProfile = useBackToHere("You");
-	const user = session.user;
-	if (!user) return null;
+	const signedIn = session.member;
+	if (!signedIn) return null;
 
 	return (
 		<SettingsPage
-			hero={<PersonAvatar person={user} size={44} />}
-			title={user.name}
-			description={user.email}
+			hero={<MemberAvatar member={signedIn} size={44} />}
+			title={signedIn.name}
+			description={signedIn.email}
 		>
 			<SettingsGroup label="Account">
 				<SettingsNameRow
-					name={user.name}
-					maxLength={USER_NAME_MAX_LENGTH}
+					name={signedIn.name}
+					maxLength={MEMBER_NAME_MAX_LENGTH}
 					savePending={updateName.isPending}
 					error={updateName.error ? failureMessage(updateName.error) : undefined}
 					onCommit={(name) => updateName.mutateAsync(name)}
@@ -336,7 +306,7 @@ function ProfileSettings() {
 				<SettingsControlRow label="Email">
 					{/* In the name's column and at its size, which a touch screen keeps at 16px for its field. */}
 					<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground pointer-coarse:text-base">
-						{user.email}
+						{signedIn.email}
 					</span>
 				</SettingsControlRow>
 			</SettingsGroup>
@@ -348,20 +318,13 @@ function ProfileSettings() {
 					trailing={<LivelinessChoice />}
 				/>
 			</SettingsGroup>
-			{/* Below a laptop's width your profile is opened from a card, with no list beside it that has Notifications. */}
+			{/* Below a laptop's width your account is opened from a card, with no list beside it that has Notifications. */}
 			{openedFromCard && (
 				<SettingsGroup>
 					<SettingsRow
 						label="Notifications"
 						chevron
-						render={
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: "notifications" }}
-								state={backToProfile}
-							/>
-						}
+						render={<Link {...settingsSectionLink("notifications")} />}
 					/>
 				</SettingsGroup>
 			)}
@@ -376,27 +339,12 @@ function ProfileSettings() {
 	);
 }
 
-/** How long Copied shows before the button reads Copy link again. */
-const COPIED_FEEDBACK_MS = 2000;
-
-/** The link that lets somebody new sign up, where the installation signs people up by referral. */
+/** The link that lets somebody new sign up, where the server signs members up by referral. */
 function ReferralLinkSettings() {
 	const { data: link } = useReferralLink();
 	const reset = useResetReferralLink();
-	const [copied, setCopied] = useState(false);
-	useEffect(() => {
-		if (!copied) return;
-		const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
-		return () => clearTimeout(timer);
-	}, [copied]);
+	const { copied, label, copy } = useCopy("Copy");
 	if (!link) return null;
-
-	function copy(url: string) {
-		void navigator.clipboard
-			?.writeText(url)
-			.then(() => setCopied(true))
-			.catch(() => setCopied(false));
-	}
 
 	return (
 		<SettingsGroup
@@ -410,10 +358,7 @@ function ReferralLinkSettings() {
 						variant="ghost"
 						size="bare"
 						disabled={reset.isPending}
-						onClick={() => {
-							setCopied(false);
-							reset.mutate();
-						}}
+						onClick={() => reset.mutate()}
 						className="rounded-md px-1 py-0.5 text-xs"
 					>
 						<RotateCcw aria-hidden />
@@ -423,7 +368,7 @@ function ReferralLinkSettings() {
 			}
 		>
 			<div className="flex flex-col gap-1">
-				<h3 className="m-0 font-medium text-sm text-foreground">Share your invite link</h3>
+				<h3 className="m-0 font-medium text-sm text-foreground">Share your referral link</h3>
 				<p className="m-0 text-muted-foreground text-xs">
 					Anyone with it can sign up and get a workspace of their own.
 				</p>
@@ -432,20 +377,16 @@ function ReferralLinkSettings() {
 				<span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
 					{withoutScheme(link)}
 				</span>
-				<Button
-					size="sm"
-					onClick={() => copy(link)}
-					className="bg-link text-background hover:bg-link hover:opacity-90"
-				>
+				<Button size="sm" onClick={() => void copy(link)}>
 					{copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-					{copied ? "Copied" : "Copy"}
+					{label}
 				</Button>
 			</div>
 		</SettingsGroup>
 	);
 }
 
-/** A link as people read it: `sugabots.app/join/…`, since every one starts with https://. */
+/** A link as members read it: `sugabots.app/join/…`, since every one starts with https://. */
 function withoutScheme(url: string): string {
 	return url.replace(/^https?:\/\//, "");
 }

@@ -11,7 +11,7 @@ import { type Backdrop, backdropSvg } from "./backdrops.ts";
  * sharp at every zoom and nothing is scaled up afterwards.
  */
 
-export interface StageLayout {
+interface StageLayout {
 	/** The stage's size, in CSS pixels: the capture is this at `deviceScaleFactor`. */
 	stage: { width: number; height: number };
 	/** The app's own viewport inside the window, in CSS pixels. */

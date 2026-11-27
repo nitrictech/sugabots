@@ -1,8 +1,9 @@
 import { InternalServerError } from "@sugabots/contracts/http";
 import { UserText, userText } from "@sugabots/errors";
 import { createAuthClient } from "better-auth/client";
+import { Effect } from "effect";
 import { failureForStatus, isApiFailure } from "./errors.ts";
-import type { TokenStore } from "./tokens.ts";
+import type { Api } from "./index.ts";
 
 /**
  * Signing up, in and out, which better-auth serves under `/auth` with a client
@@ -11,34 +12,21 @@ import type { TokenStore } from "./tokens.ts";
  * callers need not know which half of the API they are talking to.
  */
 
-export interface AuthClientOptions {
+interface AuthClientOptions {
 	baseUrl: string;
-	tokens?: TokenStore;
 	fetch?: typeof globalThis.fetch;
-	/** Overrides the declared origin outside the browser. See below. */
-	origin?: string;
+	/** The API's routes, for what changes an account through an operation of its own. */
+	api: Api;
 }
 
-export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOptions) {
+export function createAuthApi({ baseUrl, fetch, api }: AuthClientOptions) {
 	// better-auth's `basePath` is ignored whenever `baseURL` already carries a
 	// path, and `baseUrl` carries the API's mount path, so /auth goes in the URL.
 	const auth = createAuthClient({
 		baseURL: `${baseUrl}/auth`,
 		fetchOptions: {
 			...(fetch ? { customFetchImpl: fetch } : {}),
-			credentials: tokens ? "omit" : "include",
-			headers: declaredOrigin(baseUrl, origin),
-			...(tokens
-				? {
-						auth: { type: "Bearer" as const, token: () => tokens.get() },
-						onSuccess: (context: { response: Response }) => {
-							const issued = context.response.headers.get("set-auth-token");
-							if (issued) {
-								tokens.set(issued);
-							}
-						},
-					}
-				: {}),
+			credentials: "include",
 		},
 	});
 
@@ -66,39 +54,23 @@ export function createAuthApi({ baseUrl, tokens, fetch, origin }: AuthClientOpti
 		resetPassword: (input: { token: string; newPassword: string }) =>
 			orThrow(auth.resetPassword(input)),
 
-		updateName: (input: { name: string }) => orThrow(auth.updateUser(input)),
+		/**
+		 * Changes your name, which other members see and which makes your handle,
+		 * through the API rather than better-auth, so every workspace you are in
+		 * is told.
+		 */
+		updateName: async (input: { name: string }) => {
+			await Effect.runPromise(api.rename({ payload: input }));
+			return { status: true } as const;
+		},
 
 		async signOut(): Promise<void> {
-			try {
-				await orThrow(auth.signOut());
-			} finally {
-				// Whether or not the server accepted it, this client is done
-				// with the token; keeping it would only fail every next request.
-				tokens?.set(undefined);
-			}
+			await orThrow(auth.signOut());
 		},
 	};
 }
 
 export type AuthApi = ReturnType<typeof createAuthApi>;
-
-/**
- * better-auth refuses a sign-in that arrives without an `Origin` it trusts,
- * which is what stops a page on another site from posting a form at it. A
- * browser sets that header itself and will not let us touch it. Nothing else
- * sets it at all, so Electron, React Native and scripts have to say who they
- * are, and the honest answer is the API's own origin: they are not a web page.
- *
- * Sending it only outside the browser keeps the protection where it matters —
- * a caller that can set headers freely was never the thing being defended
- * against.
- */
-function declaredOrigin(baseUrl: string, override?: string): Record<string, string> {
-	if (typeof window !== "undefined") {
-		return {};
-	}
-	return { origin: override ?? new URL(baseUrl).origin };
-}
 
 interface Failure {
 	status?: number;
@@ -134,22 +106,16 @@ async function orThrow<T>(
 
 /**
  * Whether the API refused because this account has not proved its address.
- * Other refusals share its 403, so only the code in `details` tells them apart.
+ * Other refusals share its 403, so only what is behind it tells them apart:
+ * better-auth's code in `details` when signing in, and the `EmailUnverified`
+ * error when opening or accepting an invitation.
  */
 export function isEmailUnverified(failure: unknown): boolean {
 	return (
 		isApiFailure(failure) &&
-		typeof failure.details === "string" &&
-		emailUnverifiedCodes.has(failure.details)
+		(failure.details === "EMAIL_NOT_VERIFIED" || failure.error?._tag === "EmailUnverified")
 	);
 }
-
-const emailUnverifiedCodes = new Set([
-	// Signing in, from better-auth.
-	"EMAIL_NOT_VERIFIED",
-	// Accepting an invitation.
-	"EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION",
-]);
 
 /** Whether a password reset was refused because its link has been used or has expired. */
 export function isResetLinkInvalid(failure: unknown): boolean {

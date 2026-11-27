@@ -1,9 +1,9 @@
 import type { Workspace } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { Check, LogOut, Plus, UserPlus, UserRound } from "lucide-react";
-import type { useBackToHere } from "@/lib/settings-back.tsx";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { chooseWorkspace } from "@/lib/workspace.ts";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -13,11 +13,12 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
+import { initialOf } from "@/ui/letter-tile.tsx";
 
 /**
  * You, at the foot of the sidebar. The menu names you, leads to your
  * preferences and signs you out, and its workspace item opens the workspace's
- * own menu: inviting people, and any other workspace you belong to, or a new
+ * own menu: inviting members, and any other workspace you belong to, or a new
  * one. The workspace's settings are in the sidebar.
  *
  * Choosing a workspace goes to its address, which is what decides the
@@ -25,35 +26,34 @@ import {
  * opens next time.
  */
 export function AccountMenu({
-	user,
+	signedIn,
 	current,
 	workspaces,
-	settingsBack,
 	onSignOut,
 }: {
-	user: { name: string; email: string; image?: string | null };
+	signedIn: { name: string; email: string; image?: string | null };
 	current: Workspace;
 	/** Every workspace you belong to, `current` among them. */
 	workspaces: readonly Workspace[];
-	/** History state for the settings links, so their Back returns to the page they left. */
-	settingsBack?: ReturnType<typeof useBackToHere>;
 	onSignOut: () => void;
 }) {
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
-				aria-label={`Account: ${user.name}`}
+				aria-label={`Account: ${signedIn.name}`}
 				className="focus-ring flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1.5 text-left transition-colors hover:bg-row-hover data-popup-open:bg-row-selected"
 			>
-				<PersonAvatar person={user} size={24} />
-				<span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">{user.name}</span>
+				<MemberAvatar member={signedIn} size={24} />
+				<span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">
+					{signedIn.name}
+				</span>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent side="top" align="start" className="w-58">
 				<div className="flex items-center gap-2.5 p-2">
-					<PersonAvatar person={user} size={32} />
+					<MemberAvatar member={signedIn} size={32} />
 					<span className="flex min-w-0 flex-1 flex-col leading-snug">
-						<span className="truncate font-medium text-sm text-foreground">{user.name}</span>
-						<span className="truncate text-xs text-subtle-foreground">{user.email}</span>
+						<span className="truncate font-medium text-sm text-foreground">{signedIn.name}</span>
+						<span className="truncate text-xs text-subtle-foreground">{signedIn.email}</span>
 					</span>
 				</div>
 				<DropdownMenuSeparator />
@@ -62,17 +62,9 @@ export function AccountMenu({
 						<WorkspaceRow workspace={current} />
 					</DropdownMenuSubTrigger>
 					<DropdownMenuContent side="right" align="end" className="w-58">
-						<DropdownMenuItem
-							render={
-								<Link
-									to="/$workspace/settings/$section"
-									params={{ workspace: current.slug, section: "members" }}
-									state={settingsBack}
-								/>
-							}
-						>
+						<DropdownMenuItem render={<Link {...settingsSectionLink("members")} />}>
 							<UserPlus />
-							Invite people
+							Invite members
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						{workspaces.map((workspace) =>
@@ -86,7 +78,7 @@ export function AccountMenu({
 									key={workspace.id}
 									render={
 										<Link
-											to="/$workspace/agents"
+											to="/$workspace"
 											params={{ workspace: workspace.slug }}
 											onClick={() => chooseWorkspace(workspace.id)}
 										/>
@@ -96,22 +88,14 @@ export function AccountMenu({
 								</DropdownMenuItem>
 							),
 						)}
-						<DropdownMenuItem render={<Link to="/onboarding" />}>
+						<DropdownMenuItem render={<Link to="/workspace-setup" />}>
 							<Plus />
 							New workspace
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenuSub>
 				<DropdownMenuSeparator />
-				<DropdownMenuItem
-					render={
-						<Link
-							to="/$workspace/settings/$section"
-							params={{ workspace: current.slug, section: "profile" }}
-							state={settingsBack}
-						/>
-					}
-				>
+				<DropdownMenuItem render={<Link {...settingsSectionLink("account")} />}>
 					<UserRound />
 					Preferences
 				</DropdownMenuItem>
@@ -131,7 +115,7 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
 				aria-hidden
 				className="grid size-4.5 shrink-0 place-items-center rounded-xs bg-tile font-semibold text-3xs text-foreground"
 			>
-				{Array.from(workspace.name.trim())[0]?.toUpperCase() ?? "?"}
+				{initialOf(workspace.name)}
 			</span>
 			<span className="min-w-0 flex-1 truncate">{workspace.name}</span>
 		</>

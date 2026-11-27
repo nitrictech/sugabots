@@ -17,7 +17,7 @@ retain their respective licenses and ownership.
 
 ## Photos
 
-The portraits in `public/people/` are from [Unsplash](https://unsplash.com),
+The portraits in `public/members/` are from [Unsplash](https://unsplash.com),
 used under the [Unsplash License](https://unsplash.com/license):
 
 - `gary-lum.jpg`: photo by Dylan Ferreira, <https://unsplash.com/photos/jIM8kVsFKlM>

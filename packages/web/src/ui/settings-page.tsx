@@ -1,11 +1,20 @@
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "cn";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { type ReactNode, useId } from "react";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { BACK_LABEL_ON_PHONE, BACK_ON_PHONE, usePhoneBack } from "@/ui/back-button.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "@/ui/dropdown-menu.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 
 /*
  * The pieces a settings page is made of, as the design draws them: a centred
@@ -45,7 +54,6 @@ export function SettingsPage({
 	backOnWide = false,
 	headerAction,
 	children,
-	className,
 }: {
 	title?: ReactNode;
 	description?: ReactNode;
@@ -56,14 +64,13 @@ export function SettingsPage({
 	/**
 	 * Whether `back` shows on a wide screen too, where it otherwise gives way to
 	 * the trail: for a step inside another page with no address of its own,
-	 * such as a bot's Instructions, which the trail can't lead back from, and
+	 * such as an automation's Instructions, which the trail can't lead back from, and
 	 * for a page opened from one beside it, such as a provider from Models.
 	 */
 	backOnWide?: boolean;
-	/** A control beside the title, such as Invite people. */
+	/** A control beside the title, such as Invite members. */
 	headerAction?: ReactNode;
 	children: ReactNode;
-	className?: string;
 }) {
 	const phone = !useMediaQuery(SIDE_BY_SIDE);
 	const besideTitle = headerAction && !phone && <div className="shrink-0">{headerAction}</div>;
@@ -91,7 +98,6 @@ export function SettingsPage({
 					// Close under its Back; on a wide screen, as high as any other page.
 					// On a phone every page has a Back above it, the frame's or its own.
 					!back ? "pt-10 max-md:pt-3" : backOnWide ? "pt-3 lg:pt-0.5" : "pt-3 lg:pt-10",
-					className,
 				)}
 			>
 				{hero ? (
@@ -130,7 +136,7 @@ export function SettingsPage({
 export const SETTINGS_CARD =
 	"overflow-hidden rounded-xl border border-settings-card-border bg-settings-card";
 
-/** The outlined + beside a page's title that adds to it: Invite people, New bot. */
+/** The outlined + beside a page's title that adds to it: Invite members, New bot. */
 export function SettingsAddButton({
 	children,
 	onClick,
@@ -180,7 +186,7 @@ export function SettingsGroup({
 	description?: ReactNode;
 	/** A line after the rows: what follows from them. */
 	note?: ReactNode;
-	/** A control at the right of the label, such as Invite people. */
+	/** A control at the right of the label, such as Invite members. */
 	action?: ReactNode;
 	/** 3 under a page's title; 2 where the groups sit straight under the screen's heading. */
 	headingLevel?: 2 | 3;
@@ -206,13 +212,13 @@ export function SettingsGroup({
 				</div>
 			)}
 			{description && (
-				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-xs">
+				<p className="m-0 text-pretty px-0.5 pb-2.5 text-subtle-foreground text-xs leading-normal">
 					{description}
 				</p>
 			)}
 			<div className={cn(SETTINGS_CARD, className)}>{children}</div>
 			{note && (
-				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal max-lg:text-xs">
+				<div className="text-pretty px-0.5 pt-2.5 text-subtle-foreground text-xs leading-normal">
 					{note}
 				</div>
 			)}
@@ -318,7 +324,7 @@ export function SettingsFieldRow({
 				placeholder={placeholder}
 				maxLength={maxLength}
 				className={cn(
-					"min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground",
+					"min-w-0 flex-1 bg-transparent text-xs rounded-sm text-foreground focus-ring placeholder:text-subtle-foreground",
 					mono && "font-mono",
 				)}
 			/>
@@ -329,55 +335,44 @@ export function SettingsFieldRow({
 /**
  * A name, edited in place, which saves trimmed when you leave it or press
  * Enter. Escape, or leaving it blank or unchanged, puts the name back; so does
- * a save that fails, and `error` says why under it.
+ * a save that fails, and `error` says why under it. With `optional`, as for a
+ * description, leaving it blank saves it blank.
  */
 export function SettingsNameRow({
+	label = "Name",
 	name,
 	maxLength,
-	savePending,
+	optional = false,
+	savePending = false,
 	error,
 	onCommit,
 }: {
+	label?: string;
 	name: string;
-	maxLength: number;
-	savePending: boolean;
-	error: string | undefined;
-	onCommit: (name: string) => Promise<unknown>;
+	maxLength?: number;
+	optional?: boolean;
+	savePending?: boolean;
+	error?: string | undefined;
+	onCommit: (name: string) => unknown;
 }) {
-	const [draft, setDraft] = useState(name);
+	const { fieldProps } = useCommittedDraft(name, onCommit, {
+		allowEmpty: optional,
+		pending: savePending,
+	});
 	const id = useId();
-
-	function commit() {
-		const next = draft.trim();
-		if (savePending || next === name || next === "") {
-			setDraft(name);
-			return;
-		}
-		setDraft(next);
-		void onCommit(next).catch(() => setDraft(name));
-	}
 
 	return (
 		<>
-			<SettingsControlRow label="Name" htmlFor={id}>
+			<SettingsControlRow label={label} htmlFor={id}>
 				<input
 					id={id}
-					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
-					onBlur={commit}
-					onKeyDown={(event) => {
-						if (event.key === "Enter") event.currentTarget.blur();
-						if (event.key === "Escape") setDraft(name);
-					}}
+					{...fieldProps}
 					maxLength={maxLength}
+					autoComplete="off"
 					className="-ml-2.5 h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2.5 text-xs text-foreground outline-none hover:border-border-strong focus-visible:border-ring focus-visible:bg-settings-row-hover"
 				/>
 			</SettingsControlRow>
-			{error && (
-				<Alert className="border-border border-b px-4 py-2.5 text-xs last:border-b-0">
-					{error}
-				</Alert>
-			)}
+			{error && <SettingsRowAlert>{error}</SettingsRowAlert>}
 		</>
 	);
 }
@@ -418,8 +413,8 @@ export function SettingsControlRow({
 }
 
 /**
- * A field row whose control is a pick-one row of options, such as Schedule /
- * Webhook. On a phone the options go on a line of their own under the label,
+ * A field row whose control is a pick-one row of options, such as Daily /
+ * Weekly / Monthly. On a phone the options go on a line of their own under the label,
  * across the row's width, so a long row of them is never cut off.
  */
 export function SettingsChoiceRow<Value extends string>({
@@ -444,6 +439,66 @@ export function SettingsChoiceRow<Value extends string>({
 				className="sm:ml-auto max-sm:w-full max-sm:[&>label]:flex-1 max-sm:[&>label]:text-center"
 			/>
 		</div>
+	);
+}
+
+/**
+ * A field row whose value is picked from a menu that opens under its arrow,
+ * which turns while the menu is open. `mark` draws an icon beside the value
+ * and each option.
+ */
+export function SettingsMenuRow<Value extends string>({
+	label,
+	options,
+	value,
+	mark,
+	onChange,
+}: {
+	label: string;
+	options: readonly { value: Value; label: string }[];
+	value: Value;
+	mark?: (value: Value) => ReactNode;
+	onChange: (value: Value) => void;
+}) {
+	const current = options.find((option) => option.value === value);
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				aria-label={`${label}: ${current?.label ?? value}`}
+				className={cn(
+					SETTINGS_ROW,
+					"group focus-ring w-full cursor-pointer py-2.5 text-left text-sm text-foreground transition-colors hover:bg-settings-row-hover",
+				)}
+			>
+				<SettingsFieldLabel>{label}</SettingsFieldLabel>
+				<span className="flex min-w-0 flex-1 items-center gap-2.5">
+					{mark?.(value)}
+					<span className="min-w-0 flex-1 truncate">{current?.label ?? value}</span>
+				</span>
+				<ChevronDown
+					aria-hidden
+					size={15}
+					strokeWidth={2.4}
+					className="shrink-0 text-subtle-foreground transition-transform group-data-popup-open:rotate-180"
+				/>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-56">
+				<DropdownMenuRadioGroup
+					value={value}
+					onValueChange={(chosen) => {
+						const option = options.find((candidate) => candidate.value === chosen);
+						if (option) onChange(option.value);
+					}}
+				>
+					{options.map((option) => (
+						<DropdownMenuRadioItem key={option.value} value={option.value} closeOnClick>
+							{mark?.(option.value)}
+							{option.label}
+						</DropdownMenuRadioItem>
+					))}
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 
@@ -500,6 +555,15 @@ export function SettingsRowButton({
 	);
 }
 
+/** A failure said as a row of a settings group, among or after its rows. */
+export function SettingsRowAlert({ children }: { children: ReactNode }) {
+	return (
+		<div className="border-border border-b px-4 py-3 last:border-b-0">
+			<Alert>{children}</Alert>
+		</div>
+	);
+}
+
 /** The round mark at the end of a pick-one row, filled for the one picked. */
 export function SettingsRadioMark({ checked }: { checked: boolean }) {
 	return (
@@ -516,8 +580,71 @@ export function SettingsRadioMark({ checked }: { checked: boolean }) {
 }
 
 /** A pick-one row's look, for a `<label>` around a hidden radio: the row lifts under the pointer and rings when focused. */
-export const SETTINGS_RADIO_ROW =
+const SETTINGS_RADIO_ROW =
 	"flex min-h-14 cursor-pointer items-center gap-3.5 border-border border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-settings-row-hover active:bg-row-selected has-focus-visible:shadow-(--ring-shadow) has-disabled:cursor-default";
+
+/** One choice in a `SettingsRadioList`. */
+interface SettingsRadioOption<Id extends string> {
+	id: Id;
+	name: string;
+	description: string;
+	/** A word beside its name, such as "In use". */
+	badge?: string;
+}
+
+/**
+ * A pick-one list in a card under `legend`: each option a row with its name's
+ * initial, its name and what it is, the `chosen` one ticked.
+ */
+export function SettingsRadioList<Id extends string>({
+	legend,
+	options,
+	chosen,
+	disabled,
+	onChoose,
+}: {
+	legend: string;
+	options: readonly SettingsRadioOption<Id>[];
+	chosen: Id;
+	disabled: boolean;
+	onChoose: (id: Id) => void;
+}) {
+	const name = useId();
+	return (
+		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
+			<legend className="px-0.5 pb-2.5 font-medium text-xs text-muted-foreground">{legend}</legend>
+			<div className={SETTINGS_CARD}>
+				{options.map((option) => (
+					<label key={option.id} className={SETTINGS_RADIO_ROW}>
+						<input
+							type="radio"
+							name={name}
+							value={option.id}
+							checked={option.id === chosen}
+							onChange={() => onChoose(option.id)}
+							className="sr-only"
+						/>
+						<LetterTile name={option.name} />
+						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+							<span className="truncate font-medium text-sm text-foreground">
+								{option.name}
+								{option.badge && (
+									<span className="ml-2 font-normal text-subtle-foreground text-xs">
+										{option.badge}
+									</span>
+								)}
+							</span>
+							<span className="text-pretty text-subtle-foreground text-xs">
+								{option.description}
+							</span>
+						</span>
+						<SettingsRadioMark checked={option.id === chosen} />
+					</label>
+				))}
+			</div>
+		</fieldset>
+	);
+}
 
 /** How a Test went, as a dot and a line cut short to fit, given whole when pointed at. */
 export function SettingsTestOutcome({ good, children }: { good: boolean; children: string }) {
@@ -542,7 +669,7 @@ export function SettingsTestOutcome({ good, children }: { good: boolean; childre
 /**
  * A row's state as a small pill with a dot: green for something working
  * (Connected), grey for something set up but switched off (Disabled), red for
- * something whose last check failed (Connection failed).
+ * something whose last check failed (Didn't answer).
  */
 export function SettingsStatusBadge({
 	tone = "working",
@@ -617,7 +744,7 @@ export function SettingsAddMark() {
 	);
 }
 
-/** The foot of a page for something that cannot be undone: Delete pod, Sign out. */
+/** The foot of a page for something that cannot be undone: Delete project, Sign out. */
 export function SettingsDanger({
 	label,
 	description,
@@ -625,9 +752,9 @@ export function SettingsDanger({
 	onClick,
 	disabledReason,
 }: {
-	/** What the action does, in full: Delete pod. */
+	/** What the action does, in full: Delete project. */
 	label: string;
-	/** What follows from it: Removes its bots, threads and artifacts. */
+	/** What follows from it: Removes its bots, chats and files. */
 	description: ReactNode;
 	/** The button's own word, short beside the label: Delete. */
 	action: string;

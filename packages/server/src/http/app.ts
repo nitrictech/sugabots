@@ -1,8 +1,14 @@
 import { API_BASE_PATH, InternalServerError, NotFound } from "@sugabots/contracts/http";
+import type { PageAuthentication } from "@sugabots/core/authentication/page";
+import type { SessionAuthentication } from "@sugabots/core/authentication/session";
+import type { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import type { Database } from "@sugabots/core/database/database";
 import type { EventBus } from "@sugabots/core/database/events/bus";
-import { Installation } from "@sugabots/core/installation/installation";
-import { userText } from "@sugabots/errors";
+import { Ids } from "@sugabots/core/ids/ids";
+import type { Egress } from "@sugabots/core/providers/network/egress";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { processLayer } from "@sugabots/core/tiers";
+import { UserText, userText } from "@sugabots/errors";
 import { Clock, Effect, Layer, type Types } from "effect";
 import {
 	HttpMethod,
@@ -16,32 +22,16 @@ import {
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Authentication } from "../auth/authentication.ts";
 import { requireCookieOrigin, sessionLayer } from "../auth/middleware.ts";
-import { agentRoutes } from "../routes/agents/routes.ts";
-import { artifactRoutes } from "../routes/artifacts/routes.ts";
-import { chatRoutes } from "../routes/chats/routes.ts";
-import { connectionRoutes } from "../routes/connections/routes.ts";
-import { eventRoutes } from "../routes/events/routes.ts";
-import { gitHubConnectionRoutes, gitHubWebhookRoutes } from "../routes/github/routes.ts";
-import { modelProviderRoutes } from "../routes/model-providers/routes.ts";
-import { modelTrialRoutes } from "../routes/model-trials/routes.ts";
-import { notificationRoutes } from "../routes/notifications/routes.ts";
-import { onboardingRoutes } from "../routes/onboarding/routes.ts";
-import { podSandboxRoutes } from "../routes/pod-sandbox/routes.ts";
-import { podRoutes } from "../routes/pods/routes.ts";
-import { referralRoutes } from "../routes/referrals/routes.ts";
-import { routineRoutes } from "../routes/routines/routes.ts";
-import { sandboxProviderRoutes } from "../routes/sandbox-providers/routes.ts";
-import { searchProviderRoutes } from "../routes/search-providers/routes.ts";
-import { systemRoutes } from "../routes/system/routes.ts";
-import { systemAgentRoutes } from "../routes/system-agents/routes.ts";
-import { threadRoutes } from "../routes/threads/routes.ts";
-import { toolApprovalRoutes } from "../routes/tool-approvals/routes.ts";
-import { usageRoutes } from "../routes/usage/routes.ts";
-import { workspaceRoutes } from "../routes/workspaces/routes.ts";
+import { chatFileRoutes } from "../routes/chat-files/routes.ts";
+import { eventStreamRoutes } from "../routes/event-streams/routes.ts";
+import { sessionRoutes } from "../routes/session/routes.ts";
+import { signInCallbackRoutes } from "../routes/sign-in-callbacks/routes.ts";
+import { webhookRoutes } from "../routes/webhooks/routes.ts";
 import { ServerApi } from "./api.ts";
 import { contentPageRoutes, onlyPagesOnContentHost } from "./content-pages.ts";
 import { desktopViewerRoutes } from "./desktop-viewer.ts";
 import { failureResponse } from "./errors.ts";
+import { operationRoutes } from "./operation-routes.ts";
 import type { HttpServices } from "./services.ts";
 import { limitJsonBody, validateRequestLayer } from "./validation.ts";
 
@@ -50,58 +40,48 @@ const betterAuthRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const router = yield* HttpRouter.HttpRouter;
 		const authentication = yield* Authentication.Service;
-		yield* router.add("*", `${API_BASE_PATH}/auth/*`, (request) =>
-			toWebRequest(request).pipe(
-				Effect.flatMap(authentication.handler),
-				Effect.map(HttpServerResponse.fromWeb),
+		// The request as `limitJsonBody` read it, not as the route was given it.
+		yield* router.add("*", `${API_BASE_PATH}/auth/*`, () =>
+			limitJsonBody(
+				HttpServerRequest.HttpServerRequest.pipe(
+					Effect.flatMap(toWebRequest),
+					Effect.flatMap(authentication.handler),
+					Effect.map(HttpServerResponse.fromWeb),
+				),
 			),
 		);
 	}),
-);
+).pipe(processLayer);
 
 /**
  * The API, as routes on an `HttpRouter`.
  *
  * What the endpoints are is `Api` in `@sugabots/contracts/http`, which
  * `packages/sdk` derives its client from; this is where each group gets its
- * handlers and each middleware its implementation. A group left out, or a
- * handler missing from one, does not compile. better-auth's wildcard is beside
+ * handlers and each middleware its implementation. Every operation offered
+ * over HTTP has the one handler `operationRoutes` gives; the groups written
+ * by hand have their own. A hand-written group left out, or a handler missing
+ * from one, does not compile. better-auth's wildcard is beside
  * the API rather than in it, because the client reaches it through
  * better-auth's own SDK.
  *
- * The routes take their services from the layer's context: the use cases and
- * views in `HttpServices`, and the database, installation, sessions and event
- * bus in `ApiInfrastructure`. Each use case authorizes the person the
- * request's session belongs to, so no middleware decides access.
+ * The routes take their services from the layer's context: the operations and
+ * views in `HttpServices`, and the database, server settings, sessions and event
+ * bus in `ApiInfrastructure`. The `Session` middleware authenticates the
+ * request; each operation authorizes the principal it built, so no middleware
+ * decides access.
  * `createTestApp` in `app.test-support.ts` drives the same routes with fakes.
  */
 export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructure> = Layer.mergeAll(
 	HttpApiBuilder.layer(ServerApi).pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				systemRoutes,
-				workspaceRoutes,
-				eventRoutes,
-				onboardingRoutes,
-				podRoutes,
-				systemAgentRoutes,
-				modelTrialRoutes,
-				modelProviderRoutes,
-				searchProviderRoutes,
-				sandboxProviderRoutes,
-				podSandboxRoutes,
-				gitHubConnectionRoutes,
-				gitHubWebhookRoutes,
-				connectionRoutes,
-				artifactRoutes,
-				agentRoutes,
-				chatRoutes,
-				routineRoutes,
-				toolApprovalRoutes,
-				threadRoutes,
-				usageRoutes,
-				referralRoutes,
-				notificationRoutes,
+				operationRoutes,
+				sessionRoutes,
+				chatFileRoutes,
+				signInCallbackRoutes,
+				eventStreamRoutes,
+				webhookRoutes,
 			).pipe(Layer.provide(Layer.merge(sessionLayer, validateRequestLayer))),
 		),
 	),
@@ -111,12 +91,13 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 ).pipe(
 	// Each handler's Effect runs against the process's database, which the
 	// router hands to it per request rather than capturing it once.
-	HttpRouter.provideRequest(Layer.effectContext(Effect.context<Database>())),
+	HttpRouter.provideRequest(processLayer(Layer.effectContext(Effect.context<Database>()))),
 	Layer.provide(
 		HttpRouter.middleware(
-			Effect.map(Installation.Service, ({ trustedOrigins, contentOrigin }) =>
-				everyRequest(trustedOrigins, contentOrigin),
-			),
+			Effect.gen(function* () {
+				const { trustedOrigins, contentOrigin } = yield* ServerSettings.Service;
+				return everyRequest(trustedOrigins, contentOrigin, yield* Ids.Service);
+			}),
 			{ global: true },
 		),
 	),
@@ -124,13 +105,21 @@ export const apiLayer: Layer.Layer<never, never, HttpServices | ApiInfrastructur
 
 /**
  * What the API is built on besides the core services: the database each
- * request runs against, the installation's addresses, who holds a session,
- * the bus the streams listen on, and the platform the router serves from.
+ * request runs against, the server's addresses, who holds a session and the
+ * authenticator that makes its principal, the authenticator that admits a
+ * webhook call by the secret of the trigger or GitHub app it is addressed to,
+ * the ids each request's call takes, the bus the streams listen on, and the
+ * platform the router serves from.
  */
 type ApiInfrastructure =
+	| Egress.Service
 	| Database
-	| Installation.Service
+	| ServerSettings.Service
 	| Authentication.Service
+	| SessionAuthentication.Service
+	| WebhookAuthentication.Service
+	| PageAuthentication.Service
+	| Ids.Service
 	| EventBus.Service
 	| HttpRouter.HttpRouter
 	| Layer.Success<typeof HttpServer.layerServices>;
@@ -153,43 +142,46 @@ function toWebRequest(request: HttpServerRequest.HttpServerRequest): Effect.Effe
 }
 
 /** What happens to every request, the outermost first. */
-function everyRequest(origins: readonly string[], contentOrigin: string | undefined) {
+function everyRequest(
+	origins: readonly string[],
+	contentOrigin: string | undefined,
+	ids: Ids.Interface,
+) {
 	const cors = HttpMiddleware.cors({
 		allowedOrigins: origins,
-		allowedHeaders: ["authorization", "content-type", "idempotency-key", "last-event-id"],
+		allowedHeaders: ["content-type", "idempotency-key", "last-event-id"],
 		credentials: true,
 	});
 	const cookieOrigin = requireCookieOrigin(origins);
-	// Browser requests carry an HttpOnly session cookie. Bearer clients may also
-	// send Authorization, but the token issuance header is not exposed to pages.
 	const contentHostOnlyPages = onlyPagesOnContentHost(contentOrigin);
 	return (effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
 		contentHostOnlyPages(
-			cors(
-				serverTiming(
-					defectsAsInternal(unknownRouteAsNotFound(cookieOrigin(limitJsonBody(effect)))),
-				),
-			),
+			cors(serverTiming(defectsAsInternal(ids, unknownRouteAsNotFound(cookieOrigin(effect))))),
 		);
 }
 
 /**
  * A defect is logged and answers `InternalServerError`. Its message may name a
- * table, a query or a file path, so it goes to the log and not to the caller.
+ * table, a query or a file path, so it goes to the log and not to the caller,
+ * who gets a reference id that finds the log entry.
  */
 function defectsAsInternal<E, R>(
+	ids: Ids.Interface,
 	effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, R> {
 	return Effect.catchDefect(effect, (defect) =>
-		Effect.logError("Request failed", defect).pipe(
-			Effect.as(
-				failureResponse(
-					InternalServerError,
-					new InternalServerError({ message: userText`Internal server error` }),
-					500,
-				),
-			),
-		),
+		Effect.gen(function* () {
+			const reference = yield* ids.random;
+			yield* Effect.logError("Request failed", defect).pipe(Effect.annotateLogs({ reference }));
+			return failureResponse(
+				InternalServerError,
+				new InternalServerError({
+					// The reference is an id minted here, never text from the defect.
+					message: userText`Something unexpected went wrong. Reference: ${UserText.unchecked(reference)}`,
+					reference,
+				}),
+			);
+		}),
 	);
 }
 
@@ -205,7 +197,6 @@ function unknownRouteAsNotFound<E, R>(
 				failureResponse(
 					NotFound,
 					new NotFound({ message: userText`There is nothing at this address.` }),
-					404,
 				),
 			),
 	);

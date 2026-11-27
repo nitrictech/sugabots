@@ -21,11 +21,9 @@ const COLUMNS = 9;
 
 export function EmojiPicker({
 	onSelect,
-	className,
 }: {
 	/** The emoji chosen, as text, with its skin tone. */
 	onSelect: (emoji: string) => void;
-	className?: string;
 }) {
 	const [search, setSearch] = useState("");
 	const [recent, remember] = useRecentEmoji();
@@ -38,7 +36,7 @@ export function EmojiPicker({
 			resolveEmojiData={resolveEmojiData}
 			columns={COLUMNS}
 			onEmojiSelect={({ emoji }) => choose(emoji)}
-			className={cn("isolate flex h-83 w-83 max-w-full flex-col", className)}
+			className="isolate flex h-83 w-83 max-w-full flex-col"
 		>
 			{/* Ruled off from the grid, so a category's name pushed out at the top of the grid is seen leaving under the line. */}
 			<div className="border-border-strong border-b pb-1.5">
@@ -48,7 +46,7 @@ export function EmojiPicker({
 						placeholder="Search emoji"
 						value={search}
 						onChange={(event) => setSearch(event.target.value)}
-						className="focus-ring h-8 w-full rounded-tail border border-border-strong bg-background px-2.5 text-sm text-foreground placeholder:text-subtle-foreground"
+						className="focus-ring h-8 w-full rounded-sm border border-border-strong bg-background px-2.5 text-sm text-foreground placeholder:text-subtle-foreground"
 					/>
 				</div>
 				{recent.length > 0 && !search && (
@@ -71,7 +69,7 @@ export function EmojiPicker({
 			<EmojiPickerPrimitive.Viewport
 				tabIndex={0}
 				aria-label="Emoji"
-				className="relative flex-1 rounded-tail outline-hidden focus-visible:inset-shadow-ring"
+				className="relative flex-1 rounded-sm outline-hidden focus-visible:inset-shadow-ring"
 			>
 				<EmojiPickerPrimitive.Loading className="absolute inset-0 flex items-center justify-center text-muted-foreground text-xs">
 					Loading…
@@ -96,7 +94,7 @@ export function EmojiPicker({
 				</EmojiPickerPrimitive.ActiveEmoji>
 				<EmojiPickerPrimitive.SkinToneSelector
 					aria-label="Change skin tone"
-					className="focus-ring ml-auto flex size-7 shrink-0 items-center justify-center rounded-tail text-base hover:bg-chip"
+					className="focus-ring ml-auto flex size-7 shrink-0 items-center justify-center rounded-sm text-base hover:bg-chip"
 				/>
 			</div>
 		</EmojiPickerPrimitive.Root>
@@ -105,7 +103,7 @@ export function EmojiPicker({
 
 const CATEGORY_HEADER = "px-3 pt-2 pb-1 font-semibold text-subtle-foreground text-xs";
 
-const EMOJI_BUTTON = "flex size-8 items-center justify-center rounded-tail text-xl";
+const EMOJI_BUTTON = "flex size-8 items-center justify-center rounded-sm text-xl";
 
 /**
  * How the grid's headers, rows and emoji are drawn. Kept here rather than in

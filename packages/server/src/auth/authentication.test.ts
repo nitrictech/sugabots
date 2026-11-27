@@ -1,18 +1,28 @@
-import { meSchema, type WorkspaceMember } from "@sugabots/contracts";
+import { type Membership as ListedMembership, meSchema } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { user } from "@sugabots/core/database/schema";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
+import { chatServicesLayerForTests } from "@sugabots/core/chats/testing";
+import { noComputers } from "@sugabots/core/computers/testing";
+import { EventBus } from "@sugabots/core/database/events/bus";
+import { EventOutbox } from "@sugabots/core/database/events/outbox";
+import { EventStore } from "@sugabots/core/database/events/store";
+import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
+import { member } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, testInfrastructure } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
-import { Installation } from "@sugabots/core/installation/installation";
-import { Membership } from "@sugabots/core/workspaces/membership/membership";
+import { layer as operationsLayer } from "@sugabots/core/operations/layer";
+import { Operations } from "@sugabots/core/operations/registry";
+import { Models } from "@sugabots/core/providers/models/models";
+import { unusedModel } from "@sugabots/core/providers/models/testing";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	BASE_URL,
 	createTestApp,
-	installationWithWebAppAt,
+	serverSettingsWithWebAppAt,
 	type TestApp,
 } from "../http/app.test-support.ts";
 import { Authentication } from "./authentication.ts";
@@ -38,13 +48,27 @@ afterAll(async () => {
 	await closeDatabase();
 });
 
-/** The real `Authentication`, `Membership` and `Accounts` behind the test app, keeping sent emails in `sent`. */
+/**
+ * The real `Authentication`, `Accounts`, session authenticator and operations
+ * behind the test app, keeping sent emails in `sent`. The operations are built
+ * over chat services, and they and the chat services publish to a bus in
+ * memory that no case reads.
+ */
 async function appWith(
 	policy: { SIGNUP_MODE: Accounts.SignUpMode; REQUIRE_EMAIL_VERIFICATION: "true" | "false" },
 	sent: Email.Message[],
 ) {
+	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
 	const runtime = ManagedRuntime.make(
-		Layer.mergeAll(Authentication.layer, Membership.layer).pipe(
+		Layer.mergeAll(
+			Authentication.layer,
+			SessionAuthentication.layer,
+			operationsLayer.pipe(
+				Layer.provide(chatServicesLayerForTests(bus)),
+				// Nothing here makes a turn's model request.
+				Layer.provide(Layer.succeed(Models.Service, unusedModel())),
+			),
+		).pipe(
 			Layer.provideMerge(Accounts.layer),
 			Layer.provide([
 				Layer.succeed(
@@ -57,7 +81,13 @@ async function appWith(
 					}),
 				),
 			]),
-			Layer.provide(Installation.layer),
+			Layer.provide(ServerSettings.layer),
+			Layer.provide(noComputers),
+			// Where a session's end is recorded.
+			Layer.provide(EventOutbox.layer),
+			// What streams read their events from.
+			Layer.provide(EventStore.layer),
+			Layer.provide(Layer.succeed(EventBus.Service, bus)),
 			Layer.provide(testInfrastructure),
 			Layer.provide(
 				ConfigProvider.layer(
@@ -79,17 +109,17 @@ async function appWith(
 	const services = await runtime.runPromise(
 		Effect.all({
 			authentication: Authentication.Service,
-			membership: Membership.Service,
-			accounts: Accounts.Service,
+			sessions: SessionAuthentication.Service,
+			operations: Operations.Service,
 		}),
 	);
 	return atServerRoot(
 		createTestApp(
 			Layer.mergeAll(
 				Layer.succeed(Authentication.Service, services.authentication),
-				Layer.succeed(Membership.Service, services.membership),
-				Layer.succeed(Accounts.Service, services.accounts),
-				installationWithWebAppAt(ORIGIN),
+				Layer.succeed(SessionAuthentication.Service, services.sessions),
+				Layer.succeed(Operations.Service, services.operations),
+				serverSettingsWithWebAppAt(ORIGIN),
 			),
 		),
 	);
@@ -97,13 +127,28 @@ async function appWith(
 
 type App = Awaited<ReturnType<typeof appWith>>;
 
+const SIGN_UP_CLOSED = new Accounts.SignUpClosed().userMessage;
+const REFERRAL_LINK_INVALID = new Accounts.ReferralLinkInvalid().userMessage;
+
+/**
+ * The session cookie a sign-up or sign-in set, as a later request sends it
+ * back, or `undefined` when it started no session. Only the session itself:
+ * better-auth's cached copy of it would outlive a change the test then makes.
+ */
+function sessionCookieOf(response: Response): string | undefined {
+	return response.headers
+		.getSetCookie()
+		.map((cookie) => cookie.split(";", 1)[0])
+		.find((cookie) => cookie?.startsWith("better-auth.session_token="));
+}
+
 function post(app: App, path: string, body: unknown, token?: string) {
 	return app.request(`${API_BASE_PATH}${path}`, {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
 			origin: ORIGIN,
-			...(token ? { authorization: `Bearer ${token}` } : {}),
+			...(token ? { cookie: token } : {}),
 		},
 		body: JSON.stringify(body),
 	});
@@ -126,28 +171,28 @@ async function workspaceMadeBy(app: App, token: string, slug: string) {
 }
 
 function invite(app: App, token: string, workspaceId: string, email: string) {
-	return post(app, `/workspaces/${workspaceId}/invitations`, { email, role: "member" }, token);
+	return post(app, `/workspaces/${workspaceId}/invitations`, { email, role: "editor" }, token);
 }
 
-describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
+describe("accounts", () => {
 	const sent: Email.Message[] = [];
 	let app: App;
 	beforeAll(async () => {
 		app = await appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" }, sent);
 	});
 
-	/** Signs somebody up and returns the bearer token they were given. */
+	/** Signs somebody up and returns the session cookie they were given. */
 	async function signUp(name: string, email: string): Promise<string> {
 		const response = await signUpAt(app, name, email);
 
 		expect(response.status).toBe(200);
-		const token = response.headers.get("set-auth-token");
-		expect(token, "sign-up should issue a bearer token").toBeTruthy();
-		return token as string;
+		const cookie = sessionCookieOf(response);
+		expect(cookie, "sign-up should start a session").toBeTruthy();
+		return cookie as string;
 	}
 
 	function me(token: string) {
-		return app.request(`${API_BASE_PATH}/me`, { headers: { authorization: `Bearer ${token}` } });
+		return app.request(`${API_BASE_PATH}/me`, { headers: { cookie: token } });
 	}
 
 	async function verifyEmail(email: string): Promise<void> {
@@ -166,50 +211,59 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(response.status).toBe(200);
 	}
 
-	it("takes a person from sign-up to a shared workspace", async () => {
+	it("takes a member from sign-up to a shared workspace", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
 		const adaEmail = `ada-${unique}@example.com`;
 		const bobEmail = `bob-${unique}@example.com`;
 
 		const ada = await signUp("Ada", adaEmail);
-		const identified = Schema.decodeUnknownSync(meSchema)(await (await me(ada)).json()).user;
+		const identified = Schema.decodeUnknownSync(meSchema)(await (await me(ada)).json()).member;
 		expect(identified.email).toBe(adaEmail);
 
 		const workspace = await workspaceMadeBy(app, ada, `nitric-${unique}`);
 		const invited = await invite(app, ada, workspace.id, bobEmail);
 		expect(invited.status).toBe(201);
 		const invitation = (await invited.json()) as { id: string };
-		expect(sent.at(-1)?.text).toContain(`${ORIGIN}/invite/${invitation.id}`);
+		expect(sent.at(-1)?.text).toContain(`${ORIGIN}/invitations/${invitation.id}`);
 
 		const bob = await signUp("Bob", bobEmail);
 		await verifyEmail(bobEmail);
 		expect((await post(app, `/invitations/${invitation.id}/accept`, {}, bob)).status).toBe(200);
 
 		expect((await me(bob)).status).toBe(200);
-		const roster = await app.request(`${API_BASE_PATH}/workspaces/${workspace.id}/members`, {
-			headers: { authorization: `Bearer ${bob}` },
+		const roster = await app.request(`${API_BASE_PATH}/workspaces/${workspace.id}/memberships`, {
+			headers: { cookie: bob },
 		});
-		const members = (await roster.json()) as WorkspaceMember[];
-		expect(members.map((member) => [member.user.email, member.role]).sort()).toEqual([
+		const memberships = (await roster.json()) as ListedMembership[];
+		expect(
+			memberships.map((membership) => [membership.member.email, membership.role]).sort(),
+		).toEqual([
 			[adaEmail, "owner"],
-			[bobEmail, "member"],
+			[bobEmail, "editor"],
 		]);
 	});
 
-	it("accepts the HttpOnly cookie issued at sign-up on application routes", async () => {
+	it("accepts the session's token as a bearer on application routes, reading its row", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
-		const response = await signUpAt(app, "Cookie User", `cookie-${unique}@example.com`);
-		const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
-		expect(cookie).toBeTruthy();
+		const cookie = await signUp("Bearer User", `bearer-${unique}@example.com`);
+		const slug = `bearer-${unique}`;
+		await workspaceMadeBy(app, cookie, slug);
+		// The cookie's value is the session's token, signed: the bearer is the token alone.
+		const token = decodeURIComponent(cookie.split("=", 2)[1] ?? "").split(".", 1)[0];
+		const asBearer = (path: string, bearer = token) =>
+			app.request(`${API_BASE_PATH}${path}`, { headers: { authorization: `Bearer ${bearer}` } });
 
-		const identified = await app.request(`${API_BASE_PATH}/me`, {
-			headers: { cookie: cookie as string },
-		});
+		const identified = await asBearer("/me");
+		const listed = await asBearer(`/workspaces/${slug}/projects`);
+		const refused = await asBearer(`/workspaces/${slug}/projects`, "a-token-nobody-holds");
 
 		expect(identified.status).toBe(200);
-		expect(Schema.decodeUnknownSync(meSchema)(await identified.json()).user.email).toBe(
-			`cookie-${unique}@example.com`,
+		expect(Schema.decodeUnknownSync(meSchema)(await identified.json()).member.email).toBe(
+			`bearer-${unique}@example.com`,
 		);
+		expect(listed.status).toBe(200);
+		expect(await listed.json()).toEqual([]);
+		expect(refused.status).toBe(401);
 	});
 
 	it("refuses an invitation to a role the product does not implement", async () => {
@@ -273,18 +327,34 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 		expect(sent.length).toBe(sentBefore);
 	});
 
-	it("changes your name, trimmed, and refuses a blank one", async () => {
+	it("changes your name, trimmed, through its operation and refuses a blank one", async () => {
 		const token = await signUp("Ada", `rename-${crypto.randomUUID().slice(0, 8)}@example.com`);
 		const name = async () =>
-			Schema.decodeUnknownSync(meSchema)(await (await me(token)).json()).user.name;
+			Schema.decodeUnknownSync(meSchema)(await (await me(token)).json()).member.name;
+		const rename = (to: string) =>
+			app.request(`${API_BASE_PATH}/me`, {
+				method: "PATCH",
+				headers: { "content-type": "application/json", origin: ORIGIN, cookie: token },
+				body: JSON.stringify({ name: to }),
+			});
 
-		expect((await post(app, "/auth/update-user", { name: "  Ada Lovelace " }, token)).status).toBe(
-			200,
+		const renamed = await rename("  Ada Lovelace ");
+		expect(renamed.status).toBe(200);
+		expect(await name()).toBe("Ada Lovelace");
+
+		expect((await rename("   ")).status).toBe(400);
+		expect(await name()).toBe("Ada Lovelace");
+	});
+
+	it("leaves better-auth no way to change a name behind the operation's back", async () => {
+		const token = await signUp("Ada", `bypass-${crypto.randomUUID().slice(0, 8)}@example.com`);
+
+		expect((await post(app, "/auth/update-user", { name: "Someone Else" }, token)).status).toBe(
+			404,
 		);
-		expect(await name()).toBe("Ada Lovelace");
-
-		expect((await post(app, "/auth/update-user", { name: "   " }, token)).status).toBe(400);
-		expect(await name()).toBe("Ada Lovelace");
+		expect(Schema.decodeUnknownSync(meSchema)(await (await me(token)).json()).member.name).toBe(
+			"Ada",
+		);
 	});
 
 	it("refuses a blank name at sign-up", async () => {
@@ -305,7 +375,7 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
-			user: expect.objectContaining({ name: "Boot Strap", email }),
+			member: expect.objectContaining({ name: "Boot Strap", email }),
 			workspaces: [],
 		});
 	});
@@ -315,9 +385,9 @@ describe.skipIf(!process.env.DATABASE_URL)("accounts", () => {
 	});
 });
 
-describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => {
+describe("a server whose sign-up mode is closed", () => {
 	const sent: Email.Message[] = [];
-	// The same database seen under both policies: a member invites from the
+	// The same database seen under both policies: someone sends an invitation from the
 	// open one, and the invitee arrives at the closed one.
 	let open: App;
 	let closed: App;
@@ -328,11 +398,11 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 		]);
 	});
 
-	/** An unrelated account, so the installation is never empty. */
+	/** An unrelated account, so the server is never empty. */
 	async function anIncumbent(unique: string): Promise<string> {
 		const response = await signUpAt(open, "Ada", `ada-${unique}@example.com`);
 		expect(response.status).toBe(200);
-		return response.headers.get("set-auth-token") as string;
+		return sessionCookieOf(response) as string;
 	}
 
 	it("refuses an address nobody invited", async () => {
@@ -342,18 +412,18 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 		const refused = await signUpAt(closed, "Eve", `eve-${unique}@example.com`);
 
 		expect(refused.status).toBe(403);
-		expect(await refused.json()).toMatchObject({ code: "SIGN_UP_CLOSED" });
+		expect(await refused.json()).toMatchObject({ message: SIGN_UP_CLOSED });
 		expect(
 			await onDatabase((db) =>
 				db
 					.select()
-					.from(user)
-					.where(eq(user.email, `eve-${unique}@example.com`)),
+					.from(member)
+					.where(eq(member.email, `eve-${unique}@example.com`)),
 			),
 		).toEqual([]);
 	});
 
-	it("admits an address a member invited", async () => {
+	it("admits an address someone in a workspace invited", async () => {
 		const unique = crypto.randomUUID().slice(0, 8);
 		const ada = await anIncumbent(unique);
 		const bobEmail = `bob-${unique}@example.com`;
@@ -365,153 +435,147 @@ describe.skipIf(!process.env.DATABASE_URL)("an invite-only installation", () => 
 	});
 });
 
-describe.skipIf(!process.env.DATABASE_URL)(
-	"an installation that signs people up by referral",
-	() => {
-		const sent: Email.Message[] = [];
-		// The same database under both policies, so there is always somebody to
-		// refer from and the installation is never empty.
-		let open: App;
-		let referral: App;
-		beforeAll(async () => {
-			[open, referral] = await Promise.all([
-				appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
-				appWith({ SIGNUP_MODE: "referral", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
-			]);
+describe("a server that signs members up by referral", () => {
+	const sent: Email.Message[] = [];
+	// The same database under both policies, so there is always somebody to
+	// refer from and the server is never empty.
+	let open: App;
+	let referral: App;
+	beforeAll(async () => {
+		[open, referral] = await Promise.all([
+			appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
+			appWith({ SIGNUP_MODE: "referral", REQUIRE_EMAIL_VERIFICATION: "false" }, sent),
+		]);
+	});
+
+	/** A member on the referral server, and the session cookie they were given. */
+	async function aMember(unique: string): Promise<{ id: string; token: string }> {
+		const response = await signUpAt(open, "Ada", `ada-${unique}@example.com`);
+		expect(response.status).toBe(200);
+		const { user } = (await response.json()) as { user: { id: string } };
+		return { id: user.id, token: sessionCookieOf(response) as string };
+	}
+
+	async function referralLinkOf(app: App, token: string): Promise<string | null> {
+		const response = await app.request(`${API_BASE_PATH}/referral-link`, {
+			headers: { cookie: token },
+		});
+		expect(response.status).toBe(200);
+		return ((await response.json()) as { url: string | null }).url;
+	}
+
+	function codeIn(link: string | null): string {
+		const code = link === null ? null : new URL(link).pathname.split("/join/")[1];
+		expect(code, "the link should carry a code").toBeTruthy();
+		return code as string;
+	}
+
+	function referrerOf(email: string) {
+		return onDatabase((db) =>
+			db.select({ referredBy: member.referredBy }).from(member).where(eq(member.email, email)),
+		);
+	}
+
+	it("admits somebody holding a member's link, and records who sent it", async () => {
+		const unique = crypto.randomUUID().slice(0, 8);
+		const ada = await aMember(unique);
+		const link = await referralLinkOf(referral, ada.token);
+		const bobEmail = `bob-${unique}@example.com`;
+
+		expect(link).toMatch(new RegExp(`^${ORIGIN}/join/[0-9a-z]{13}$`));
+		expect((await signUpAt(referral, "Bob", bobEmail, { referralCode: codeIn(link) })).status).toBe(
+			200,
+		);
+		expect(await referrerOf(bobEmail)).toEqual([{ referredBy: ada.id }]);
+	});
+
+	it("refuses somebody with no link, or a code nobody holds", async () => {
+		const unique = crypto.randomUUID().slice(0, 8);
+		await aMember(unique);
+
+		const withoutLink = await signUpAt(referral, "Eve", `eve-${unique}@example.com`);
+		const forged = await signUpAt(referral, "Eve", `eve-${unique}@example.com`, {
+			referralCode: "0000000000000",
 		});
 
-		/** A member of the referral installation, and the bearer token they were given. */
-		async function aMember(unique: string): Promise<{ id: string; token: string }> {
-			const response = await signUpAt(open, "Ada", `ada-${unique}@example.com`);
-			expect(response.status).toBe(200);
-			const { user } = (await response.json()) as { user: { id: string } };
-			return { id: user.id, token: response.headers.get("set-auth-token") as string };
-		}
+		expect(withoutLink.status).toBe(403);
+		expect(await withoutLink.json()).toMatchObject({ message: SIGN_UP_CLOSED });
+		expect(forged.status).toBe(403);
+		expect(await forged.json()).toMatchObject({ message: REFERRAL_LINK_INVALID });
+		expect(await referrerOf(`eve-${unique}@example.com`)).toEqual([]);
+	});
 
-		async function referralLinkOf(app: App, token: string): Promise<string | null> {
-			const response = await app.request(`${API_BASE_PATH}/referral-link`, {
-				headers: { authorization: `Bearer ${token}` },
-			});
-			expect(response.status).toBe(200);
-			return ((await response.json()) as { url: string | null }).url;
-		}
+	it("stops a link working once its member resets it, and admits with the new one", async () => {
+		const unique = crypto.randomUUID().slice(0, 8);
+		const ada = await aMember(unique);
+		const oldCode = codeIn(await referralLinkOf(referral, ada.token));
 
-		function codeIn(link: string | null): string {
-			const code = link === null ? null : new URL(link).pathname.split("/join/")[1];
-			expect(code, "the link should carry a code").toBeTruthy();
-			return code as string;
-		}
+		const reset = await post(referral, "/referral-link/reset", {}, ada.token);
+		const newCode = codeIn(((await reset.json()) as { url: string }).url);
 
-		function referrerOf(email: string) {
-			return onDatabase((db) =>
-				db.select({ referredBy: user.referredBy }).from(user).where(eq(user.email, email)),
-			);
-		}
+		expect(reset.status).toBe(200);
+		expect(codeIn(await referralLinkOf(referral, ada.token))).toBe(newCode);
+		const stale = await signUpAt(referral, "Bob", `bob-${unique}@example.com`, {
+			referralCode: oldCode,
+		});
+		expect(stale.status).toBe(403);
+		expect(await stale.json()).toMatchObject({ message: REFERRAL_LINK_INVALID });
+		expect(
+			(await signUpAt(referral, "Bob", `bob-${unique}@example.com`, { referralCode: newCode }))
+				.status,
+		).toBe(200);
+	});
 
-		it("admits somebody holding a member's link, and records who sent it", async () => {
-			const unique = crypto.randomUUID().slice(0, 8);
-			const ada = await aMember(unique);
-			const link = await referralLinkOf(referral, ada.token);
-			const bobEmail = `bob-${unique}@example.com`;
+	it("does not let somebody signing up say who referred them", async () => {
+		const unique = crypto.randomUUID().slice(0, 8);
+		const ada = await aMember(unique);
 
-			expect(link).toMatch(new RegExp(`^${ORIGIN}/join/[0-9a-z]{13}$`));
-			expect(
-				(await signUpAt(referral, "Bob", bobEmail, { referralCode: codeIn(link) })).status,
-			).toBe(200);
-			expect(await referrerOf(bobEmail)).toEqual([{ referredBy: ada.id }]);
+		const response = await signUpAt(open, "Eve", `eve-${unique}@example.com`, {
+			referredBy: ada.id,
 		});
 
-		it("refuses somebody with no link, or a code nobody holds", async () => {
-			const unique = crypto.randomUUID().slice(0, 8);
-			await aMember(unique);
+		expect(response.status).toBe(400);
+		expect(await referrerOf(`eve-${unique}@example.com`)).toEqual([]);
+	});
 
-			const withoutLink = await signUpAt(referral, "Eve", `eve-${unique}@example.com`);
-			const forged = await signUpAt(referral, "Eve", `eve-${unique}@example.com`, {
-				referralCode: "0000000000000",
-			});
+	it("offers no link where sign-up is not by referral", async () => {
+		const ada = await aMember(crypto.randomUUID().slice(0, 8));
 
-			expect(withoutLink.status).toBe(403);
-			expect(await withoutLink.json()).toMatchObject({ code: "SIGN_UP_CLOSED" });
-			expect(forged.status).toBe(403);
-			expect(await forged.json()).toMatchObject({ code: "REFERRAL_LINK_INVALID" });
-			expect(await referrerOf(`eve-${unique}@example.com`)).toEqual([]);
-		});
+		expect(await referralLinkOf(open, ada.token)).toBeNull();
+		expect((await post(open, "/referral-link/reset", {}, ada.token)).status).toBe(404);
+	});
+});
 
-		it("stops a link working once its member resets it, and admits with the new one", async () => {
-			const unique = crypto.randomUUID().slice(0, 8);
-			const ada = await aMember(unique);
-			const oldCode = codeIn(await referralLinkOf(referral, ada.token));
+describe("a server that requires email verification", () => {
+	const sent: Email.Message[] = [];
+	let app: App;
+	beforeAll(async () => {
+		app = await appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "true" }, sent);
+	});
 
-			const reset = await post(referral, "/referral-link/reset", {}, ada.token);
-			const newCode = codeIn(((await reset.json()) as { url: string }).url);
+	it("withholds a session until the address is proven, then admits", async () => {
+		const email = `verify-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const password = "correct-horse-battery";
 
-			expect(reset.status).toBe(200);
-			expect(codeIn(await referralLinkOf(referral, ada.token))).toBe(newCode);
-			const stale = await signUpAt(referral, "Bob", `bob-${unique}@example.com`, {
-				referralCode: oldCode,
-			});
-			expect(stale.status).toBe(403);
-			expect(await stale.json()).toMatchObject({ code: "REFERRAL_LINK_INVALID" });
-			expect(
-				(await signUpAt(referral, "Bob", `bob-${unique}@example.com`, { referralCode: newCode }))
-					.status,
-			).toBe(200);
-		});
+		const signedUp = await post(app, "/auth/sign-up/email", { name: "Vera", email, password });
+		expect(signedUp.status).toBe(200);
+		expect(sessionCookieOf(signedUp)).toBeUndefined();
 
-		it("does not let somebody signing up say who referred them", async () => {
-			const unique = crypto.randomUUID().slice(0, 8);
-			const ada = await aMember(unique);
+		const tooEarly = await post(app, "/auth/sign-in/email", { email, password });
+		expect(tooEarly.status).toBe(403);
 
-			const response = await signUpAt(open, "Eve", `eve-${unique}@example.com`, {
-				referredBy: ada.id,
-			});
+		const link = sent
+			.findLast((message) => message.to[0].email === email)
+			?.text?.match(/https?:\/\/\S+/)?.[0];
+		expect(link, "a verification link should have been sent").toBeTruthy();
+		const url = new URL(link as string);
+		url.searchParams.delete("callbackURL");
+		expect(
+			(await app.request(`${url.pathname}${url.search}`, { headers: { origin: ORIGIN } })).status,
+		).toBe(200);
 
-			expect(response.status).toBe(400);
-			expect(await referrerOf(`eve-${unique}@example.com`)).toEqual([]);
-		});
-
-		it("offers no link where sign-up is not by referral", async () => {
-			const ada = await aMember(crypto.randomUUID().slice(0, 8));
-
-			expect(await referralLinkOf(open, ada.token)).toBeNull();
-			expect((await post(open, "/referral-link/reset", {}, ada.token)).status).toBe(404);
-		});
-	},
-);
-
-describe.skipIf(!process.env.DATABASE_URL)(
-	"an installation that requires email verification",
-	() => {
-		const sent: Email.Message[] = [];
-		let app: App;
-		beforeAll(async () => {
-			app = await appWith({ SIGNUP_MODE: "open", REQUIRE_EMAIL_VERIFICATION: "true" }, sent);
-		});
-
-		it("withholds a session until the address is proven, then admits", async () => {
-			const email = `verify-${crypto.randomUUID().slice(0, 8)}@example.com`;
-			const password = "correct-horse-battery";
-
-			const signedUp = await post(app, "/auth/sign-up/email", { name: "Vera", email, password });
-			expect(signedUp.status).toBe(200);
-			expect(signedUp.headers.get("set-auth-token")).toBeNull();
-
-			const tooEarly = await post(app, "/auth/sign-in/email", { email, password });
-			expect(tooEarly.status).toBe(403);
-
-			const link = sent
-				.findLast((message) => message.to[0].email === email)
-				?.text?.match(/https?:\/\/\S+/)?.[0];
-			expect(link, "a verification link should have been sent").toBeTruthy();
-			const url = new URL(link as string);
-			url.searchParams.delete("callbackURL");
-			expect(
-				(await app.request(`${url.pathname}${url.search}`, { headers: { origin: ORIGIN } })).status,
-			).toBe(200);
-
-			const signedIn = await post(app, "/auth/sign-in/email", { email, password });
-			expect(signedIn.status).toBe(200);
-			expect(signedIn.headers.get("set-auth-token")).toBeTruthy();
-		});
-	},
-);
+		const signedIn = await post(app, "/auth/sign-in/email", { email, password });
+		expect(signedIn.status).toBe(200);
+		expect(sessionCookieOf(signedIn)).toBeTruthy();
+	});
+});

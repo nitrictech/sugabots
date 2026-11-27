@@ -1,6 +1,10 @@
 import type { ApiFailure } from "@sugabots/contracts/http";
 import { isApiFailure } from "@sugabots/sdk";
 
+/** What a page says when a request it needed never reached the API. */
+export const API_DID_NOT_ANSWER = "The API did not answer. Reload this page to try again.";
+
+// biome-ignore lint/plugin/errors-implement-domain-error: The UI uses this signal while its workspace is loading.
 export class NotReadyError extends Error {
 	constructor() {
 		super("Workspace not ready");
@@ -9,16 +13,11 @@ export class NotReadyError extends Error {
 }
 
 /**
- * What to put in front of somebody when a request fails.
- *
- * Every screen needs this and each was writing its own `describe(failure)`,
- * three of them with the same name and different behaviour. The wording that
- * genuinely differs per screen is the `instead` map: a `Conflict` means
- * something specific where a pod is being named, and nothing in
- * particular anywhere else.
- *
- * Anything that is not one of the API's failures never reached it, so it gets the one
- * message that is true of all of them.
+ * What to put in front of somebody when a request fails: the API's own
+ * message, or the screen's wording for that failure in `instead`, such as
+ * what a `Conflict` means where a project is being named. Anything that is
+ * not one of the API's failures never reached it, so it gets the one message
+ * that is true of all of them.
  */
 export function failureMessage(
 	failure: unknown,

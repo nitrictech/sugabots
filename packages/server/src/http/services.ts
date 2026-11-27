@@ -1,73 +1,13 @@
-import type { Usage } from "@sugabots/core/accounting/usage";
-import type { Accounts } from "@sugabots/core/accounts/accounts";
-import type { Artifacts } from "@sugabots/core/artifacts/artifacts";
-import type { ArtifactPages } from "@sugabots/core/artifacts/pages";
-import type { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
-import type { ChatView } from "@sugabots/core/conversations/chats/chat-view";
-import type { Chats } from "@sugabots/core/conversations/chats/chats";
-import type { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
-import type { Reactions } from "@sugabots/core/conversations/reactions/reactions";
-import type { Routines } from "@sugabots/core/conversations/routines/routines";
-import type { ThreadView } from "@sugabots/core/conversations/thread-view";
-import type { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
-import type { Turns } from "@sugabots/core/conversations/turns/turns";
-import type { Notifications } from "@sugabots/core/notifications/notifications";
-import type { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
-import type { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
-import type { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
-import type { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import type { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import type { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
-import type { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
-import type { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
-import type { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
-import type { Membership } from "@sugabots/core/workspaces/membership/membership";
-import type { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import type { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
-import type { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
-import type { ChannelAccess } from "../routes/events/access.ts";
+import type { Operations } from "@sugabots/core/operations/registry";
 
 /**
- * Everything the routes may ask core for. Each is a use case or a view whose
- * every method requires the current actor and authorizes them, or the event
- * streams' `ChannelAccess`, which does the same for a channel. The exception
- * is `Routines.Webhooks`, which nobody signs in to call: the routine's secret
- * admits the run instead; and `Routines.ConnectionEvents`, which an
- * integration's signed delivery admits. `Accounts` is here for the referral link; its
- * `admit` is better-auth's, for somebody who has no account yet.
+ * Everything the routes may ask core for: the operation registry, which a
+ * route reaches through `operationCaller`, and its long-running operations,
+ * the event streams and the desktop viewer, which a route reaches through
+ * `longRunningCaller` or, for the viewer's WebSocket, directly.
  *
  * `apiLayer` requires these and nothing else from core, so a route yielding a
  * repository, a workflow's steps or a service that acts for nobody, such as
- * `TurnExecution` or `PersonalPods`, does not compile.
+ * `TurnExecution` or `PersonalAssistants`, does not compile.
  */
-export type HttpServices =
-	| Accounts.Service
-	| Membership.Service
-	| Onboarding.Service
-	| WorkspaceTimeZone.Service
-	| PodAdministration.Service
-	| AgentAdministration.Service
-	| ModelProviderSetup.Service
-	| SearchProviderSetup.Service
-	| SandboxProviderSetup.Service
-	| SandboxNetwork.Service
-	| DesktopViewer.Service
-	| PodSandboxSetup.Service
-	| GitHubApps.Service
-	| GitHubConnections.Service
-	| ConnectionSetup.Service
-	| Artifacts.Service
-	| ArtifactPages.Service
-	| ModelTrials.Service
-	| Usage.Service
-	| Notifications.Service
-	| Chats.Service
-	| ChatFiles.Service
-	| ChatView.Service
-	| Reactions.Service
-	| ThreadView.Service
-	| Turns.Controls
-	| Routines.Service
-	| Routines.Webhooks
-	| Routines.ConnectionEvents
-	| ChannelAccess.Service;
+export type HttpServices = Operations.Service | Operations.LongRunning;

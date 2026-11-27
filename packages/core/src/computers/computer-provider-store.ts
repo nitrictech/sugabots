@@ -1,0 +1,434 @@
+export {
+	ComputerProviderBuiltInFixed,
+	ComputerProviderHasComputers,
+	ComputerProviderIncomplete,
+} from "@sugabots/contracts/errors/computers";
+export * as ComputerProviderStore from "./computer-provider-store.ts";
+
+import type {
+	ComputerNetworkMode,
+	ComputerProviderSettings,
+	ComputerProviderUpdate,
+	NewComputerProvider,
+} from "@sugabots/contracts";
+import { COMPUTER_NETWORK_MODE_DEFAULT, computerBuiltInProvider } from "@sugabots/contracts";
+import {
+	ComputerProviderBuiltInFixed,
+	ComputerProviderHasComputers,
+	ComputerProviderIncomplete,
+} from "@sugabots/contracts/errors/computers";
+import type { UserText } from "@sugabots/errors";
+import { and, asc, eq, ne } from "drizzle-orm";
+import { Context, DateTime, Effect, Layer, Redacted } from "effect";
+import { query, serviceOperations, transaction, writtenRow } from "../database/database.ts";
+import {
+	type ComputerProviderRow,
+	computer,
+	computerDestruction,
+	computerProvider,
+} from "../database/schema.ts";
+import { stillConfiguredAs } from "../providers/tested-configuration.ts";
+import { Secrets } from "../secrets/secrets.ts";
+import { processLayer, Tier } from "../tiers.ts";
+import type { Computers } from "./computers.ts";
+
+/**
+ * The only writer of `computer_provider`: the computer providers a workspace
+ * has configured. At most one is enabled, and enabling one disables the
+ * others. A provider is never enabled without what it needs to make a
+ * computer, such as its key.
+ */
+export interface Interface {
+	readonly list: (workspaceId: string) => Effect.Effect<readonly ComputerProviderRow[]>;
+	readonly create: (
+		workspaceId: string,
+		input: { createdById: string; provider: NewComputerProvider },
+	) => Effect.Effect<ComputerProviderRow, ComputerProviderIncomplete>;
+	readonly update: (
+		workspaceId: string,
+		providerId: string,
+		changes: ComputerProviderUpdate,
+	) => Effect.Effect<
+		ComputerProviderRow | undefined,
+		ComputerProviderIncomplete | ComputerProviderBuiltInFixed | ComputerProviderHasComputers
+	>;
+	/** Deletes the row. Its computers must have been destroyed first. */
+	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
+	/**
+	 * Records how a test of the configuration last updated at `testedAt`
+	 * went, `error` saying why it failed, unless the provider has been
+	 * reconfigured since.
+	 */
+	readonly recordTest: (
+		workspaceId: string,
+		providerId: string,
+		testedAt: Date,
+		error?: UserText,
+	) => Effect.Effect<void>;
+	/** Remembers the template build Sugabots last started for the provider, until its settings or key change. */
+	readonly recordTemplateBuild: (
+		workspaceId: string,
+		providerId: string,
+		build: Computers.TemplateBuild,
+	) => Effect.Effect<void>;
+	/** How to reach the provider, enabled or not, for a test; nothing while it lacks a setting it needs. */
+	readonly access: (
+		workspaceId: string,
+		providerId: string,
+	) => Effect.Effect<Configured | undefined>;
+	/** The provider that makes the workspace's computers, or nothing when none is enabled. */
+	readonly enabled: (workspaceId: string) => Effect.Effect<Configured | undefined>;
+}
+
+export class Service extends Context.Service<Service, Interface>()(
+	"@sugabots/core/ComputerProviderStore",
+) {
+	declare readonly [Tier]: "process";
+}
+
+/** A provider row as something to make computers with. */
+export interface Configured {
+	readonly id: string;
+	readonly access: Computers.ProviderAccess;
+	/** So a test result is recorded against the configuration it tested. */
+	readonly configurationUpdatedAt: Date;
+}
+
+export const make = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Interface>("ComputerProviderStore");
+	const cipher = yield* Secrets.Service;
+
+	const toConfigured = (row: ComputerProviderRow): Configured | undefined => {
+		const access = toAccess(row);
+		return access && { id: row.id, access, configurationUpdatedAt: row.updatedAt };
+	};
+
+	const toAccess = (row: ComputerProviderRow): Computers.ProviderAccess | undefined =>
+		row.apiKeyEncrypted
+			? accessOf(row.settings, Redacted.make(cipher.decrypt(row.apiKeyEncrypted)))
+			: undefined;
+
+	const load = (workspaceId: string, providerId: string) =>
+		query((db) =>
+			db
+				.select()
+				.from(computerProvider)
+				.where(
+					and(eq(computerProvider.workspaceId, workspaceId), eq(computerProvider.id, providerId)),
+				)
+				.limit(1),
+		).pipe(Effect.map(([row]) => row));
+
+	/** Whether the provider has made a computer, or left a machine behind, that still needs it to be destroyed. */
+	const hasComputers = (providerId: string) =>
+		Effect.map(
+			Effect.all([
+				query((db) =>
+					db
+						.select({ id: computer.id })
+						.from(computer)
+						.where(eq(computer.computerProviderId, providerId))
+						.limit(1),
+				),
+				query((db) =>
+					db
+						.select({ id: computerDestruction.id })
+						.from(computerDestruction)
+						.where(eq(computerDestruction.computerProviderId, providerId))
+						.limit(1),
+				),
+			]),
+			([made, left]) => made.length + left.length > 0,
+		);
+
+	/** The provider's row, locked until the transaction ends, so its computers are counted against what is changed. */
+	const lockForUpdate = (workspaceId: string, providerId: string) =>
+		query((db) =>
+			db
+				.select()
+				.from(computerProvider)
+				.where(
+					and(eq(computerProvider.workspaceId, workspaceId), eq(computerProvider.id, providerId)),
+				)
+				.for("update"),
+		).pipe(Effect.map(([row]) => row));
+
+	/** Disables the workspace's other providers, so this one can be the enabled one. */
+	const disableOthers = (workspaceId: string, providerId?: string) =>
+		query((db) =>
+			db
+				.update(computerProvider)
+				.set({ enabled: false })
+				.where(
+					and(
+						eq(computerProvider.workspaceId, workspaceId),
+						eq(computerProvider.enabled, true),
+						...(providerId ? [ne(computerProvider.id, providerId)] : []),
+					),
+				),
+		);
+
+	return Service.of({
+		list: (workspaceId) =>
+			operation(
+				"list",
+				query((db) =>
+					db
+						.select()
+						.from(computerProvider)
+						.where(eq(computerProvider.workspaceId, workspaceId))
+						.orderBy(asc(computerProvider.createdAt)),
+				),
+			),
+
+		create: (workspaceId, { createdById, provider }) =>
+			operation(
+				"create",
+				transaction(
+					Effect.gen(function* () {
+						const values = {
+							workspaceId,
+							createdById,
+							settings: withUsualAddress(provider.settings),
+							apiKeyEncrypted: provider.apiKey ? cipher.encrypt(provider.apiKey) : null,
+							enabled: provider.enabled ?? false,
+						};
+						yield* requireComplete(values);
+						if (values.enabled) yield* disableOthers(workspaceId);
+						return yield* query((db) =>
+							db.insert(computerProvider).values(values).returning(),
+						).pipe(Effect.flatMap(writtenRow("computer_provider")));
+					}),
+				),
+			),
+
+		update: (workspaceId, providerId, changes) =>
+			operation(
+				"update",
+				transaction(
+					Effect.gen(function* () {
+						const current = yield* lockForUpdate(workspaceId, providerId);
+						if (!current) return undefined;
+						if (changes.settings && changes.settings.builtIn !== current.builtIn) {
+							return yield* new ComputerProviderBuiltInFixed();
+						}
+						// A key goes only where it was given for: one kept when an address
+						// changes would be sent to the new address, which whoever changed
+						// it may own.
+						const addressMoved =
+							changes.settings !== undefined &&
+							addressesIn(changes.settings).join() !== addressesIn(current.settings).join();
+						const values = {
+							...(changes.enabled !== undefined ? { enabled: changes.enabled } : {}),
+							...(changes.settings ? { settings: changes.settings } : {}),
+							...(changes.apiKey !== undefined
+								? { apiKeyEncrypted: changes.apiKey ? cipher.encrypt(changes.apiKey) : null }
+								: addressMoved
+									? { apiKeyEncrypted: null }
+									: {}),
+						};
+						const next = { ...current, ...values };
+						// Its computers are destroyed with its key at its address, so
+						// neither goes while it has any.
+						const losesReach = current.apiKeyEncrypted !== null && next.apiKeyEncrypted === null;
+						if ((losesReach || addressMoved) && (yield* hasComputers(providerId))) {
+							return yield* new ComputerProviderHasComputers();
+						}
+						// Taking away what it needs disables it, rather than refusing the change.
+						const complete = isComplete(next);
+						if (next.enabled && !complete) {
+							if (changes.enabled) return yield* incompleteFor(next);
+							next.enabled = false;
+						}
+						if (next.enabled) yield* disableOthers(workspaceId, providerId);
+						return yield* query((db) =>
+							db
+								.update(computerProvider)
+								.set({
+									...values,
+									enabled: next.enabled,
+									// What Sugabots made for other settings or another account
+									// says nothing about the ones now configured.
+									...(changes.settings || changes.apiKey !== undefined
+										? { managedResources: null }
+										: {}),
+								})
+								.where(eq(computerProvider.id, providerId))
+								.returning(),
+						).pipe(Effect.flatMap(writtenRow("computer_provider")));
+					}),
+				),
+			),
+
+		remove: (workspaceId, providerId) =>
+			operation(
+				"remove",
+				query((db) =>
+					db
+						.delete(computerProvider)
+						.where(
+							and(
+								eq(computerProvider.workspaceId, workspaceId),
+								eq(computerProvider.id, providerId),
+							),
+						)
+						.returning({ id: computerProvider.id }),
+				).pipe(Effect.map((rows) => rows.length > 0)),
+			),
+
+		recordTest: (workspaceId, providerId, testedAt, error) =>
+			operation(
+				"recordTest",
+				Effect.gen(function* () {
+					const now = yield* DateTime.nowAsDate;
+					yield* query((db) =>
+						db
+							.update(computerProvider)
+							.set({ lastTestedAt: now, lastTestError: error ?? null })
+							.where(
+								and(
+									eq(computerProvider.workspaceId, workspaceId),
+									eq(computerProvider.id, providerId),
+									stillConfiguredAs(computerProvider.updatedAt, testedAt),
+								),
+							),
+					);
+				}),
+			),
+
+		recordTemplateBuild: (workspaceId, providerId, build) =>
+			operation(
+				"recordTemplateBuild",
+				query((db) =>
+					db
+						.update(computerProvider)
+						.set({ managedResources: { builtIn: "e2b", templateBuild: build } })
+						.where(
+							and(
+								eq(computerProvider.workspaceId, workspaceId),
+								eq(computerProvider.id, providerId),
+							),
+						),
+				).pipe(Effect.asVoid),
+			),
+
+		access: (workspaceId, providerId) =>
+			operation(
+				"access",
+				Effect.map(load(workspaceId, providerId), (row) => row && toConfigured(row)),
+			),
+
+		enabled: (workspaceId) =>
+			operation(
+				"enabled",
+				query((db) =>
+					db
+						.select()
+						.from(computerProvider)
+						.where(
+							and(
+								eq(computerProvider.workspaceId, workspaceId),
+								eq(computerProvider.enabled, true),
+							),
+						)
+						.limit(1),
+				).pipe(Effect.map(([row]) => row && toConfigured(row))),
+			),
+	});
+});
+
+export const layer = processLayer(Layer.effect(Service, make));
+
+type Provider = Pick<ComputerProviderRow, "settings" | "apiKeyEncrypted" | "enabled">;
+
+/** How to reach a provider configured with `settings` and `apiKey`; nothing while it lacks a setting it needs. */
+function accessOf(
+	settings: ComputerProviderSettings,
+	apiKey: Redacted.Redacted<string>,
+): Computers.ProviderAccess | undefined {
+	const { defaultImage, defaultSize } = computerBuiltInProvider(settings.builtIn);
+	switch (settings.builtIn) {
+		case "opensandbox":
+			return settings.serverUrl
+				? {
+						provider: "opensandbox",
+						baseUrl: settings.serverUrl,
+						apiKey,
+						image: settings.image ?? defaultImage,
+						size: sizeIn(settings, defaultSize),
+						networkMode: networkModeIn(settings),
+					}
+				: undefined;
+		case "e2b":
+			return {
+				provider: "e2b",
+				apiKey,
+				template: settings.template ?? defaultImage,
+				networkMode: networkModeIn(settings),
+				size: sizeIn(settings, defaultSize),
+				...(settings.apiUrl && settings.sandboxUrl
+					? { endpoints: { apiUrl: settings.apiUrl, sandboxUrl: settings.sandboxUrl } }
+					: {}),
+			};
+	}
+}
+
+/** Whether the provider has everything it needs to make a computer. */
+function isComplete({ settings, apiKeyEncrypted }: Omit<Provider, "enabled">): boolean {
+	if (!apiKeyEncrypted) return false;
+	switch (settings.builtIn) {
+		case "opensandbox":
+			return settings.serverUrl !== undefined;
+		case "e2b":
+			// E2B Embed needs both of its addresses; E2B Cloud needs neither.
+			return (settings.apiUrl === undefined) === (settings.sandboxUrl === undefined);
+	}
+}
+
+function requireComplete(provider: Provider) {
+	return provider.enabled && !isComplete(provider) ? incompleteFor(provider) : Effect.void;
+}
+
+function incompleteFor({ settings, apiKeyEncrypted }: Provider) {
+	return Effect.fail(
+		new ComputerProviderIncomplete({
+			missing:
+				apiKeyEncrypted === null
+					? "key"
+					: settings.builtIn === "opensandbox"
+						? "address"
+						: "addresses",
+		}),
+	);
+}
+
+/** The addresses the settings point Sugabots at, which egress must allow. */
+export function addressesIn(settings: ComputerProviderSettings): string[] {
+	const addresses =
+		settings.builtIn === "opensandbox"
+			? [settings.serverUrl]
+			: [settings.apiUrl, settings.sandboxUrl];
+	return addresses.filter((address) => address !== undefined);
+}
+
+/** How the provider's computers reach the internet, by its settings or the default. */
+export function networkModeIn(settings: ComputerProviderSettings): ComputerNetworkMode {
+	return settings.networkMode ?? COMPUTER_NETWORK_MODE_DEFAULT;
+}
+
+/** The most each of the provider's computers may use, by its settings or its built-in provider's default. */
+function sizeIn(
+	settings: { cpuCount?: number; memoryGiB?: number },
+	defaultSize: Computers.Size,
+): Computers.Size {
+	return {
+		cpuCount: settings.cpuCount ?? defaultSize.cpuCount,
+		memoryGiB: settings.memoryGiB ?? defaultSize.memoryGiB,
+	};
+}
+
+/** OpenSandbox at the address it's usually at, when none is given. */
+export function withUsualAddress(settings: ComputerProviderSettings): ComputerProviderSettings {
+	if (settings.builtIn !== "opensandbox" || settings.serverUrl) return settings;
+	return { ...settings, serverUrl: computerBuiltInProvider(settings.builtIn).baseUrl };
+}

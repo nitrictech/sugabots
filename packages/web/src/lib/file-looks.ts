@@ -25,7 +25,7 @@ export function extensionOf(name: string): string {
 	return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-/** A file's size as people read it, such as 240 KB or 2.1 MB. */
+/** A file's size as members read it, such as 240 KB or 2.1 MB. */
 export function fileSizeLabel(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	const kilobytes = Math.round(bytes / 1024);

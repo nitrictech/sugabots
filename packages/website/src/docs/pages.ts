@@ -1,4 +1,5 @@
-import type { BotLook } from "@sugabots/avatars";
+import type { AvatarParts } from "@sugabots/avatars";
+import { pageMarkdown, plainText } from "@sugabots/docs/markdown";
 import GithubSlugger from "github-slugger";
 import type { MDXContent } from "mdx/types";
 import { type DocGroup, docGroups } from "@/docs/nav";
@@ -25,7 +26,7 @@ export interface Heading {
 export interface DocPage extends Frontmatter {
 	slug: string;
 	group: Pick<DocGroup, "title" | "tone">;
-	bot: BotLook;
+	bot: AvatarParts;
 	Content: MDXContent;
 	headings: readonly Heading[];
 	/** The page as Markdown, headed by its title and description, for readers who want to paste it elsewhere. */
@@ -46,16 +47,7 @@ function slugFromPath(path: string) {
 	return path.slice(CONTENT_DIRECTORY.length, -".mdx".length);
 }
 
-const FRONTMATTER = /^---\n[\s\S]*?\n---\n+/;
 const CODE_FENCE = /^(```|~~~)/;
-
-/** Inline Markdown reduced to the text rehype-slug sees: no code ticks, emphasis or link targets. */
-function plainText(markdown: string) {
-	return markdown
-		.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-		.replace(/[`*_]/g, "")
-		.trim();
-}
 
 /** The page's `##` headings, with the ids rehype-slug gives them. */
 function secondLevelHeadings(markdown: string): Heading[] {
@@ -82,7 +74,7 @@ function loadPages(): DocPage[] {
 			const source = sources[path];
 			if (!module || source === undefined)
 				throw new Error(`docs/nav.ts lists ${slug}, but ${path} is missing`);
-			const body = source.replace(FRONTMATTER, "");
+			const body = pageMarkdown(source);
 			const { title, description } = module.frontmatter;
 			return {
 				title,

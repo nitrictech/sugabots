@@ -1,31 +1,36 @@
-import type { ModelProvider, WorkspaceModelsResponse } from "@sugabots/contracts";
+import type { ModelProvider, NamedMember, WorkspaceModelsResponse } from "@sugabots/contracts";
 import {
-	presetSignsIn,
+	builtInSignsIn,
 	providerIsConnected,
 	providerLacksCredential,
-	seededPresets,
+	seededBuiltIns,
 } from "@sugabots/contracts";
+import { DisplayName } from "@sugabots/errors";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
+import { namedMemberColumns } from "../../chats/store/participants.ts";
 import { type Executor, query } from "../../database/database.ts";
 import {
 	type ModelProviderRow,
+	member,
+	membership,
 	modelProvider,
 	type ProviderModelRow,
 	providerModel,
-	user,
 } from "../../database/schema.ts";
+import { membershipOf } from "../../workspaces/membership/member-reads.ts";
 import { configurationStatus } from "../tested-configuration.ts";
-import { defaultModelOf, offeredIn } from "./model-provider-repository.ts";
+import { capabilitiesOn, defaultModelOf, offeredIn } from "./model-provider-store.ts";
 
 /**
  * Every model provider in the workspace, each with its models: the defaults
- * first, in the catalog's order, then the rest oldest first.
+ * first, in the built-in providers' order, then the rest oldest first.
  */
 export const providersIn = (workspaceId: string) =>
 	Effect.gen(function* () {
 		const providers = yield* query((db) =>
-			withConnectedBy(db)
+			withMembers(db)
 				.where(eq(modelProvider.workspaceId, workspaceId))
 				.orderBy(asc(modelProvider.createdAt)),
 		);
@@ -45,10 +50,10 @@ export const providersIn = (workspaceId: string) =>
 				)
 				.orderBy(asc(providerModel.displayName), asc(providerModel.modelId)),
 		);
-		return inListOrder(providers).map(({ provider, connectedBy }) =>
+		return inListOrder(providers).map(({ provider, connectedBy, signedInAs }) =>
 			toProvider(
 				provider,
-				connectedBy,
+				{ connectedBy, signedInAs },
 				models.filter((model) => model.providerId === provider.id),
 			),
 		);
@@ -58,7 +63,7 @@ export const providersIn = (workspaceId: string) =>
 export const providerIn = (workspaceId: string, providerId: string) =>
 	Effect.gen(function* () {
 		const [row] = yield* query((db) =>
-			withConnectedBy(db)
+			withMembers(db)
 				.where(and(eq(modelProvider.id, providerId), eq(modelProvider.workspaceId, workspaceId)))
 				.limit(1),
 		);
@@ -72,11 +77,30 @@ export const providerIn = (workspaceId: string, providerId: string) =>
 				)
 				.orderBy(asc(providerModel.displayName), asc(providerModel.modelId)),
 		);
-		return toProvider(row.provider, row.connectedBy, models);
+		return toProvider(row.provider, row, models);
 	});
 
 /**
- * The models the workspace offers for agents to run on, and its default, which
+ * The names of the workspace's model providers that sign in with `memberId`'s
+ * subscription, in the order the list shows them.
+ */
+export const providersSignedInAs = (workspaceId: string, memberId: string) =>
+	query((db) =>
+		db
+			.select({ provider: modelProvider })
+			.from(modelProvider)
+			.where(
+				and(eq(modelProvider.workspaceId, workspaceId), eq(modelProvider.signedInById, memberId)),
+			)
+			.orderBy(asc(modelProvider.createdAt)),
+	).pipe(
+		Effect.map((rows) =>
+			inListOrder(rows).map(({ provider }) => DisplayName.fromRecord(provider.name)),
+		),
+	);
+
+/**
+ * The models the workspace offers for bots to run on, and its default, which
  * it does not offer while a failed test has that model's provider off.
  */
 export const offeredModels = (workspaceId: string) =>
@@ -95,45 +119,61 @@ export const offeredModels = (workspaceId: string) =>
 				models: rows.map(({ model, provider }) => ({
 					providerId: provider.id,
 					providerName: provider.name,
-					providerPreset: provider.preset,
-					providerActive: provider.active,
+					providerBuiltIn: provider.builtIn,
 					modelId: model.modelId,
 					displayName: model.displayName,
-					capabilities: model.capabilities.filter(
-						(capability) => !model.disabledCapabilities.includes(capability),
-					),
+					capabilities: capabilitiesOn(model),
 				})),
 				defaultModel: defaultModel ?? null,
 			}),
 		),
 	);
 
-/** A default seeded into an older workspace is still one of the defaults. */
 function inListOrder<Row extends { provider: ModelProviderRow }>(rows: Row[]): Row[] {
 	const rank = ({ provider: row }: Row) => {
-		const seeded = row.preset ? seededPresets.indexOf(row.preset) : -1;
-		return seeded === -1 ? seededPresets.length : seeded;
+		const seeded = row.builtIn ? seededBuiltIns.indexOf(row.builtIn) : -1;
+		return seeded === -1 ? seededBuiltIns.length : seeded;
 	};
 	return rows.toSorted((a, b) => rank(a) - rank(b));
 }
 
-/** Providers with the name of whoever connected each, while they still have an account. */
-function withConnectedBy(db: Executor) {
+/** The member whose subscription a provider signs in with, beside whoever connected it. */
+const signer = alias(member, "signer");
+const signerMembership = alias(membership, "signer_membership");
+
+/**
+ * Providers with whoever connected each, and whose subscription each signs in
+ * with, while they are still in the workspace.
+ */
+function withMembers(db: Executor) {
 	return db
-		.select({ provider: modelProvider, connectedBy: user.name })
+		.select({
+			provider: modelProvider,
+			connectedBy: namedMemberColumns,
+			signedInAs: { id: signer.id, name: signer.name, email: signer.email, image: signer.image },
+		})
 		.from(modelProvider)
-		.leftJoin(user, eq(user.id, modelProvider.connectedById));
+		.leftJoin(membership, membershipOf(modelProvider.workspaceId, modelProvider.connectedById))
+		.leftJoin(member, eq(member.id, membership.memberId))
+		.leftJoin(
+			signerMembership,
+			and(
+				eq(signerMembership.workspaceId, modelProvider.workspaceId),
+				eq(signerMembership.memberId, modelProvider.signedInById),
+			),
+		)
+		.leftJoin(signer, eq(signer.id, signerMembership.memberId));
 }
 
 function toProvider(
 	row: ModelProviderRow,
-	connectedBy: string | null,
+	members: { connectedBy: NamedMember | null; signedInAs: NamedMember | null },
 	models: ProviderModelRow[],
 ): ModelProvider {
 	const hasApiKey = row.apiKeyEncrypted !== null;
 	const signedIn = row.oauthTokensEncrypted !== null;
 	const connected = providerIsConnected({
-		preset: row.preset,
+		builtIn: row.builtIn,
 		hasApiKey,
 		signedIn,
 		active: row.active,
@@ -141,27 +181,25 @@ function toProvider(
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
-		preset: row.preset,
+		builtIn: row.builtIn,
 		name: row.name,
 		baseUrl: row.baseUrl,
 		apiFormat: row.apiFormat,
 		active: row.active,
 		status:
-			presetSignsIn(row.preset) && row.oauthTokensEncrypted === null
+			builtInSignsIn(row.builtIn) && !signedIn && !hasApiKey
 				? "signed_out"
 				: configurationStatus({
-						missingKey: providerLacksCredential({ preset: row.preset, hasApiKey, signedIn }),
+						missingKey: providerLacksCredential({ builtIn: row.builtIn, hasApiKey, signedIn }),
 						lastTestedAt: row.lastTestedAt,
 						lastTestError: row.lastTestError,
 					}),
 		hasApiKey,
 		signedIn,
 		customHeaders: row.customHeadersEncrypted.map(({ name }) => ({ name })),
-		modelCount: models.length,
-		enabledModelCount: models.filter(({ enabled }) => enabled).length,
-		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
-		connectedBy: connected ? connectedBy : null,
+		connectedBy: connected ? members.connectedBy : null,
+		signedInAs: members.signedInAs,
 		createdAt: row.createdAt.toISOString(),
 		models: models.map((model) => ({
 			id: model.id,
@@ -196,11 +234,4 @@ export const modelAcceptsImages = (workspaceId: string, modelId: string) =>
 					eq(providerModel.enabled, true),
 				),
 			),
-	).pipe(
-		Effect.map((models) =>
-			models.some(
-				(model) =>
-					model.capabilities.includes("vision") && !model.disabledCapabilities.includes("vision"),
-			),
-		),
-	);
+	).pipe(Effect.map((models) => models.some((model) => capabilitiesOn(model).includes("vision"))));

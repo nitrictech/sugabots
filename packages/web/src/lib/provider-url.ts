@@ -1,6 +1,10 @@
 import { OPENAI_COMPATIBLE_PATH, providerUrlSchema } from "@sugabots/contracts";
 import { Option, Schema } from "effect";
 
+/** What a form says of typed text `parseProviderBaseUrl` cannot read as a base URL. */
+export const NOT_A_SERVER_ADDRESS =
+	"That is not a server address. A host and port, like 192.168.1.10:11434, is enough.";
+
 /**
  * The base URL somebody typed, or nothing if what they typed is not one. A bare
  * host is completed: `http://` in front, since a provider you run yourself is

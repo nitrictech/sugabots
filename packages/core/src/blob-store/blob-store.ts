@@ -1,12 +1,17 @@
 export * as BlobStore from "./blob-store.ts";
 
 import { NodeFileSystem } from "@effect/platform-node";
-import { Config, Context, Data, Effect, Layer, Stream } from "effect";
-import { fromFileSystem } from "./implementations/filesystem.ts";
-import { fromPostgres } from "./implementations/postgres.ts";
+import { type DomainError, userText } from "@sugabots/errors";
+import { asc, eq } from "drizzle-orm";
+import { Config, Context, Effect, ErrorReporter, Layer, Schema, Stream } from "effect";
+import { query } from "../database/database.ts";
+import { processLayer, Tier } from "../tiers.ts";
+import { fromFileSystem, moveFolderOnDisk } from "./implementations/filesystem.ts";
+import { fromPostgres, moveFolderInPostgres } from "./implementations/postgres.ts";
+import { blobFolderMove } from "./sql.ts";
 
 /**
- * Bytes kept under path-like keys, such as `threads/<threadId>/files/<fileId>`,
+ * Bytes kept under path-like keys, such as `chats/<chatId>/files/<fileId>`,
  * for any feature that stores files. The store knows nothing of who owns a
  * blob: each feature keeps its own records, points at blobs by key, and
  * deletes its blobs itself when what owns them goes, usually with
@@ -41,32 +46,42 @@ export interface Interface {
 	/** Removes what is stored under `key`, if anything is. */
 	readonly delete: (key: Key) => Effect.Effect<void, Failure>;
 	/**
-	 * Every blob under `prefix`, at any depth, ordered by key. `threads/a`
-	 * covers `threads/a/files/1` but not `threads/ab`.
+	 * Removes every blob under `prefix`, at any depth. `chats/a` covers
+	 * `chats/a/files/1` but not `chats/ab`.
 	 */
-	readonly list: (prefix: Key) => Effect.Effect<readonly Entry[], Failure>;
-	/** Removes every blob under `prefix`, matched as `list` matches it. */
 	readonly deletePrefix: (prefix: Key) => Effect.Effect<void, Failure>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/BlobStore") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/BlobStore") {
+	declare readonly [Tier]: "process";
+}
 
-/** Select the implementation using `BLOB_STORE_PROVIDER`, defaults to the application database. */
+/**
+ * Select the implementation using `BLOB_STORE_PROVIDER`, defaults to the
+ * application database. Before it serves anything, it moves the folders a
+ * migration moved (see `blob_folder_move`).
+ */
 export const make = Effect.gen(function* () {
 	const provider = yield* Config.Literals(PROVIDERS, "BLOB_STORE_PROVIDER").pipe(
 		Config.withDefault("postgres"),
 	);
 	switch (provider) {
-		case "postgres":
+		case "postgres": {
+			yield* moveQueuedFolders(moveFolderInPostgres);
 			return yield* fromPostgres;
-		case "filesystem":
-			return yield* fromFileSystem(yield* Config.String("BLOB_STORE_FILESYSTEM_ROOT"));
+		}
+		case "filesystem": {
+			const root = yield* Config.String("BLOB_STORE_FILESYSTEM_ROOT");
+			const store = yield* fromFileSystem(root);
+			yield* moveQueuedFolders(moveFolderOnDisk(root));
+			return store;
+		}
 	}
 });
 
-export const layerNoDeps = Layer.effect(Service, make);
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
 
-/** The database and `Ids` are infrastructure the entry point provides. */
+/** The database and `Ids` are infrastructure the server provides. */
 export const layer = layerNoDeps.pipe(Layer.provide(NodeFileSystem.layer));
 
 /** A blob's path, made by `key`. */
@@ -82,22 +97,55 @@ export interface Content<E = never> {
 }
 
 /** What `get` reads back. */
-export interface Blob {
+interface Blob {
 	stream: Stream.Stream<Uint8Array, NotFound | Failure>;
 	contentType: string;
 	/** In bytes. */
 	size: number;
 }
 
+const PROVIDERS = ["postgres", "filesystem"] as const;
+const blobOperation = Schema.Literals([
+	"put",
+	"get",
+	"delete",
+	"deletePrefix",
+] satisfies (keyof Interface)[]);
+const blobProvider = Schema.Literals(PROVIDERS);
+
 /** Nothing is stored under `key`. */
-export class NotFound extends Data.TaggedError("BlobNotFound")<{
-	key: Key;
-}> {}
+export class NotFound
+	extends Schema.TaggedError<NotFound>()("BlobNotFound", {
+		key: Schema.declare<Key>(
+			(value): value is Key => typeof value === "string" && value.split("/").every(Boolean),
+		),
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return `No blob is stored at ${this.key}`;
+	}
+	get userMessage() {
+		return userText`The stored file is missing.`;
+	}
+}
 
 /** The content is over `maxSize` bytes, the most that is kept. */
-export class TooLarge extends Data.TaggedError("BlobTooLarge")<{
-	maxSize: number;
-}> {}
+export class TooLarge
+	extends Schema.TaggedError<TooLarge>()("BlobTooLarge", { maxSize: Schema.Number })
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return `Blob exceeds ${this.maxSize} bytes`;
+	}
+	get userMessage() {
+		return userText`The file is larger than ${this.maxSize} bytes and was not saved.`;
+	}
+}
 
 /**
  * The store could not be reached, such as over a dropped connection or when
@@ -105,11 +153,23 @@ export class TooLarge extends Data.TaggedError("BlobTooLarge")<{
  * happened, wholly or in part: a `put` whose reply was lost, or a
  * `deletePrefix` that failed partway.
  */
-export class Unavailable extends Data.TaggedError("BlobStoreUnavailable")<{
-	operation: keyof Interface;
-	provider: Provider;
-	cause: unknown;
-}> {}
+export class Unavailable
+	extends Schema.TaggedError<Unavailable>()("BlobStoreUnavailable", {
+		operation: blobOperation,
+		provider: blobProvider,
+		cause: Schema.Defect(),
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The ${this.provider} blob store could not ${this.operation}`;
+	}
+	get userMessage() {
+		return userText`File storage is temporarily unavailable. Try again shortly.`;
+	}
+}
 
 /**
  * The store refused `operation` and will go on refusing it until someone
@@ -117,20 +177,26 @@ export class Unavailable extends Data.TaggedError("BlobStoreUnavailable")<{
  * the bucket missing, or over its quota. Trying again does not help, so a
  * caller gives up on what needed the store and reports it.
  */
-export class Rejected extends Data.TaggedError("BlobStoreRejected")<{
-	operation: keyof Interface;
-	provider: Provider;
-	cause: unknown;
-}> {}
+export class Rejected
+	extends Schema.TaggedError<Rejected>()("BlobStoreRejected", {
+		operation: blobOperation,
+		provider: blobProvider,
+		cause: Schema.Defect(),
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The ${this.provider} blob store refused ${this.operation}`;
+	}
+	get userMessage() {
+		return userText`File storage refused the request. Ask whoever runs Sugabots to check its storage settings.`;
+	}
+}
 
 /** How any method can fail other than with `NotFound`. */
 export type Failure = Unavailable | Rejected;
-
-export interface Entry {
-	key: Key;
-	contentType: string;
-	size: number;
-}
 
 /**
  * The key naming `segments` as a path. A segment must be non-empty and contain
@@ -166,6 +232,29 @@ export function atMost<E>(
 	);
 }
 
-const PROVIDERS = ["postgres", "filesystem"] as const;
-
-type Provider = (typeof PROVIDERS)[number];
+/**
+ * Moves each folder `blob_folder_move` holds with `moveFolder`, dropping its
+ * row once it has moved, so the blobs a migration moved are where their
+ * records point. `moveFolder` leaves what has already moved alone, so moving
+ * again after a crash part-way finishes the job. A failure stops the server
+ * starting, rather than leave files it can't find.
+ */
+const moveQueuedFolders = <E, R>(moveFolder: (from: Key, to: Key) => Effect.Effect<void, E, R>) =>
+	Effect.gen(function* () {
+		const queued = yield* query((db) =>
+			db
+				.select()
+				.from(blobFolderMove)
+				.orderBy(asc(blobFolderMove.queuedAt), asc(blobFolderMove.id)),
+		);
+		for (const { id, fromPrefix, toPrefix } of queued) {
+			yield* moveFolder(fromPrefix, toPrefix);
+			yield* query((db) => db.delete(blobFolderMove).where(eq(blobFolderMove.id, id)));
+		}
+		if (queued.length > 0) {
+			yield* Effect.logInfo(`Moved the files of ${queued.length} folders a migration moved`);
+		}
+	}).pipe(
+		Effect.mapError((cause) => new Error("Moving the files a migration moved failed", { cause })),
+		Effect.orDie,
+	);

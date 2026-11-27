@@ -1,15 +1,10 @@
-import type { PodColor } from "@sugabots/contracts";
-
-/*
- * Plain data, which the native apps' copies are generated from. apps/codegen
- * loads this module with Node, so it imports nothing but types.
- */
+import type { ProjectColor } from "@sugabots/contracts";
 
 /**
  * The hues a provider's models are drawn in on the usage breakdown, from the
- * pod colours so its views read as one family, ordered so neighbours differ.
+ * project colours so its views read as one family, ordered so neighbours differ.
  */
-export const PROVIDER_HUES: readonly PodColor[] = [
+export const PROVIDER_HUES: readonly ProjectColor[] = [
 	"blue",
 	"purple",
 	"teal",

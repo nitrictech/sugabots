@@ -3,12 +3,12 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { cn } from "cn";
 import { useMemo, useState } from "react";
 
-export function PersonAvatar({
-	person: { name, email, image },
+export function MemberAvatar({
+	member: { name, email, image },
 	size = 32,
 	className,
 }: {
-	person: { name: string; email: string; image?: string | null };
+	member: { name: string; email: string; image?: string | null };
 	size?: number;
 	className?: string;
 }) {
@@ -19,7 +19,7 @@ export function PersonAvatar({
 		<span
 			title={name}
 			className={cn(
-				"relative grid shrink-0 place-items-center overflow-hidden rounded-full bg-person-avatar font-bold text-person-avatar-foreground",
+				"relative grid shrink-0 place-items-center overflow-hidden rounded-full bg-member-avatar font-bold text-member-avatar-foreground",
 				className,
 			)}
 			style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.34)) }}
@@ -48,7 +48,7 @@ const GRAVATAR_PIXEL_RATIO = 2;
 
 /**
  * Avatars up to this many CSS pixels all ask Gravatar for the same image, so a
- * person's image is downloaded once however many sizes the page shows it at.
+ * member's image is downloaded once however many sizes the page shows it at.
  */
 const LARGEST_SHARED_GRAVATAR_PX = 64;
 

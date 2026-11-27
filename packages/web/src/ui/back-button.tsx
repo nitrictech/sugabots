@@ -1,5 +1,6 @@
 import type { useRender } from "@base-ui/react/use-render";
-import { useCanGoBack, useRouter } from "@tanstack/react-router";
+import { deepEqual, useCanGoBack, useRouter } from "@tanstack/react-router";
+import { cn } from "cn";
 import { ChevronLeft } from "lucide-react";
 import { cloneElement, isValidElement, type MouseEvent, type ReactElement } from "react";
 import { pageBehind, type TrailPage } from "@/lib/history-trail.ts";
@@ -24,8 +25,22 @@ export const BACK_ON_PHONE =
 export const BACK_LABEL_ON_PHONE = "max-md:sr-only";
 
 /** The round Back's chevron. */
-export function BackChevron({ className }: { className?: string }) {
-	return <ChevronLeft aria-hidden size={22} strokeWidth={2.25} className={className} />;
+export function BackChevron() {
+	return <ChevronLeft aria-hidden size={22} strokeWidth={2.25} />;
+}
+
+/** The round Back as a button, for a Back that is an action rather than a link. `className` hides it where it isn't wanted. */
+export function BackButton({ onClick, className }: { onClick: () => void; className?: string }) {
+	return (
+		<button
+			type="button"
+			aria-label="Back"
+			onClick={onClick}
+			className={cn(BACK_BUTTON, className)}
+		>
+			<BackChevron />
+		</button>
+	);
 }
 
 /**
@@ -35,12 +50,12 @@ export function BackChevron({ className }: { className?: string }) {
  * here.
  *
  * - `leave(toHome)` goes back to the page this one was opened from, which
- *   could be anywhere, as Back does, so a thread opened from Home goes back to
+ *   could be anywhere, as Back does, so a chat opened from Home goes back to
  *   Home; or `toHome` when this page was the first one opened.
  * - `leaveFor(isHome, toHome)` goes back only when the page behind is home,
  *   as `isHome` tells it, and otherwise `toHome`: for a page that is gone,
- *   whose Back would otherwise return to it, or a thread that must close onto
- *   its own chat rather than whatever was open before it.
+ *   whose Back would otherwise return to it, or a run that must close onto
+ *   the chat it is in rather than whatever was open before it.
  * - `label(home)` names where `leave` goes: plainly "Back" to the opener, or
  *   "Back to" `home`.
  */
@@ -56,11 +71,15 @@ export function useLeave() {
 		if (behind && isHome(behind)) router.history.back();
 		else toHome();
 	};
-	/** `leaveFor` the page at `href`, such as the list a deleted thing was in. */
+	/**
+	 * `leaveFor` the page at `href`, such as the list a deleted thing was in:
+	 * the same path, and the same search, which names a page open over it, such as settings.
+	 */
 	const leaveForPage = (href: string) => {
-		const { pathname } = new URL(href, window.location.origin);
+		const { pathname, search } = new URL(href, window.location.origin);
+		const searchOfPage = router.options.parseSearch(search);
 		leaveFor(
-			(page) => page.pathname === pathname,
+			(page) => page.pathname === pathname && deepEqual(page.search, searchOfPage),
 			() => void router.navigate({ href, replace: true }),
 		);
 	};
@@ -69,6 +88,21 @@ export function useLeave() {
 		leave,
 		leaveFor,
 		leaveForPage,
+	};
+}
+
+/**
+ * The click of a Back link to the page this one sits under: back through
+ * history when that page is the one behind, so the browser's Back afterwards
+ * does not reopen this one, and otherwise to it in this page's place. A click
+ * that opens a new tab, or that a phone's Back has already taken, is left alone.
+ */
+export function useBackToLinkedPage(): (event: MouseEvent<HTMLAnchorElement>) => void {
+	const { leaveForPage } = useLeave();
+	return (event) => {
+		if (event.defaultPrevented || !isPlainClick(event)) return;
+		event.preventDefault();
+		leaveForPage(event.currentTarget.href);
 	};
 }
 

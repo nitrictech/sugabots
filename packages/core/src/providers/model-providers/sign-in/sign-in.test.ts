@@ -1,18 +1,20 @@
-import { Effect, Layer } from "effect";
+import type { InputOf, OutputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { user, workspace, workspaceMember } from "../../../database/schema.ts";
+import { setRole } from "../../../authentication/seed.test-support.ts";
 import {
 	closeDatabase,
-	onDatabase,
 	type Promised,
 	runOnPostgres,
 	servedOnPostgres,
 } from "../../../database/testing.ts";
-import { servedOnPostgresAs } from "../../../workspaces/testing.ts";
+import { createWorkspaceFixture } from "../../../database/workspace.test-support.ts";
+import { servedOperations } from "../../../operations/testing.ts";
+import { authenticators, principals } from "../../../proofs/world.test-support.ts";
+import { unimplemented } from "../../../testing.ts";
 import { Egress, type EgressHttpClients } from "../../network/egress.ts";
 import { providerIn, providersIn } from "../model-provider-reads.ts";
-import { ModelProviderRepository } from "../model-provider-repository.ts";
-import { ModelProviderSetup } from "../model-provider-setup.ts";
+import { ModelProviderStore } from "../model-provider-store.ts";
 import { withSignInAccess } from "./sign-in.ts";
 
 /**
@@ -20,49 +22,54 @@ import { withSignInAccess } from "./sign-in.ts";
  * against real SQL and stand-ins for each sign-in service and model API.
  */
 describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
-	let store: Promised<ModelProviderRepository.Interface>;
+	let store: Promised<ModelProviderStore.Interface>;
 	let workspaceId: string;
-	let userId: string;
+	let memberId: string;
 	let providerId: string;
 	let service: { clients: EgressHttpClients };
+	let signInAs: ReturnType<typeof principals>["member"];
 
-	/** The setup as the workspace's administrator. */
-	const setup = async () =>
-		(
-			await servedOnPostgresAs(
-				ModelProviderSetup.Service,
-				ModelProviderSetup.layer.pipe(
-					Layer.provide([
-						Layer.succeed(Egress.Service, {
-							providers: service.clients,
-							validateProviderUrl: () => Effect.void,
-							oauth: async () => new Response(null, { status: 503 }),
-							webFetch: async () => new Response(null, { status: 503 }),
-						}),
-					]),
-				),
-			)
-		)(userId);
+	/** The sign-in operations, called for the workspace's administrator signed in. */
+	const setup = async () => {
+		const call = await servedOperations({
+			egress: unimplemented(Egress.Service, {
+				providers: service.clients,
+				validateProviderUrl: () => Effect.void,
+				oauth: async () => new Response(null, { status: 503 }),
+				webFetch: async () => new Response(null, { status: 503 }),
+			}),
+		});
+		const principal = await signInAs(memberId);
+		const operation =
+			<Name extends RequestOperationName>(name: Name) =>
+			(input: InputOf<Name>) =>
+				call(principal, name, input);
+		return {
+			startSignIn: operation("modelProviders.startSignIn"),
+			completeSignIn: operation("modelProviders.completeSignIn"),
+		};
+	};
 
 	const view = () => runOnPostgres(providerIn(workspaceId, providerId));
 
-	/** The endpoint ready to send, as a turn would get it. */
-	const withAccess = (endpoint: ModelProviderRepository.ProviderEndpoint) =>
+	/** The provider access ready to send, as a turn would get it. */
+	const withAccess = (access: ModelProviderStore.ProviderAccess) =>
 		runOnPostgres(
 			Effect.gen(function* () {
-				const repository = yield* ModelProviderRepository.Service;
-				return yield* withSignInAccess(repository, service.clients, workspaceId, endpoint);
-			}).pipe(Effect.provide(ModelProviderRepository.layer)),
+				const repository = yield* ModelProviderStore.Service;
+				return yield* withSignInAccess(repository, service.clients, workspaceId, access);
+			}).pipe(Effect.provide(ModelProviderStore.layer)),
 		);
 
-	const storedEndpoint = async () => {
-		const endpoint = await store.endpoint(workspaceId, providerId);
-		if (!endpoint) throw new Error("fixture");
-		return endpoint;
+	const storedAccess = async () => {
+		const access = await store.access(workspaceId, providerId);
+		if (!access) throw new Error("fixture");
+		return access;
 	};
 
 	beforeAll(async () => {
-		store = await servedOnPostgres(ModelProviderRepository.Service, ModelProviderRepository.layer);
+		store = await servedOnPostgres(ModelProviderStore.Service, ModelProviderStore.layer);
+		signInAs = principals(await authenticators()).member;
 	});
 
 	afterAll(async () => {
@@ -71,26 +78,34 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 
 	beforeEach(async () => {
 		const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-		const [made] = await onDatabase((db) =>
-			db
-				.insert(workspace)
-				.values({ name: `Test ${stamp}`, slug: `test-${stamp}` })
-				.returning(),
+		const {
+			workspace: made,
+			members: { somebody },
+		} = await createWorkspaceFixture(
+			{ name: `Test ${stamp}`, slug: `test-${stamp}` },
+			{ somebody: { name: "Ada", email: `ada-${stamp}@example.com`, role: "admin" } },
 		);
-		const [person] = await onDatabase((db) =>
-			db
-				.insert(user)
-				.values({ name: "Ada", email: `ada-${stamp}@example.com` })
-				.returning(),
-		);
-		if (!made || !person) throw new Error("could not create the test workspace");
 		workspaceId = made.id;
-		userId = person.id;
-		await onDatabase((db) =>
-			db.insert(workspaceMember).values({ workspaceId, userId, role: "admin" }),
-		);
-		await store.seedPresets(workspaceId);
+		memberId = somebody.id;
+		await store.seedBuiltInProviders(workspaceId);
 	});
+
+	function expectSignedInWithModel(
+		outcome: OutputOf<"modelProviders.completeSignIn">,
+		modelId: string,
+	) {
+		expect(outcome).toMatchObject({
+			status: "signed_in",
+			provider: {
+				signedIn: true,
+				signedInAs: { id: memberId },
+				active: true,
+				status: "connected",
+			},
+		});
+		if (outcome.status !== "signed_in") throw new Error("Expected a signed-in provider");
+		expect(outcome.provider.models.map((model) => model.modelId)).toEqual([modelId]);
+	}
 
 	describe("with ChatGPT", () => {
 		let openai: ReturnType<typeof fakeOpenAI>;
@@ -99,7 +114,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			openai = fakeOpenAI();
 			service = openai;
 			const seeded = (await runOnPostgres(providersIn(workspaceId))).find(
-				({ preset }) => preset === "chatgpt",
+				({ builtIn }) => builtIn === "chatgpt",
 			);
 			if (!seeded) throw new Error("ChatGPT is not seeded");
 			providerId = seeded.id;
@@ -124,18 +139,30 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			expect(waiting).toEqual({ status: "pending" });
 
 			openai.enterCode();
-			const outcome = await signIn.completeSignIn({
-				workspace: workspaceId,
-				providerId,
-				attempt: started.attempt,
+			const secondSession = await setup();
+			const completion = { workspace: workspaceId, providerId, attempt: started.attempt };
+			await expect(secondSession.completeSignIn(completion)).rejects.toMatchObject({
+				_tag: "ProviderSignInAttemptInvalid",
 			});
+			for (const invalid of [
+				{ ...completion, attempt: undefined },
+				{ ...completion, providerId: crypto.randomUUID() },
+				{ ...completion, workspace: crypto.randomUUID() },
+			]) {
+				await expect(signIn.completeSignIn(invalid)).rejects.toMatchObject({
+					_tag: "ProviderSignInAttemptInvalid",
+				});
+			}
+			await setRole(workspaceId, memberId, "editor");
+			await expect(signIn.completeSignIn(completion)).rejects.toMatchObject({
+				_tag: "ProviderSignInAttemptInvalid",
+			});
+			expect(await view()).toMatchObject({ status: "signed_out" });
 
-			expect(outcome).toMatchObject({
-				status: "signed_in",
-				provider: { signedIn: true, active: true, status: "connected" },
-			});
-			if (outcome.status !== "signed_in") throw new Error("unreachable");
-			expect(outcome.provider.models.map(({ modelId }) => modelId)).toEqual(["gpt-5.5"]);
+			await setRole(workspaceId, memberId, "admin");
+			const outcome = await signIn.completeSignIn(completion);
+
+			expectSignedInWithModel(outcome, "gpt-5.5");
 			expect(openai.listingHeaders).toMatchObject({
 				authorization: `Bearer ${openai.issued[0]}`,
 				"chatgpt-account-id": "account-1",
@@ -147,7 +174,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			const signIn = await setup();
 			const started = await signIn.startSignIn({ workspace: workspaceId, providerId });
 			const other = await store.create(workspaceId, {
-				createdById: userId,
+				createdById: memberId,
 				provider: {
 					name: "Gateway",
 					baseUrl: "https://models.example/v1",
@@ -163,7 +190,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					providerId: other.id,
 					attempt: started.attempt,
 				}),
-			).rejects.toMatchObject({ _tag: "ProviderSignInNotOffered" });
+			).rejects.toMatchObject({ _tag: "ProviderSignInAttemptInvalid" });
 		});
 
 		it("spends a lapsing refresh token once, however many turns start together", async () => {
@@ -174,11 +201,22 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60_000,
 					accountId: "account-1",
 				},
-				signedInById: userId,
+				signedInById: memberId,
 			});
-			const endpoint = await storedEndpoint();
+			const access = await storedAccess();
+			const exchange = openai.holdRefreshes();
 
-			const ready = await Promise.all([1, 2, 3].map(() => withAccess(endpoint)));
+			const first = withAccess(access);
+			let others: Promise<Awaited<typeof first>[]>;
+			try {
+				// One turn is exchanging the token under its claim; the others start
+				// meanwhile and wait for its tokens rather than spend it again.
+				await exchange.started;
+				others = Promise.all([2, 3].map(() => withAccess(access)));
+			} finally {
+				exchange.release();
+			}
+			const ready = [await first, ...(await others)];
 
 			expect(openai.refreshesSpent).toEqual(["refresh-0"]);
 			const renewed = openai.issued[0];
@@ -194,10 +232,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60 * 60_000,
 					accountId: "account-1",
 				},
-				signedInById: userId,
+				signedInById: memberId,
 			});
 
-			const ready = await withAccess(await storedEndpoint());
+			const ready = await withAccess(await storedAccess());
 
 			expect(ready.apiKey).toBe("fresh-token");
 			expect(ready.headers["ChatGPT-Account-Id"]).toBe("account-1");
@@ -212,8 +250,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 			xai = fakeXai();
 			service = xai;
 			const added = await store.create(workspaceId, {
-				createdById: userId,
-				provider: { preset: "supergrok" },
+				createdById: memberId,
+				provider: { builtIn: "supergrok" },
 			});
 			providerId = added.id;
 		});
@@ -245,16 +283,11 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 				attempt: started.attempt,
 			});
 
-			expect(outcome).toMatchObject({
-				status: "signed_in",
-				provider: { signedIn: true, active: true, status: "connected" },
-			});
-			if (outcome.status !== "signed_in") throw new Error("unreachable");
-			expect(outcome.provider.models.map(({ modelId }) => modelId)).toEqual(["grok-4.3"]);
+			expectSignedInWithModel(outcome, "grok-4.3");
 			expect(xai.listingAuthorization).toBe("Bearer xai-access-1");
 		});
 
-		it("says so when the person declines the sign-in", async () => {
+		it("says so when the member declines the sign-in", async () => {
 			const signIn = await setup();
 			const started = await signIn.startSignIn({ workspace: workspaceId, providerId });
 
@@ -276,16 +309,16 @@ describe.skipIf(!process.env.DATABASE_URL)("a subscription provider", () => {
 					expiresAt: Date.now() + 60_000,
 					accountId: null,
 				},
-				signedInById: userId,
+				signedInById: memberId,
 			});
 
-			const ready = await withAccess(await storedEndpoint());
-			const again = await withAccess(await storedEndpoint());
+			const ready = await withAccess(await storedAccess());
+			const again = await withAccess(await storedAccess());
 
 			expect(ready.apiKey).toBe("xai-access-1");
 			expect(again.apiKey).toBe("xai-access-1");
 			expect(xai.refreshesSpent).toEqual(["xai-refresh-0"]);
-			expect((await storedEndpoint()).oauthTokens?.refresh).toBe("xai-refresh-0");
+			expect((await storedAccess()).oauthTokens?.refresh).toBe("xai-refresh-0");
 		});
 	});
 });
@@ -305,6 +338,8 @@ function fakeOpenAI() {
 	const issued: string[] = [];
 	const refreshesSpent: string[] = [];
 	const state = { listingHeaders: {} as Record<string, string> };
+	let refreshHeld: Promise<void> | undefined;
+	let refreshStarted = () => {};
 
 	const respond = async (url: string, init?: RequestInit): Promise<Response> => {
 		const { pathname } = new URL(url);
@@ -325,8 +360,8 @@ function fakeOpenAI() {
 			if (spent) {
 				if (refreshesSpent.includes(spent)) return new Response(null, { status: 401 });
 				refreshesSpent.push(spent);
-				// Slow enough that concurrent callers would overlap without the lock.
-				await Effect.runPromise(Effect.sleep("50 millis"));
+				refreshStarted();
+				await refreshHeld;
 			}
 			const access = jwt({ n: issued.length, chatgpt_account_id: "account-1" });
 			issued.push(access);
@@ -349,14 +384,8 @@ function fakeOpenAI() {
 		return new Response(null, { status: 404 });
 	};
 
-	const clients: EgressHttpClients = {
-		for: () =>
-			((input: string | URL | Request, init?: RequestInit) =>
-				respond(input instanceof Request ? input.url : input.toString(), init)) as typeof fetch,
-	};
-
 	return {
-		clients,
+		clients: clientsRespondingWith(respond),
 		issued,
 		refreshesSpent,
 		get listingHeaders() {
@@ -364,6 +393,17 @@ function fakeOpenAI() {
 		},
 		enterCode: () => {
 			codeEntered = true;
+		},
+		/**
+		 * Holds every refresh exchange from now on until `release`, so a case sees
+		 * callers that overlap with one in flight. `started` resolves once one is.
+		 */
+		holdRefreshes: () => {
+			const held = Promise.withResolvers<void>();
+			const started = Promise.withResolvers<void>();
+			refreshHeld = held.promise;
+			refreshStarted = started.resolve;
+			return { started: started.promise, release: held.resolve };
 		},
 	};
 }
@@ -415,14 +455,8 @@ function fakeXai() {
 		return new Response(null, { status: 404 });
 	};
 
-	const clients: EgressHttpClients = {
-		for: () =>
-			((input: string | URL | Request, init?: RequestInit) =>
-				respond(input instanceof Request ? input.url : input.toString(), init)) as typeof fetch,
-	};
-
 	return {
-		clients,
+		clients: clientsRespondingWith(respond),
 		refreshesSpent,
 		get listingAuthorization() {
 			return state.listingAuthorization;
@@ -434,4 +468,12 @@ function fakeXai() {
 			code = "declined";
 		},
 	};
+}
+
+function clientsRespondingWith(
+	respond: (url: string, init?: RequestInit) => Promise<Response>,
+): EgressHttpClients {
+	const fetchFromProvider: typeof fetch = (input, init) =>
+		respond(input instanceof Request ? input.url : input.toString(), init);
+	return { for: () => fetchFromProvider };
 }

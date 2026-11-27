@@ -1,17 +1,11 @@
-import { type ApiFailure, Forbidden, NotFound } from "@sugabots/contracts/http";
-import type { UserFacing } from "@sugabots/core/user-message";
-import { type DomainError, type PublicError, toPublicError, type UserText } from "@sugabots/errors";
-import { Effect, Schema } from "effect";
+import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import { type ApiFailure, type ApiFailureClass, failureForError } from "@sugabots/contracts/http";
+import { type DomainError, toPublicError } from "@sugabots/errors";
+import { Effect, Schema, SchemaAST } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 
-/** One of the API's failure classes, such as `NotFound`. */
-type ApiFailureClass = new (fields: {
-	readonly message: UserText;
-	readonly error?: PublicError;
-}) => ApiFailure;
-
 /**
- * Turns a service's own errors into the API's, choosing each one's class, and
+ * Turns an operation's errors into the API's, choosing each one's class, and
  * so its status, by its tag. The response carries the error's `userMessage`,
  * plus its {@link toPublicError} fields for a `DomainError`. Its internal
  * `message` and `cause` never reach a client.
@@ -26,13 +20,7 @@ type ApiFailureClass = new (fields: {
  */
 export const asHttpError =
 	<const Statuses extends Record<string, ApiFailureClass>>(statuses: Statuses) =>
-	<
-		A,
-		E extends
-			| ((DomainError | UserFacing) & { readonly _tag: keyof Statuses & string })
-			| ApiFailure,
-		R,
-	>(
+	<A, E extends (DomainError & { readonly _tag: keyof Statuses & string }) | ApiFailure, R>(
 		effect: Effect.Effect<A, E, R>,
 	): Effect.Effect<
 		A,
@@ -44,31 +32,44 @@ export const asHttpError =
 			const Failure = statuses[failure._tag] as Statuses[Exclude<E, ApiFailure>["_tag"]];
 			return new Failure({
 				message: failure.userMessage,
-				...(isDomainError(failure) ? { error: toPublicError(failure) } : {}),
+				error: toPublicError(failure),
 			}) as InstanceType<typeof Failure>;
 		});
 
 /**
- * How core's refusals are answered, for the `asHttpError` of any endpoint
- * whose use case authorizes. Something the caller cannot reach is `NotFound`,
- * so an id cannot be probed for; something they reach but may not act on is
- * `Forbidden`.
+ * Answers an operation's errors as the HTTP API answers them everywhere, by
+ * `failureForError`.
  */
-export const refusals = { ResourceHidden: NotFound, ActionForbidden: Forbidden };
+export const answerAsHttp = asHttpError(failureForError);
 
-/** Whether `failure` is a `DomainError` rather than an older `UserFacing` error. */
-function isDomainError(failure: DomainError | UserFacing): failure is DomainError {
-	return "isRetryable" in failure;
-}
+/**
+ * For an operation only a member signed in may call, such as one on their own
+ * settings, on an endpoint that declares no refusal: behind `Session` the
+ * principal is always a member, so `IsMember`'s refusal there is a defect.
+ */
+export const memberOnly = <A, E, R>(
+	effect: Effect.Effect<A, E | ActionForbidden, R>,
+): Effect.Effect<A, Exclude<E, ActionForbidden>, R> =>
+	Effect.catchIf<A, E | ActionForbidden, R, ActionForbidden, never, never, never>(
+		effect,
+		(failure): failure is ActionForbidden => failure instanceof ActionForbidden,
+		(refusal) => Effect.die(refusal),
+	);
 
 /**
  * A failure as a response, for the router-level middleware that answers
- * before any endpoint does and so has no endpoint to encode it.
+ * before any endpoint does and so has no endpoint to encode it. Its status is
+ * the one `schema` declares, as an endpoint's would be.
  */
 export function failureResponse<F extends ApiFailure>(
 	schema: Schema.Codec<F, unknown>,
 	failure: F,
-	status: number,
 ): HttpServerResponse.HttpServerResponse {
+	const status = httpApiStatus(schema.ast) ?? INTERNAL_SERVER_ERROR;
 	return HttpServerResponse.jsonUnsafe(Schema.encodeSync(schema)(failure), { status });
 }
+
+const httpApiStatus = SchemaAST.resolveAt<number>("httpApiStatus");
+
+/** The status the HttpApi gives a failure whose schema declares none. */
+const INTERNAL_SERVER_ERROR = 500;

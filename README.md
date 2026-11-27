@@ -9,12 +9,12 @@
   <img alt="" src="packages/avatars/assets/bot-crowd.svg" width="376">
 </p>
 
-Sugabots is a self-hosted workspace where people and AI agents work together.
-Create agents, organise them into shared pods, and run conversations that can use
-built-in tools and MCP connections.
+Sugabots is a self-hosted workspace where members and bots work together.
+Create bots, bring them into projects with your team, and run chats that can use
+built-in tools and MCP connectors.
 
 <p align="center">
-  <img alt="A Sugabots thread where two people and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/one-thread-mac.webp" width="800">
+  <img alt="A Sugabots project where two members and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/project-chat-mac.webp" width="800">
 </p>
 
 Everything stays in your own database. Bots use the model providers you choose,
@@ -40,22 +40,22 @@ It sets Sugabots up in a new `sugabots` folder and starts it. Then open <http://
 
 ## Host it for your team
 
-To use Sugabots with other people, run it somewhere they can reach.
+To use Sugabots with other members, run it somewhere they can reach.
 [Deploy with Docker](https://sugabots.ai/docs/deploy-with-docker) walks through
 a server of your own or a hosting platform.
 
 ## Features
 
-### Shared pods
+### Projects
 
-A pod is a shared space for a group of people and their bots. Everyone in it
+A project is a long-running piece of work shared by a group of members and their bots. Everyone in it
 sees the same chats, results and approvals, so nobody has to forward an answer
 or explain what a bot already did.
 
 ### Bots that work together
 
-When a bot needs help, it asks another bot in its pod. The exchange shows up as
-a thread under its message, so you can see exactly who said what.
+When a bot needs help, it asks another bot. The exchange shows up as
+a chat under its message, so you can see exactly who said what.
 
 ### A different model for every bot
 
@@ -70,31 +70,31 @@ Connect Linear, Notion, Stripe, Sentry, Jira, any MCP server or a plain HTTP
 API once, and let your bots use it to do work. Choose which tools run straight
 away and which wait for someone to say yes.
 
-### Routines
+### Automations
 
-Give a bot a job to do on a schedule, or whenever a webhook or a GitHub event
-calls it. It posts what it did in its chat, where the team can pick it up. Try telling a bot "check in with me every morning at 9".
+Give a bot a job to do on a routine, or whenever a webhook or a GitHub event
+calls it. It posts what it did in its automation's feed, where the team can pick it up. Try telling a bot "check in with me every morning at 9".
 
-### Sandboxes
+### Computers
 
-Bots can runs code, use software or browse the web in their own isolated environment.
+Bots run code, use software and browse the web on a computer of their own, or their project's.
 
 ### And more
 
-- **GitHub**: bots read a pod's repositories, push branches, and open pull
+- **GitHub**: bots read their repositories, push branches, and open pull
   requests once someone allows it.
-- **Artifacts**: files and outputs bots make are saved for the team to open and
-  review.
-- **Usage and costs**: see what every bot, model and team costs, day by day.
+- **Files**: what members upload and bots make is kept for the team to open
+  and review.
+- **Usage and costs**: see what every bot and model costs, day by day.
 - **Web search**: bots search the web and read pages, through Exa, Brave Search,
   Tavily or your own SearXNG server.
-- **Roles**: owners, admins, members and viewers, with pods deciding who sees
-  what.
-- **Personal pod**: everyone gets a private pod and assistant that nobody else
-  can see into, admins included.
-- **Bots set their own schedules**: ask a bot to "check in with me every morning
-  at 9" and it sets up the routine.
-- **Signed webhooks**: routines check calls from GitHub, Stripe, Slack and Linear,
+- **Roles**: owners, admins, editors and viewers, with public and personal bots, and public and private projects
+  deciding who sees what.
+- **Personal Assistant**: everyone gets an assistant of their own that nobody
+  else can talk to, admins included.
+- **Bots set their own routines**: ask a bot to "check in with me every morning
+  at 9" and it sets up the automation.
+- **Signed webhooks**: automations check calls from GitHub, Stripe, Slack and Linear,
   or any sender using HMAC, bearer, API key or basic auth.
 
 ## Community and support

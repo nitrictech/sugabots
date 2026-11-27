@@ -16,13 +16,13 @@ export function BotCrowd() {
 			className="grid max-w-94 grid-cols-8 items-center gap-2 py-2.5"
 			aria-hidden
 		>
-			{botCrowd.map(({ rotate, lift, ...look }) => (
+			{botCrowd.map(({ rotate, lift, ...avatar }) => (
 				<RevealItem
-					key={look.color}
+					key={avatar.color}
 					variant="pop"
 					style={{ rotate, y: `${(-lift / CROWD_FACE_PX) * 100}%` }}
 				>
-					<BotAvatar {...look} className="aspect-square h-auto w-full" />
+					<BotAvatar {...avatar} className="aspect-square h-auto w-full" />
 				</RevealItem>
 			))}
 		</Reveal>

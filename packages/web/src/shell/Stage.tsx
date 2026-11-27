@@ -2,7 +2,7 @@ import { cn } from "cn";
 import { ChevronLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { usePanelKeys } from "@/lib/panel-keys.ts";
-import { BACK_BUTTON, BackChevron, useLeave } from "@/ui/back-button.tsx";
+import { BackButton, useLeave } from "@/ui/back-button.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 
 /**
@@ -13,8 +13,8 @@ import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
 export type CloseStage = (how?: { replace: boolean }) => void;
 
 /**
- * The level a view inside a stage was opened from, such as a bot's routines
- * above one of them, which its Back returns to.
+ * The level a view inside a stage was opened from, such as a project's
+ * automations above one of them, which its Back returns to.
  */
 export interface StageParent {
 	/** Where Back goes, as a screen reader hears it: "Back to" this. */
@@ -40,8 +40,21 @@ export function StageBack({ parent }: { parent: StageParent }) {
 }
 
 /**
- * Something a bot made or is doing, opened large beside its chat or a list so
- * it can be talked about while it is looked at. On a phone it covers them.
+ * Closes a `Stage`, or a view standing in for one, at the right of its header;
+ * a phone closes it with Back instead.
+ */
+export function StageClose({ onClose }: { onClose: () => void }) {
+	return (
+		<IconButton label="Close" variant="bar" onClick={onClose} className="max-md:hidden">
+			<X size={16} strokeWidth={1.75} />
+		</IconButton>
+	);
+}
+
+/**
+ * Something a bot made or is doing, opened large beside its chat or a
+ * list so it can be talked about while it is looked at. On a phone it covers
+ * them.
  * With `parent`, it is a view inside another, and its Back, before the
  * title, returns there, as Escape does; without, Escape closes it.
  */
@@ -57,7 +70,7 @@ export function Stage({
 }: {
 	/** Its name, as assistive technology announces it. */
 	label: string;
-	/** A `StageMark`, or another mark of what is shown. */
+	/** An `IconTile`, or another mark of what is shown. */
 	icon: ReactNode;
 	title: string;
 	/** A quieter line under the title, such as who made it and when. */
@@ -81,17 +94,11 @@ export function Stage({
 				{parent && <StageBack parent={parent} />}
 				{/* On a phone it covers the page it was opened from, so it goes back to it, as a phone's pages do. */}
 				{!parent && (
-					<button
-						type="button"
-						aria-label="Back"
-						onClick={() => {
-							// Opened first, it is replaced, so Back from what shows does not return to it.
-							leave(() => onClose({ replace: true }));
-						}}
-						className={cn(BACK_BUTTON, "md:hidden")}
-					>
-						<BackChevron />
-					</button>
+					<BackButton
+						// Opened first, it is replaced, so Back from what shows does not return to it.
+						onClick={() => leave(() => onClose({ replace: true }))}
+						className="md:hidden"
+					/>
 				)}
 				{!parent && <span className="contents max-md:hidden">{icon}</span>}
 				<div className="flex min-w-0 flex-1 flex-col pl-1 leading-snug">
@@ -101,27 +108,11 @@ export function Stage({
 					{byline && <p className="m-0 truncate text-subtle-foreground text-xs">{byline}</p>}
 				</div>
 				{actions}
-				<IconButton label="Close" variant="bar" onClick={() => onClose()} className="max-md:hidden">
-					<X size={16} strokeWidth={1.75} />
-				</IconButton>
+				<StageClose onClose={() => onClose()} />
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6 max-md:px-3 max-md:pb-tab-bar-offset-3">
 				{children}
 			</div>
 		</section>
-	);
-}
-
-/**
- * The square that marks what kind of thing a `Stage` or a card shows.
- */
-export function StageMark({ children }: { children: ReactNode }) {
-	return (
-		<span
-			aria-hidden
-			className="grid size-7 shrink-0 place-items-center rounded-sm bg-chip text-muted-foreground [&_svg]:size-3.75"
-		>
-			{children}
-		</span>
 	);
 }

@@ -1,7 +1,4 @@
-import type { AgentColor } from "@sugabots/contracts";
-
-/** A colour a bot can wear: the contracts' own list, named for what it colours here. */
-export type BotColor = AgentColor;
+import type { BotColor } from "@sugabots/contracts";
 
 /** A colour as each theme draws it. */
 export interface ThemedColor {
@@ -14,7 +11,7 @@ export interface ThemedColor {
  * and the tint behind anything the bot says, with the text and inline mono
  * that sit on that tint.
  */
-export interface BotPalette {
+interface BotPalette {
 	face: string;
 	eyes: string;
 	tint: ThemedColor;
@@ -31,7 +28,7 @@ export interface BotPalette {
  * L .935 C .015, mono L .87 C .08; light text L .275 C .065, mono L .5 C .14),
  * all AA on their tint.
  */
-export const botColors: Record<AgentColor, BotPalette> = {
+export const botPalettes: Record<BotColor, BotPalette> = {
 	red: {
 		face: "#ef4444",
 		eyes: "#450a0a",

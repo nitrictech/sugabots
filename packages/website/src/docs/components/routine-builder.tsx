@@ -1,42 +1,55 @@
+import type { Weekday } from "@sugabots/contracts";
+import { calendarScheduleLabel } from "@sugabots/contracts/routine-schedule-label";
 import { cn } from "cn";
 import { MinusIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
+import { cast } from "@/cast";
 import { BotAvatar } from "@/components/bot-avatar";
+import { DemoCard } from "@/components/demo-card";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { cast } from "@/docs/cast";
+import { ChoiceChips } from "@/components/ui/choice-chips";
 
 const repeats = { daily: "Every day", weekdays: "Weekdays", weekly: "Weekly" } as const;
 type Repeat = keyof typeof repeats;
 
 const days = [
-	["M", "Mondays"],
-	["Tu", "Tuesdays"],
-	["W", "Wednesdays"],
-	["Th", "Thursdays"],
-	["F", "Fridays"],
-	["Sa", "Saturdays"],
-	["Su", "Sundays"],
-] as const;
+	["M", "Mondays", "mon"],
+	["Tu", "Tuesdays", "tue"],
+	["W", "Wednesdays", "wed"],
+	["Th", "Thursdays", "thu"],
+	["F", "Fridays", "fri"],
+	["Sa", "Saturdays", "sat"],
+	["Su", "Sundays", "sun"],
+] as const satisfies readonly (readonly [string, string, Weekday])[];
+
+const WORKING_DAYS: Weekday[] = ["mon", "tue", "wed", "thu", "fri"];
+/** Any date will do: the demo's routines repeat every day or week from it. */
+const STARTS_ON = "2026-01-05";
 
 const HOURS_IN_DAY = 24;
 
-function listInEnglish(items: readonly string[]) {
-	if (items.length <= 1) return items.join("");
-	return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
-}
+const ROW_LABEL = "w-16 text-sm font-semibold";
 
-/** How the routine dialog words a schedule, e.g. "Weekdays at 8:00". */
-function describeSchedule(repeat: Repeat, pickedDays: readonly number[], hour: number) {
-	const time = `${hour}:00`;
-	if (repeat === "daily") return `Every day at ${time}`;
-	if (repeat === "weekdays") return `Weekdays at ${time}`;
+/** How the app words a routine, e.g. "Weekdays at 8:00". */
+function describeRoutine(repeat: Repeat, pickedDays: readonly number[], hour: number) {
+	const times = [hour * 60];
+	if (repeat === "daily") {
+		return calendarScheduleLabel({ repeat: "daily", every: 1, times, startsOn: STARTS_ON });
+	}
+	const weekly = (weekdays: Weekday[]) =>
+		calendarScheduleLabel({
+			repeat: "weekly",
+			every: 1,
+			days: weekdays,
+			times,
+			startsOn: STARTS_ON,
+		});
+	if (repeat === "weekdays") return weekly(WORKING_DAYS);
 	if (pickedDays.length === 0) return "Pick at least one day";
-	const names = pickedDays.map((day) => days[day]?.[1] ?? "");
-	return `${listInEnglish(names)} at ${time}`;
+	return weekly(pickedDays.flatMap((day) => days[day]?.[2] ?? []));
 }
 
-/** A routine's "When" settings to play with, and the summary the app shows for them. */
+/** A routine's settings to play with, and the summary the app shows for them. */
 export function RoutineBuilder() {
 	const [repeat, setRepeat] = useState<Repeat>("weekdays");
 	const [pickedDays, setPickedDays] = useState<readonly number[]>([0, 3]);
@@ -50,30 +63,18 @@ export function RoutineBuilder() {
 	}
 
 	return (
-		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
+		<DemoCard>
 			<div className="flex flex-col gap-4 border-b px-5 py-4">
-				<div className="flex flex-wrap items-center gap-2">
-					<span className="w-16 text-sm font-semibold">Repeat</span>
-					{(Object.keys(repeats) as Repeat[]).map((option) => (
-						<button
-							key={option}
-							type="button"
-							aria-pressed={option === repeat}
-							onClick={() => setRepeat(option)}
-							className={cn(
-								"rounded-full border-2 px-3 py-0.5 text-sm font-semibold transition-colors",
-								option === repeat
-									? "border-foreground bg-foreground text-background"
-									: "border-input text-muted-foreground hover:text-foreground",
-							)}
-						>
-							{repeats[option]}
-						</button>
-					))}
-				</div>
+				<ChoiceChips
+					label="Repeat"
+					labelClassName={cn("float-left", ROW_LABEL)}
+					options={repeats}
+					value={repeat}
+					onChange={setRepeat}
+				/>
 				{repeat === "weekly" && (
 					<div className="flex flex-wrap items-center gap-1.5">
-						<span className="w-16 text-sm font-semibold">Days</span>
+						<span className={ROW_LABEL}>Days</span>
 						{days.map(([short, long], day) => (
 							<button
 								key={long}
@@ -94,7 +95,7 @@ export function RoutineBuilder() {
 					</div>
 				)}
 				<div className="flex items-center gap-2">
-					<span className="w-16 text-sm font-semibold">Time</span>
+					<span className={ROW_LABEL}>Time</span>
 					<Button
 						variant="outline"
 						size="icon-sm"
@@ -115,14 +116,14 @@ export function RoutineBuilder() {
 				</div>
 			</div>
 			<div className="flex items-center gap-3 px-5 py-4">
-				<BotAvatar size="lg" {...bot.look} />
+				<BotAvatar size="lg" {...bot.avatar} />
 				<div className="flex flex-col">
 					<span className="font-bold">Morning inbox sweep</span>
 					<span className="text-sm text-muted-foreground">
-						{bot.name} · {describeSchedule(repeat, pickedDays, hour)}
+						{bot.name} · {describeRoutine(repeat, pickedDays, hour)}
 					</span>
 				</div>
 			</div>
-		</Card>
+		</DemoCard>
 	);
 }

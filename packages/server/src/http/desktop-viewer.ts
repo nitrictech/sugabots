@@ -1,55 +1,95 @@
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { CurrentActor } from "@sugabots/core/authorization/current-actor";
-import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
+import { computersContracts } from "@sugabots/contracts/operations/computers";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
 import {
 	answerChallenge,
 	CHALLENGE_BYTES,
-} from "@sugabots/core/conversations/tools/browser/vnc-authentication";
-import { Installation } from "@sugabots/core/installation/installation";
-import type { Sandboxes } from "@sugabots/core/sandboxes/sandboxes";
-import { Data, Effect, Layer } from "effect";
+} from "@sugabots/core/chats/tools/browser/vnc-authentication";
+import type { Computers } from "@sugabots/core/computers/computers";
+import { Ids } from "@sugabots/core/ids/ids";
+import { Operations } from "@sugabots/core/operations/registry";
+import { Egress } from "@sugabots/core/providers/network/egress";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { processLayer } from "@sugabots/core/tiers";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Context, Duration, Effect, ErrorReporter, Layer, Schema, Stream } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Socket } from "effect/unstable/socket";
 import { Authentication } from "../auth/authentication.ts";
 
 /**
- * An agent's desktop in a thread, live: a WebSocket the web app's noVNC
- * viewer opens, relayed to the desktop's VNC server in the sandbox. The relay
+ * A bot's desktop in a chat, live: a WebSocket the web app's noVNC
+ * viewer opens, relayed to the desktop's VNC server in the computer. The relay
  * logs in to the server with its password and offers the viewer no
  * authentication, then passes frames both ways untouched; neither the
- * password nor the sandbox's address reaches the browser.
+ * password nor the computer's address reaches the browser.
+ *
+ * The desktop viewer is a long-running operation, `computers.viewDesktop`,
+ * authenticated from the session's row: it proves again whenever who reaches
+ * what changes, and the relay closes once it ends, because the member may no
+ * longer see the desktop as it was opened for them, or their session ended
+ * or expired. It closes after {@link DesktopViewerTiming}'s `maxAge` too, as
+ * an event stream does, so a viewer that went away without its socket
+ * noticing holds no computer awake for long.
  */
 export const desktopViewerRoutes = Layer.effectDiscard(
 	Effect.gen(function* () {
+		const { maxAge } = yield* DesktopViewerTiming;
 		const router = yield* HttpRouter.HttpRouter;
 		const authentication = yield* Authentication.Service;
-		const viewer = yield* DesktopViewer.Service;
-		const trusted = new Set((yield* Installation.Service).trustedOrigins);
+		const sessions = yield* SessionAuthentication.Service;
+		const operations = yield* Operations.LongRunning;
+		const ids = yield* Ids.Service;
+		const egress = yield* Egress.Service;
+		const trusted = new Set((yield* ServerSettings.Service).trustedOrigins);
+		const decodeAddress = Schema.decodeSync(computersContracts["computers.viewDesktop"].input);
 
 		yield* router.add(
 			"GET",
-			`${API_BASE_PATH}/threads/:threadId/agents/:agentId/desktop`,
+			`${API_BASE_PATH}/chats/:chatId/bots/:botId/desktop`,
 			Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest;
 				// Any page the browser visits can open a WebSocket here with the
-				// person's cookie, so only the web app's own origin may.
+				// member's cookie, so only the web app's own origin may.
 				if (!request.headers.origin || !trusted.has(request.headers.origin)) {
 					return HttpServerResponse.text("Untrusted origin", { status: 403 });
 				}
-				const holder = yield* authentication.identify(new Headers(request.headers));
-				if (!holder) return HttpServerResponse.text("Sign in first", { status: 401 });
-				const { threadId, agentId } = yield* HttpRouter.params;
-				if (!threadId || !agentId) return HttpServerResponse.empty({ status: 404 });
+				const headers = new Headers(request.headers);
+				const holder = yield* authentication.identify(headers);
+				const principal = yield* sessions.authenticateLongRunning(headers).pipe(
+					Effect.provideService(SessionAuthentication.Cookies, {
+						read: () =>
+							Effect.succeed(holder && { session: holder.session, member: holder.member.id }),
+					}),
+					Effect.option,
+				);
+				if (principal._tag === "None") {
+					return HttpServerResponse.text("Sign in first", { status: 401 });
+				}
+				const { chatId, botId } = yield* HttpRouter.params;
+				if (!chatId || !botId) return HttpServerResponse.empty({ status: 404 });
+				const call = { kind: "request" as const, request: yield* ids.next };
 
 				return yield* Effect.scoped(
 					Effect.gen(function* () {
-						const desktop = yield* viewer.open({ threadId, agentId });
+						const viewing = yield* operations["computers.viewDesktop"](
+							principal.value,
+							decodeAddress({ chatId, botId }),
+							call,
+						);
+						const [desktop] = yield* Stream.runCollect(Stream.take(viewing.stream, 1));
+						if (!desktop) return HttpServerResponse.empty({ status: 404 });
 						const browserSide = yield* request.upgrade;
-						yield* relay(browserSide, upstream(desktop.endpoint), desktop.password);
+						// Ending the relay closes the member's socket; the operation ending, or its
+						// time running out, ends the relay.
+						yield* Effect.raceAll([
+							relay(browserSide, upstream(desktop.endpoint, egress), desktop.password),
+							viewing.ended,
+							Effect.sleep(maxAge),
+						]);
 						return HttpServerResponse.empty();
 					}),
 				).pipe(
-					CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(holder.user.id)),
 					Effect.catchTags({
 						DesktopUnavailable: (failure) =>
 							Effect.succeed(HttpServerResponse.text(failure.userMessage, { status: 404 })),
@@ -66,35 +106,43 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 			),
 		);
 	}),
+).pipe(processLayer);
+
+/** How long a desktop viewer stays open, which a test may shorten. */
+interface DesktopViewerTimingInterface {
+	/**
+	 * After this the viewer closes, and opening it again proves afresh.
+	 * Bounds what a viewer that went away without its socket noticing holds
+	 * open, and how long a desktop stays open on proofs that might be stale.
+	 */
+	readonly maxAge: Duration.Input;
+}
+
+export const DesktopViewerTiming = Context.Reference<DesktopViewerTimingInterface>(
+	"@sugabots/server/DesktopViewerTiming",
+	{ defaultValue: () => ({ maxAge: Duration.minutes(30) }) },
 );
 
 /**
- * The desktop's VNC server as a WebSocket, reached through the sandbox
- * provider: websockify in front of Xvnc, or x11vnc itself in sandboxes made
- * from images before Xvnc.
+ * The desktop's VNC server as a WebSocket, reached through the computer
+ * provider: websockify in front of Xvnc.
  */
-function upstream(desktop: Sandboxes.Endpoint) {
-	const url = desktop.url.replace(/^http/, "ws");
+function upstream(desktop: Pick<Computers.Endpoint, "url" | "headers">, egress: Egress.Interface) {
 	return Socket.fromWebSocket(
-		Effect.acquireRelease(
-			Effect.sync(
-				// Node's WebSocket takes headers as well as protocols: a provider
-				// may need them to route the request, and x11vnc refuses a
-				// handshake without an Origin, which only browsers send unasked.
-				() =>
-					new WebSocket(url, {
-						protocols: [VNC_SUBPROTOCOL],
-						headers: { ...desktop.headers, origin: RELAY_ORIGIN },
-					} as unknown as string[]),
+		egress.providerWebSocket(desktop.url, [VNC_SUBPROTOCOL], desktop.headers).pipe(
+			Effect.mapError(
+				(cause) =>
+					new Socket.SocketError({
+						reason: new Socket.SocketOpenError({ kind: "Unknown", cause }),
+					}),
 			),
-			(socket) => Effect.sync(() => socket.close()),
 		),
 		{ openTimeout: "10 seconds" },
 	);
 }
 
 /**
- * Logs in to the desktop for the person, then copies frames each way until
+ * Signs in to the desktop for the member, then copies frames each way until
  * either side closes.
  */
 function relay(
@@ -108,7 +156,7 @@ function relay(
 			const browser = bytesOf(yield* browserSide.reader);
 			const desktop = bytesOf(yield* desktopSocket.reader);
 			const [toBrowser, toDesktop] = yield* Effect.all([browserSide.writer, desktopSocket.writer]);
-			yield* logIn({ browser, toBrowser, desktop, toDesktop, password });
+			yield* signIn({ browser, toBrowser, desktop, toDesktop, password });
 			const pump = (from: Bytes, to: Socket.Writer) =>
 				Effect.gen(function* () {
 					const unread = from.rest();
@@ -123,8 +171,8 @@ function relay(
 			return yield* Effect.raceFirst(pump(browser, toDesktop), pump(desktop, toBrowser));
 		}),
 	).pipe(
-		Effect.catchTag("DesktopLoginFailed", (failure) =>
-			Effect.logWarning(`Couldn't log in to the desktop for its viewer: ${failure.reason}`),
+		Effect.catchTag("DesktopSignInFailed", (failure) =>
+			Effect.logWarning(`Couldn't sign in to the desktop for its viewer: ${failure.reason}`),
 		),
 		Effect.ignore,
 	);
@@ -135,7 +183,7 @@ function relay(
  * relay answers the desktop's VNC authentication, and tells the viewer it
  * needs none.
  */
-function logIn({
+function signIn({
 	browser,
 	toBrowser,
 	desktop,
@@ -153,25 +201,25 @@ function logIn({
 		yield* toBrowser.write(version);
 		const viewerVersion = yield* browser.take(VERSION_BYTES);
 		if (new TextDecoder().decode(viewerVersion) !== RFB_3_8) {
-			return yield* new DesktopLoginFailed({ reason: "the viewer doesn't speak RFB 3.8" });
+			return yield* new DesktopSignInFailed({ reason: "the viewer doesn't speak RFB 3.8" });
 		}
 		yield* toDesktop.write(viewerVersion);
 		const [offered = 0] = yield* desktop.take(1);
 		const securityTypes = yield* desktop.take(offered);
 		if (!securityTypes.includes(VNC_AUTHENTICATION)) {
-			return yield* new DesktopLoginFailed({ reason: "the desktop doesn't ask for a password" });
+			return yield* new DesktopSignInFailed({ reason: "the desktop doesn't ask for a password" });
 		}
 		yield* toBrowser.write(Uint8Array.of(1, NO_AUTHENTICATION));
 		const [chosen] = yield* browser.take(1);
 		if (chosen !== NO_AUTHENTICATION) {
-			return yield* new DesktopLoginFailed({ reason: "the viewer chose another security type" });
+			return yield* new DesktopSignInFailed({ reason: "the viewer chose another security type" });
 		}
 		yield* toDesktop.write(Uint8Array.of(VNC_AUTHENTICATION));
 		const challenge = yield* desktop.take(CHALLENGE_BYTES);
 		yield* toDesktop.write(answerChallenge(password, challenge));
 		const result = yield* desktop.take(SECURITY_RESULT_BYTES);
 		if (result.some((byte) => byte !== 0)) {
-			return yield* new DesktopLoginFailed({ reason: "the desktop refused its password" });
+			return yield* new DesktopSignInFailed({ reason: "the desktop refused its password" });
 		}
 		yield* toBrowser.write(result);
 	});
@@ -223,7 +271,21 @@ function concatenated(parts: readonly Uint8Array[]) {
 }
 
 /** The desktop and its viewer couldn't be joined, for `reason`. */
-class DesktopLoginFailed extends Data.TaggedError("DesktopLoginFailed")<{ reason: string }> {}
+class DesktopSignInFailed
+	extends Schema.TaggedError<DesktopSignInFailed>()("DesktopSignInFailed", {
+		reason: Schema.String,
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return this.reason;
+	}
+	get userMessage() {
+		return userText`Sugabots couldn't connect to the desktop. Close the viewer and open it again.`;
+	}
+}
 
 const RFB_3_8 = "RFB 003.008\n";
 const VERSION_BYTES = RFB_3_8.length;
@@ -233,9 +295,3 @@ const SECURITY_RESULT_BYTES = 4;
 
 /** Asks for VNC's bytes as they are rather than as base64 text. */
 const VNC_SUBPROTOCOL = "binary";
-
-/**
- * Any origin satisfies x11vnc, which only checks that one is given, and
- * websockify, which doesn't check.
- */
-const RELAY_ORIGIN = "http://sugabots-desktop-relay";

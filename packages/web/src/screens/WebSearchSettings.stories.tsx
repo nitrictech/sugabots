@@ -12,20 +12,19 @@ const workspace = {
 	name: "Suga Workspace",
 	slug: "suga",
 	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+	setUpAt: "2026-09-01T00:00:00.000Z",
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 
 const brave: SearchProvider = {
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	workspaceId: workspace.id,
-	preset: "brave",
+	builtIn: "brave",
 	name: "Brave Search",
 	baseUrl: "https://api.search.brave.com/res/v1",
 	enabled: false,
 	status: "missing_key",
 	hasApiKey: false,
-	lastTestedAt: null,
 	lastTestError: null,
 	createdAt: "2026-09-14T00:00:00.000Z",
 };
@@ -98,7 +97,7 @@ export const Providers = meta.story({
 		msw.use(
 			answers({
 				...brave,
-				preset: "exa",
+				builtIn: "exa",
 				name: "Exa",
 				baseUrl: "https://api.exa.ai",
 				enabled: true,

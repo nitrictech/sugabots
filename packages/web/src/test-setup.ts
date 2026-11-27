@@ -1,4 +1,13 @@
-import { configure } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
+import { afterEach, vi } from "vitest";
+
+afterEach(() => {
+	cleanup();
+	vi.unstubAllGlobals();
+	localStorage.clear();
+	sessionStorage.clear();
+	vi.resetAllMocks();
+});
 
 /*
  * The router loads each screen lazily, so the first test in a file waits for

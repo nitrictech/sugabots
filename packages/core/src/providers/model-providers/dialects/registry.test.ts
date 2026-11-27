@@ -50,12 +50,12 @@ const blank = (modelId: string): DiscoveredModel => ({
 });
 
 const openai: ProviderIdentity = {
-	preset: "openai",
+	builtIn: "openai",
 	baseUrl: "https://api.openai.com/v1",
 	apiFormat: "openai",
 };
 const custom = (baseUrl: string): ProviderIdentity => ({
-	preset: null,
+	builtIn: null,
 	baseUrl,
 	apiFormat: "openai",
 });
@@ -63,7 +63,7 @@ const custom = (baseUrl: string): ProviderIdentity => ({
 describe("registryFrom", () => {
 	const registry: ModelRegistry = registryFrom(source, "test");
 
-	it("fills a preset's model from that provider's entry", () => {
+	it("fills a built-in provider's model from that provider's entry", () => {
 		expect(registry.complete(blank("gpt-4o"), openai)).toEqual({
 			modelId: "gpt-4o",
 			displayName: "GPT-4o",

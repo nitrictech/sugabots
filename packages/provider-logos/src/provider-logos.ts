@@ -1,4 +1,4 @@
-import type { ProviderPresetId } from "@sugabots/contracts";
+import type { BuiltInProviderId } from "@sugabots/contracts";
 import anthropic from "../logos/anthropic.svg";
 import anthropicDark from "../logos/anthropic-dark.svg";
 import cerebras from "../logos/cerebras.svg";
@@ -25,7 +25,7 @@ import xaiDark from "../logos/xai-dark.svg";
  * provider publishes them: never redraw or recolour one. To update a logo,
  * download the new file from `source` and change `fetched`.
  */
-export interface ProviderLogoAsset {
+interface ProviderLogoAsset {
 	/** The logo's URL, for light backgrounds, or for both when `dark` is absent. */
 	light: string;
 	/** A version for dark backgrounds, where the provider publishes one. */
@@ -48,7 +48,7 @@ export interface ProviderLogoAsset {
 
 const FETCHED = "2026-09-25";
 
-export const providerLogos: Record<ProviderPresetId, ProviderLogoAsset> = {
+export const providerLogos: Record<BuiltInProviderId, ProviderLogoAsset> = {
 	anthropic: {
 		light: anthropic,
 		dark: anthropicDark,

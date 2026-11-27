@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { NodeHttpServer } from "@effect/platform-node";
 import { EventBus } from "@sugabots/core/database/events/bus";
+import { processLayer } from "@sugabots/core/tiers";
 import { COMMIT, VERSION } from "@sugabots/core/version";
 import { Config, Duration, Effect, Layer } from "effect";
 import { HttpServer } from "effect/unstable/http";
@@ -35,4 +36,4 @@ export const listeningLayer = Layer.effectDiscard(
 			Effect.log(`sugabots ${build} listening on ${address}`),
 		);
 	}),
-);
+).pipe(processLayer);

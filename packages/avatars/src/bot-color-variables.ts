@@ -1,6 +1,6 @@
-import type { AgentColor } from "@sugabots/contracts";
+import type { BotColor } from "@sugabots/contracts";
 import type { CSSProperties } from "react";
-import { botColors, type ThemedColor } from "./bot-colors.ts";
+import { botPalettes, type ThemedColor } from "./bot-colors.ts";
 
 const themed = ({ light, dark }: ThemedColor) => `light-dark(${light}, ${dark})`;
 
@@ -10,8 +10,8 @@ const themed = ({ light, dark }: ThemedColor) => `light-dark(${light}, ${dark})`
  * `--bot-text` and `--bot-mono`. The themed ones use `light-dark()`, so they
  * follow the element's `color-scheme`.
  */
-export function botColorVariables(color: AgentColor): CSSProperties {
-	const palette = botColors[color];
+export function botColorVariables(color: BotColor): CSSProperties {
+	const palette = botPalettes[color];
 	return {
 		"--bot-face": palette.face,
 		"--bot-eyes": palette.eyes,

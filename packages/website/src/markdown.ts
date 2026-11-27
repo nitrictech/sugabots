@@ -1,5 +1,5 @@
 /**
- * Each page's Markdown version, for AI agents. The Worker serves it to page
+ * Each page's Markdown version, for AI assistants. The Worker serves it to page
  * requests that ask for `text/markdown`.
  */
 

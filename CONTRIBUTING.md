@@ -3,7 +3,7 @@
 ## Run from source
 
 This runs PostgreSQL in Docker and the web app and API directly on your
-machine. The application is a React web app, a Hono API, and PostgreSQL.
+machine. The application is a React web app, an API built on Effect's HttpApi, and PostgreSQL.
 
 ### 1. Install the prerequisites
 
@@ -41,7 +41,7 @@ credentials:
 
 ```dotenv
 BETTER_AUTH_SECRET=<output of openssl rand -base64 32>
-CREDENTIALS_ENCRYPTION_KEY=<output of another openssl rand -base64 32>
+SECRETS_ENCRYPTION_KEY=<output of another openssl rand -base64 32>
 ```
 
 Generate each value separately:
@@ -51,7 +51,7 @@ openssl rand -base64 32
 ```
 
 The remaining defaults are ready for a localhost installation. Keep `.env`
-private and backed up. Losing `CREDENTIALS_ENCRYPTION_KEY` makes saved
+private and backed up. Losing `SECRETS_ENCRYPTION_KEY` makes saved
 credentials unreadable; changing `BETTER_AUTH_SECRET` signs everyone
 out.
 
@@ -83,7 +83,7 @@ when source files change. On its first run, Portless creates a local certificate
 authority, adds it to your system trust store, and may ask for administrator
 access to start its HTTPS proxy.
 
-Open <https://sugabots.localhost>, create an account, and follow the onboarding
+Open <https://sugabots.localhost>, create an account, and follow the workspace setup
 flow. Development email is printed in the terminal, including the verification
 link.
 
@@ -142,6 +142,10 @@ bun run dev
 Back up your PostgreSQL volume and `.env` before updating an installation that
 contains data you care about.
 
+If your `.env` uses `CREDENTIALS_ENCRYPTION_KEY`, rename it to
+`SECRETS_ENCRYPTION_KEY` and keep its value so the server can still read saved
+secrets. The old name still works during the upgrade.
+
 ### Reset everything
 
 The following removes the database volume and all Sugabots data:
@@ -153,7 +157,7 @@ bun run db:migrate
 ```
 
 Do not run `docker compose down -v` unless you intend to delete every account,
-workspace, conversation, and saved credential.
+workspace, chat, and saved credential.
 
 ### Build the Docker image
 
@@ -174,13 +178,26 @@ bun run check           # lint, typecheck, and test
 bun run build           # build all packages
 bun run format          # apply Biome formatting fixes
 bun run db:studio       # inspect the database with Drizzle Studio
-bun run build:sandbox   # build the sandbox image, as sugabots-sandbox:dev
+bun run build:computer  # build the computer image, as sugabots-computer:dev
 ```
 
-Sandboxes are made from the published image their tag names on its registry,
+`packages/contracts/src/http/http-api.json` records the public HTTP API: each
+endpoint's route, statuses, fields and the status of each error. A test fails
+while it disagrees with the API. After changing the API on purpose, such as
+adding or moving an operation's endpoint, write it again with
+`bun run test --project contracts -u` and review its diff.
+
+`bun run db:compare-migrations <revision>` checks that the migrations after
+`main`'s newest upgrade a database the same way as the ones at a git revision.
+It runs both sets on copies of a database at `main`'s schema, one holding an
+installation's rows and one empty, then compares the copies' schemas and rows.
+Run it after changing a migration that's already been reviewed, such as when
+squashing migrations.
+
+Computers are made from the published image their tag names on its registry,
 so a local build under the published name is never used. To try one, set the
-OpenSandbox provider's image to `sugabots-sandbox:dev` in the workspace's
-settings. The pods' sandboxes move to it once idle.
+OpenSandbox provider's image to `sugabots-computer:dev` in the workspace's
+settings. Projects' computers move to it once idle.
 
 The API exports traces and logs to any OTLP/HTTP collector set by the tracing
 lines in `.env` (see `.env.example`). For local development,
@@ -193,8 +210,9 @@ lines in `.env` (see `.env.example`). For local development,
 | `packages/errors`    | `DomainError`, user text, and what of a failure may leave the system           |
 | `packages/contracts` | Portable API schemas and shared wire types                                     |
 | `packages/core`      | Domain services, database schema and migrations, and the durable workflows     |
+| `packages/bot-loop`  | The bot loop: the turn workflow and its steps, recording through operations     |
 | `packages/server`    | HTTP API, authentication, configuration, and process composition               |
-| `packages/workflow`  | The workflow engines (in memory, and single-runner on Postgres) and activities |
+| `packages/workflow`  | The workflow engine (single-runner on Postgres) and activities                 |
 | `packages/sdk`       | Typed API, authentication, and reconnecting SSE client                         |
 | `packages/web`       | React and Vite web app                                                         |
 | `packages/docs`      | The docs pages, which the website publishes and bots read                      |
@@ -231,6 +249,7 @@ Commits & PR titles must use `conventional commits` format (i.e. `type(optional 
 
 Storybook is the catalogue of the app's controls, product components, and
 views. Stories live beside the production components in `packages/web/src`.
+Keep story-only support beside the stories in `*.test-support.ts` or `*.test-support.tsx` files.
 
 ### Run Storybook
 

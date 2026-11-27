@@ -1,0 +1,163 @@
+import type { ChatDetails, CurrentUser, MessageReplyTo } from "@sugabots/contracts";
+import { type Dispatch, type SetStateAction, useMemo } from "react";
+import { useInterruptTurns } from "@/lib/chat-query.ts";
+import type { ChatLocation } from "@/lib/chats.ts";
+import type { ComposerAttachments } from "@/lib/composer-attachments.ts";
+import { failureMessage } from "@/lib/failure.ts";
+import { listNames } from "@/lib/name-list.ts";
+import { BotsWithoutModelNotice, useRequiredRepliers } from "./BotsWithoutModelNotice.tsx";
+import { ChatComposer } from "./ChatComposer.tsx";
+import { ConnectorsNotice } from "./ConnectorsNotice.tsx";
+import type { ChatRecipients, DraftAudience } from "./chat-recipients.ts";
+import { ModelName } from "./ModelName.tsx";
+import { composerMentionable } from "./mentions.tsx";
+import type { MessageSending } from "./message-sending.ts";
+import { anyoneTyping, type Typer, TypingIndicator } from "./TypingIndicator.tsx";
+
+/** Shown when marking a chat resolved, or reopening it, did not save. */
+const RESOLVE_FAILURE_MESSAGE = "This chat was not marked resolved or reopened. Try again.";
+/** Every bot a message goes to is named, however many: "Ada, Bea and Cy". */
+const EVERY_NAME = { maxNamed: Number.POSITIVE_INFINITY };
+
+/**
+ * The foot of a chat: the composer, saying whom the message goes to, and
+ * under it who is typing, or else which bots will reply when that is not
+ * simply the lead. While a bot that
+ * must reply to the draft has no model, the server would refuse it, so the
+ * composer says so in place of the reply hint and holds Send.
+ */
+export function ChatFooter({
+	chatLocation,
+	details,
+	signedIn,
+	chatName,
+	draft,
+	onDraftChange,
+	replyingTo,
+	onReplyingToChange,
+	attachments,
+	audience,
+	recipients,
+	sending,
+	resolveFailed,
+	typers,
+}: {
+	/** Where the chat is: one of a project's chats, or one of a bot's. */
+	chatLocation: ChatLocation;
+	details: ChatDetails;
+	signedIn: CurrentUser;
+	/** Whom the composer says a message goes to while the draft names nobody. */
+	chatName: string;
+	draft: string;
+	onDraftChange: Dispatch<SetStateAction<string>>;
+	replyingTo: MessageReplyTo | undefined;
+	onReplyingToChange: (replyingTo: MessageReplyTo | undefined) => void;
+	attachments: ComposerAttachments;
+	audience: DraftAudience;
+	recipients: ChatRecipients;
+	sending: MessageSending;
+	/** Whether marking the chat resolved, or reopening it, last failed. */
+	resolveFailed: boolean;
+	typers: readonly Typer[];
+}) {
+	const { withoutModel, model } = useRequiredRepliers(audience.floor);
+	const mentionable = useMemo(
+		() => composerMentionable(details, signedIn, details.chat.kind),
+		[details, signedIn],
+	);
+	const held = withoutModel.length > 0;
+	const hint = held ? undefined : replyHint(audience);
+	const interrupt = useInterruptTurns(details.chat.id);
+	const interruptible = (details.permissions?.interruptTurns ?? []).map(({ turnId }) => turnId);
+	// Stopped already, until the replies end: the turns stay listed for the moment they take to.
+	const stopping =
+		interrupt.isPending ||
+		(interrupt.isSuccess && interruptible.every((turnId) => interrupt.variables?.includes(turnId)));
+	return (
+		<div className="mx-auto w-full max-w-200 shrink-0 px-4 max-md:pb-tab-bar md:px-5 md:pb-4">
+			<ChatComposer
+				label={composerLabel({ audience, automation: !!details.automation, chatName })}
+				model={model && <ModelName modelId={model} />}
+				value={draft}
+				onValueChange={onDraftChange}
+				onSubmit={sending.submit}
+				submitLabel="Send message"
+				sending={sending.pending}
+				// A line high, as the model beside it is, so nothing moves as somebody starts or stops typing.
+				status={
+					anyoneTyping(typers) ? <TypingIndicator typers={typers} className="h-4 px-0" /> : hint
+				}
+				held={held && <BotsWithoutModelNotice bots={withoutModel} />}
+				error={
+					sending.error ??
+					(interrupt.isError ? failureMessage(interrupt.error) : undefined) ??
+					(resolveFailed ? RESOLVE_FAILURE_MESSAGE : undefined)
+				}
+				interrupt={
+					interruptible.length > 0
+						? {
+								label: interruptible.length === 1 ? "Interrupt the reply" : "Interrupt the replies",
+								pending: stopping,
+								onInterrupt: () => interrupt.mutate(interruptible),
+							}
+						: undefined
+				}
+				mentionable={mentionable}
+				replyingTo={
+					replyingTo && { message: replyingTo, onCancel: () => onReplyingToChange(undefined) }
+				}
+				addressed={{
+					// Those the draft names too, so the row shows everyone the message goes to.
+					bots: [...recipients.addressed, ...recipients.named],
+					onRemove: recipients.remove,
+					onClearInherited: recipients.clearAddressed,
+				}}
+				attachments={attachments}
+				notice={<ConnectorsNotice owner={chatLocation} />}
+			/>
+		</div>
+	);
+}
+
+/** What the composer is labelled: whom the message goes to. */
+function composerLabel({
+	audience,
+	automation,
+	chatName,
+}: {
+	audience: DraftAudience;
+	/** Whether the chat is an automation's feed. */
+	automation: boolean;
+	chatName: string;
+}): string {
+	if (audience.membersOnly && audience.mentions.length > 0) {
+		return `Message ${listNames(audience.mentions.map((member) => member.name))}`;
+	}
+	const { floor } = audience;
+	if (automation && floor.kind === "lead")
+		return `Message ${floor.lead.name} about this automation`;
+	return `Message ${chatName}`;
+}
+
+/**
+ * Under the composer while nobody is typing: who answers the message, by the
+ * floor's rule. Nothing while the lead answers a draft that mentions nobody,
+ * as it answers every such message.
+ */
+function replyHint({ floor, mentions }: DraftAudience): string | undefined {
+	switch (floor.kind) {
+		case "bots":
+			return `${listNames(
+				floor.bots.map((bot) => bot.name),
+				EVERY_NAME,
+			)} will reply here.`;
+		case "lead":
+			return mentions.length > 0 ? `${floor.lead.name} will reply here.` : undefined;
+		case "leadMayReply":
+			return `${floor.lead.name} may reply.`;
+		case "leadWontReply":
+			return `${floor.lead.name} won't reply.`;
+		case "nobody":
+			return undefined;
+	}
+}

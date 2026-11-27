@@ -2,23 +2,22 @@ import type { SearchProvider } from "@sugabots/contracts";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiAnswers, linear, mount } from "@/test-api.tsx";
-import { client } from "@/test-client.ts";
+import { apiAnswers, linear, mount } from "@/api.test-support.tsx";
+import { client } from "@/client.test-support.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const route = client.api.searchProviders;
 
 const brave: SearchProvider = {
 	id: "0199a3a0-0000-7000-8000-0000000000e1",
 	workspaceId: linear.workspaceId,
-	preset: "brave",
+	builtIn: "brave",
 	name: "Brave Search",
 	baseUrl: "https://api.search.brave.com/res/v1",
 	enabled: false,
 	status: "missing_key",
 	hasApiKey: false,
-	lastTestedAt: null,
 	lastTestError: null,
 	createdAt: "2026-09-14T00:00:00.000Z",
 };
@@ -29,7 +28,7 @@ const keyed: SearchProvider = {
 };
 const exa: SearchProvider = {
 	...brave,
-	preset: "exa",
+	builtIn: "exa",
 	name: "Exa",
 	baseUrl: "https://api.exa.ai",
 	status: "untested",
@@ -44,7 +43,6 @@ function openAdvanced() {
 }
 
 beforeEach(() => {
-	vi.clearAllMocks();
 	apiAnswers();
 });
 
@@ -66,7 +64,7 @@ describe("the Web search settings", () => {
 
 		await waitFor(() => expect(route.replace).toHaveBeenCalledOnce());
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
-			payload: { preset: "exa", enabled: true },
+			payload: { builtIn: "exa", enabled: true },
 		});
 		await waitFor(async () =>
 			expect((await searchSwitch()).getAttribute("aria-checked")).toBe("true"),
@@ -74,11 +72,11 @@ describe("the Web search settings", () => {
 
 		const providers = openAdvanced();
 		expect(within(providers).getByRole("radio", { name: /Exa/ })).toHaveProperty("checked", true);
-		expect(screen.getByText(/Without one, searches use Exa's free tier/)).toBeDefined();
+		screen.getByText(/Without one, searches use Exa's free tier/);
 	});
 
 	it("changes provider from the list, keeping the switch as it was", async () => {
-		const searxng = { ...exa, preset: "searxng" as const, name: "SearXNG" };
+		const searxng = { ...exa, builtIn: "searxng" as const, name: "SearXNG" };
 		route.get.mockReturnValue(Effect.succeed({ provider: exa }));
 		route.replace.mockImplementation(() => {
 			route.get.mockReturnValue(Effect.succeed({ provider: searxng }));
@@ -91,9 +89,9 @@ describe("the Web search settings", () => {
 
 		await waitFor(() => expect(route.replace).toHaveBeenCalledOnce());
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
-			payload: { preset: "searxng", enabled: true },
+			payload: { builtIn: "searxng", enabled: true },
 		});
-		expect(await screen.findByRole("heading", { name: "SearXNG" })).toBeDefined();
+		await screen.findByRole("heading", { name: "SearXNG" });
 	});
 
 	it("switches the web off on a swap to a provider that needs a key, until it has one", async () => {
@@ -110,9 +108,9 @@ describe("the Web search settings", () => {
 		// The API refuses a provider that is on without a key, so the swap turns the web off.
 		await waitFor(() => expect(route.replace).toHaveBeenCalledOnce());
 		expect(route.replace.mock.calls[0]?.[0]).toMatchObject({
-			payload: { preset: "brave", enabled: false },
+			payload: { builtIn: "brave", enabled: false },
 		});
-		expect(await screen.findByRole("heading", { name: "Brave Search" })).toBeDefined();
+		await screen.findByRole("heading", { name: "Brave Search" });
 		const power = await searchSwitch();
 		await waitFor(() => expect(power.getAttribute("aria-checked")).toBe("false"));
 		expect(power).toHaveProperty("disabled", true);
@@ -120,30 +118,36 @@ describe("the Web search settings", () => {
 
 	it("holds the switch off until a provider that needs a key has one", async () => {
 		route.get.mockReturnValue(Effect.succeed({ provider: brave }));
-		route.update.mockImplementation((request: { payload: Record<string, unknown> }) => {
-			const next = { ...keyed, enabled: request.payload.enabled === true };
-			route.get.mockReturnValue(Effect.succeed({ provider: next }));
-			return Effect.succeed(next);
-		});
+		route.update.mockImplementation(
+			(request: { payload: { changes: Record<string, unknown> } }) => {
+				const next = { ...keyed, enabled: request.payload.changes.enabled === true };
+				route.get.mockReturnValue(Effect.succeed({ provider: next }));
+				return Effect.succeed(next);
+			},
+		);
 		mount("/suga/settings/search");
 
 		expect(await searchSwitch()).toHaveProperty("disabled", true);
-		expect(screen.getByText("Brave Search needs an API key first. Add it below.")).toBeDefined();
+		screen.getByText("Brave Search needs an API key first. Add it below.");
 		const key = screen.getByLabelText("API key");
 		key.focus();
 		fireEvent.change(key, { target: { value: "brave-key" } });
 		fireEvent.keyDown(key, { key: "Enter" });
 
 		await waitFor(() => expect(route.update).toHaveBeenCalledOnce());
-		expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { apiKey: "brave-key" } });
-		expect(await screen.findByText("••••••••")).toBeDefined();
+		expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+			payload: { changes: { apiKey: "brave-key" } },
+		});
+		await screen.findByText("••••••••");
 
 		const power = await searchSwitch();
 		await waitFor(() => expect(power).toHaveProperty("disabled", false));
 		fireEvent.click(power);
 
 		await waitFor(() => expect(route.update).toHaveBeenCalledTimes(2));
-		expect(route.update.mock.calls[1]?.[0]).toMatchObject({ payload: { enabled: true } });
+		expect(route.update.mock.calls[1]?.[0]).toMatchObject({
+			payload: { changes: { enabled: true } },
+		});
 	});
 
 	it("removes a saved key after asking", async () => {
@@ -162,9 +166,11 @@ describe("the Web search settings", () => {
 		fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
 
 		await waitFor(() =>
-			expect(route.update.mock.calls[0]?.[0]).toMatchObject({ payload: { apiKey: null } }),
+			expect(route.update.mock.calls[0]?.[0]).toMatchObject({
+				payload: { changes: { apiKey: null } },
+			}),
 		);
-		expect(await screen.findByPlaceholderText("Paste your key")).toBeDefined();
+		await screen.findByPlaceholderText("Paste your key");
 	});
 
 	it("runs a test search and says how it went", async () => {
@@ -176,16 +182,14 @@ describe("the Web search settings", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /Test search/ }));
 
-		expect(await screen.findByText("Search works")).toBeDefined();
+		await screen.findByText("Search works");
 	});
 
-	it("tells a member the pane is for administrators", async () => {
-		apiAnswers({ role: "member" });
+	it("tells an editor the pane is for administrators", async () => {
+		apiAnswers({ role: "editor" });
 		mount("/suga/settings/search");
 
-		expect(
-			await screen.findByText("Only workspace administrators can manage web search."),
-		).toBeDefined();
+		await screen.findByText("Only workspace administrators can manage web search.");
 		expect(route.get).not.toHaveBeenCalled();
 	});
 });

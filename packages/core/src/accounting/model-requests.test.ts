@@ -27,15 +27,14 @@ describe.skipIf(!process.env.DATABASE_URL)("model requests, against Postgres", (
 
 	const started = (): ModelRequests.Started => ({
 		workspaceId: randomUUID(),
-		activity: {
-			purpose: "summary",
-			podId: randomUUID(),
-			threadId: randomUUID(),
+		purpose: {
+			name: "compaction",
+			chatId: randomUUID(),
 			turnId: randomUUID(),
 		},
 		step: 0,
 		providerId: randomUUID(),
-		preset: "anthropic",
+		builtIn: "anthropic",
 		model: "claude-haiku-4-5",
 		startedAt: new Date("2026-09-28T10:00:00Z"),
 	});
@@ -53,9 +52,8 @@ describe.skipIf(!process.env.DATABASE_URL)("model requests, against Postgres", (
 
 		expect(await rowOf(id)).toMatchObject({
 			workspaceId: request.workspaceId,
-			purpose: "summary",
-			podId: "podId" in request.activity ? request.activity.podId : undefined,
-			agentId: null,
+			purpose: "compaction",
+			botId: null,
 			outcome: "started",
 			endedAt: null,
 			costUsd: null,

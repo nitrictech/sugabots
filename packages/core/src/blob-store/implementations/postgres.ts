@@ -1,4 +1,4 @@
-import { asc, eq, like, sql } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { Effect, Option, Stream } from "effect";
 import { Database, query, serviceOperations } from "../../database/database.ts";
 import { blob } from "../../database/schema.ts";
@@ -59,17 +59,6 @@ export const fromPostgres = Effect.gen(function* () {
 				"delete",
 				query((db) => db.delete(blob).where(eq(blob.key, key))),
 			),
-		list: (prefix) =>
-			operation(
-				"list",
-				query((db) =>
-					db
-						.select({ key: blob.key, contentType: blob.contentType, size: blob.size })
-						.from(blob)
-						.where(like(blob.key, underPattern(prefix)))
-						.orderBy(asc(blob.key)),
-				),
-			),
 		deletePrefix: (prefix) =>
 			operation(
 				"deletePrefix",
@@ -77,6 +66,19 @@ export const fromPostgres = Effect.gen(function* () {
 			),
 	} satisfies BlobStore.Interface;
 });
+
+/**
+ * Moves every blob under the key `from` to the same key under `to`, for
+ * `BlobStore.make`. One that has already moved is under `to` alone, so it
+ * is left as it is.
+ */
+export const moveFolderInPostgres = (from: BlobStore.Key, to: BlobStore.Key) =>
+	query((db) =>
+		db
+			.update(blob)
+			.set({ key: sql<BlobStore.Key>`${to} || substr(${blob.key}, length(${from}) + 1)` })
+			.where(like(blob.key, underPattern(from))),
+	).pipe(Effect.asVoid);
 
 /**
  * The largest blob kept. `put` holds a blob in memory whole to insert it, so

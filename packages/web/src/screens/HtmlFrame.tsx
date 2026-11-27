@@ -5,7 +5,7 @@ import {
 	type PageTheme,
 	pageThemeCss,
 	withLeadingTags,
-} from "@sugabots/contracts/artifact-pages";
+} from "@sugabots/contracts/file-pages";
 import { cn } from "cn";
 import {
 	type CSSProperties,
@@ -19,7 +19,7 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
-import { type PageAt, usePageAddress } from "@/lib/artifacts.ts";
+import { type PageAt, usePageAddress } from "@/lib/files.ts";
 import { FIT_HEIGHT_PX, FRAME_TOKENS } from "@/lib/page-frame.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -34,7 +34,7 @@ import { Button } from "@/ui/button.tsx";
  * then stops it loading or sending anything over the network, other than
  * fetching scripts from one CDN.
  *
- * Given `at`, and inside the app, the page is loaded from the installation's
+ * Given `at`, and inside the app, the page is loaded from the server's
  * content origin when one is set: an origin of its own, apart from the app's
  * site and process. The frame's `csp` attribute asks for the page's policy,
  * which Chromium then holds any document in the frame to, so a page that

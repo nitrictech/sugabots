@@ -10,12 +10,12 @@ import {
 	useImperativeHandle,
 	useRef,
 } from "react";
-import { botColors } from "./bot-colors.ts";
-import { BotFace, type BotLook } from "./bot-face.tsx";
+import { botPalettes } from "./bot-colors.ts";
+import { type AvatarParts, StillBotFace } from "./bot-face.tsx";
 import { LivelyEyes, ThinkingDots } from "./eyes.tsx";
 import { Part, partKey } from "./face-drawing.tsx";
 import { FACE_VIEWBOX_SIZE, viewboxPercentage } from "./face-marks.ts";
-import { type FaceControls, useFaceRig } from "./face-rig.ts";
+import { useFaceRig } from "./face-rig.ts";
 import { type EyePlacement, type HeadPart, headShape } from "./head-shapes.ts";
 import { type LayerName, restingStyle } from "./layer-motion.ts";
 import { useLiveliness } from "./liveliness.ts";
@@ -23,16 +23,12 @@ import { type BotMood, moods } from "./moods.ts";
 import { repeatAtRandom } from "./random.ts";
 import { useWatching } from "./watching.ts";
 
-/** Something a lively face does once, on request. Adding one is adding an entry to `actions`. */
 export type FaceAction = "hop";
-
-const actions: Record<FaceAction, (face: FaceControls) => void> = {
-	hop: (face) => face.hop(),
-};
 
 /** A lively face, as its `ref` gives it. */
 export interface LivelyFace {
-	play(action: FaceAction): void;
+	/** Hops once, as it does when pressed. */
+	hop(): void;
 }
 
 /** What a lively face does, apart from how it looks. */
@@ -43,32 +39,32 @@ export interface LivelyBehaviour {
 	watchPointer?: boolean;
 	/** Its eyes turn to where someone types on the page, and wander again once they stop. */
 	watchTyping?: boolean;
-	/** Plays actions on the face, such as a hop as the pointer comes onto it. */
+	/** Makes the face hop on request, such as when the pointer comes onto it. */
 	ref?: Ref<LivelyFace>;
 }
 
-type LivelyBotFaceProps = BotLook &
+type LivelyBotFaceProps = AvatarParts &
 	LivelyBehaviour &
 	Pick<ComponentProps<"svg">, "width" | "height" | "className">;
 
 /**
- * A bot's face that seems alive, in a mood (see `moods`), and playing actions
- * through its `ref`. Its eyes slide across the head and narrow towards its
+ * A bot's face that seems alive, in a mood (see `moods`), and hopping on
+ * request through its `ref`. Its eyes slide across the head and narrow towards its
  * edge while the head leans after them, which makes the flat head read as
- * round. It hops when pressed. Sized like `BotFace`. Where faces may not move
- * (see `useLiveliness`) it is the still `BotFace`, and off screen it holds still.
+ * round. It hops when pressed. Sized like `StillBotFace`. Where faces may not move
+ * (see `useLiveliness`) it is the still `StillBotFace`, and off screen it holds still.
  */
 export function LivelyBotFace(props: LivelyBotFaceProps) {
 	if (useLiveliness() === "off") {
-		const { color, face, shape, width, height, className } = props;
-		return <BotFace {...{ color, face, shape, width, height, className }} />;
+		const { color, eyes, shape, width, height, className } = props;
+		return <StillBotFace {...{ color, eyes, shape, width, height, className }} />;
 	}
 	return <AnimatedBotFace {...props} />;
 }
 
 function AnimatedBotFace({
 	color,
-	face,
+	eyes,
 	shape = "circle",
 	mood = "idle",
 	watchPointer = false,
@@ -84,7 +80,7 @@ function AnimatedBotFace({
 	const shown = moods[inView ? mood : "still"];
 	const { controls, drawing } = useFaceRig(shown.look, root);
 
-	useImperativeHandle(ref, () => ({ play: (action) => actions[action](controls) }), [controls]);
+	useImperativeHandle(ref, () => ({ hop: () => controls.hop() }), [controls]);
 	useWatching(
 		controls,
 		root,
@@ -103,7 +99,7 @@ function AnimatedBotFace({
 		};
 	}, [shown, controls]);
 
-	const { face: faceColor, eyes: eyeColor } = botColors[color];
+	const { face: faceColor, eyes: eyeColor } = botPalettes[color];
 	const head = headShape(shape);
 	const { layers } = drawing;
 	const clipId = useId();
@@ -154,7 +150,7 @@ function AnimatedBotFace({
 																	overflow="visible"
 																	className="absolute inset-0 size-full"
 																>
-																	<LivelyEyes face={face} color={eyeColor} drawing={drawing} />
+																	<LivelyEyes eyes={eyes} color={eyeColor} drawing={drawing} />
 																</svg>
 																<ThinkingDots color={eyeColor} drawing={drawing} />
 															</Layer>

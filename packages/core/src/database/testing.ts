@@ -1,8 +1,11 @@
+import { setTimeout as delay } from "node:timers/promises";
+import { sql } from "drizzle-orm";
 import { type Context, Effect, Layer, ManagedRuntime } from "effect";
+import { onTestFinished } from "vitest";
 import { BlobStore } from "../blob-store/blob-store.ts";
-import { Credentials } from "../credentials/credentials.ts";
 import { Ids } from "../ids/ids.ts";
-import { Installation } from "../installation/installation.ts";
+import { Secrets } from "../secrets/secrets.ts";
+import { ServerSettings } from "../server-settings/server-settings.ts";
 import {
 	Database,
 	type Executor,
@@ -11,32 +14,35 @@ import {
 	type QueryFailure,
 	query,
 	type RunEffect,
+	type Transaction,
+	transaction,
 	transactional,
 } from "./database.ts";
 
 /**
- * A real database, for the repository and service tests.
+ * A real database, for the store and service tests.
  *
  * Such a test is about what the SQL does. `onPostgres(service)` hands back the
  * same service with its methods returning promises, so a case reads
- * `await pods.create(...)` rather than wrapping every line, and a failure
+ * `await projects.create(...)` rather than wrapping every line, and a failure
  * rejects with the service's own error so `rejects.toThrow(NameTaken)` still
  * means what it says.
  *
- * One runtime for the process, so every test file shares one pool.
+ * One runtime per test file: its cases share the runtime's pool, and the file
+ * disposes of it in its `afterAll` with `closeDatabase`.
  */
 
 /**
  * What the process provides every service once, as `index.ts` does: here the
- * test database, real ids, blobs kept in the database, and credentials sealed
+ * test database, real ids, blobs kept in the database, and secrets encrypted
  * under a fixed test key.
  */
 export const testInfrastructure = Layer.mergeAll(
 	BlobStore.layer,
-	Layer.succeed(Credentials.Service, Credentials.fromKey(Buffer.alloc(32).toString("base64"))),
+	Layer.succeed(Secrets.Service, Secrets.fromKey(Buffer.alloc(32).toString("base64"))),
 	Layer.succeed(
-		Installation.Service,
-		Installation.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
+		ServerSettings.Service,
+		ServerSettings.fromUrls({ isProduction: false, publicUrl: "http://sugabots.test" }),
 	),
 ).pipe(Layer.provideMerge(Ids.layer), Layer.provideMerge(layer));
 
@@ -53,6 +59,125 @@ export const runOnPostgres = effectRunner<TestInfrastructure>(databaseForTests);
 /** Runs one query against the test database, for a case's fixtures and checks. */
 export const onDatabase = <A>(run: (db: Executor) => Effect.Effect<A, QueryFailure>): Promise<A> =>
 	runOnPostgres(query(run));
+
+const LOCK_WAIT_POLL_INTERVAL_MS = 20;
+const LOCK_WAIT_DEADLINE_MS = 4_000;
+
+/**
+ * Waits until `count` connections to this worker's database are waiting on locks.
+ * Use a held transaction's `waitForWaiters` to limit the observation to its locks.
+ */
+export function waitUntilWaitingOnLocks(count: number, signal?: AbortSignal): Promise<void> {
+	return observeLockWait(count, signal);
+}
+
+function observeLockWait(
+	count: number,
+	signal?: AbortSignal,
+	holder?: Promise<{ pid: number }>,
+): Promise<void> {
+	const finished = new AbortController();
+	const deadline = AbortSignal.timeout(LOCK_WAIT_DEADLINE_MS);
+	const stop = AbortSignal.any([deadline, finished.signal, ...(signal ? [signal] : [])]);
+	const waiting = pollLockWait(count, stop, holder).catch((error: unknown) => {
+		if (deadline.aborted && stop.reason === deadline.reason) {
+			throw new Error(
+				`Timed out waiting for ${count} Postgres connection(s) blocked on ${holder ? "the held transaction" : "locks"}`,
+			);
+		}
+		throw error;
+	});
+	onTestFinished(async () => {
+		finished.abort();
+		await waiting.catch(() => {});
+	});
+	return waiting;
+}
+
+async function pollLockWait(count: number, signal: AbortSignal, holder?: Promise<{ pid: number }>) {
+	const blocker = holder
+		? await runOnPostgres(Effect.tryPromise({ try: () => holder, catch: (error) => error }), {
+				signal,
+			})
+		: undefined;
+	const blockerPid = blocker?.pid;
+	while (true) {
+		signal.throwIfAborted();
+		const [waiting] = await runOnPostgres(
+			query((db) =>
+				db.execute<{ count: number }>(
+					blockerPid === undefined
+						? sql`select count(*)::int as count from pg_stat_activity
+						where datname = current_database() and wait_event_type = 'Lock'`
+						: sql`with recursive blocked(pid) as (
+						select ${blockerPid}::int
+						union
+						select activity.pid from pg_stat_activity as activity
+						join blocked on blocked.pid = any(pg_blocking_pids(activity.pid))
+						where activity.datname = current_database() and activity.wait_event_type = 'Lock'
+					)
+					select count(*)::int as count from blocked where pid <> ${blockerPid}`,
+					"objects",
+				),
+			),
+			{ signal },
+		);
+		if ((waiting?.count ?? 0) >= count) return;
+		await delay(LOCK_WAIT_POLL_INTERVAL_MS, undefined, { signal });
+	}
+}
+
+/**
+ * Runs `work` in a transaction and holds it open, with the locks `work` took,
+ * until `release` is called, so a case can start another write against them.
+ * `afterRelease` runs in the same transaction once released, before it commits.
+ *
+ * `held` resolves with `work`'s value once `work` is done, or rejects if the
+ * transaction fails first. `release` lets the transaction finish and resolves
+ * once it has committed. Call it to choose when the transaction commits; a case
+ * that ends without calling it, by failing or timing out, has the transaction
+ * released when it finishes, so its locks never stall the cases after it.
+ *
+ * Call it from inside a case, not from a `beforeAll` or `beforeEach`.
+ */
+export function holdTransaction<A>(
+	work: Effect.Effect<A, unknown, TestInfrastructure | Transaction>,
+	afterRelease: Effect.Effect<unknown, unknown, TestInfrastructure | Transaction> = Effect.void,
+): {
+	held: Promise<A>;
+	release: () => Promise<void>;
+	waitForWaiters: (count: number, signal?: AbortSignal) => Promise<void>;
+} {
+	const released = Promise.withResolvers<void>();
+	const acquired = Promise.withResolvers<{ value: A; pid: number }>();
+	const held = acquired.promise.then(({ value }) => value);
+	const finished = runOnPostgres(
+		transaction(
+			Effect.gen(function* () {
+				const [backend] = yield* query((db) =>
+					db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`, "objects"),
+				);
+				if (!backend) return yield* Effect.die("Postgres returned no backend pid");
+				const value = yield* work;
+				acquired.resolve({ value, pid: backend.pid });
+				yield* Effect.promise(() => released.promise);
+				yield* afterRelease;
+			}),
+		),
+	).then(() => {});
+	void finished.catch(acquired.reject);
+	const release = () => {
+		released.resolve();
+		return finished;
+	};
+	// A failure has already reached the case through `held` or `release`.
+	onTestFinished(() => release().catch(() => {}));
+	return {
+		held,
+		release,
+		waitForWaiters: (count, signal) => observeLockWait(count, signal, acquired.promise),
+	};
+}
 
 /** The same service with its methods returning promises. */
 export type Promised<Service> = {

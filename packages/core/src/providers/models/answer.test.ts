@@ -14,19 +14,19 @@ describe("asking a model again", () => {
 
 	it("stops as soon as one answer is usable", async () => {
 		const ask = vi
-			.fn((): Effect.Effect<string, Models.UnusableAnswer> => Effect.succeed("a summary"))
+			.fn((): Effect.Effect<string, Models.UnusableAnswer> => Effect.succeed("an answer"))
 			.mockImplementationOnce(() => new Models.UnusableAnswer({ reason: "not JSON" }));
 
 		const answer = await Effect.runPromise(Models.retryUnusable(Effect.suspend(ask)));
 
 		expect(ask).toHaveBeenCalledTimes(2);
-		expect(answer).toBe("a summary");
+		expect(answer).toBe("an answer");
 	});
 
 	it("does not ask again for anything but the shape", async () => {
 		// A timeout costs the same next time, and a dead provider is for the
 		// caller to handle.
-		const ask = vi.fn(() => Effect.fail(new Models.AnswerTimedOut({ purpose: "thread summary" })));
+		const ask = vi.fn(() => Effect.fail(new Models.AnswerTimedOut({ purpose: "compaction" })));
 
 		const exit = await Effect.runPromiseExit(Models.retryUnusable(Effect.suspend(ask)));
 

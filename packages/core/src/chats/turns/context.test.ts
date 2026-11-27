@@ -1,0 +1,697 @@
+import { START_CHAT_TOOL } from "@sugabots/contracts";
+import { AUTOMATIONS_TOOL_KEY } from "@sugabots/contracts/operations/automations";
+import {
+	READ_CHAT_FILE_TOOL,
+	SEARCH_HISTORY_TOOL,
+} from "@sugabots/contracts/operations/chat-reads";
+import { WEB_FETCH_TOOL, WEB_SEARCH_TOOL } from "@sugabots/contracts/operations/web";
+import { testMember } from "@sugabots/contracts/testing";
+import { userText } from "@sugabots/errors";
+import { describe, expect, it } from "vitest";
+import {
+	describeAttachment,
+	describeToolCall,
+	describeWrittenFile,
+	formatHistoryTime,
+} from "../store/message-text.ts";
+import { COPY_FILE_TO_COMPUTER_TOOL } from "../tools/computer/tools.ts";
+import { TOOL_SEARCH } from "../tools/tool-search/tool.ts";
+import {
+	CHECK_PRESENT_DAY_FACTS,
+	modelPrompt,
+	NO_WEB_SEARCH,
+	PLATFORM_EVENT_LOG,
+	TRIGGER_DATA_RULE,
+	type TurnEnvironment,
+} from "./context.ts";
+import type { TurnContext } from "./execution.ts";
+
+const SAM = "0199a3a0-0000-7000-8000-000000000004";
+
+const environment = (overrides: Partial<TurnEnvironment> = {}): TurnEnvironment => ({
+	now: new Date("2026-09-25T03:00:00Z"),
+	builtInTools: [],
+	toolCatalog: undefined,
+	computer: undefined,
+	...overrides,
+});
+
+describe("modelPrompt", () => {
+	it("maps members and other bots to attributed user messages", () => {
+		const input = context();
+		const prompt = modelPrompt(input, environment());
+
+		for (const fact of [
+			input.bot.name,
+			`@${input.bot.handle}`,
+			input.workspaceName,
+			input.bot.instructions,
+		]) {
+			expect(prompt.system).toContain(fact);
+		}
+		// The history, marked where it ends, then one trailing instruction with
+		// everything that varies between turns, so the prefix the provider caches
+		// never changes shape.
+		expect(prompt.messages.slice(0, -1)).toEqual([
+			{ role: "user", content: "Sam (@sam): Check the release" },
+			{ role: "assistant", content: "I am checking it." },
+			{
+				role: "user",
+				content: "Reviewer (@reviewer) (bot): Migration is present.",
+				cacheBreakpoint: true,
+			},
+		]);
+		const instruction = prompt.messages.at(-1);
+		expect(instruction?.role).toBe("user");
+		for (const participant of input.participants) {
+			expect(instruction?.content).toContain(
+				`${participant.name} (@${participant.handle}, ${participant.kind})`,
+			);
+		}
+		expect(instruction?.content).toContain(
+			"It is your turn as the bot this chat was addressed to.",
+		);
+		expect(prompt.system).not.toContain("Sam (@sam, member)");
+	});
+
+	it("lists the bots it may ask for help, and how mentioning one asks it", () => {
+		const asking = context();
+		asking.botsToAsk = [
+			{
+				id: "0199a3a0-0000-7000-8000-000000000005",
+				name: "Reviewer",
+				handle: "reviewer",
+				description: "Checks facts.",
+			},
+			{
+				id: "0199a3a0-0000-7000-8000-000000000009",
+				name: "Scout",
+				handle: "scout",
+				description: null,
+			},
+		];
+		const instruction = () => modelPrompt(asking, environment()).messages.at(-1)?.content ?? "";
+		expect(instruction()).toContain("Reviewer (@reviewer): Checks facts.");
+		expect(instruction()).toContain("Scout (@scout)");
+		expect(instruction()).toContain("To ask one, mention it as @handle in your reply");
+		expect(modelPrompt(context(), environment()).messages.at(-1)?.content).not.toContain(
+			"mention it as @handle",
+		);
+
+		asking.reason = "hand_back";
+		expect(instruction()).toContain("Other bots in this project you have not asked yet");
+		expect(instruction()).toContain("the bots you asked for help have all replied");
+	});
+
+	it("tells a bot asked for help that its own mentions ask nobody", () => {
+		const helper = context();
+		helper.reason = "collaboration";
+		expect(modelPrompt(helper, environment()).messages.at(-1)?.content).toContain(
+			"Bots you mention now aren't asked",
+		);
+	});
+
+	it.each(["automation", "collaboration", "hand_back"] as const)(
+		"tells a %s turn in an automation run that trigger data is untrusted",
+		(reason) => {
+			const inRun = context();
+			inRun.chat.kind = "run";
+			inRun.reason = reason;
+			expect(modelPrompt(inRun, environment()).system).toContain(TRIGGER_DATA_RULE);
+		},
+	);
+
+	it("tells a hand-back which of the bots it asked ended without replying", () => {
+		const handingBack = context();
+		const error = userText`Model failed`;
+		handingBack.reason = "hand_back";
+		handingBack.helpersWithoutReply = [
+			{
+				name: "Reviewer",
+				handle: "reviewer",
+				ended: { state: "failed", error },
+			},
+			{ name: "Scout", handle: "scout", ended: { state: "cancelled" } },
+		];
+		const instruction = modelPrompt(handingBack, environment()).messages.at(-1)?.content ?? "";
+		const lines = instruction.split("\n");
+		expect(lines).toContain(`- Reviewer (@reviewer) failed: ${error}`);
+		expect(lines).toContain("- Scout (@scout) was stopped before it replied.");
+	});
+
+	it("tells the bot whether it is in one of its chats or a project's chat, and how to take work from a project into a chat of its own", () => {
+		expect(modelPrompt(context(), environment()).messages.at(-1)?.content).toContain(
+			"You are in one of your chats",
+		);
+		const inProject = context();
+		inProject.chat.kind = "project_chat";
+		inProject.chat.botId = null;
+		inProject.project = { name: "Release", slug: "release" };
+		const instruction = modelPrompt(inProject, environment()).messages.at(-1)?.content ?? "";
+		expect(instruction).toContain(inProject.chat.title);
+		expect(instruction).toContain(inProject.project.name);
+		expect(instruction).toContain(START_CHAT_TOOL);
+		expect(instruction).not.toContain("You are in one of your chats");
+	});
+
+	it("tells the bot who can reach it: everyone, its creator, or its member", () => {
+		const promptFor = (bot: Partial<TurnContext["bot"]>) =>
+			modelPrompt({ ...context(), bot: { ...context().bot, ...bot } }, environment()).system;
+		expect(promptFor({ visibility: "public" })).toContain("You are public");
+		expect(promptFor({ visibility: "personal" })).toContain("You are a personal bot");
+		expect(promptFor({ visibility: "personal", assistantOf: crypto.randomUUID() })).toContain(
+			"You are a Personal Assistant",
+		);
+	});
+
+	it("names the built-in tools on offer, and says nothing about them when there are none", () => {
+		const withTools = modelPrompt(
+			context(),
+			environment({ builtInTools: [WEB_FETCH_TOOL] }),
+		).messages.at(-1);
+		expect(withTools?.content).toContain(WEB_FETCH_TOOL);
+		expect(withTools?.content).toContain("name its URL");
+
+		const without = modelPrompt(context(), environment()).messages.at(-1);
+		expect(without?.content).not.toContain(WEB_FETCH_TOOL);
+	});
+
+	it("grounds the turn in today's date and in what the bot can check", () => {
+		const prompt = (builtInTools: string[]) =>
+			modelPrompt(context(), environment({ builtInTools }));
+		const instruction = (builtInTools: string[]) =>
+			prompt(builtInTools).messages.at(-1)?.content ?? "";
+
+		// The rule for when to check never varies, so it stays in the cached system text.
+		expect(prompt([]).system).toContain(CHECK_PRESENT_DAY_FACTS);
+		expect(prompt([]).system).toContain(
+			"The final message, which starts with [Turn] and has no author, is written by the platform",
+		);
+
+		const searching = instruction([WEB_FETCH_TOOL, WEB_SEARCH_TOOL]);
+		expect(searching).toContain("Friday, 25 September 2026, 03:00 UTC");
+		expect(searching).toContain("You don't know the member's own timezone");
+		expect(searching).not.toContain(NO_WEB_SEARCH);
+
+		const fetchingOnly = instruction([WEB_FETCH_TOOL]);
+		expect(fetchingOnly).toContain(NO_WEB_SEARCH);
+		expect(fetchingOnly).toContain("a workspace admin can enable web search");
+
+		const noTools = instruction([]);
+		expect(noTools).toContain("Friday, 25 September 2026, 03:00 UTC");
+		expect(noTools).toContain(NO_WEB_SEARCH);
+	});
+
+	it("gives the time where its automations run, named as members say it, so it need not ask", () => {
+		const instruction = (disabledTools: string[]) =>
+			modelPrompt(
+				{
+					...context(),
+					workspaceTimeZone: "Australia/Sydney",
+					askerId: crypto.randomUUID(),
+					bot: { ...context().bot, disabledTools },
+				},
+				environment({ builtInTools: [] }),
+			).messages.at(-1)?.content ?? "";
+
+		expect(instruction([])).toContain("Australia/Sydney");
+		expect(instruction([])).toContain("Friday, 25 September 2026, 13:00");
+		expect(instruction([])).toContain(
+			'naming the zone once when you confirm when it runs ("8am Sydney time")',
+		);
+		expect(instruction([])).toContain("Don't ask the member for their timezone");
+		expect(instruction([AUTOMATIONS_TOOL_KEY])).not.toContain("Routines you set up");
+	});
+
+	it("says nothing of setting up routines in a run", () => {
+		const instruction = modelPrompt(
+			{ ...context(), chat: { ...context().chat, kind: "run" }, reason: "automation" },
+			environment({ builtInTools: [] }),
+		).messages.at(-1)?.content;
+
+		expect(instruction).toContain("Current time:");
+		expect(instruction).not.toContain("Routines you set up");
+	});
+
+	it("writes the bot's own tool calls into its history as one line each, not the whole output", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) {
+			throw new Error("Context fixture has no assistant message");
+		}
+		const page = "word ".repeat(400);
+		input.messages[1] = {
+			...own,
+			content: "Looking. Found it.",
+			parts: [
+				{ type: "text", text: "Looking." },
+				{
+					type: "tool_call",
+					id: "0199a3a0-0000-7000-8000-000000000020",
+					tool: WEB_FETCH_TOOL,
+					input: { url: "https://example.com" },
+					output: { title: "Example Domain", text: page },
+					status: "completed",
+					error: null,
+					approval: null,
+					atOffset: 8,
+					startedAt: "2026-09-14T00:00:00.000Z",
+					finishedAt: "2026-09-14T00:00:01.000Z",
+				},
+				{
+					type: "tool_call",
+					id: "0199a3a0-0000-7000-8000-000000000021",
+					tool: WEB_SEARCH_TOOL,
+					input: { query: "release" },
+					output: null,
+					status: "failed",
+					error: "No search provider",
+					approval: null,
+					atOffset: 8,
+					startedAt: "2026-09-14T00:00:00.000Z",
+					finishedAt: "2026-09-14T00:00:01.000Z",
+				},
+				{ type: "text", text: " Found it." },
+			],
+		};
+
+		const prompt = modelPrompt(input, environment());
+		const authored = prompt.messages[1];
+		const history = prompt.messages[2]?.content ?? "";
+
+		expect(authored).toEqual({ role: "assistant", content: "Looking. Found it." });
+		expect(history).toContain("Generated by the application, not authored");
+		expect(history).toContain('[Used web_fetch with {"url":"https://example.com"}: ');
+		expect(history).toContain("… (");
+		expect(history).not.toContain(page);
+		expect(history).toContain(
+			'[Used web_search with {"query":"release"}; it failed: No search provider]',
+		);
+	});
+
+	it("tells later turns which tools a tool search found, not their schemas", () => {
+		const search = {
+			type: "tool_call",
+			id: "0199a3a0-0000-7000-8000-000000000022",
+			tool: TOOL_SEARCH,
+			input: { query: "look up a page" },
+			output: { tools: [{ tool: "wiki__lookup", inputSchema: { type: "object" } }] },
+			status: "completed",
+			error: null,
+			approval: null,
+			atOffset: 0,
+			startedAt: "2026-09-14T00:00:00.000Z",
+			finishedAt: "2026-09-14T00:00:01.000Z",
+		} as const;
+
+		const described = describeToolCall(search);
+		expect(described).toContain(TOOL_SEARCH);
+		expect(described).toContain("wiki__lookup");
+		expect(described).not.toContain("inputSchema");
+	});
+
+	it("keeps what search_history found longer than other tools' output", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) {
+			throw new Error("Context fixture has no assistant message");
+		}
+		const found = `The hotel budget is 150 euros a night. ${"word ".repeat(500)}`;
+		input.messages[1] = {
+			...own,
+			content: "Found it.",
+			parts: [
+				{
+					type: "tool_call",
+					id: "0199a3a0-0000-7000-8000-000000000022",
+					tool: SEARCH_HISTORY_TOOL,
+					input: { query: "hotel budget" },
+					output: {
+						messages: [{ author: "Sam", at: "Fri, 15 May 2026, 17:02 UTC", text: found }],
+						more: false,
+					},
+					status: "completed",
+					error: null,
+					approval: null,
+					atOffset: 0,
+					startedAt: "2026-09-14T00:00:00.000Z",
+					finishedAt: "2026-09-14T00:00:01.000Z",
+				},
+				{ type: "text", text: "Found it." },
+			],
+		};
+
+		const history = modelPrompt(input, environment()).messages[2]?.content ?? "";
+
+		expect(history).toContain(found);
+		expect(history).not.toContain("… (");
+	});
+
+	it("names the file a long tool result was kept as, so a later turn can read on", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) {
+			throw new Error("Context fixture has no assistant message");
+		}
+		const callId = "0199a3a0-0000-7000-8000-000000000023";
+		const fileId = "0199a3a0-0000-7000-8000-0000000000f1";
+		input.messages[1] = {
+			...own,
+			parts: [
+				{
+					type: "tool_call",
+					id: callId,
+					tool: WEB_FETCH_TOOL,
+					input: { url: "https://example.com/report" },
+					output: "line\n".repeat(20_000),
+					status: "completed",
+					error: null,
+					approval: null,
+					atOffset: 0,
+					startedAt: "2026-09-14T00:00:00.000Z",
+					finishedAt: "2026-09-14T00:00:01.000Z",
+				},
+			],
+		};
+
+		const history =
+			modelPrompt(input, environment(), new Map([[callId, fileId]])).messages[2]?.content ?? "";
+
+		expect(history).toContain(fileId);
+		expect(history).toContain(READ_CHAT_FILE_TOOL);
+	});
+
+	it("tells the bot which message a member's reply quotes", () => {
+		const input = context();
+		const [question, , finding] = input.messages;
+		if (!question || !finding) throw new Error("Context fixture has no messages to reply with");
+		input.messages.push({
+			...question,
+			id: "0199a3a0-0000-7000-8000-000000000020",
+			parts: [{ type: "text", text: "Which migration?" }],
+			content: "Which migration?",
+			replyTo: { id: finding.id, author: finding.author, preview: "Migration is present." },
+			createdAt: "2026-09-10T04:03:00.000Z",
+		});
+
+		const prompt = modelPrompt(input, environment());
+
+		expect(prompt.messages).toContainEqual(
+			expect.objectContaining({
+				content: 'Sam (@sam): [Replying to Reviewer: "Migration is present."]\nWhich migration?',
+			}),
+		);
+	});
+
+	it("writes members' reactions where they happened, so later turns only add to the history", () => {
+		const input = context();
+		const [question, answer, finding] = input.messages;
+		if (!question || !answer || !finding) throw new Error("Context fixture has no messages");
+		input.messages = [
+			question,
+			{
+				...answer,
+				reactions: [
+					{
+						emoji: "👀",
+						members: [{ id: SAM, name: "Sam", at: "2026-09-10T04:01:30.000Z" }],
+					},
+				],
+			},
+			{
+				...finding,
+				reactions: [
+					{
+						emoji: "🎉",
+						members: [{ id: SAM, name: "Sam", at: "2026-09-10T04:05:00.000Z" }],
+					},
+				],
+			},
+		];
+
+		const history = modelPrompt(input, environment()).messages.slice(0, -1);
+
+		expect(history.map(({ content }) => content)).toEqual([
+			"Sam (@sam): Check the release",
+			"I am checking it.",
+			`${PLATFORM_EVENT_LOG}\nSam reacted 👀 to your message: "I am checking it."`,
+			"Reviewer (@reviewer) (bot): Migration is present.",
+			`${PLATFORM_EVENT_LOG}\nSam reacted 🎉 to Reviewer's message: "Migration is present."`,
+		]);
+	});
+
+	it("lists the files a member attached after what they wrote, even with nothing written", () => {
+		const input = context();
+		const asked = input.messages[0];
+		if (!asked) {
+			throw new Error("Context fixture has no member's message");
+		}
+		const report = {
+			type: "file",
+			id: "0199a3a0-0000-7000-8000-0000000000f2",
+			name: "report.pdf",
+			contentType: "application/pdf",
+			size: 2_200_000,
+		} as const;
+		const line = describeAttachment(report, { usesComputer: false });
+
+		input.messages[0] = { ...asked, parts: [...asked.parts, report] };
+		expect(modelPrompt(input, environment()).messages[0]).toEqual({
+			role: "user",
+			content: `Sam (@sam): Check the release
+${line}`,
+		});
+
+		input.messages[0] = { ...asked, content: "", parts: [report] };
+		expect(modelPrompt(input, environment()).messages[0]).toEqual({
+			role: "user",
+			content: `Sam (@sam): ${line}`,
+		});
+	});
+
+	it("tells a bot that works in the computer it can copy an attached file there", () => {
+		const input = context();
+		const asked = input.messages[0];
+		if (!asked) {
+			throw new Error("Context fixture has no member's message");
+		}
+		const chart = {
+			type: "file",
+			id: "0199a3a0-0000-7000-8000-0000000000f3",
+			name: "chart.png",
+			contentType: "image/png",
+			size: 4_096,
+		} as const;
+		input.bot = { ...input.bot, usesComputer: true };
+		input.messages[0] = { ...asked, content: "", parts: [chart] };
+
+		const attached = modelPrompt(input, environment()).messages[0];
+		expect(attached?.role).toBe("user");
+		for (const field of [
+			chart.name,
+			chart.id,
+			chart.contentType,
+			READ_CHAT_FILE_TOOL,
+			COPY_FILE_TO_COMPUTER_TOOL,
+		]) {
+			expect(attached?.content).toContain(field);
+		}
+	});
+
+	it("leaves a bot's own attached files to its tool calls, and describes another's", () => {
+		const input = context();
+		const [, own, others] = input.messages;
+		if (!own || !others) throw new Error("Context fixture has no bots' messages");
+		const chart = {
+			type: "file",
+			id: "0199a3a0-0000-7000-8000-0000000000f4",
+			name: "chart.png",
+			contentType: "image/png",
+			size: 4_096,
+		} as const;
+		input.bot = { ...input.bot, usesComputer: true };
+		input.messages[1] = { ...own, parts: [...own.parts, chart] };
+		input.messages[2] = { ...others, parts: [...others.parts, chart] };
+
+		const history = modelPrompt(input, environment()).messages;
+
+		expect(history[1]).toEqual({ role: "assistant", content: "I am checking it." });
+		expect(history[2]).toMatchObject({
+			role: "user",
+			content: `Reviewer (@reviewer) (bot): Migration is present.
+${describeAttachment(chart, { usesComputer: true })}`,
+		});
+	});
+
+	it("says just before an automation's result which automation posted it, when, and what the run was told", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) throw new Error("Context fixture has no bot's message");
+		const run = {
+			runId: "0199a3a0-0000-7000-8000-0000000000f6",
+			chatId: "0199a3a0-0000-7000-8000-0000000000f7",
+			automationId: "0199a3a0-0000-7000-8000-0000000000f8",
+			automationName: "Say Hello",
+		};
+		input.messages[1] = { ...own, automationResultOf: run };
+		input.automationInstructions = new Map([[run.runId, "Say hello"]]);
+
+		const [notice, result] = modelPrompt(input, environment()).messages.slice(1, 3);
+		expect(notice?.role).toBe("user");
+		expect(notice?.content).toContain(PLATFORM_EVENT_LOG);
+		expect(notice?.content).toContain(run.automationName);
+		expect(notice?.content).toContain(formatHistoryTime(new Date(own.createdAt)));
+		expect(notice?.content).toContain("Say hello");
+		expect(result).toEqual({ role: "assistant", content: own.content });
+	});
+
+	it("lists the files an automation's result showed after it, so a later turn can find them", () => {
+		const input = context();
+		const own = input.messages[1];
+		if (!own) throw new Error("Context fixture has no bot's message");
+		const traction = {
+			type: "written_file",
+			fileId: "0199a3a0-0000-7000-8000-0000000000f5",
+			kind: "html",
+			title: "Weekly traction",
+			version: 3,
+		} as const;
+		const result = {
+			...own,
+			automationResultOf: {
+				runId: "0199a3a0-0000-7000-8000-0000000000f6",
+				chatId: "0199a3a0-0000-7000-8000-0000000000f7",
+				automationId: "0199a3a0-0000-7000-8000-0000000000f8",
+				automationName: "Daily traction",
+			},
+		};
+		// What the line before a result says is the test above's to check.
+		const posted = expect.objectContaining({ role: "user" });
+		const shown = expect.stringContaining(describeWrittenFile(traction));
+
+		input.messages[1] = { ...result, parts: [...own.parts, traction] };
+		expect(modelPrompt(input, environment()).messages.slice(1, 4)).toEqual([
+			posted,
+			{ role: "assistant", content: "I am checking it." },
+			{ role: "user", content: shown },
+		]);
+
+		input.messages[1] = { ...result, content: "", parts: [traction] };
+		expect(modelPrompt(input, environment()).messages.slice(1, 4)).toEqual([
+			posted,
+			{ role: "user", content: shown },
+			expect.objectContaining({ content: expect.stringContaining("Migration is present.") }),
+		]);
+	});
+});
+
+/** A turn's context a case changes before it makes the prompt: its fields and its chat's. */
+type EditableContext = Omit<{ -readonly [Key in keyof TurnContext]: TurnContext[Key] }, "chat"> & {
+	chat: { -readonly [Key in keyof TurnContext["chat"]]: TurnContext["chat"][Key] };
+};
+
+function context(): EditableContext {
+	return {
+		chat: {
+			id: "0199a3a0-0000-7000-8000-000000000001",
+			workspaceId: "0199a3a0-0000-7000-8000-000000000002",
+			title: "Check the release",
+			kind: "project_chat",
+			botId: "0199a3a0-0000-7000-8000-000000000003",
+		},
+		bot: {
+			id: "0199a3a0-0000-7000-8000-000000000003",
+			name: "Host Bot",
+			handle: "host-bot",
+			model: "claude-sonnet-4-20250514",
+			instructions: "Check facts carefully.",
+			disabledTools: [],
+			usesComputer: false,
+			naturalBrowsing: false,
+			assistantOf: null,
+			visibility: "public",
+			color: "orange",
+			acceptsImages: false,
+			defaultProjectId: "0199a3a0-0000-7000-8000-000000000004",
+		},
+		projectId: "0199a3a0-0000-7000-8000-000000000004",
+		reason: "default",
+		windowTokens: 256_000,
+		compaction: undefined,
+		automationInstructions: new Map(),
+		project: null,
+		workspaceName: "Suga",
+		workspaceSlug: "suga",
+		workspaceTimeZone: "UTC",
+		askerId: null,
+		startedFor: null,
+		botsToAsk: [],
+		helpersWithoutReply: [],
+		participants: [
+			testMember({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
+			{
+				kind: "bot",
+				id: "0199a3a0-0000-7000-8000-000000000003",
+				name: "Host Bot",
+				handle: "host-bot",
+				color: "green",
+				eyes: "pill",
+				shape: "circle",
+			},
+			{
+				kind: "bot",
+				id: "0199a3a0-0000-7000-8000-000000000005",
+				name: "Reviewer",
+				handle: "reviewer",
+				color: "orange",
+				eyes: "dot",
+				shape: "circle",
+			},
+		],
+		messages: [
+			{
+				id: "0199a3a0-0000-7000-8000-000000000006",
+				chatId: "0199a3a0-0000-7000-8000-000000000001",
+				author: testMember({ id: "0199a3a0-0000-7000-8000-000000000004", name: "Sam" }),
+				status: "complete",
+				parts: [{ type: "text", text: "Check the release" }],
+				content: "Check the release",
+				createdAt: "2026-09-10T04:00:00.000Z",
+			},
+			{
+				id: "0199a3a0-0000-7000-8000-000000000007",
+				chatId: "0199a3a0-0000-7000-8000-000000000001",
+				author: {
+					kind: "bot",
+					id: "0199a3a0-0000-7000-8000-000000000003",
+					name: "Host Bot",
+					handle: "host-bot",
+					color: "green",
+					eyes: "pill",
+					shape: "circle",
+				},
+				status: "complete",
+				parts: [{ type: "text", text: "I am checking it." }],
+				content: "I am checking it.",
+				createdAt: "2026-09-10T04:01:00.000Z",
+			},
+			{
+				id: "0199a3a0-0000-7000-8000-000000000008",
+				chatId: "0199a3a0-0000-7000-8000-000000000001",
+				author: {
+					kind: "bot",
+					id: "0199a3a0-0000-7000-8000-000000000005",
+					name: "Reviewer",
+					handle: "reviewer",
+					color: "orange",
+					eyes: "dot",
+					shape: "circle",
+				},
+				status: "complete",
+				parts: [{ type: "text", text: "Migration is present." }],
+				content: "Migration is present.",
+				createdAt: "2026-09-10T04:02:00.000Z",
+			},
+		],
+	};
+}

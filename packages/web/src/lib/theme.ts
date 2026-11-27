@@ -20,7 +20,7 @@ export function useTheme(): [Theme, (next: Theme) => void] {
 	// The script in index.html has usually done this already. Doing it again on
 	// mount is what keeps the two honest if the stored value changes underneath.
 	useEffect(() => {
-		apply(theme);
+		applyTheme(theme);
 	}, [theme]);
 
 	const setTheme = useCallback((next: Theme) => {
@@ -48,7 +48,8 @@ function read(): Theme {
 	}
 }
 
-function apply(theme: Theme): void {
+/** Draws the page in `theme`, by the root element's `data-theme`. */
+export function applyTheme(theme: Theme): void {
 	if (theme === "dark") {
 		delete document.documentElement.dataset.theme;
 	} else {

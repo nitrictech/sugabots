@@ -5,41 +5,47 @@ import {
 	MAX_EVERY_MONTHS,
 	MAX_EVERY_WEEKS,
 } from "@sugabots/contracts";
+import { formatEvery, formatTime } from "@sugabots/contracts/routine-schedule-label";
+import { cn } from "cn";
 import { Check, Minus, Plus, X } from "lucide-react";
-import type { ReactNode } from "react";
 import {
 	canAddTime,
 	DAY_OPTIONS,
 	formatDayOfMonth,
-	formatEvery,
-	formatTime,
 	nextTime,
 	REPEAT_OPTIONS,
-	type ScheduleReading,
+	type RoutineReading,
 	TIME_STEP_MINUTES,
 	today,
 	withRepeat,
 } from "@/lib/routine-schedule.ts";
+import { Button } from "@/ui/button.tsx";
+import { MENU_ITEM, MENU_POPUP } from "@/ui/dropdown-menu.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { SettingsChoiceRow, SettingsFieldLabel, SettingsGroup } from "@/ui/settings-page.tsx";
+import {
+	SettingsChoiceRow,
+	SettingsControlRow,
+	SettingsGroup,
+	SettingsRow,
+} from "@/ui/settings-page.tsx";
 
-/** The most of each unit a schedule can skip between runs. */
+/** The most of each unit a routine can skip between runs. */
 const MAX_EVERY = { daily: MAX_EVERY_DAYS, weekly: MAX_EVERY_WEEKS, monthly: MAX_EVERY_MONTHS };
 
-/** The days of the month a schedule can pick: the 1st to the 28th, so each falls in every month, then the last day. */
+/** The days of the month a routine can pick: the 1st to the 28th, so each falls in every month, then the last day. */
 const LAST_NUMBERED_DAY = 28;
 
 /**
- * A schedule's groups: how often it repeats and every how many, on which
- * days, then at which times, with `note` under the last. A schedule written
- * as cron shows as written until a repeat is picked in its place.
+ * A routine's groups: how often it repeats and every how many, on which days,
+ * then at which times, with `note` under the last. A routine stored as cron
+ * shows as written until a repeat is picked in its place.
  */
-export function ScheduleGroups({
+export function RoutineGroups({
 	reading,
 	note,
 	onChange,
 }: {
-	reading: ScheduleReading;
+	reading: RoutineReading;
 	note: string;
 	onChange: (schedule: CalendarSchedule) => void;
 }) {
@@ -54,11 +60,15 @@ export function ScheduleGroups({
 					onChange={(repeat) => onChange(withRepeat(reading, repeat))}
 				/>
 				{reading.kind === "written" && (
-					<div className="flex flex-col gap-1 border-border border-b px-4 py-3 last:border-b-0">
-						<span className="text-sm text-foreground">{reading.label}</span>
-						<code className="font-mono text-xs text-muted-foreground">{reading.expression}</code>
-						<span className="text-xs text-subtle-foreground">Pick a repeat to replace it.</span>
-					</div>
+					<SettingsRow
+						label={reading.label}
+						sub={
+							<>
+								<code className="block font-mono text-muted-foreground">{reading.expression}</code>
+								Pick a repeat to replace it.
+							</>
+						}
+					/>
 				)}
 				{schedule && <RepeatRows schedule={schedule} onChange={onChange} />}
 			</SettingsGroup>
@@ -71,7 +81,7 @@ export function ScheduleGroups({
 	);
 }
 
-/** Every how many days, weeks or months, and for a weekly or monthly schedule, on which days. */
+/** Every how many days, weeks or months, and for a weekly or monthly routine, on which days. */
 function RepeatRows({
 	schedule,
 	onChange,
@@ -94,13 +104,9 @@ function RepeatRows({
 				onMore={schedule.every < max ? () => changeEvery(schedule.every + 1) : undefined}
 			/>
 			{schedule.repeat === "weekly" && (
-				<fieldset className="m-0 flex min-h-11.5 items-center gap-3 border-0 border-border border-b px-4 py-2.5 last:border-b-0 max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
-					<legend className="sr-only">Days</legend>
-					{/* The legend names the days for assistive technology; this shows it in the label column. */}
-					<span aria-hidden className="contents">
-						<SettingsFieldLabel>Days</SettingsFieldLabel>
-					</span>
-					<span className="flex gap-1.5 sm:ml-auto max-sm:justify-between">
+				<SettingsControlRow label="Days" stackOnPhone>
+					<fieldset className="m-0 flex min-w-0 gap-1.5 border-0 p-0 sm:ml-auto max-sm:justify-between">
+						<legend className="sr-only">Days</legend>
 						{DAY_OPTIONS.map((day) => {
 							const selected = schedule.days.includes(day.value);
 							return (
@@ -127,8 +133,8 @@ function RepeatRows({
 								</label>
 							);
 						})}
-					</span>
-				</fieldset>
+					</fieldset>
+				</SettingsControlRow>
 			)}
 			{schedule.repeat === "monthly" && (
 				<StepperRow
@@ -155,7 +161,7 @@ const PICKABLE_TIMES = Array.from(
 );
 
 /**
- * The times a schedule runs at, each a chip picked from the half hours, with
+ * The times a routine runs at, each a chip picked from the half hours, with
  * an × to remove it while another is left, and + Add for one more.
  */
 function TimesRow({
@@ -166,8 +172,7 @@ function TimesRow({
 	onChange: (times: number[]) => void;
 }) {
 	return (
-		<div className="flex min-h-11.5 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
-			<SettingsFieldLabel>Times</SettingsFieldLabel>
+		<SettingsControlRow label="Times" stackOnPhone>
 			<ul className="m-0 flex flex-1 list-none flex-wrap gap-2 p-0">
 				{times.map((time, index) => {
 					const others = times.filter((_, other) => other !== index);
@@ -202,18 +207,18 @@ function TimesRow({
 				})}
 				{canAddTime(times) && (
 					<li>
-						<button
-							type="button"
+						<Button
+							size="sm"
 							aria-label="Add a time"
 							onClick={() => onChange([...times, nextTime(times)])}
-							className="focus-ring h-full rounded-lg bg-primary px-3 py-1.5 font-medium text-sm text-primary-foreground transition-colors hover:bg-primary-hover"
+							className="h-full rounded-lg"
 						>
 							+ Add
-						</button>
+						</Button>
 					</li>
 				)}
 			</ul>
-		</div>
+		</SettingsControlRow>
 	);
 }
 
@@ -232,7 +237,7 @@ function TimeSelect({
 	label: string;
 	value: number;
 	options: readonly number[];
-	/** Times the schedule's other chips hold, shown but not pickable. */
+	/** Times the routine's other chips hold, shown but not pickable. */
 	taken: readonly number[];
 	onChange: (time: number) => void;
 }) {
@@ -257,13 +262,18 @@ function TimeSelect({
 					align="start"
 					sideOffset={6}
 				>
-					<Select.Popup className="max-h-popover min-w-(--anchor-width) origin-(--transform-origin) overflow-y-auto scrollbar-gutter-stable rounded-lg border border-border-strong bg-panel p-1 text-foreground shadow-popover outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0">
+					<Select.Popup
+						className={cn(
+							MENU_POPUP,
+							"max-h-popover min-w-(--anchor-width) scrollbar-gutter-stable",
+						)}
+					>
 						{options.map((option) => (
 							<Select.Item
 								key={option}
 								value={option}
 								disabled={taken.includes(option)}
-								className="flex min-h-8 cursor-pointer select-none items-center gap-3 rounded-tail py-1.5 pr-2 pl-2.5 text-sm tabular-nums outline-hidden data-disabled:pointer-events-none data-highlighted:bg-chip data-disabled:text-disabled-foreground"
+								className={cn(MENU_ITEM, "min-h-8 gap-3 py-1.5 pr-2 tabular-nums")}
 							>
 								<Select.ItemText className="flex-1">{formatTime(option)}</Select.ItemText>
 								{/* Holds the tick's room on every row, so the list is as wide with it as without. */}
@@ -307,44 +317,21 @@ function StepperRow({
 	onMore: (() => void) | undefined;
 }) {
 	return (
-		<div className="flex min-h-11.5 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0">
-			<SettingsFieldLabel>{label}</SettingsFieldLabel>
+		<SettingsControlRow label={label}>
 			<span className="flex flex-1 items-center justify-end gap-3">
-				<StepButton label={lessLabel} onClick={onLess}>
-					<Minus size={14} strokeWidth={2.4} />
-				</StepButton>
+				<IconButton variant="round" label={lessLabel} onClick={onLess} disabled={!onLess}>
+					<Minus strokeWidth={2.4} />
+				</IconButton>
 				<output
 					aria-label={label}
 					className="min-w-16 text-center font-semibold text-base text-foreground tabular-nums"
 				>
 					{value}
 				</output>
-				<StepButton label={moreLabel} onClick={onMore}>
-					<Plus size={14} strokeWidth={2.4} />
-				</StepButton>
+				<IconButton variant="round" label={moreLabel} onClick={onMore} disabled={!onMore}>
+					<Plus strokeWidth={2.4} />
+				</IconButton>
 			</span>
-		</div>
-	);
-}
-
-function StepButton({
-	label,
-	onClick,
-	children,
-}: {
-	label: string;
-	onClick: (() => void) | undefined;
-	children: ReactNode;
-}) {
-	return (
-		<button
-			type="button"
-			aria-label={label}
-			onClick={onClick}
-			disabled={!onClick}
-			className="focus-ring grid size-7.5 shrink-0 place-items-center rounded-full bg-chip text-foreground transition-colors hover:bg-hover disabled:opacity-45"
-		>
-			{children}
-		</button>
+		</SettingsControlRow>
 	);
 }

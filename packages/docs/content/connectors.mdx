@@ -1,0 +1,209 @@
+---
+title: Connectors
+description: Connect services like Linear and Notion to a bot or a project, so its bots can work with them.
+---
+
+A connector links a [project](/docs/projects) to a service through the
+[Model Context Protocol](https://modelcontextprotocol.io) (MCP). Once it's
+connected, the project's bots can use the service's tools, with the
+[tool access](/docs/tools-and-approvals#tools-from-connectors) you choose. A
+connector can also be an [HTTP endpoint](#http-endpoints): a web API bots
+send requests to, or the project's own [GitHub app](#github).
+
+Each connector belongs to one project. A bot's own connectors are those of
+its hidden default project, where its own chats are, so a bot has
+connectors just as a project does.
+
+## Which connectors a bot uses
+
+A bot working in a project's chat uses the project's connectors and its
+own. When both have a connector with the same name, the project's is the one
+it uses. In its own chats, a bot uses just its own. When a bot
+[asks another for help](/docs/chats#bots-asking-bots), the other bot
+answers in the same chat, with the project's connectors and its own.
+
+## Who manages them
+
+Whoever may change a project adds and manages its connectors, signs them in
+and chooses their tools' access: in a project members made, the owner and
+admins. Everyone in the project can see which connectors it has.
+
+A bot's own connectors are managed by its creator, the owner and admins, and
+anyone who can talk to the bot can see them. You can also add connectors to
+your own [Personal Assistants](/docs/bots#personal-assistants).
+
+## Add one
+
+Open **Connectors** beside the bot's chats, and choose **Add connector**.
+A project's connectors are beside its chats the same way.
+
+### Built-in connectors
+
+These sign in with one click. Pick one, then **Connect** and sign in to the service.
+
+| Connector | What bots can reach |
+| --- | --- |
+| Linear | Issues, projects and cycles |
+| Stripe | Customers, payments and invoices |
+| Notion | Pages and databases |
+| Sentry | Errors and performance issues |
+| Jira | Issues and boards |
+
+### Any other MCP server
+
+Choose **Something else**, then **Connect by URL**, and fill in:
+
+- **Name**: what it's called in Sugabots.
+- **Server URL**: Sugabots connects to remote servers over Streamable HTTP.
+  It doesn't run servers itself.
+  A plain-HTTP or local-network address needs
+  [`ALLOW_UNSAFE_WORKSPACE_URLS=true`](/docs/configuration#network) in
+  production.
+- **Sign in with**: how Sugabots proves itself to the server.
+  - **Token**: an access token, sent as `Authorization: Bearer <token>`. Leave
+    it empty if the server needs none.
+  - **Sign in**: the server's own sign-in, which you complete next.
+  - **Header**: a secret sent exactly as typed, in the header you name.
+
+Once Sugabots has found a connector's tools, each one starts at the
+[tool access](/docs/tools-and-approvals#tools-from-connectors) that suits it, and
+you can change it from the connector's settings.
+
+## HTTP endpoints
+
+An HTTP endpoint lets bots call a web API that isn't an MCP server. Choose
+**Something else**, then **HTTP endpoint**, and fill in:
+
+- **Address**: the API's base URL, such as `https://api.example.com/v1`.
+  Requests only go to paths under it.
+- **Sign in with**: **Token** sends `Authorization: Bearer <token>`, and
+  **Header** sends a secret in the header you name. Leave it empty for an API
+  that needs no credential.
+
+Each endpoint has one tool per method, named like `alerts__get`: `get`,
+`post`, `put`, `patch` and `delete`. A bot gives a path, query parameters,
+headers and, except for `get` and `delete`, a body. It gets back the status,
+the `content-type`, `location`, `retry-after` and `x-request-id` headers, and
+up to 5 MB of body. Redirects come back to the bot and aren't followed.
+
+Bots never see the secret. Sugabots adds it after the bot has written the
+request, refuses a request that sets that header itself, and replaces the
+secret with `[credential]` wherever the API sends it back. A bot can't send it
+to another address.
+
+The tools start with `get` on **Allow**, `delete` on **Off**, and the others on
+**Ask**. Set `post` to **Allow** for bots that should send without waiting for
+a member, such as from an [automation](/docs/automations).
+
+**Test connector** checks the address against the
+[network settings](/docs/configuration#network) again. It sends nothing to the
+API, so a wrong secret shows up only when a bot first uses it.
+
+## GitHub
+
+Each project, and so each bot, can have its own **GitHub app**, made for it
+and installed on one GitHub account or organisation:
+
+1. Choose **GitHub** under **Add connector**. Name an **Organization** to own
+   the app, or leave it empty to own it yourself, and choose **Make on GitHub**.
+2. Choose **Install on GitHub**, and install the app on the account its bots
+   work on.
+3. Choose **Add repository** to pick the repositories it works on, from those
+   the installation reaches.
+
+The project's [automations](/docs/automations) can then start on GitHub
+events, and its [computer](/docs/projects#computer) is signed in to read those repositories.
+A project has at most one GitHub app, since its computer can be signed in to
+only one account there. A bot working in a project's chat uses the project's
+GitHub app; when the project has none, it uses its own, but the project's
+computer isn't signed in to that app's repositories, so only public ones can be
+cloned there.
+
+## Look after it
+
+Open **Connectors** beside the chats of the bot or project that holds the
+connector, then the connector, to see its tools. Its **⋯** menu
+signs in again or replaces its secret, and **Test connector** asks the server
+which tools it offers right now. Below that, choose **Allow**, **Ask** or
+**Off** for a whole group of tools at once, or for each one. Tools are named
+after the connector, like `linear__list_issues`, so bots can tell connectors apart.
+
+If a server can't be reached, its tools are left out of that turn and the bot
+carries on without them. A connector with every tool off isn't contacted at
+all.
+
+<Careful title="Disconnecting">
+
+Its bots lose its tools straight away. Adding it again means signing in
+or entering its details again.
+
+</Careful>
+
+## Troubleshooting
+
+### Check the server yourself
+
+Ask the server for its tools from the machine that runs Sugabots, with the
+credential the connector sends. This takes Sugabots out of the picture:
+
+```sh
+curl -i https://mcp.example.com/mcp \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+```
+
+A working server answers `200` with JSON describing itself. If `curl` fails
+the same way, the problem is in the server, its address or the credential, not
+in Sugabots. The full error behind each message is in Sugabots' logs:
+`docker compose logs sugabots`.
+
+### The token or secret isn't accepted
+
+- Most servers want the `Authorization` header to be `Bearer` followed by the
+  token, such as `Bearer abc123`, not the token on its own.
+- Tokens are often tied to the account that made them, so they can only reach
+  what that account can. Some expire, and some are revoked when the account's
+  password changes.
+- Copying a token from a terminal or email can add a line break or drop a
+  character. Paste it into a plain text editor first to check.
+
+### The server refuses access
+
+The credential was accepted but lacks permission, an `HTTP 403`. Check the
+token's scopes or the account's role on the server. Some servers also refuse
+requests from addresses they don't recognise, so check any allow list the
+server has.
+
+### Nothing answers as an MCP server
+
+- Sugabots speaks MCP over Streamable HTTP. A server that only offers the older
+  SSE transport, often at an address ending in `/sse`, won't answer.
+- The MCP address is usually on a path such as `/mcp` or `/api/mcp`, not the
+  server's home page. The server's documentation lists it.
+- A reverse proxy in front of the server can answer with its own page. Check the
+  proxy forwards the MCP path.
+
+### The server can't be reached
+
+- When Sugabots runs in Docker, `localhost` and `127.0.0.1` mean the Sugabots
+  container itself. Use the server's network address, such as
+  `http://192.168.1.20/mcp`, instead.
+- Check a firewall on the server, or between the two machines, allows the port.
+- Sugabots gives up after 15 seconds, so a server that is slow to start may need
+  a second check.
+
+### Sign-in won't start
+
+Sugabots signs in to a server by registering itself with the server's sign-in
+service first, which the OAuth standard calls dynamic client registration. Some
+servers only accept apps registered another way, so their sign-in can't be used
+yet. Connect with an access token from the server instead.
+
+### The server URL isn't allowed
+
+By default, an installation only connects to `https://` addresses on the public
+internet, so that one workspace can't reach other services on the network or
+send keys unencrypted. Whoever runs Sugabots can allow plain HTTP and local
+network addresses with the [network settings](/docs/configuration#network).

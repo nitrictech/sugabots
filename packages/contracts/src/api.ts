@@ -1,7 +1,6 @@
 import { Schema } from "effect";
 import { emailSchema } from "./email.ts";
 import { uuidSchema } from "./uuid.ts";
-import { workspaceRoleSchema } from "./workspaces.ts";
 
 export const healthResponseSchema = Schema.Struct({
 	status: Schema.Literal("ok"),
@@ -13,24 +12,29 @@ export const healthResponseSchema = Schema.Struct({
 
 export type HealthResponse = typeof healthResponseSchema.Type;
 
-export const sessionUserSchema = Schema.Struct({
+export const currentUserSchema = Schema.Struct({
 	id: uuidSchema,
 	email: emailSchema,
 	name: Schema.String,
 	image: Schema.NullOr(Schema.String),
 });
 
-export type SessionUser = typeof sessionUserSchema.Type;
+export type CurrentUser = typeof currentUserSchema.Type;
 
-export const USER_NAME_MAX_LENGTH = 100;
-
-export const userNameSchema = Schema.Trim.check(
-	Schema.isMinLength(1),
-	Schema.isMaxLength(USER_NAME_MAX_LENGTH),
-);
-
-export const workspaceMembershipSchema = Schema.Struct({
-	role: workspaceRoleSchema,
+/** A member named beside something they did, such as connecting a provider, while they are still in the workspace. */
+export const namedMemberSchema = Schema.Struct({
+	id: uuidSchema,
+	name: Schema.String,
+	/** As the workspace's list of members shows it, for a picture of them where they have none of their own. */
+	email: emailSchema,
+	image: Schema.NullOr(Schema.String),
 });
 
-export type WorkspaceMembership = typeof workspaceMembershipSchema.Type;
+export type NamedMember = typeof namedMemberSchema.Type;
+
+export const MEMBER_NAME_MAX_LENGTH = 100;
+
+export const memberNameSchema = Schema.Trim.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MEMBER_NAME_MAX_LENGTH),
+);

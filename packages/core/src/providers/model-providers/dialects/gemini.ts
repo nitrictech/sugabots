@@ -2,8 +2,10 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { ProviderDialect } from "./dialect.ts";
 import { openaiCompatible } from "./openai-compatible.ts";
 
+export const geminiModelId = (modelId: string) => modelId.replace(/^models\//, "");
+
 /**
- * Lists models through Gemini's OpenAI-compatible API (the preset's base URL),
+ * Lists models through Gemini's OpenAI-compatible API (the built-in provider's base URL),
  * but sends requests to the native API one level up. The compatible API's
  * stream leaves `index` off tool calls, which the OpenAI SDK rejects, and the
  * OpenAI SDK drops the thought signatures Gemini needs back after each tool
@@ -11,7 +13,6 @@ import { openaiCompatible } from "./openai-compatible.ts";
  */
 export const gemini: ProviderDialect = {
 	...openaiCompatible,
-	name: "Gemini",
 	requestRoot: (baseUrl) => baseUrl.replace(/\/openai$/, ""),
 	// The native API reports context overflow in its own words.
 	recognizeFailure: ({ message }) =>
@@ -26,5 +27,5 @@ export const gemini: ProviderDialect = {
 			baseURL: endpoint.baseUrl,
 			headers: endpoint.headers,
 			fetch,
-		})(modelId.replace(/^models\//, "")),
+		})(geminiModelId(modelId)),
 };

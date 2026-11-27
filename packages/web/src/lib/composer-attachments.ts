@@ -36,11 +36,8 @@ export type ComposerAttachments = {
 	items: readonly ComposerAttachment[];
 	/** How many files the latest attach left out, for going over `MAX_ATTACHMENTS_PER_MESSAGE`. */
 	leftOut: number;
-	/**
-	 * Adds files in order, each uploading straight away, up to the limit.
-	 * Absent until the chat exists, since that is where they upload to.
-	 */
-	attach: ((files: readonly File[]) => void) | undefined;
+	/** Adds files in order, each uploading straight away, up to the limit. */
+	attach: (files: readonly File[]) => void;
 	/** Drops a chip, stopping its upload or removing the file it uploaded. */
 	remove: (key: string) => void;
 	/** Uploads a file whose failure is retryable again, on the same chip. */
@@ -66,7 +63,7 @@ export type FilesForSending = {
 };
 
 /** Whether the attached files can go with a message now, and if not, how many hold it up. */
-export type SendReadiness = { ready: true } | { ready: false; failed: number; uploading: number };
+type SendReadiness = { ready: true } | { ready: false; failed: number; uploading: number };
 
 export function sendReadiness(items: readonly ComposerAttachment[]): SendReadiness {
 	const failed = items.filter(
@@ -85,13 +82,13 @@ export function canSend(draftText: string, items: readonly ComposerAttachment[])
 }
 
 /**
- * The composer's attachments for the chat `conversationId`. Each file uploads as soon
+ * The composer's attachments for the chat `chatId`. Each file uploads as soon
  * as it is attached. They are kept in memory only, so leaving the chat stops
  * the uploads still going, removes the files uploaded and not sent, which
- * would otherwise count toward the files a person can have waiting, and
+ * would otherwise count toward the files a member can have waiting, and
  * empties the composer for the next chat.
  */
-export function useComposerAttachments(conversationId: string | undefined): ComposerAttachments {
+export function useComposerAttachments(chatId: string): ComposerAttachments {
 	const [items, setItems] = useState<readonly ComposerAttachment[]>([]);
 	const [leftOut, setLeftOut] = useState(0);
 	// The source of truth, so a handler reads what the last one wrote without waiting for a render.
@@ -113,13 +110,12 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 	}
 
 	function startUpload(key: string, file: File): void {
-		if (!conversationId) return;
 		const controller = new AbortController();
 		inFlight.current.set(key, controller);
 		setUpload(key, { state: "uploading", progress: 0 });
 		const stillWanted = () => inFlight.current.get(key) === controller;
 		uploadChatFile({
-			conversationId,
+			chatId,
 			file,
 			signal: controller.signal,
 			onProgress: (progress) => {
@@ -129,7 +125,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 			(uploaded) => {
 				// Removed while it was finishing: it has to go from the API too.
 				if (!stillWanted()) {
-					removeChatFile(conversationId, uploaded.id);
+					removeChatFile(chatId, uploaded.id);
 					return;
 				}
 				inFlight.current.delete(key);
@@ -164,8 +160,8 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 		if (!item) return;
 		inFlight.current.get(key)?.abort();
 		inFlight.current.delete(key);
-		if (conversationId && item.upload.state === "uploaded") {
-			removeChatFile(conversationId, item.upload.attachment.id);
+		if (item.upload.state === "uploaded") {
+			removeChatFile(chatId, item.upload.attachment.id);
 		}
 		setLeftOut(0);
 		commit((items) => items.filter((candidate) => candidate.key !== key));
@@ -179,8 +175,8 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 
 	function takeForSending(draftText: string): FilesForSending | undefined {
 		const taken = current.current;
-		if (!conversationId || !canSend(draftText, taken)) return undefined;
-		const takenFrom = conversationId;
+		if (!canSend(draftText, taken)) return undefined;
+		const takenFrom = chatId;
 		const fileIds = uploadedFileIds(taken);
 		setLeftOut(0);
 		commit(() => []);
@@ -202,7 +198,7 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 				}
 				// The API attaches all of a message's files or none, without saying
 				// which was missing, so each uploads again. The ones still there go,
-				// so they stop counting toward the files a person can have waiting.
+				// so they stop counting toward the files a member can have waiting.
 				for (const fileId of fileIds) removeChatFile(takenFrom, fileId);
 				commit((items) => [
 					...taken.map((item): ComposerAttachment => ({ ...item, upload: FILE_GONE })),
@@ -213,26 +209,25 @@ export function useComposerAttachments(conversationId: string | undefined): Comp
 	}
 
 	useEffect(() => {
-		openChatId.current = conversationId;
+		openChatId.current = chatId;
 		const uploads = inFlight.current;
 		return () => {
 			openChatId.current = undefined;
 			for (const controller of uploads.values()) controller.abort();
 			uploads.clear();
-			if (conversationId) {
-				for (const fileId of uploadedFileIds(current.current))
-					removeChatFile(conversationId, fileId);
+			for (const fileId of uploadedFileIds(current.current)) {
+				removeChatFile(chatId, fileId);
 			}
 			current.current = [];
 			setItems([]);
 			setLeftOut(0);
 		};
-	}, [conversationId]);
+	}, [chatId]);
 
 	return {
 		items,
 		leftOut,
-		attach: conversationId === undefined ? undefined : attach,
+		attach,
 		remove,
 		retry,
 		takeForSending,
@@ -257,7 +252,7 @@ function uploadToStart(file: File): AttachmentUpload {
 
 /**
  * Why an upload failed, and whether trying again could work: it can after the
- * connection drops, the API has trouble of its own, or a person has too many
+ * connection drops, the API has trouble of its own, or a member has too many
  * files waiting, but not when the API refuses the file itself.
  */
 function uploadFailure(failure: unknown): AttachmentUpload {
@@ -289,7 +284,7 @@ const FILE_GONE: AttachmentUpload = {
  * the API cleared for waiting too long.
  */
 export function isFileGoneRefusal(failure: unknown): boolean {
-	return isApiFailure(failure) && failure.error?._tag === "UploadsNotFound";
+	return isApiFailure(failure) && failure.error?._tag === "UnsentAttachmentsNotFound";
 }
 
 function uploadedFileIds(items: readonly ComposerAttachment[]): string[] {

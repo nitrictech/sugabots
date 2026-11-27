@@ -12,9 +12,9 @@ import {
 } from "react";
 import type { AttachmentUpload, ComposerAttachment } from "@/lib/composer-attachments.ts";
 import { extensionOf, type FileLook, fileLookOf } from "@/lib/file-looks.ts";
-import { listNames } from "@/lib/name-list.ts";
+import { countOf, listNames } from "@/lib/name-list.ts";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
 
 /**
  * The files attached to the message being written, as thumbnails above its
@@ -144,8 +144,8 @@ export function LeftOutNote({ count }: { count: number }) {
 						className="shrink-0 text-muted-foreground"
 					/>
 					<span>
-						{count === 1 ? "1 file wasn't added." : `${count} files weren't added.`} A message can
-						have {MAX_ATTACHMENTS_PER_MESSAGE} at most.
+						{countOf(count, "file wasn't", "files weren't")} added. A message can have{" "}
+						{MAX_ATTACHMENTS_PER_MESSAGE} at most.
 					</span>
 				</>
 			)}
@@ -202,17 +202,15 @@ export function AttachmentChip({
 				look !== "image" && <TypeBadge file={file} look={look} />
 			)}
 			{retryable && (
-				<Tooltip label="Retry" side="top">
-					<button
-						type="button"
-						aria-label={`Retry ${file.name}`}
-						aria-describedby={failureId}
-						onClick={onRetry}
-						className="focus-ring absolute top-1/2 left-1/2 z-2 grid size-8 -translate-x-1/2 -translate-y-7/10 place-items-center rounded-full bg-hover text-foreground transition-colors hover:bg-hover-strong"
-					>
-						<RotateCcw aria-hidden size={16} strokeWidth={2.4} />
-					</button>
-				</Tooltip>
+				<IconButton
+					label={`Retry ${file.name}`}
+					side="top"
+					aria-describedby={failureId}
+					onClick={onRetry}
+					className="absolute top-1/2 left-1/2 z-2 size-8 -translate-x-1/2 -translate-y-7/10 bg-hover text-foreground hover:bg-hover-strong [&_svg]:size-4"
+				>
+					<RotateCcw aria-hidden strokeWidth={2.4} />
+				</IconButton>
 			)}
 			<span className="pointer-events-none absolute inset-0 flex flex-col justify-end gap-0.5 bg-linear-to-b from-20% from-transparent to-75% to-background/92 px-1.75 py-1.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
 				<MiddleTruncated
@@ -230,18 +228,16 @@ export function AttachmentChip({
 					</span>
 				)}
 			</span>
-			<Tooltip label="Remove" side="top">
-				<button
-					type="button"
-					aria-label={`Remove ${file.name}`}
-					aria-describedby={failureId}
-					data-remove-chip
-					onClick={onRemove}
-					className="focus-ring absolute top-1 right-1 z-3 grid size-6 place-items-center rounded-full bg-background/85 text-foreground opacity-0 transition-opacity hover:bg-background focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
-				>
-					<X aria-hidden size={12} strokeWidth={2.4} />
-				</button>
-			</Tooltip>
+			<IconButton
+				label={`Remove ${file.name}`}
+				side="top"
+				aria-describedby={failureId}
+				data-remove-chip
+				onClick={onRemove}
+				className="absolute top-1 right-1 z-3 bg-background/85 text-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100 [&_svg]:size-3"
+			>
+				<X aria-hidden strokeWidth={2.4} />
+			</IconButton>
 			{upload.state === "uploading" && (
 				<UploadProgress name={file.name} fraction={upload.progress} />
 			)}
@@ -344,7 +340,7 @@ function TypeBadge({ file, look }: { file: File; look: Exclude<FileLook, "image"
 	return (
 		<span
 			className={cn(
-				"absolute bottom-1.25 left-1.25 flex h-4 max-w-attachment-preview items-center truncate rounded px-1.25 font-semibold text-3xs text-white tracking-wide transition-opacity group-focus-within:opacity-0 group-hover:opacity-0",
+				"absolute bottom-1.25 left-1.25 flex h-4 max-w-attachment-preview items-center truncate rounded px-1.25 font-semibold text-3xs text-file-badge-foreground tracking-wide transition-opacity group-focus-within:opacity-0 group-hover:opacity-0",
 				look === "sheet" ? "bg-file-badge-sheet" : "bg-file-badge-other",
 			)}
 		>

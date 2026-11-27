@@ -14,6 +14,7 @@ import {
 } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
+import { processLayer, Tier } from "../tiers.ts";
 import { relations } from "./relations.ts";
 
 /**
@@ -53,7 +54,9 @@ export class Transaction extends Context.Service<
 		readonly batches: Map<unknown, Batch>;
 		readonly afterCommit: Array<Effect.Effect<void>>;
 	}
->()("Database/Transaction") {}
+>()("Database/Transaction") {
+	declare readonly [Tier]: "request";
+}
 
 /** Items one `batchedBeforeCommit` gathered in a transaction, and the work that flushes them. */
 interface Batch {
@@ -142,7 +145,9 @@ export class Database extends Context.Service<
 			use: Effect.Effect<A, E, R>,
 		) => Effect.Effect<A, E, Exclude<R, Transaction>>;
 	}
->()("Database") {}
+>()("Database") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * The outermost transaction is a real `begin`/`commit`. Work deferred with
@@ -231,7 +236,9 @@ export const clientLayer = PgClient.layerConfig({
 const DIRECT_POOL_SIZE = 6;
 
 /** The main pool, passed through as the direct one when `DATABASE_URL` is direct. */
-const mainAsDirect = Layer.effectContext(Effect.context<PgClient.PgClient | SqlClient.SqlClient>());
+const mainAsDirect = processLayer(
+	Layer.effectContext(Effect.context<PgClient.PgClient | SqlClient.SqlClient>()),
+);
 
 /**
  * The pool for what needs one Postgres session across statements: session
@@ -250,7 +257,7 @@ export const directClientLayer: Layer.Layer<
 			? PgClient.layer({ url: url.value, maxConnections: DIRECT_POOL_SIZE })
 			: mainAsDirect;
 	}),
-).pipe(Layer.orDie);
+).pipe(processLayer, Layer.orDie);
 
 /** Drizzle on whichever pool `PgClient` provides. */
 export const make = Effect.gen(function* () {
@@ -258,7 +265,7 @@ export const make = Effect.gen(function* () {
 	const root = yield* makeWithDefaults({ relations });
 	return Database.of({
 		execute: (run) => run(root),
-		// A failure to begin or commit is a defect: no repository can do anything about it.
+		// A failure to begin or commit is a defect: no store can do anything about it.
 		transaction: transactional(
 			<A, E, R>(use: Effect.Effect<A, E, R>) =>
 				client.withTransaction(use).pipe(Effect.catchIf(isSqlError, Effect.die)) as Effect.Effect<
@@ -270,12 +277,12 @@ export const make = Effect.gen(function* () {
 	});
 });
 
-export const layerNoDeps = Layer.effect(Database, make);
+export const layerNoDeps = processLayer(Layer.effect(Database, make));
 
 /** The database at `DATABASE_URL`, with its pool, which other modules also use directly. */
 export const layer = layerNoDeps.pipe(Layer.provideMerge(clientLayer));
 
-/** A query against the pool, or the open transaction. A repository's whole vocabulary. */
+/** A query against the pool, or the open transaction. A store's whole vocabulary. */
 export const query = <A>(
 	run: (executor: Executor) => Effect.Effect<A, QueryFailure>,
 ): Effect.Effect<A, never, Database> =>
@@ -332,8 +339,7 @@ export const queryCatching = <A, Failure>(
  * `Database` the calling service was built with, in a span named
  * `${service}.${method}`. A service whose methods go through it keeps
  * `Database` out of their types, so its callers need not provide one. Any
- * other service `work` needs, such as `CurrentActor`, stays in the method's
- * type for its caller to provide.
+ * other service `work` needs stays in the method's type for its caller to provide.
  */
 export const serviceOperations = <Methods>(service: string) =>
 	Effect.map(

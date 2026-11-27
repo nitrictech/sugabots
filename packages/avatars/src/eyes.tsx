@@ -1,4 +1,4 @@
-import type { AgentFace } from "@sugabots/contracts";
+import type { BotEyes } from "@sugabots/contracts";
 import { type MotionValue, motion, useTransform } from "motion/react";
 import type { RefObject } from "react";
 import { Mark, markKey } from "./face-drawing.tsx";
@@ -29,17 +29,17 @@ type ArcEyeMark = Extract<FaceMark, { shape: "stroke" }>;
  * away as the thinking dots grow.
  */
 export function LivelyEyes({
-	face,
+	eyes,
 	color,
 	drawing,
 }: {
-	face: AgentFace;
+	eyes: BotEyes;
 	color: string;
 	drawing: FaceDrawing;
 }) {
 	return (
 		<>
-			{faceMarks(face).map((mark) => (
+			{faceMarks(eyes).map((mark) => (
 				<motion.g key={markKey(mark)} style={{ scale: drawing.eyesShrink }}>
 					{
 						// An arc is a shut eye already: it only flattens, never blinks or smiles.

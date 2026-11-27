@@ -12,6 +12,7 @@ import { PagesFromContentOrigin } from "@/screens/HtmlFrame.tsx";
 import { LoadFailure } from "@/shell/LoadFailure.tsx";
 import { TooltipProvider } from "@/ui/tooltip.tsx";
 import "@/app.css";
+import { Splash } from "@/shell/Splash.tsx";
 
 /**
  * The router is created once, outside the tree, and handed the session as
@@ -19,7 +20,7 @@ import "@/app.css";
  *
  * Nothing mounts until `/me` has answered. A route guard has to be able to say
  * yes or no, and "not known yet" is neither: mounting first would send everyone
- * to the login page for a frame, then bounce those with a good token back,
+ * to the sign-in page for a frame, then bounce those with a good token back,
  * which the address bar and the back button both remember.
  */
 
@@ -28,7 +29,7 @@ const router = createAppRouter();
 function App() {
 	const session = useSessionFromApi();
 
-	if (session.user === undefined) {
+	if (session.member === undefined) {
 		return session.error ? (
 			<LoadFailure
 				title="Could not check your session"
@@ -40,7 +41,7 @@ function App() {
 		);
 	}
 
-	return <SessionRouter key={session.user?.id ?? "signed-out"} session={session} />;
+	return <SessionRouter key={session.member?.id ?? "signed-out"} session={session} />;
 }
 
 function SessionRouter({ session }: { session: Session }) {
@@ -69,15 +70,6 @@ function queriesStartingFrom(me: Me | undefined): QueryClient {
 		queries.setQueryData(workspacesQuery.queryKey, me.workspaces);
 	}
 	return queries;
-}
-
-/**
- * The gap before the first paint of the app proper. Deliberately not a spinner:
- * it is one request against a local API, and a spinner that flashes for 40ms
- * reads as a fault.
- */
-function Splash() {
-	return <div className="h-full bg-list" />;
 }
 
 reloadWhenADeployReplacesChunks();

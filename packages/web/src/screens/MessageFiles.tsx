@@ -12,7 +12,9 @@ import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import { extensionOf, type FileLook, fileLookOf, fileSizeLabel } from "@/lib/file-looks.ts";
 import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/ui/dialog.tsx";
+import { FileRow } from "@/ui/file-row.tsx";
 import { FLOATING_ON_PHONE, IconButton } from "@/ui/icon-button.tsx";
+import { IconTile } from "@/ui/icon-tile.tsx";
 import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 
 /**
@@ -22,7 +24,7 @@ import { MiddleTruncated } from "@/ui/middle-truncated.tsx";
 export type FileUrlOf = (fileId: string) => string | undefined;
 
 /**
- * The files on a message, a person's or a bot's reply, under its words: its
+ * The files on a message, a member's or a bot's reply, under its words: its
  * images as pictures, each opening full size over the chat, then every other
  * file as a chip to download. A file not served yet shows without a link.
  */
@@ -52,7 +54,7 @@ function lookOf(file: FilePart): FileLook {
 /**
  * One image in a 4:3 frame up to 360 by 270, two side by side, or three to a
  * row, each tile 4:3 and the grid no wider than the chat it is in. Every image
- * is shown. Tiles keep their size before their images load, so the thread
+ * is shown. Tiles keep their size before their images load, so the chat
  * doesn't move as they arrive.
  */
 function ImageGrid({ images, urlOf }: { images: readonly FilePart[]; urlOf: FileUrlOf }) {
@@ -146,7 +148,7 @@ function ImageTile({
 				file={file}
 				url={url}
 				variant="round"
-				className="absolute top-1.5 right-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+				className="absolute top-1.5 right-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 pointer-coarse:size-11 pointer-coarse:[&_svg]:size-5"
 			/>
 		</div>
 	);
@@ -187,7 +189,7 @@ function ImageViewer({
 			onKeyDown={stepWithArrowKeys}
 			// Stretched to its insets, rather than as tall as the picture: on a phone, the picture
 			// alone on black across the whole screen, as a phone's own photos open.
-			className="inset-4 flex h-auto w-auto max-w-none translate-x-0 translate-y-0 flex-col gap-3 p-3 sm:inset-10 sm:max-w-none max-md:inset-0 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:scheme-dark max-md:px-0 max-md:pt-safe-or-3 max-md:pb-safe-or-4"
+			className="inset-0 flex h-auto w-auto max-w-none flex-col gap-3 p-3 sm:max-w-none md:inset-10 max-md:gap-0 max-md:rounded-none max-md:bg-black max-md:scheme-dark max-md:px-0 max-md:pt-safe-or-3 max-md:pb-safe-or-4"
 		>
 			{/* On a phone, × at the left and Download at the right, the name between them. */}
 			<div className="flex items-center gap-2 pl-1 max-md:gap-3 max-md:px-4">
@@ -293,19 +295,18 @@ function DownloadButton({
 function FileChip({ file, url }: { file: FilePart; url: string | undefined }) {
 	const extension = extensionOf(file.name).toUpperCase();
 	return (
-		<div className="flex w-full items-center gap-2.5 rounded-lg border border-border bg-card py-2 pr-2 pl-2.5">
-			<span className="grid size-8 shrink-0 place-items-center rounded-md bg-tile text-soft-foreground">
-				<FileLookIcon look={lookOf(file)} />
-			</span>
-			<span className="flex min-h-7.5 min-w-0 flex-1 flex-col justify-center gap-px">
-				<MiddleTruncated text={file.name} className="font-medium text-sm text-foreground" />
-				<span className="text-xs text-subtle-foreground">
-					{extension ? `${extension} · ` : ""}
-					{fileSizeLabel(file.size)}
-				</span>
-			</span>
-			{url && <DownloadButton file={file} url={url} size="lg" />}
-		</div>
+		<FileRow
+			look="card"
+			className="w-full pr-2"
+			icon={
+				<IconTile size="md" tone="tile">
+					<FileLookIcon look={lookOf(file)} />
+				</IconTile>
+			}
+			title={<MiddleTruncated text={file.name} />}
+			subtitle={`${extension ? `${extension} · ` : ""}${fileSizeLabel(file.size)}`}
+			trailing={url && <DownloadButton file={file} url={url} size="lg" />}
+		/>
 	);
 }
 

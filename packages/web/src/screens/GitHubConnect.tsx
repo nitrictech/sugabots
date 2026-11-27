@@ -1,23 +1,25 @@
-import { BookOpen, Lock, Search, X } from "lucide-react";
-import { type FormEvent, useDeferredValue, useId, useState } from "react";
+import { BookOpen, Lock, X } from "lucide-react";
+import { type FormEvent, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
 import {
-	useConnectionRepositories,
+	useConnectorRepositories,
 	useMakeGitHubApp,
 	usePrefetchReachableRepositories,
 	useReachableRepositories,
-} from "@/lib/github-connections.ts";
+} from "@/lib/github-connectors.ts";
 import { Alert } from "@/ui/alert.tsx";
-import { ConnectionMark } from "@/ui/connection-mark.tsx";
+import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	DialogFormBody,
 	DialogFormFooter,
 	DialogFormFrame,
 	DialogFormHeader,
+	DialogFormScroll,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import {
 	SettingsAddRow,
 	SettingsControlRow,
@@ -27,23 +29,23 @@ import {
 } from "@/ui/settings-page.tsx";
 
 /**
- * Connecting a pod to GitHub: the pod gets a private GitHub App of its own,
- * made on GitHub from Sugabots' manifest, owned by the organization named or
- * by the person, then installed there; its repositories are chosen on its
- * page once it is. A pod connects to one account, since its sandbox can be
+ * Connecting a project to GitHub: the project gets a private GitHub App of its
+ * own, made on GitHub from Sugabots' manifest, owned by the organization named
+ * or by the member, then installed there; its repositories are chosen on its
+ * page once it is. A project connects to one account, since its computer can be
  * signed in to only one at GitHub.
  */
 export function GitHubConnectStep({
-	podId,
+	projectId,
 	onBack,
 	done,
 }: {
-	podId: string;
+	projectId: string;
 	onBack: () => void;
 	done: () => void;
 }) {
 	const id = useId();
-	const make = useMakeGitHubApp(podId);
+	const make = useMakeGitHubApp(projectId);
 	const [organization, setOrganization] = useState("");
 
 	function submit(event: FormEvent) {
@@ -56,13 +58,13 @@ export function GitHubConnectStep({
 			<DialogFormHeader title="GitHub" onBack={onBack} backDisabled={make.isPending} />
 			<DialogFormBody>
 				<div className="flex flex-col items-center gap-1.5 pb-1 text-center">
-					<ConnectionMark presetId="github" name="GitHub" />
+					<ConnectorMark markId="github" name="GitHub" />
 					<span className="text-xs text-muted-foreground">
-						The pod gets a private GitHub App of its own: you make it on GitHub, then install it on
-						the account it works on.
+						The project gets a private GitHub App of its own: you make it on GitHub, then install it
+						on the account it works on.
 					</span>
 				</div>
-				<SettingsGroup note="The organization whose repositories the pod works on. Leave it empty for your own account. Making an app for an organization takes an owner or app manager there.">
+				<SettingsGroup note="The organization whose repositories the project works on. Leave it empty for your own account. Making an app for an organization takes an owner or app manager there.">
 					<SettingsControlRow label="Organization" htmlFor={id}>
 						<input
 							id={id}
@@ -72,7 +74,7 @@ export function GitHubConnectStep({
 							value={organization}
 							onChange={(event) => setOrganization(event.target.value)}
 							placeholder="Optional"
-							className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+							className="min-w-0 flex-1 bg-transparent text-sm rounded-sm text-foreground focus-ring placeholder:text-muted-foreground"
 						/>
 					</SettingsControlRow>
 				</SettingsGroup>
@@ -89,25 +91,29 @@ export function GitHubConnectStep({
 }
 
 /**
- * A GitHub connection's repositories, on its page: who added each, and, for
- * someone who manages the pod's connections, removing one or adding another
- * the connection's app reaches. Nothing until the app is installed.
+ * A GitHub connector's repositories, on its page: who added each, and, for
+ * someone who manages the project's connectors, removing one or adding another
+ * the connector's app reaches. Nothing until the app is installed.
  */
 export function GitHubRepositoriesGroup({
-	podId,
-	connectionId,
+	projectId,
+	connectorId,
 	appSettingsUrl,
 	canManage,
 }: {
-	podId: string;
-	connectionId: string;
+	projectId: string;
+	connectorId: string;
 	/** Where the app's owner changes it on GitHub. */
 	appSettingsUrl: string;
 	canManage: boolean;
 }) {
-	const { repositories, add, remove } = useConnectionRepositories(podId, connectionId);
+	const { repositories, add, remove } = useConnectorRepositories(projectId, connectorId);
 	// Listing what the app reaches takes GitHub a while, so it starts before Add repository is chosen.
-	usePrefetchReachableRepositories(podId, connectionId, canManage && !!repositories.data?.account);
+	usePrefetchReachableRepositories(
+		projectId,
+		connectorId,
+		canManage && !!repositories.data?.account,
+	);
 	const [choosing, setChoosing] = useState(false);
 	if (repositories.isPending) return null;
 	if (repositories.isError) return <Alert>{failureMessage(repositories.error)}</Alert>;
@@ -117,9 +123,11 @@ export function GitHubRepositoriesGroup({
 		<>
 			<SettingsGroup
 				label="Repositories"
+				// On the connector's page, straight under the page's own heading.
+				headingLevel={2}
 				note={
 					<>
-						Bots in this pod read these from its sandbox, and work on them with the tools below.
+						The project's bots read these from its computer, and work on them with the tools below.
 						They come from {account} on GitHub, through{" "}
 						<a
 							href={appSettingsUrl}
@@ -127,7 +135,7 @@ export function GitHubRepositoriesGroup({
 							rel="noreferrer"
 							className="focus-ring rounded-sm font-medium text-link"
 						>
-							the pod's app
+							the project's app
 						</a>
 						.
 					</>
@@ -158,8 +166,8 @@ export function GitHubRepositoriesGroup({
 			<Dialog open={choosing} onOpenChange={setChoosing}>
 				{choosing && (
 					<AddRepositoryDialog
-						podId={podId}
-						connectionId={connectionId}
+						projectId={projectId}
+						connectorId={connectorId}
 						account={account}
 						accountRepositories={listed.map((one) => one.repository.toLowerCase())}
 						onAdd={(repository) => add.mutateAsync(repository)}
@@ -171,33 +179,35 @@ export function GitHubRepositoriesGroup({
 	);
 }
 
-/** Adding one of the repositories the connection's app reaches that the connection doesn't have yet. */
+/** Adding one of the repositories the connector's app reaches that the connector doesn't have yet. */
 function AddRepositoryDialog({
-	podId,
-	connectionId,
+	projectId,
+	connectorId,
 	account,
 	accountRepositories,
 	onAdd,
 	done,
 }: {
-	podId: string;
-	connectionId: string;
+	projectId: string;
+	connectorId: string;
 	account: string;
-	/** The connection's repositories, lowercased, which aren't offered again. */
+	/** The connector's repositories, lowercased, which aren't offered again. */
 	accountRepositories: readonly string[];
 	onAdd: (repository: string) => Promise<unknown>;
 	done: () => void;
 }) {
-	const reached = useReachableRepositories(podId, connectionId);
-	const [query, setQuery] = useState("");
+	const reached = useReachableRepositories(projectId, connectorId);
 	const [adding, setAdding] = useState<string>();
 	const [error, setError] = useState<unknown>();
-	const needle = useDeferredValue(query.trim().toLowerCase());
-	const shown = (reached.data ?? []).filter(
-		(one) =>
-			!accountRepositories.includes(one.repository.toLowerCase()) &&
-			(needle === "" || one.repository.toLowerCase().includes(needle)),
+	const addable = (reached.data ?? []).filter(
+		(one) => !accountRepositories.includes(one.repository.toLowerCase()),
 	);
+	const {
+		query,
+		setQuery,
+		searching,
+		matches: shown,
+	} = useSearchFilter(addable, (one) => [one.repository]);
 
 	async function addOne(repository: string) {
 		setAdding(repository);
@@ -216,20 +226,10 @@ function AddRepositoryDialog({
 			<DialogFormStep onSubmit={(event) => event.preventDefault()}>
 				<DialogFormHeader title={`Add from ${account}`} />
 				<DialogFormBody>
-					<label className="focus-ring-within flex items-center gap-2.25 rounded-xl bg-chip px-3">
-						<Search aria-hidden size={15} className="shrink-0 text-muted-foreground" />
-						<input
-							type="search"
-							value={query}
-							onChange={(event) => setQuery(event.target.value)}
-							placeholder="Search repositories"
-							aria-label="Search repositories"
-							className="min-w-0 flex-1 bg-transparent py-2.25 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-						/>
-					</label>
+					<SearchField label="Search repositories" value={query} onChange={setQuery} />
 					{error !== undefined && <Alert>{failureMessage(error)}</Alert>}
 					{reached.error && <Alert>{failureMessage(reached.error)}</Alert>}
-					<div className="-mx-1 max-h-repos overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+					<DialogFormScroll height="repos">
 						{shown.length > 0 ? (
 							<SettingsGroup>
 								{shown.map((choice) => (
@@ -256,13 +256,13 @@ function AddRepositoryDialog({
 						) : (
 							!reached.isError && (
 								<p className="m-0 px-1 text-muted-foreground text-xs">
-									{needle === ""
-										? `The connection has every repository the app reaches on ${account}.`
+									{!searching
+										? `The connector has every repository the app reaches on ${account}.`
 										: `No repository matches “${query.trim()}”.`}
 								</p>
 							)
 						)}
-					</div>
+					</DialogFormScroll>
 				</DialogFormBody>
 				<DialogFormFooter onCancel={done} cancelDisabled={adding !== undefined} />
 			</DialogFormStep>

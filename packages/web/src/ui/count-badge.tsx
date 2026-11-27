@@ -1,47 +1,16 @@
-import { cn } from "cn";
-
 /** The most a badge counts; more shows as this with a plus. */
 const MAX_COUNTED = 99;
 
-/** The badge's box at each size, which a mark standing in for a badge can take to sit where it would. */
-export const COUNT_BADGE_SIZES = {
-	/** In a tab, beside its name. */
-	sm: "h-4 min-w-4.5 px-1.25 text-2xs",
-	/** At the end of a list row. */
-	md: "h-4.5 min-w-5 px-1.5 text-2xs",
-} as const;
-
-export type CountBadgeSize = keyof typeof COUNT_BADGE_SIZES;
-
 /**
  * How many of something there are, as a filled pill: up to 99, then "99+".
- * `label` says what is counted to assistive technology, such as "3 unread
- * messages"; without it the badge is hidden from it, for a control whose own
- * name already says the count.
+ * `label` says what is counted to assistive technology, such as "3 waiting on
+ * you".
  */
-export function CountBadge({
-	count,
-	label,
-	size,
-	className,
-}: {
-	count: number;
-	label?: string;
-	size: CountBadgeSize;
-	/** Merged over its own, for its place and ring, or another fill. */
-	className?: string;
-}) {
+export function CountBadge({ count, label }: { count: number; label: string }) {
 	return (
-		<span
-			aria-hidden={label === undefined ? true : undefined}
-			className={cn(
-				"grid shrink-0 place-items-center rounded-full bg-rail-count font-semibold text-primary-foreground",
-				COUNT_BADGE_SIZES[size],
-				className,
-			)}
-		>
+		<span className="grid h-4 min-w-4.5 shrink-0 place-items-center rounded-full bg-rail-count px-1.25 font-semibold text-2xs text-primary-foreground">
 			<span aria-hidden>{count > MAX_COUNTED ? `${MAX_COUNTED}+` : count}</span>
-			{label !== undefined && <span className="sr-only">{label}</span>}
+			<span className="sr-only">{label}</span>
 		</span>
 	);
 }

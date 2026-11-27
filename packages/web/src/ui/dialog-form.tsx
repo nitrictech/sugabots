@@ -18,7 +18,7 @@ import { DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 const widths = {
 	compact: "max-w-105 sm:max-w-105",
 	default: "max-w-115 sm:max-w-115",
-	/** For writing at length, such as a routine's instructions. */
+	/** For writing at length, such as an automation's instructions. */
 	wide: "max-w-160 sm:max-w-160",
 } as const;
 
@@ -294,6 +294,37 @@ export function DialogFormBody({
 			className={cn(
 				"flex min-h-0 flex-col overflow-x-hidden overflow-y-auto px-4.5 pt-1 pb-5 max-md:flex-1 max-md:px-4",
 				gap === "compact" ? "gap-3" : "gap-3.5",
+			)}
+		>
+			{children}
+		</div>
+	);
+}
+
+/** How tall a `DialogFormScroll` may grow before it scrolls. */
+const SCROLL_HEIGHTS = {
+	picker: "max-h-picker",
+	"picker-tall": "max-h-picker-tall",
+	repos: "max-h-repos",
+} as const;
+
+/**
+ * A long list inside a `DialogFormBody`, such as a catalog to pick from, that
+ * scrolls on its own under what stays put above it, like its search. On a
+ * phone, where the dialog is a sheet that scrolls as a whole, it grows instead.
+ */
+export function DialogFormScroll({
+	height,
+	children,
+}: {
+	height: keyof typeof SCROLL_HEIGHTS;
+	children: ReactNode;
+}) {
+	return (
+		<div
+			className={cn(
+				"-mx-1 flex flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible",
+				SCROLL_HEIGHTS[height],
 			)}
 		>
 			{children}

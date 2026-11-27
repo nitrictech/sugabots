@@ -11,7 +11,7 @@ const workspace = {
 	name: "Suga Workspace",
 	slug: "suga",
 	timeZone: "UTC",
-	setupCompletedAt: "2026-09-01T00:00:00.000Z",
+	setUpAt: "2026-09-01T00:00:00.000Z",
 	createdAt: "2026-09-01T00:00:00.000Z",
 };
 
@@ -33,21 +33,21 @@ const september: WorkspaceUsage = {
 	month: "2026-09",
 	timeZone: "UTC",
 	usd: 94.2,
-	unpricedRequests: 0,
+	unknownCostRequests: 0,
 	days: days("2026-09", SEPTEMBER_DAYS, 30),
 	bots: [
-		bot("Growth Desk", "green", "pill", "Revenue", 30.14),
-		bot("Linear Handler", "orange", "square", "Engineering", 16.01),
-		bot("Chief", "purple", "arc", "Personal", 13.19),
-		bot("Account Manager", "sky", "dot", "Revenue", 10.36),
-		bot("Lead Researcher", "ice", "wink", "Revenue", 7.54),
-		bot("On-call", "rose", "dot", "Engineering", 4.71),
-		bot("Inbox Manager", "yellow", "pill", "Personal", 3.77),
-		bot("Scheduler", "teal", "square", "Personal", 2.83),
+		bot("Growth Desk", "green", "pill", 30.14),
+		bot("Linear Handler", "orange", "square", 16.01),
+		bot("Chief", "purple", "arc", 13.19),
+		bot("Account Manager", "sky", "dot", 10.36),
+		bot("Lead Researcher", "ice", "wink", 7.54),
+		bot("On-call", "rose", "dot", 4.71),
+		bot("Inbox Manager", "yellow", "pill", 3.77),
+		bot("Scheduler", "teal", "square", 2.83),
 	],
 	models: [
 		model("claude-sonnet-4-5", "Claude Sonnet", "Anthropic", "anthropic", 47.1),
-		// The bots' $16.01 and the system agents' $5.65, together.
+		// The bots' $16.01 and the system bots' $5.65, together.
 		model("claude-haiku-4-5", "Claude Haiku", "Anthropic", "anthropic", 21.66),
 		model("gpt-5", "GPT-5", "OpenAI", "openai", 18.84),
 		model("deepseek/deepseek-v3", "DeepSeek V3", "OpenRouter", "openrouter", 6.59),
@@ -60,30 +60,24 @@ const september: WorkspaceUsage = {
 		),
 		model("qwen3.5:4b", "Qwen 3.5 4B", "Ollama", "ollama", 0),
 	],
-	pods: [
-		pod("Revenue", "green", 3, 48.04),
-		pod("Engineering", "orange", 2, 20.72),
-		pod("Personal", "purple", 3, 19.78),
-	],
-	systemAgents: { usd: 5.65, unpricedRequests: 0 },
+	systemBots: { usd: 5.65, unknownCostRequests: 0 },
+	personalAssistants: { usd: 0, unknownCostRequests: 0 },
 };
 
 function bot(
 	name: string,
 	color: WorkspaceUsage["bots"][number]["color"],
-	face: WorkspaceUsage["bots"][number]["face"],
-	podName: string,
+	eyes: WorkspaceUsage["bots"][number]["eyes"],
 	usd: number,
 ) {
 	return {
-		agentId: `bot-${name}`,
+		botId: `bot-${name}`,
 		name,
 		color,
-		face,
+		eyes,
 		shape: "circle" as const,
-		podName,
 		usd,
-		unpricedRequests: 0,
+		unknownCostRequests: 0,
 	};
 }
 
@@ -91,26 +85,17 @@ function model(
 	id: string,
 	displayName: string,
 	providerName: string,
-	preset: WorkspaceUsage["models"][number]["preset"],
+	builtIn: WorkspaceUsage["models"][number]["builtIn"],
 	usd: number,
 ) {
 	return {
 		model: id,
 		displayName,
 		providerName,
-		preset,
+		builtIn,
 		usd,
-		unpricedRequests: 0,
+		unknownCostRequests: 0,
 	};
-}
-
-function pod(
-	name: string,
-	color: WorkspaceUsage["pods"][number]["color"],
-	botCount: number,
-	usd: number,
-) {
-	return { podId: `pod-${name}`, name, color, botCount, usd, unpricedRequests: 0 };
 }
 
 const august: WorkspaceUsage = {
@@ -125,19 +110,19 @@ const answering = (...months: WorkspaceUsage[]) =>
 	http.get(usageUrl, ({ request }) => {
 		const asked = new URL(request.url).searchParams.get("month") ?? "";
 		const found = months.find((usage) => usage.month === asked);
-		return HttpResponse.json(found ?? nothingSpent(asked));
+		return HttpResponse.json(found ?? noUsage(asked));
 	});
 
-const nothingSpent = (month: string): WorkspaceUsage => ({
+const noUsage = (month: string): WorkspaceUsage => ({
 	month,
 	timeZone: "UTC",
 	usd: 0,
-	unpricedRequests: 0,
+	unknownCostRequests: 0,
 	days: days(month, [], 30),
 	bots: [],
 	models: [],
-	pods: [],
-	systemAgents: { usd: 0, unpricedRequests: 0 },
+	systemBots: { usd: 0, unknownCostRequests: 0 },
+	personalAssistants: { usd: 0, unknownCostRequests: 0 },
 });
 
 function QueryPreview({ children }: { children: ReactNode }) {
@@ -181,13 +166,13 @@ const meta = preview.meta({
 
 /**
  * The design's month: the total, a bar for each day so far, and the month by
- * bot, with the system agents last. The month still going can't be stepped past.
+ * bot, with the system bots last. The month still going can't be stepped past.
  */
 export const ByBot = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText("$94.20")).toBeInTheDocument();
 		await expect(canvas.getByText("Growth Desk")).toBeInTheDocument();
-		await expect(canvas.getByText("System agents")).toBeInTheDocument();
+		await expect(canvas.getByText("System bots")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Next month" })).toBeDisabled();
 		await expect(
 			canvas.getByText(
@@ -237,16 +222,6 @@ export const ByModel = meta.story({
 	},
 });
 
-/** By pod, counting each pod's bots, with the system agents' work last. */
-export const ByPod = meta.story({
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("radio", { name: "Pod" }));
-		await expect(canvas.getByText("Revenue")).toBeInTheDocument();
-		await expect(canvas.getAllByText("3 bots")).toHaveLength(2);
-		await expect(canvas.getByText("$5.65")).toBeInTheDocument();
-	},
-});
-
 /** Stepping back a month reads that month instead, and it can be stepped forward again. */
 export const EarlierMonth = meta.story({
 	play: async ({ canvas, userEvent }) => {
@@ -260,17 +235,17 @@ export const EarlierMonth = meta.story({
 /**
  * Some requests couldn't be priced, such as one to a model with no published
  * price. They are counted beneath the breakdown, and a bot whose every request
- * went unpriced shows a dash rather than a misleading $0.00.
+ * had an unknown cost shows a dash rather than a misleading $0.00.
  */
-export const SomeUnpriced = meta.story({
+export const SomeUnknownCost = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			answering({
 				...september,
-				unpricedRequests: 3,
+				unknownCostRequests: 3,
 				bots: [
 					...september.bots,
-					{ ...bot("Custom Endpoint", "teal", "wink", "Engineering", 0), unpricedRequests: 3 },
+					{ ...bot("Custom Provider", "teal", "wink", 0), unknownCostRequests: 3 },
 				],
 			}),
 		);
@@ -278,7 +253,7 @@ export const SomeUnpriced = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			await canvas.findByText(
-				"Estimated from each provider's published prices. 3 requests couldn't be priced and aren't included. Your provider bills you directly.",
+				"Estimated from each provider's published prices. 3 requests have an unknown cost and aren't included. Your provider bills you directly.",
 			),
 		).toBeInTheDocument();
 		await expect(canvas.getByText("Not priced")).toBeInTheDocument();
@@ -286,7 +261,7 @@ export const SomeUnpriced = meta.story({
 });
 
 /** A month nothing was spent in says so, rather than showing an empty list. */
-export const NothingSpent = meta.story({
+export const NoUsage = meta.story({
 	beforeEach({ msw }) {
 		msw.use(answering());
 	},
@@ -319,7 +294,7 @@ export const InWorkspaceTimeZone = meta.story({
 
 /**
  * A workspace in a time zone this browser doesn't have still shows its
- * spend: this month and today are taken in UTC instead.
+ * usage: this month and today are taken in UTC instead.
  */
 export const TimeZoneUnknownToBrowser = meta.story({
 	beforeEach({ msw }) {

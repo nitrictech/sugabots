@@ -1,162 +1,67 @@
-import type { Agent, Pod, SessionUser, Workspace, WorkspacePermissions } from "@sugabots/contracts";
-import {
-	CONNECTION_SIGN_IN_RETURN_PATH,
-	GITHUB_SETUP_RETURN_PATH,
-	type GitHubSetupFailure,
-} from "@sugabots/contracts";
-import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ParsedLocation, RouterHistory } from "@tanstack/react-router";
-import {
-	createRootRouteWithContext,
-	createRoute,
-	createRouter,
-	Link,
-	Navigate,
-	Outlet,
-	RouterProvider,
-	redirect,
-	useLocation,
-	useMatch,
-	useMatchRoute,
-	useNavigate,
-	useParams,
-	useRouter,
-} from "@tanstack/react-router";
-import { MessageSquareOff } from "lucide-react";
-import { type ComponentType, lazy, type ReactNode, Suspense, useEffect, useState } from "react";
-import { validate as isUuid } from "uuid";
-import { usePodAgent } from "@/lib/agents.ts";
-import {
-	type ConversationPlace,
-	prefetchConversation,
-	useChatList,
-	useConversationPlace,
-	useDirectMessage,
-	useOpenBotChannel,
-	useOpenPodChat,
-	useOpenRoutineFeed,
-} from "@/lib/chats.ts";
-import { signInFailureReason } from "@/lib/connections.ts";
+import { createRouter, defaultStringifySearch, RouterProvider } from "@tanstack/react-router";
 import { followTrail, historyIndex } from "@/lib/history-trail.ts";
-import {
-	conversationLink,
-	podChatLink,
-	podLink,
-	podSettingsPageLink,
-	routineThreadLink,
-	type ThreadsTab,
-} from "@/lib/links.ts";
-import { matchesMedia, SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { RESET_PASSWORD_PATH } from "@/lib/password-reset.ts";
-import { defaultPod, findPod, podsQuery, usePods } from "@/lib/pods.ts";
-import { loadFailure } from "@/lib/query.ts";
-import { type Session, SessionContext, useSession } from "@/lib/session.ts";
-import {
-	chooseWorkspace,
-	useDeleteWorkspace,
-	useWorkspace,
-	useWorkspaceStanding,
-	useWorkspaces,
-} from "@/lib/workspace.ts";
-import {
-	podHasSettingsPage,
-	podSettingsPage,
-	workspaceSettingSection,
-} from "@/lib/workspace-settings.ts";
-import { ApprovalPage } from "@/screens/ApprovalPage.tsx";
-import { ArtifactsPage } from "@/screens/Artifacts.tsx";
-import type { Staged } from "@/screens/ConversationChat.tsx";
-import type { RoutinesView } from "@/screens/RoutinesStage.tsx";
-import { SettingsLayout } from "@/screens/SettingsLayout.tsx";
-import { Approvals } from "@/shell/Approvals.tsx";
-import { DirectMessagesOverview } from "@/shell/DirectMessages.tsx";
-import { Inbox, InboxOverview } from "@/shell/Inbox.tsx";
-import { LoadFailure } from "@/shell/LoadFailure.tsx";
-import { MobileDirectMessages, MobileHome } from "@/shell/MobileHome.tsx";
+import { matchesMedia, REDUCED_MOTION, SIDE_BY_SIDE } from "@/lib/media.ts";
+import { hasSettingsOpen, type SettingsLocation, settingsLocationOf } from "@/lib/open-settings.ts";
+import { type Session, SessionContext } from "@/lib/session.ts";
 import { PageFailure } from "@/shell/PageFailure.tsx";
-import { RoutinesPage } from "@/shell/Routines.tsx";
-import { Panes, Shell } from "@/shell/Shell.tsx";
-import { You, YouPod } from "@/shell/You.tsx";
-import { useLeave } from "@/ui/back-button.tsx";
-import { EmptyState } from "@/ui/empty-state.tsx";
-
-const ConversationPage = lazyNamed(
-	() => import("@/screens/ConversationPage.tsx"),
-	"ConversationPage",
-);
-const NewThread = lazyNamed(() => import("@/screens/NewThread.tsx"), "NewThread");
-// Lazy as the conversation is: it shows the one there already is with the people chosen.
-const NewDirectMessagePage = lazyNamed(
-	() => import("@/shell/NewDirectMessage.tsx"),
-	"NewDirectMessagePage",
-);
-const ActivityPane = lazyNamed(() => import("@/screens/ActivityPane.tsx"), "ActivityPane");
-const Invite = lazyNamed(() => import("@/screens/Invite.tsx"), "Invite");
-const Login = lazyNamed(() => import("@/screens/Login.tsx"), "Login");
-const ResetPassword = lazyNamed(
-	// Only this export: the module's other screen would otherwise decide the props.
-	() => import("@/screens/ResetPassword.tsx").then(({ ResetPassword }) => ({ ResetPassword })),
-	"ResetPassword",
-);
-const Onboarding = lazyNamed(() => import("@/screens/Onboarding.tsx"), "Onboarding");
-// Its own export, or the module's other exports would decide the props.
-const NewRoutine = lazyNamed(
-	() => import("@/screens/RoutineEditing.tsx").then(({ NewRoutine }) => ({ NewRoutine })),
-	"NewRoutine",
-);
-/*
- * The settings sections are a chunk of their own; the window they open in is
- * not. `SettingsDialog` is imported eagerly so the click opens something, and
- * its `Suspense` holds the space the sections land in.
- */
-const WorkspaceSettings = lazyNamed(
-	() => import("@/screens/WorkspaceSettings.tsx"),
-	"WorkspaceSettings",
-);
-
-/**
- * A screen's named export as a component that loads its module on first render,
- * with `preload` to start the load sooner. Both share one load; a failed preload
- * is forgotten, so opening the screen fetches again.
- *
- * Once the module is here, the screen renders without suspending: `lazy` alone
- * would suspend once even then, and hold the screen behind React's 300ms reveal throttle.
- *
- * TanStack Router's `lazyRouteComponent` is not used because it calls `use()`
- * only while the module is still loading, and React 19.3 reports a render that
- * suspends on `use()` and then finishes without calling it as an error.
- */
-function lazyNamed<Name extends string, Props extends object>(
-	load: () => Promise<Record<Name, ComponentType<Props>>>,
-	name: Name,
-) {
-	let loading: Promise<{ default: ComponentType<Props> }> | undefined;
-	let loaded: ComponentType<Props> | undefined;
-	const loadScreenModule = () => {
-		loading ??= load().then(
-			(module) => {
-				loaded = module[name];
-				return { default: loaded };
-			},
-			(error: unknown) => {
-				loading = undefined;
-				throw error;
-			},
-		);
-		return loading;
-	};
-	const Lazy = lazy(loadScreenModule);
-	function Screen(props: Props) {
-		// Chosen once per mount: swapping `Lazy` for the loaded component would remount the screen.
-		const [Component] = useState<ComponentType<Props>>(() => loaded ?? Lazy);
-		return <Component {...props} />;
-	}
-	Screen.displayName = name;
-	const preload = () => {
-		loadScreenModule().catch(() => {});
-	};
-	return Object.assign(Screen, { preload });
-}
+import { approvalRoute, approvalsIndexRoute, approvalsRoute } from "./routes/approvals.tsx";
+import {
+	automationRoute,
+	automationsIndexRoute,
+	automationsRoute,
+	newAutomationRoute,
+	projectAutomationRoute,
+	projectAutomationsIndexRoute,
+	projectAutomationsRoute,
+	projectNewAutomationRoute,
+} from "./routes/automations.tsx";
+import {
+	botFileRoute,
+	botFilesRoute,
+	botIndexRoute,
+	botNewChatRoute,
+	botRoute,
+	botsRoute,
+	chatByIdRoute,
+	chatRoute,
+} from "./routes/bots.tsx";
+import { gitHubSetupReturnRoute, signInReturnRoute } from "./routes/connector-returns.tsx";
+import {
+	botConnectorRoute,
+	botConnectorsRoute,
+	projectConnectorRoute,
+	projectConnectorsRoute,
+} from "./routes/connectors.tsx";
+import {
+	botComputerRoute,
+	botSettingsRoute,
+	projectBotsRoute,
+	projectComputerRoute,
+	projectMembersRoute,
+	projectSettingsRoute,
+} from "./routes/owner-settings.tsx";
+import {
+	projectChatRoute,
+	projectFileRoute,
+	projectFilesRoute,
+	projectIndexRoute,
+	projectNewChatRoute,
+	projectRoute,
+	projectsRoute,
+} from "./routes/projects.tsx";
+import { type RouterContext, rootRoute } from "./routes/root.tsx";
+import { settingsPageRoute, settingsRoute } from "./routes/settings.tsx";
+import { invitationRoute, joinRoute, resetPasswordRoute, signInRoute } from "./routes/sign-in.tsx";
+import {
+	homeRoute,
+	indexRoute,
+	shellRoute,
+	workspaceIndexRoute,
+	youRoute,
+} from "./routes/workspace.tsx";
+import { workspaceSetupRoute } from "./routes/workspace-setup.tsx";
 
 /*
  * The routes, declared rather than generated.
@@ -167,1649 +72,148 @@ function lazyNamed<Name extends string, Props extends object>(
  * are the product's vocabulary, so it is worth reading:
  *
  *   /                        opens the workspace last chosen
- *   /login
+ *   /sign-in
  *   /reset-password           where a password reset email's link lands
  *   /join/$code               where a referral link lands
- *   /invite/$id
- *   /connections/oauth/return        where a connection's sign-in comes back
- *   /$workspace/settings     workspace settings
- *   /$workspace/agents       lands on the first shared pod, or on Personal when there is none
- *   /$workspace/activity     what is new across the workspace: mentions, unread messages, routine runs and collaborations
- *   /$workspace/activity/$pod/$conversation   the conversation, run or collaboration of the one chosen, beside them
- *   /$workspace/dm           your direct messages with other people
- *   /$workspace/dm/new       starting one, with one person or a group
- *   /$workspace/dm/$conversation   one of them, by its id, `?message=` jumped to
+ *   /invitations/$id
+ *   /connectors/oauth/return        where a connector's sign-in comes back
+ *   /connectors/github/return       where installing a project's GitHub app comes back
+ *   /workspace-setup         setting up a workspace, the first or another
+ *   /$workspace              the member's oldest Personal Assistant
+ *   /$workspace/home         on a phone, Home: the Personal Assistants, projects and pinned bots
+ *   /$workspace/you          on a phone, You: the workspace, its settings and signing out
+ *   /$workspace/settings[/…]   where settings were before they were a dialog, which opens them
  *   /$workspace/approvals    every approval across the workspace
  *   /$workspace/approvals/$call   one of them in full, by its tool call's id
- *   /$workspace/pods/$pod    one pod's conversation list
- *   /$workspace/pods/$pod/chat               the pod's chat, opened first if nobody has
- *   /$workspace/pods/$pod/routines/$routine  a routine's own thread, opened first if it has none
- *   /$workspace/pods/$pod/routines/new  a routine being made, for `?bot=` when begun from that bot
- *   /$workspace/pods/$pod/threads/new         starting a thread from its first message
- *   /$workspace/pods/$pod/threads/$conversation   one conversation, by pod slug and its id
- *   /$workspace/pods/$pod/agents/$agent       an agent's newest conversation, started if it has none
- *   /$workspace/settings/members/$member   one person, by membership id
- *   /$workspace/settings/pods/$pod   workspace pod detail
- *   /$workspace/settings/pods/$pod/agents/$agent   agent configuration
- *   /$workspace/settings/pods/$pod/connections/$connection   one connection, by id
- *   /$workspace/settings/providers/$provider   one model provider
- *   /$workspace/settings/providers/default  the model new bots start on
- *   /$workspace/settings/providers/system   the model the system bots use
+ *   /$workspace/projects     every project the member is in or could join
+ *   /$workspace/projects/$project   a project, which opens its newest chat, or a new one; on a phone, its sidebar
+ *   /$workspace/projects/$project/new   starting a chat from its first message
+ *   /$workspace/projects/$project/$chat   one of its chats
+ *   /$workspace/projects/$project/files[/$file]   the files made in it
+ *   /$workspace/projects/$project/connectors[/$connector]   the services it is connected to
+ *   /$workspace/projects/$project/settings[/members|/bots]   its settings, and its members and bots
+ *   /$workspace/projects/$project/computer   its computer
+ *   /$workspace/projects/$project/automations[/new|/$automation]   its automations
+ *   /$workspace/bots         every bot the member reaches
+ *   /$workspace/bots/$bot    a bot, starting a chat with it from its first message
+ *   /$workspace/bots/$bot/chats/$chat   one of its chats, or an automation's feed
+ *   /$workspace/bots/$bot/files[/$file]   the files it made
+ *   /$workspace/bots/$bot/connectors[/$connector]   the services it is connected to
+ *   /$workspace/bots/$bot/settings   its settings
+ *   /$workspace/bots/$bot/computer   its computer
+ *   /$workspace/bots/$bot/automations[/new|/$automation]   its automations
+ *   /$workspace/chats/$chat   a chat by its id alone, which goes on to its bot's address
  *
- * An agent's address names its pod, because a handle is unique only within
- * one, and uses the handle rather than the name, so renaming an agent keeps
- * its links. A collaboration or routine run has no address of its own: it
- * opens beside its bot's chat, as `?thread=`.
- */
-
-/**
- * What the route guards and loaders read. A route takes its context when it loads, so a
- * component reading it would not see you change, as when you rename yourself,
- * until the next navigation: components read the session with `useSession()`.
- */
-export interface RouterContext {
-	user: Session["user"];
-	/** The session's query cache, which loaders prime for the page they lead to. */
-	queries: QueryClient;
-}
-
-const rootRoute = createRootRouteWithContext<RouterContext>()({
-	notFoundComponent: () => (
-		<div className="grid h-full place-items-center bg-list">
-			<EmptyState title="There is nothing at this address">
-				The link may be old, or the workspace may have moved on.
-			</EmptyState>
-		</div>
-	),
-});
-
-/** `?invite=` from the invitations NIT-1758 sent before there was a route. */
-interface RootSearch {
-	invite?: string;
-}
-
-const validateInviteSearch = (search: Record<string, unknown>): RootSearch => ({
-	invite: typeof search.invite === "string" ? search.invite : undefined,
-});
-
-const indexRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/",
-	validateSearch: validateInviteSearch,
-	beforeLoad: (options) => {
-		// Invitation links already in inboxes and docker logs point at `/?invite=`.
-		// They keep working: the route is the new shape, this is the old one.
-		if (options.search.invite !== undefined) {
-			throw redirect({ to: "/invite/$id", params: { id: options.search.invite } });
-		}
-		requireUser(options);
-	},
-	loader: preloadChatScreenForWideLayout,
-	component: LandingRoute,
-});
-
-/**
- * Opens the chosen workspace, unless that would take the caller into its setup
- * and another is set up. One left part way then opens when asked for by its
- * address or the switcher, or here when there is no other.
- */
-function LandingRoute() {
-	const { workspace: chosen, isPending, failure, refetch } = useWorkspace();
-	const workspaces = useWorkspaces();
-	const standing = useWorkspaceStanding();
-	if (failure) {
-		return (
-			<LoadFailure title="Could not load your workspace" error={failure.error} retry={refetch} />
-		);
-	}
-	if (isPending) return <div className="h-full bg-list" />;
-	if (!chosen) return <Navigate to="/onboarding" replace />;
-	if (chosen.setupCompletedAt === null && standing.isPending) {
-		return <div className="h-full bg-list" />;
-	}
-	const setUp = workspaces.data?.find((one) => one.setupCompletedAt !== null);
-	const landing = setUp && opensIntoSetup(chosen, standing.data?.permissions) ? setUp : chosen;
-	return <Navigate to="/$workspace/agents" params={{ workspace: landing.slug }} replace />;
-}
-
-interface LoginSearch {
-	invite?: string;
-	/** Set on the way back from a password reset. */
-	passwordChanged?: boolean;
-	/** Where signing in interrupted, as a path in this app; anything else is dropped. */
-	returnTo?: string;
-}
-
-const loginRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/login",
-	validateSearch: (search: Record<string, unknown>): LoginSearch => ({
-		...validateInviteSearch(search),
-		passwordChanged: search.passwordChanged === true ? true : undefined,
-		returnTo: isAppPath(search.returnTo) ? search.returnTo : undefined,
-	}),
-	component: LoginRoute,
-});
-
-/** A path in this app: not protocol-relative or backslashed, which a browser would take elsewhere. */
-function isAppPath(value: unknown): value is string {
-	return (
-		typeof value === "string" &&
-		value.startsWith("/") &&
-		!value.startsWith("//") &&
-		!value.includes("\\")
-	);
-}
-
-function LoginRoute() {
-	const session = useSession();
-	const { invite, passwordChanged, returnTo = "/" } = loginRoute.useSearch();
-	const navigate = useNavigate();
-
-	if (session.user) {
-		return invite !== undefined ? (
-			<Navigate to="/invite/$id" params={{ id: invite }} replace />
-		) : (
-			<Navigate to={returnTo} replace />
-		);
-	}
-
-	return (
-		<Login
-			inviteId={invite}
-			passwordChanged={passwordChanged}
-			onSignedIn={async () => {
-				await session.refresh();
-				await navigate({
-					to: invite !== undefined ? "/invite/$id" : returnTo,
-					params: invite !== undefined ? { id: invite } : undefined,
-					replace: true,
-				});
-			}}
-		/>
-	);
-}
-
-/** `$code` is from a member's referral link; the API decides whether it still works. */
-const joinRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/join/$code",
-	component: JoinRoute,
-});
-
-/** Signing up from a referral link. Somebody already signed in has no use for it and goes home. */
-function JoinRoute() {
-	const session = useSession();
-	const { code } = joinRoute.useParams();
-	const navigate = useNavigate();
-
-	if (session.user) return <Navigate to="/" replace />;
-
-	return (
-		<Login
-			referralCode={code}
-			onSignedIn={async () => {
-				await session.refresh();
-				await navigate({ to: "/", replace: true });
-			}}
-		/>
-	);
-}
-
-interface ResetPasswordSearch {
-	/** From a link the API has checked; absent with `error` once it has expired or been used. */
-	token?: string;
-}
-
-const resetPasswordRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: RESET_PASSWORD_PATH,
-	validateSearch: (search: Record<string, unknown>): ResetPasswordSearch => ({
-		token: optionalString(search.token),
-	}),
-	component: ResetPasswordRoute,
-});
-
-function ResetPasswordRoute() {
-	const session = useSession();
-	const { token } = resetPasswordRoute.useSearch();
-	const navigate = useNavigate();
-	const toLogin = (search: LoginSearch) => navigate({ to: "/login", search, replace: true });
-
-	return (
-		<ResetPassword
-			token={token}
-			onBack={() => toLogin({})}
-			onReset={async () => {
-				// The reset ended every session, this browser's included.
-				await session.refresh();
-				await toLogin({ passwordChanged: true });
-			}}
-		/>
-	);
-}
-
-interface SignInReturnSearch {
-	workspace?: string;
-	pod?: string;
-	/** A code saying why the sign-in did not finish, shown only through `signInFailureReason`. */
-	oauth_error?: string;
-}
-
-const optionalString = (value: unknown) => (typeof value === "string" ? value : undefined);
-
-/** Where a connection's OAuth sign-in returns. The API sends ids; this picks the page. */
-const signInReturnRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: CONNECTION_SIGN_IN_RETURN_PATH,
-	validateSearch: (search: Record<string, unknown>): SignInReturnSearch => ({
-		workspace: optionalString(search.workspace),
-		pod: optionalString(search.pod),
-		oauth_error: optionalString(search.oauth_error),
-	}),
-	beforeLoad: requireUser,
-	component: SignInReturnRoute,
-});
-
-function SignInReturnRoute() {
-	const { workspace, pod: podId, oauth_error: oauthError } = signInReturnRoute.useSearch();
-	const workspaces = useWorkspaces();
-	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
-	const pods = useQuery(podsQuery(workspace));
-	const pod = pods.data?.find((one) => one.id === podId);
-	const navigate = useNavigate();
-
-	useEffect(() => {
-		if (!pod || !slug) return;
-		// Outside any workspace, so this names one; the link helpers are for pages inside.
-		void navigate({
-			to: "/$workspace/settings/pods/$pod/$page",
-			params: { workspace: slug, pod: pod.slug, page: "connections" },
-			search: { oauth_error: oauthError },
-			replace: true,
-		});
-	}, [pod, slug, oauthError, navigate]);
-
-	const resolving = workspace !== undefined && (pods.isPending || workspaces.isPending);
-	if ((pod && slug) || resolving) {
-		return <div className="h-full bg-list" />;
-	}
-	return (
-		<div className="grid h-full place-items-center bg-list p-6">
-			<EmptyState title="Connection sign-in failed">
-				<p>
-					{oauthError
-						? signInFailureReason(oauthError)
-						: "The pod it was for is no longer available to you."}
-				</p>
-				<Link to="/" className="text-link underline">
-					Return to workspace
-				</Link>
-			</EmptyState>
-		</div>
-	);
-}
-
-/**
- * Where a pod's GitHub setup returns: the API names the pod, its GitHub
- * connection once GitHub made its app, and why setup stopped when it did.
- */
-const gitHubSetupReturnRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: GITHUB_SETUP_RETURN_PATH,
-	validateSearch: (search: Record<string, unknown>) => ({
-		workspace: optionalString(search.workspace),
-		pod: optionalString(search.pod),
-		connection: optionalString(search.connection),
-		github_error: optionalString(search.github_error),
-	}),
-	beforeLoad: requireUser,
-	component: GitHubSetupReturnRoute,
-});
-
-function GitHubSetupReturnRoute() {
-	const {
-		workspace,
-		pod: podId,
-		connection,
-		github_error: failure,
-	} = gitHubSetupReturnRoute.useSearch();
-	const workspaces = useWorkspaces();
-	const slug = workspaces.data?.find((one) => one.id === workspace)?.slug;
-	const pods = useQuery(podsQuery(workspace));
-	const pod = pods.data?.find((one) => one.id === podId);
-	const navigate = useNavigate();
-
-	useEffect(() => {
-		if (failure || !slug || !pod || !connection) return;
-		// Outside any workspace, so this names one; the link helpers are for pages inside.
-		void navigate({
-			to: "/$workspace/settings/pods/$pod/connections/$connection",
-			params: { workspace: slug, pod: pod.slug, connection },
-			replace: true,
-		});
-	}, [failure, slug, pod, connection, navigate]);
-
-	const resolving = workspace !== undefined && (pods.isPending || workspaces.isPending);
-	if ((!failure && slug && pod && connection) || resolving) {
-		return <div className="h-full bg-list" />;
-	}
-	return (
-		<div className="grid h-full place-items-center bg-list p-6">
-			<EmptyState title="GitHub setup didn't finish">
-				<p>{gitHubSetupFailureReason(failure)}</p>
-				{slug && pod ? (
-					<Link
-						to="/$workspace/settings/pods/$pod"
-						params={{ workspace: slug, pod: pod.slug }}
-						className="text-link underline"
-					>
-						Back to {pod.name}
-					</Link>
-				) : (
-					<Link to="/" className="text-link underline">
-						Return to workspace
-					</Link>
-				)}
-			</EmptyState>
-		</div>
-	);
-}
-
-const GITHUB_SETUP_FAILURES: Record<GitHubSetupFailure, string> = {
-	expired:
-		"The link had expired, or was started by someone else. Start again from the pod's connections.",
-	github: "GitHub refused or couldn't be reached. Try again in a moment.",
-	cancelled:
-		"It was cancelled on GitHub. Start again from the pod's connections when you're ready.",
-};
-
-function gitHubSetupFailureReason(failure: string | undefined) {
-	return failure && failure in GITHUB_SETUP_FAILURES
-		? GITHUB_SETUP_FAILURES[failure as GitHubSetupFailure]
-		: "The pod it was for is no longer available to you.";
-}
-
-const inviteRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/invite/$id",
-	beforeLoad: ({ context, params }) => {
-		// An invitation is accepted as somebody. Sign in first, and come back:
-		// the id rides along so the link is not lost on the way.
-		if (context.user === null) {
-			throw redirect({ to: "/login", search: { invite: params.id } });
-		}
-	},
-	component: InviteRoute,
-});
-
-function InviteRoute() {
-	const session = useSession();
-	const { id } = inviteRoute.useParams();
-	const navigate = useNavigate();
-
-	return (
-		<Invite
-			id={id}
-			onDone={async () => {
-				await session.refresh();
-				await navigate({ to: "/", replace: true });
-			}}
-		/>
-	);
-}
-
-interface OnboardingSearch {
-	/**
-	 * The workspace being set up, by its address. Written before the workspace
-	 * is saved, so a reload while it saves picks up where it got to.
-	 */
-	workspace?: string;
-}
-
-/**
- * Setting up a workspace, the first or another, all at this one path: every
- * top-level path hides the workspace whose address matches it.
- */
-const onboardingRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/onboarding",
-	validateSearch: (search: Record<string, unknown>): OnboardingSearch => ({
-		workspace: typeof search.workspace === "string" ? search.workspace : undefined,
-	}),
-	beforeLoad: requireUser,
-	component: OnboardingRoute,
-});
-
-function OnboardingRoute() {
-	const session = useSession();
-	const { workspace: madeSlug } = onboardingRoute.useSearch();
-	const { isPending, failure, refetch } = useWorkspace();
-	const workspaces = useWorkspaces();
-
-	if (failure) {
-		return <LoadFailure title="Could not start setup" error={failure.error} retry={refetch} />;
-	}
-	if (isPending) return <div className="h-full bg-list" />;
-	return (
-		<WorkspaceSetup
-			session={session}
-			made={workspaces.data?.find((one) => one.slug === madeSlug)}
-		/>
-	);
-}
-
-/**
- * Cancel chooses the workspace setup was opened from, or another when that is
- * the one being set up, and goes back to the page it was opened on. Without
- * one there is nowhere to go back to, and no Cancel.
+ * Your settings and the workspace's open over any of these as a dialog,
+ * which the search names as `?settings=` and the page of them open:
  *
- * Cancel deletes the workspace being set up while its setup is unfinished, if
- * the caller may delete it, as its owner may. One whose setup is finished stays.
+ *   ?settings=                  the list of sections, with General beside it on a laptop
+ *   ?settings=$section          a section, such as `members` or `notifications`
+ *   ?settings=members/$membership   one member, by membership id
+ *   ?settings=providers/$provider   one model provider
+ *   ?settings=providers/default   the model new bots start on
+ *   ?settings=providers/system    the model the system bots use
+ *
+ * A bot's address uses its handle, unique in its workspace, rather than its
+ * name, so renaming a bot keeps its links. An automation run has no address
+ * of its own: its feed's address names it as `?runChat=`, to open the feed at it.
+ *
+ * Each area's routes and their pages are declared in a module of its own under
+ * `routes/`; the tree below puts them together.
  */
-function WorkspaceSetup({ session, made }: { session: Session; made: Workspace | undefined }) {
-	const router = useRouter();
-	const openedFrom = useWorkspace().workspace;
-	const workspaces = useWorkspaces().data;
-	// Settled when setup opens, because making the workspace chooses it.
-	const [returnTo] = useState(() =>
-		openedFrom && openedFrom.id !== made?.id
-			? openedFrom
-			: workspaces?.find((one) => one.id !== made?.id),
-	);
-	const deleteWorkspace = useDeleteWorkspace();
-	// Setup shows its steps only once the workspace being set up is chosen, so this is its standing.
-	const standing = useWorkspaceStanding();
-
-	async function cancel() {
-		if (made?.setupCompletedAt === null && standing.data?.permissions.deleteWorkspace) {
-			// One that cannot be deleted now stays; leaving still goes ahead.
-			await deleteWorkspace.mutateAsync(made.id).catch(() => undefined);
-		}
-		if (returnTo) chooseWorkspace(returnTo.id);
-		if (router.history.canGoBack()) router.history.back();
-		else void router.navigate({ to: "/" });
-	}
-
-	return (
-		<Onboarding
-			session={session}
-			workspace={made}
-			onAddress={(slug) =>
-				void router.navigate({ to: "/onboarding", search: { workspace: slug }, replace: true })
-			}
-			onCancel={returnTo ? () => void cancel() : undefined}
-		/>
-	);
-}
-
-/** The frame, for the workspace the address names. */
-const shellRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: "/$workspace",
-	beforeLoad: requireUser,
-	component: ShellRoute,
-});
-
-const workspaceIndexRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/",
-	beforeLoad: ({ params }) => {
-		throw redirect({ to: "/$workspace/agents", params });
-	},
-});
-
-function ShellRoute() {
-	const workspace = useWorkspace();
-	const workspaces = useWorkspaces();
-	const standing = useWorkspaceStanding();
-
-	if (workspace.failure) {
-		return (
-			<LoadFailure
-				title="Could not load your workspace"
-				error={workspace.failure.error}
-				retry={workspace.refetch}
-			/>
-		);
-	}
-	if (workspace.isPending) return <div className="h-full bg-list" />;
-	if (!workspace.workspace) {
-		// Somebody in no workspace at all has one to make, not a wrong address.
-		return workspaces.data?.length === 0 ? (
-			<Navigate to="/onboarding" replace />
-		) : (
-			<EmptyState title="No such workspace here" />
-		);
-	}
-	if (workspace.workspace.setupCompletedAt === null) {
-		// Setup left part way is finished before the workspace is used, by whoever may finish it.
-		// Anybody invited part way through uses it as it is.
-		const standingFailure = loadFailure(standing);
-		if (standingFailure) {
-			return (
-				<LoadFailure
-					title="Could not load your workspace"
-					error={standingFailure.error}
-					retry={standing.refetch}
-				/>
-			);
-		}
-		if (standing.isPending) return <div className="h-full bg-list" />;
-		if (opensIntoSetup(workspace.workspace, standing.data?.permissions)) {
-			return <Navigate to="/onboarding" search={{ workspace: workspace.workspace.slug }} replace />;
-		}
-	}
-	return <Shell />;
-}
-
-/**
- * Whether opening `workspace` takes the caller into its setup instead: it is
- * still being set up, and they may finish it, which takes
- * `workspace.providers.manage`.
- */
-function opensIntoSetup(
-	workspace: Workspace,
-	permissions: WorkspacePermissions | undefined,
-): boolean {
-	return workspace.setupCompletedAt === null && permissions?.manageProviders === true;
-}
-
-const settingsRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings",
-	// General on a wide screen; on a phone, the list of sections to drill into.
-	component: () => (
-		<SettingsLayout index>
-			<WorkspaceSettings section="general" />
-		</SettingsLayout>
-	),
-});
-
-const settingsSectionRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/$section",
-	component: SettingsSectionRoute,
-});
-
-/** One person in the workspace, by their membership's id. */
-const settingsMemberRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/members/$member",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsMemberRoute,
-});
-
-function SettingsMemberRoute() {
-	const { member } = settingsMemberRoute.useParams();
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="members" selectedMemberId={member} />
-		</SettingsLayout>
-	);
-}
-
-const settingsPodAgentRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/pods/$pod/agents/$agent",
-	// The dialog waits for the rosters, so its code downloads alongside rather than after.
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsPodAgentRoute,
-});
-
-const settingsPodRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/pods/$pod",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsPodRoute,
-});
-
-/** One of a pod's pages besides General: Connections, People or Bots. */
-const settingsPodPageRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/pods/$pod/$page",
-	validateSearch: (search: Record<string, unknown>): { oauth_error?: string } => ({
-		oauth_error: optionalString(search.oauth_error),
-	}),
-	// A sign-in error shown for one pod must not follow you to the next.
-	remountDeps: ({ params }) => [params.workspace, params.pod],
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsPodPageRoute,
-});
-
-/** One of a pod's connections, by its id. */
-const settingsPodConnectionRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/pods/$pod/connections/$connection",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsPodConnectionRoute,
-});
-
-/** One model provider, by its id. */
-const settingsProviderRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/providers/$provider",
-	loader: () => WorkspaceSettings.preload(),
-	component: SettingsProviderRoute,
-});
-
-function SettingsProviderRoute() {
-	const { provider } = settingsProviderRoute.useParams();
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="providers" selectedProviderId={provider} />
-		</SettingsLayout>
-	);
-}
-
-/** The one model the system bots share. A fixed path, which wins over a provider's id. */
-const settingsSystemModelRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/providers/system",
-	loader: () => WorkspaceSettings.preload(),
-	component: () => (
-		<SettingsLayout>
-			<WorkspaceSettings section="providers" modelChoice="system" />
-		</SettingsLayout>
-	),
-});
-
-/** The model new bots start on. A fixed path, like the system bots' one. */
-const settingsDefaultModelRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/settings/providers/default",
-	loader: () => WorkspaceSettings.preload(),
-	component: () => (
-		<SettingsLayout>
-			<WorkspaceSettings section="providers" modelChoice="default" />
-		</SettingsLayout>
-	),
-});
-
-function SettingsPodRoute() {
-	const { pod: podSlug } = settingsPodRoute.useParams();
-	const { data: pods, isPending, error } = usePods();
-	const pod = findPod(pods, podSlug);
-	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!pod) {
-		return (
-			<Panes>
-				<EmptyState title={error ? "Could not load this pod" : "No such pod here"} />
-			</Panes>
-		);
-	}
-	// A personal pod has no General: its settings start at Connections.
-	if (!podHasSettingsPage(pod, "general")) {
-		return <Navigate {...podSettingsPageLink(pod, "connections")} replace />;
-	}
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="pods" selectedPodId={pod.id} />
-		</SettingsLayout>
-	);
-}
-
-function SettingsPodPageRoute() {
-	const { pod: podSlug, page: pageSegment } = settingsPodPageRoute.useParams();
-	const { oauth_error: oauthError } = settingsPodPageRoute.useSearch();
-	const navigate = settingsPodPageRoute.useNavigate();
-	// Kept after the error leaves the address, so a reload does not show it twice.
-	const [signInError, setSignInError] = useState(oauthError);
-	useEffect(() => {
-		if (oauthError === undefined) return;
-		setSignInError(oauthError);
-		void navigate({
-			search: (previous) => ({ ...previous, oauth_error: undefined }),
-			replace: true,
-		});
-	}, [oauthError, navigate]);
-	const { data: pods, isPending, error } = usePods();
-	const pod = findPod(pods, podSlug);
-	const page = podSettingsPage(pageSegment);
-	if (!page) {
-		return (
-			<Navigate from="/$workspace" to="./settings/pods/$pod" params={{ pod: podSlug }} replace />
-		);
-	}
-	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!pod) {
-		return (
-			<Panes>
-				<EmptyState title={error ? "Could not load this pod" : "No such pod here"} />
-			</Panes>
-		);
-	}
-	// A page this pod doesn't have, such as a personal pod's People, gives way to its Connections.
-	if (!podHasSettingsPage(pod, page)) {
-		return <Navigate {...podSettingsPageLink(pod, "connections")} replace />;
-	}
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings
-				section="pods"
-				selectedPodId={pod.id}
-				podPage={page}
-				connectionSignInError={signInError && signInFailureReason(signInError)}
-			/>
-		</SettingsLayout>
-	);
-}
-
-function SettingsPodConnectionRoute() {
-	const { pod: podSlug, connection } = settingsPodConnectionRoute.useParams();
-	const { data: pods, isPending, error } = usePods();
-	const pod = findPod(pods, podSlug);
-	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!pod) {
-		return (
-			<Panes>
-				<EmptyState title={error ? "Could not load this pod" : "No such pod here"} />
-			</Panes>
-		);
-	}
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="pods" selectedPodId={pod.id} selectedConnectionId={connection} />
-		</SettingsLayout>
-	);
-}
-
-function SettingsPodAgentRoute() {
-	const { pod: podSlug, agent: handle } = settingsPodAgentRoute.useParams();
-	const { found, isPending, error } = usePodAgent(podSlug, handle);
-	if (isPending) return <SettingsLayout>{null}</SettingsLayout>;
-	if (!found) {
-		return (
-			<Panes>
-				<EmptyState title={error ? "Could not load this agent" : "No such agent in this pod"} />
-			</Panes>
-		);
-	}
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section="pods" selectedPodId={found.pod.id} selectedAgent={found} />
-		</SettingsLayout>
-	);
-}
-
-function SettingsSectionRoute() {
-	const { section } = settingsSectionRoute.useParams();
-	const setting = workspaceSettingSection(section);
-	// `general` is reachable by name too, which is how a phone's list opens it.
-	if (!setting) {
-		return <Navigate from="/$workspace" to="./settings" replace />;
-	}
-	return (
-		<SettingsLayout>
-			<WorkspaceSettings section={setting.id} />
-		</SettingsLayout>
-	);
-}
-
-/** Inbox: what is new across the workspace, and the chat, run or collaboration of each, opened in its place. */
-const activityRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/activity",
-	component: () => (
-		<Panes>
-			<Inbox>
-				<Outlet />
-			</Inbox>
-		</Panes>
-	),
-});
-
-/** With nothing chosen, how much is unread sits beside the list; on a phone the list is the page. */
-const activityIndexRoute = createRoute({
-	getParentRoute: () => activityRoute,
-	path: "/",
-	component: InboxOverview,
-});
-
-interface ActivityChatSearch extends ConversationSearch {
-	/** A message to jump to in the chat, such as the mention the row is. */
-	message?: string;
-	/** A routine run or collaboration shown as the pane itself, in place of the chat. */
-	threadPage?: string;
-}
-
-const activityChatRoute = createRoute({
-	getParentRoute: () => activityRoute,
-	path: "/$pod/$conversation",
-	validateSearch: (search: Record<string, unknown>): ActivityChatSearch => ({
-		...validateConversationSearch(search),
-		...idParam(search, "message"),
-		...idParam(search, "threadPage"),
-	}),
-	preloadStaleTime: 0,
-	loader: ({ context, params }) => {
-		prefetchConversation(context.queries, params.conversation);
-		return ConversationPage.preload();
-	},
-	component: () => {
-		const { pod, conversation } = activityChatRoute.useParams();
-		const navigate = activityChatRoute.useNavigate();
-		const changeThread = useThreadChange((thread, replace) =>
-			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
-		);
-		const search = activityChatRoute.useSearch();
-		return (
-			<PodConversationScreen podSlug={pod} conversationId={conversation}>
-				{(found, user) => (
-					<ActivityPane
-						pod={found.pod}
-						conversation={found.conversation}
-						conversationId={conversation}
-						user={user}
-						threadPageId={search.threadPage}
-						focusMessageId={search.message}
-						threadId={search.thread}
-						onThreadPageChange={(threadPage) =>
-							void navigate({ search: (previous) => ({ ...previous, threadPage }) })
-						}
-						onThreadChange={changeThread}
-						staged={stagedOf(search)}
-						onStagedChange={(staged, how) =>
-							void navigate({
-								search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
-								...how,
-							})
-						}
-					/>
-				)}
-			</PodConversationScreen>
-		);
-	},
-});
-
-/**
- * Your direct messages with other people. The address names no pod, as a
- * direct message between people is in none. On a phone the list is the page
- * until one is open.
- */
-const directMessagesRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/dm",
-	component: DirectMessagesRoute,
-});
-
-function DirectMessagesRoute() {
-	const matchRoute = useMatchRoute();
-	const atList = Boolean(matchRoute({ to: directMessagesRoute.fullPath }));
-	return (
-		<>
-			{atList && <MobileDirectMessages className="md:hidden" />}
-			<Panes className={atList ? "max-md:hidden" : undefined}>
-				<Outlet />
-			</Panes>
-		</>
-	);
-}
-
-/** Beside the sidebar while none is open: a way to start one. */
-const directMessagesIndexRoute = createRoute({
-	getParentRoute: () => directMessagesRoute,
-	path: "/",
-	component: DirectMessagesOverview,
-});
-
-/** Starting a direct message: whom to, and the first message. */
-const newDirectMessageRoute = createRoute({
-	getParentRoute: () => directMessagesRoute,
-	path: "/new",
-	component: () => <NewDirectMessagePage />,
-});
-
-interface DirectMessageSearch extends ConversationSearch {
-	/** A message to jump to, such as the one a notification is about. */
-	message?: string;
-}
-
-const directMessageRoute = createRoute({
-	getParentRoute: () => directMessagesRoute,
-	path: "/$conversation",
-	validateSearch: (search: Record<string, unknown>): DirectMessageSearch => ({
-		...validateConversationSearch(search),
-		...idParam(search, "message"),
-	}),
-	preloadStaleTime: 0,
-	loader: ({ context, params }) => {
-		prefetchConversation(context.queries, params.conversation);
-		return ConversationPage.preload();
-	},
-	component: () => {
-		const { conversation } = directMessageRoute.useParams();
-		const navigate = directMessageRoute.useNavigate();
-		const changeThread = useThreadChange((thread, replace) =>
-			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
-		);
-		const search = directMessageRoute.useSearch();
-		return (
-			<ConversationScreen place={useDirectMessage(conversation)}>
-				{(found, user) => (
-					<ConversationPage
-						conversation={found.conversation}
-						pod={found.pod}
-						conversationId={conversation}
-						user={user}
-						threadId={search.thread}
-						focusMessageId={search.message}
-						onThreadChange={changeThread}
-						staged={stagedOf(search)}
-						onStagedChange={(staged, how) =>
-							void navigate({
-								search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
-								...how,
-							})
-						}
-					/>
-				)}
-			</ConversationScreen>
-		);
-	},
-});
-
-/** Every approval across the workspace, and each one in full on its own page. */
-const approvalsRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/approvals",
-	component: () => (
-		<Panes>
-			<Outlet />
-		</Panes>
-	),
-});
-
-const approvalsIndexRoute = createRoute({
-	getParentRoute: () => approvalsRoute,
-	path: "/",
-	component: Approvals,
-});
-
-const approvalRoute = createRoute({
-	getParentRoute: () => approvalsRoute,
-	path: "/$call",
-	component: () => <ApprovalPage callId={approvalRoute.useParams().call} />,
-});
-
-/**
- * You on a phone, where the sidebar's foot has no room: your workspace, its
- * pods, and signing out. A wider screen, as a window widened from a phone's
- * size, has settings of its own, which it goes to in this page's place.
- */
-const youRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/you",
-	component: () => {
-		const wide = useMediaQuery(SIDE_BY_SIDE);
-		if (wide) return <Navigate from="/$workspace" to="./settings" replace />;
-		return (
-			<Panes>
-				<You />
-			</Panes>
-		);
-	},
-});
-
-/**
- * A pod's settings as a phone opens them from You: a page of its parts. A
- * wider screen goes to the pod's own settings in its place.
- */
-const youPodRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/you/pods/$pod",
-	component: () => {
-		const wide = useMediaQuery(SIDE_BY_SIDE);
-		const { pod: podSlug } = youPodRoute.useParams();
-		const { data: pods, isPending } = usePods();
-		const pod = findPod(pods, podSlug);
-		if (wide) {
-			return (
-				<Navigate from="/$workspace" to="./settings/pods/$pod" params={{ pod: podSlug }} replace />
-			);
-		}
-		return (
-			<Panes>
-				{isPending ? null : pod ? <YouPod pod={pod} /> : <EmptyState title="No such pod here" />}
-			</Panes>
-		);
-	},
-});
-
-/** Where `/` and closing settings land: the first shared pod, or Personal for somebody in none. */
-const agentsRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/agents",
-	loader: preloadChatScreenForWideLayout,
-	component: AgentsRoute,
-});
-
-function AgentsRoute() {
-	const { data: pods, isPending, error } = usePods();
-	if (isPending) return <Panes>{null}</Panes>;
-	if (error)
-		return (
-			<Panes>
-				<EmptyState title="Could not load your pods" />
-			</Panes>
-		);
-	const first = defaultPod(pods);
-	if (!first) {
-		return (
-			<Panes>
-				<EmptyState title="No pods here yet" />
-			</Panes>
-		);
-	}
-	return <Navigate {...podLink(first)} replace />;
-}
-
-const podRoute = createRoute({
-	getParentRoute: () => shellRoute,
-	path: "/pods/$pod",
-	loader: preloadChatScreenForWideLayout,
-	component: PodRoute,
-});
-
-/** A pod's page beside the sidebar. On a phone, the pod's own address is Home. */
-function PodRoute() {
-	const { pod: podSlug } = podRoute.useParams();
-	const matchRoute = useMatchRoute();
-	const atPod = Boolean(matchRoute({ to: podRoute.fullPath }));
-	const { data: pods, isPending, error } = usePods();
-	const pod = findPod(pods, podSlug);
-	if (isPending) return <Panes>{null}</Panes>;
-	if (!pod) {
-		return (
-			<Panes>
-				<EmptyState title={error ? "Could not load this pod" : "No such pod here"}>
-					{error
-						? "The API did not answer. Reload, or check that it is running."
-						: "It may have been removed, or you may not be a member of it."}
-				</EmptyState>
-			</Panes>
-		);
-	}
-	return (
-		<>
-			{atPod && <MobileHome pod={pod} className="md:hidden" />}
-			<Panes className={atPod ? "max-md:hidden" : undefined}>
-				<Outlet />
-			</Panes>
-		</>
-	);
-}
-
-const podIndexRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/",
-	component: PodIndexRoute,
-});
-
-function PodIndexRoute() {
-	const { pod: podSlug } = podRoute.useParams();
-	const pod = findPod(usePods().data, podSlug);
-	return pod ? <OpenTopChat pod={pod} /> : null;
-}
-
-/**
- * A pod opened without a chat chosen opens its chat, or, in a Personal pod,
- * which has none, the list's top one, where the list and the chat sit side by
- * side. On a phone the list is the page, so it stays.
- */
-function OpenTopChat({ pod }: { pod: Pod }) {
-	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
-	const { data: list } = useChatList(pod.slug);
-	if (!sideBySide) return null;
-	if (pod.kind === "shared" && list) {
-		const first = list.chats.find((chat) => chat.conversation.main);
-		return (
-			<Navigate
-				{...(first
-					? conversationLink({ pod, conversationId: first.conversation.id })
-					: podChatLink(pod))}
-				replace
-			/>
-		);
-	}
-	const top = list?.threads[0];
-	if (!top) return null;
-	return <Navigate {...conversationLink({ pod, conversationId: top.conversation.id })} replace />;
-}
-
-/**
- * Where a pod opens its top chat beside the sidebar. On a phone, touching a chat's
- * link preloads it instead, through `agentRoute`'s loader.
- */
-function preloadChatScreenForWideLayout() {
-	if (matchesMedia(SIDE_BY_SIDE)) ConversationPage.preload();
-}
-
-const artifactsRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/artifacts",
-	component: () => {
-		const pod = findPod(usePods().data, artifactsRoute.useParams().pod);
-		return pod ? <ArtifactsPage pod={pod} /> : null;
-	},
-});
-
-interface ArtifactSearch {
-	/** An earlier version to show; the current one when absent. */
-	version?: number;
-}
-
-const validateArtifactSearch = (search: Record<string, unknown>): ArtifactSearch =>
-	typeof search.version === "number" && Number.isInteger(search.version) && search.version > 0
-		? { version: search.version }
-		: {};
-
-const artifactRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/artifacts/$artifact",
-	validateSearch: validateArtifactSearch,
-	component: () => {
-		const { pod: podSlug, artifact } = artifactRoute.useParams();
-		const { version } = artifactRoute.useSearch();
-		const pod = findPod(usePods().data, podSlug);
-		return pod ? <ArtifactsPage pod={pod} selectedId={artifact} version={version} /> : null;
-	},
-});
-
-interface ConversationSearch {
-	/** A collaboration or routine thread open beside the chat. */
-	thread?: string;
-	/** An artifact open large beside the chat, in place of the conversation list. */
-	artifact?: string;
-	/** An earlier version of `artifact` to show; the current one when absent. */
-	version?: number;
-	/** The bot's sandbox desktop open large beside the chat, when no artifact is. */
-	desktop?: true;
-	/**
-	 * The bot's routines open large beside the chat, when nothing else is: all
-	 * of them, one by its id, or a new one being made.
-	 */
-	routines?: string;
-	/** The bot's threads open large beside the chat, those still going or those done, when nothing else is. */
-	threads?: ThreadsTab;
-}
-
-const validateConversationSearch = (search: Record<string, unknown>): ConversationSearch => {
-	const { artifact } = idParam(search, "artifact");
-	return {
-		...idParam(search, "thread"),
-		...(artifact
-			? { artifact, ...validateArtifactSearch(search) }
-			: search.desktop === true
-				? { desktop: true }
-				: typeof search.routines === "string" && isRoutinesView(search.routines)
-					? { routines: search.routines }
-					: search.threads === "open" || search.threads === "done"
-						? { threads: search.threads }
-						: {}),
-	};
-};
-
-/** How the address says which of a bot's routines are open beside its chat. */
-const ALL_ROUTINES = "all";
-const NEW_ROUTINE = "new";
-
-const isRoutinesView = (value: string) =>
-	value === ALL_ROUTINES || value === NEW_ROUTINE || isUuid(value);
-
-const routinesViewFromSearch = (value: string): RoutinesView =>
-	value === NEW_ROUTINE
-		? { kind: "new" }
-		: value === ALL_ROUTINES
-			? { kind: "list" }
-			: { kind: "routine", routineId: value };
-
-const routinesViewSearch = (view: RoutinesView): string =>
-	view.kind === "new" ? NEW_ROUTINE : view.kind === "list" ? ALL_ROUTINES : view.routineId;
-
-/** What `search` opens beside a chat, and the search that opens `staged`. */
-const stagedOf = (search: ConversationSearch): Staged | undefined =>
-	search.artifact
-		? { kind: "artifact", artifactId: search.artifact, version: search.version }
-		: search.desktop
-			? { kind: "desktop" }
-			: search.routines
-				? { kind: "routines", view: routinesViewFromSearch(search.routines) }
-				: search.threads
-					? { kind: "threads", tab: search.threads }
-					: undefined;
-
-const stagedSearchOf = (staged: Staged | undefined): ConversationSearch => ({
-	artifact: staged?.kind === "artifact" ? staged.artifactId : undefined,
-	version: staged?.kind === "artifact" ? staged.version : undefined,
-	desktop: staged?.kind === "desktop" ? true : undefined,
-	routines: staged?.kind === "routines" ? routinesViewSearch(staged.view) : undefined,
-	threads: staged?.kind === "threads" ? staged.tab : undefined,
-});
-
-/**
- * `search[name]` when it is an id, and otherwise undefined. Said either way,
- * because the router keeps the address's raw value under any name a route's
- * validation leaves out.
- */
-function idParam<Name extends string>(
-	search: Record<string, unknown>,
-	name: Name,
-): { [key in Name]: string | undefined } {
-	const value = search[name];
-	return { [name]: typeof value === "string" && isUuid(value) ? value : undefined } as {
-		[key in Name]: string | undefined;
-	};
-}
-
-/** The pod's routines, with the one chosen beside them: its own thread, where its runs post. */
-const routinesRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/routines",
-	// The bot whose routines the page is, when none of them is open yet.
-	validateSearch: (search: Record<string, unknown>): { bot?: string } =>
-		typeof search.bot === "string" ? { bot: search.bot } : {},
-	component: () => {
-		const { pod: podSlug } = routinesRoute.useParams();
-		const { routine } = useParams({ strict: false });
-		const { bot } = routinesRoute.useSearch();
-		const making = useMatch({ from: newRoutineRoute.id, shouldThrow: false }) !== undefined;
-		const pod = findPod(usePods().data, podSlug);
-		return pod ? (
-			<RoutinesPage pod={pod} selectedRoutineId={routine} botHandle={bot} making={making}>
-				<Outlet />
-			</RoutinesPage>
-		) : null;
-	},
-});
-
-/** A routine being made, beside the pod's routines, for the bot `?bot=` names when it was begun from its. */
-const newRoutineRoute = createRoute({
-	getParentRoute: () => routinesRoute,
-	path: "/new",
-	component: () => {
-		const pod = findPod(usePods().data, newRoutineRoute.useParams().pod);
-		const { bot } = newRoutineRoute.useSearch();
-		return pod ? <NewRoutine pod={pod} botHandle={bot} /> : null;
-	},
-});
-
-/** With none chosen, the bot's first routine, or the pod's, opens beside the list; on a phone the list is the page. */
-const routinesIndexRoute = createRoute({
-	getParentRoute: () => routinesRoute,
-	path: "/",
-	component: () => {
-		const pod = findPod(usePods().data, routinesIndexRoute.useParams().pod);
-		const { bot } = routinesIndexRoute.useSearch();
-		const sideBySide = useMediaQuery(SIDE_BY_SIDE);
-		const { data: list } = useChatList(pod?.slug);
-		const first = list?.routines.find((row) => bot === undefined || row.agent.handle === bot);
-		if (!pod || !sideBySide || !first) return null;
-		return <Navigate {...routineThreadLink(pod, first.routine.id)} replace />;
-	},
-});
-
-/** A routine's own thread, opened first if it has none, beside the pod's routines. */
-const routineThreadRoute = createRoute({
-	getParentRoute: () => routinesRoute,
-	path: "/$routine",
-	validateSearch: validateConversationSearch,
-	loader: () => ConversationPage.preload(),
-	component: () => {
-		const { pod: podSlug, routine } = routineThreadRoute.useParams();
-		const pod = findPod(usePods().data, podSlug);
-		return pod ? <RoutineFeed key={routine} pod={pod} routineId={routine} /> : null;
-	},
-});
-
-/** The routine's own thread, opened first when it has none, as a chat beside the routines. */
-function RoutineFeed({ pod, routineId }: { pod: Pod; routineId: string }) {
-	const opened = useOpenRoutineFeed(pod, routineId);
-	const navigate = routineThreadRoute.useNavigate();
-	const changeThread = useThreadChange((thread, replace) =>
-		navigate({ search: (previous) => ({ ...previous, thread }), replace }),
-	);
-	const search = routineThreadRoute.useSearch();
-	if (opened.isError) {
-		return (
-			<EmptyState title="Could not open this routine">
-				It may have been removed. Reload this page to try again.
-			</EmptyState>
-		);
-	}
-	if (!opened.data) return null;
-	const conversationId = opened.data.id;
-	return (
-		<PodConversationScreen podSlug={pod.slug} conversationId={conversationId}>
-			{(found, user) => (
-				<ConversationPage
-					conversation={found.conversation}
-					pod={found.pod}
-					conversationId={conversationId}
-					user={user}
-					threadId={search.thread}
-					onThreadChange={changeThread}
-					staged={stagedOf(search)}
-					onStagedChange={(staged, how) =>
-						void navigate({
-							search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
-							...how,
-						})
-					}
-				/>
-			)}
-		</PodConversationScreen>
-	);
-}
-
-/** The pod's chat, opened first if nobody has, then shown at its own address. */
-const podChatRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/chat",
-	loader: () => ConversationPage.preload(),
-	component: () => {
-		const { pod: podSlug } = podChatRoute.useParams();
-		const pod = findPod(usePods().data, podSlug);
-		return pod ? <OpenPodChat pod={pod} /> : null;
-	},
-});
-
-function OpenPodChat({ pod }: { pod: Pod }) {
-	return (
-		<NavigateWhenOpened
-			pod={pod}
-			opened={useOpenPodChat(pod)}
-			failure={{ title: "Could not open this pod's channel", body: API_DID_NOT_ANSWER }}
-		/>
-	);
-}
-
-/** A bot's channel, opened first if nobody has, then shown at its own address. */
-const agentRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/agents/$agent",
-	validateSearch: validateConversationSearch,
-	loader: () => ConversationPage.preload(),
-	component: () => {
-		const { pod, agent } = agentRoute.useParams();
-		const search = agentRoute.useSearch();
-		return (
-			<PodAgentScreen podSlug={pod} handle={agent}>
-				{(found) => <OpenBotChannel pod={found.pod} agent={found.agent} search={search} />}
-			</PodAgentScreen>
-		);
-	},
-});
-
-/** Opens `agent`'s channel in `pod`, keeping what `search` opens beside it. */
-function OpenBotChannel({
-	pod,
-	agent,
-	search,
-}: {
-	pod: Pod;
-	agent: Agent;
-	search: ConversationSearch;
-}) {
-	return (
-		<NavigateWhenOpened
-			pod={pod}
-			opened={useOpenBotChannel(pod, agent.id)}
-			failure={{ title: "Could not open this channel", body: API_DID_NOT_ANSWER }}
-			search={search}
-		/>
-	);
-}
-
-const API_DID_NOT_ANSWER = "The API did not answer. Reload this page to try again.";
-
-/**
- * Goes to the conversation `opened` finds or opens, at its own address and in
- * place of this one, keeping `search`; says `failure` when it cannot.
- */
-function NavigateWhenOpened({
-	pod,
-	opened,
-	failure,
-	search,
-}: {
-	pod: Pod;
-	opened: { data: { id: string } | undefined; isError: boolean };
-	failure: { title: string; body: string };
-	search?: ConversationSearch;
-}) {
-	if (opened.isError) return <EmptyState title={failure.title}>{failure.body}</EmptyState>;
-	if (!opened.data) return null;
-	return (
-		<Navigate
-			{...conversationLink({ pod, conversationId: opened.data.id })}
-			search={search}
-			replace
-		/>
-	);
-}
-
-/** Starting a thread in a pod, from its first message, with the bot `?agent=` names by its handle. */
-const newThreadRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/threads/new",
-	validateSearch: (search: Record<string, unknown>): { agent?: string } => ({
-		agent: optionalString(search.agent),
-	}),
-	component: () => {
-		const { pod: podSlug } = newThreadRoute.useParams();
-		const { agent } = newThreadRoute.useSearch();
-		const pod = findPod(usePods().data, podSlug);
-		const { user } = useSession();
-		// Keyed so a + on another bot starts its draft afresh.
-		return pod && user ? (
-			<NewThread key={agent} pod={pod} userId={user.id} agentHandle={agent} />
-		) : null;
-	},
-});
-
-const conversationRoute = createRoute({
-	getParentRoute: () => podRoute,
-	path: "/threads/$conversation",
-	validateSearch: validateConversationSearch,
-	// On every hover, not once per 30 s: the query cache, not the router,
-	// decides what of the conversation is still fresh.
-	preloadStaleTime: 0,
-	// Also run while the pointer is on a link here, so it is loading before the click.
-	loader: ({ context, params }) => {
-		prefetchConversation(context.queries, params.conversation);
-		return ConversationPage.preload();
-	},
-	component: () => {
-		const { pod, conversation } = conversationRoute.useParams();
-		const navigate = conversationRoute.useNavigate();
-		const changeThread = useThreadChange((thread, replace) =>
-			navigate({ search: (previous) => ({ ...previous, thread }), replace }),
-		);
-		const search = conversationRoute.useSearch();
-		return (
-			<PodConversationScreen podSlug={pod} conversationId={conversation}>
-				{(found, user) => (
-					<ConversationPage
-						conversation={found.conversation}
-						pod={found.pod}
-						conversationId={conversation}
-						user={user}
-						threadId={search.thread}
-						onThreadChange={changeThread}
-						staged={stagedOf(search)}
-						onStagedChange={(staged, how) =>
-							void navigate({
-								search: (previous) => ({ ...previous, ...stagedSearchOf(staged) }),
-								...how,
-							})
-						}
-					/>
-				)}
-			</PodConversationScreen>
-		);
-	},
-});
-
-/**
- * The conversation in the pod at `podSlug`, once its pod and bot are found,
- * for a screen of it; see `ConversationScreen`.
- */
-function PodConversationScreen({
-	podSlug,
-	conversationId,
-	children,
-}: {
-	podSlug: string;
-	conversationId: string;
-	children: (found: ConversationPlace, user: SessionUser) => ReactNode;
-}) {
-	return (
-		<ConversationScreen place={useConversationPlace(podSlug, conversationId)}>
-			{children}
-		</ConversationScreen>
-	);
-}
-
-/**
- * A screen of a conversation, once `place` has found where it is and who it
- * is with; while it loads nothing, and if it cannot be found, why.
- */
-function ConversationScreen<Place>({
-	place: { found, isPending, error },
-	children,
-}: {
-	place: { found: Place | undefined; isPending: boolean; error: unknown };
-	children: (found: Place, user: SessionUser) => ReactNode;
-}) {
-	const { user } = useSession();
-
-	if (isPending) return null;
-	if (!found) {
-		return (
-			// Lifted a little above the middle, as the pod's empty pages are.
-			<div className="flex min-h-0 flex-1 pb-20">
-				<EmptyState
-					title={error ? "Could not load this conversation" : "Conversation not found"}
-					icon={<MessageSquareOff strokeWidth={1.75} />}
-				>
-					{error
-						? "Reload the page, or check that the API is running."
-						: "It was removed, or you're not in it."}
-				</EmptyState>
-			</div>
-		);
-	}
-	if (!user) return null;
-	return (
-		// The screen's code can arrive after its data. Without a boundary of its
-		// own, React would hide the sidebar with it while it loads.
-		<Suspense fallback={null}>{children(found, user)}</Suspense>
-	);
-}
-
-/**
- * The bot at `handle` in the pod at `podSlug`, once found, for a screen of its
- * chat; while it loads nothing, and if it cannot be found, why.
- */
-function PodAgentScreen({
-	podSlug,
-	handle,
-	children,
-}: {
-	podSlug: string;
-	handle: string;
-	children: (found: { pod: Pod; agent: Agent }, user: SessionUser) => ReactNode;
-}) {
-	const { user } = useSession();
-	const { found, isPending, error } = usePodAgent(podSlug, handle);
-
-	if (isPending) return null;
-	if (!found) {
-		return (
-			<EmptyState title={error ? "Could not load this agent" : "No such agent here"}>
-				{error
-					? "The API did not answer. Reload, or check that it is running."
-					: "It may have been removed, or renamed — or you may not be a member of any pod it is in."}
-			</EmptyState>
-		);
-	}
-	if (!user) return null;
-	return (
-		// The screen's code can arrive after its data. Without a boundary of its
-		// own, React would hide the sidebar with it while it loads.
-		<Suspense fallback={null}>{children(found, user)}</Suspense>
-	);
-}
-
-/**
- * Signed out means the login page. `undefined` cannot reach here: `main.tsx`
- * waits for `/me` to answer before it mounts the router at all.
- */
-function requireUser({
-	context,
-	location,
-}: {
-	context: RouterContext;
-	location: ParsedLocation;
-}): void {
-	if (context.user === null) {
-		throw redirect({
-			to: "/login",
-			search: location.href === "/" ? {} : { returnTo: location.href },
-		});
-	}
-}
 
 const routeTree = rootRoute.addChildren([
 	indexRoute,
-	loginRoute,
+	signInRoute,
 	joinRoute,
 	resetPasswordRoute,
-	inviteRoute,
+	invitationRoute,
 	signInReturnRoute,
 	gitHubSetupReturnRoute,
-	onboardingRoute,
+	workspaceSetupRoute,
 	shellRoute.addChildren([
 		workspaceIndexRoute,
 		settingsRoute,
-		settingsSectionRoute,
-		settingsMemberRoute,
-		settingsPodAgentRoute,
-		settingsPodConnectionRoute,
-		settingsPodRoute,
-		settingsPodPageRoute,
-		settingsSystemModelRoute,
-		settingsDefaultModelRoute,
-		settingsProviderRoute,
-		agentsRoute,
-		activityRoute.addChildren([activityIndexRoute, activityChatRoute]),
+		settingsPageRoute,
 		approvalsRoute.addChildren([approvalsIndexRoute, approvalRoute]),
-		directMessagesRoute.addChildren([
-			directMessagesIndexRoute,
-			newDirectMessageRoute,
-			directMessageRoute,
-		]),
 		youRoute,
-		youPodRoute,
-		podRoute.addChildren([
-			podIndexRoute,
-			agentRoute,
-			podChatRoute,
-			routinesRoute.addChildren([routinesIndexRoute, newRoutineRoute, routineThreadRoute]),
-			newThreadRoute,
-			conversationRoute,
-			artifactsRoute,
-			artifactRoute,
+		homeRoute,
+		projectsRoute,
+		botsRoute,
+		chatByIdRoute,
+		projectRoute.addChildren([
+			projectIndexRoute,
+			projectNewChatRoute,
+			projectFilesRoute,
+			projectFileRoute,
+			projectConnectorsRoute,
+			projectConnectorRoute,
+			projectSettingsRoute,
+			projectMembersRoute,
+			projectBotsRoute,
+			projectComputerRoute,
+			projectAutomationsRoute.addChildren([
+				projectAutomationsIndexRoute,
+				projectNewAutomationRoute,
+				projectAutomationRoute,
+			]),
+			projectChatRoute,
+		]),
+		botRoute.addChildren([
+			botIndexRoute,
+			botNewChatRoute,
+			chatRoute,
+			botFilesRoute,
+			botFileRoute,
+			botConnectorsRoute,
+			botConnectorRoute,
+			botSettingsRoute,
+			botComputerRoute,
+			automationsRoute.addChildren([automationsIndexRoute, newAutomationRoute, automationRoute]),
 		]),
 	]),
 ]);
 
+/** Whether `pathname` is one of a bot's or a project's own pages, which the icon rail stands beside. */
+function isOwnerPath(pathname: string): boolean {
+	return /^\/[^/]+\/(bots|projects)\/[^/]+/.test(pathname);
+}
+
+/**
+ * The view transition between two pages, by its types: a phone's slide, or,
+ * from a tablet up, `rail` between the sidebar and a bot's or a project's own
+ * pages, on which its marks move between the sidebar's rows and the icon rail.
+ * None under reduced motion, as the browser would otherwise cross-fade the pages.
+ *
+ * Whether the rail was showing is judged by the page the last navigation went
+ * to, not the one the router last finished on: a page that sends on to
+ * another as it opens, as a project's opens its newest chat, is still opening
+ * when it does, so judged by the page before, it would start a second `rail`
+ * transition that cuts the first short.
+ */
+function pageTransitions() {
+	let railShowing: boolean | undefined;
+	return (locations: {
+		fromLocation?: ParsedLocation;
+		toLocation: ParsedLocation;
+		hrefChanged: boolean;
+	}): string[] | false => {
+		const { fromLocation, toLocation } = locations;
+		const railWasShowing =
+			railShowing ?? (fromLocation !== undefined && isOwnerPath(fromLocation.pathname));
+		railShowing = isOwnerPath(toLocation.pathname);
+		if (matchesMedia(REDUCED_MOTION)) return false;
+		if (!matchesMedia(SIDE_BY_SIDE)) return phoneSlide(locations);
+		if (!fromLocation) return false;
+		return railWasShowing !== railShowing ? ["rail"] : false;
+	};
+}
+
 /**
  * Which way a phone slides from one page to the next, as a view transition's
- * type: `forward` into a page further in, as a channel opened from Home or a
- * thread from its channel, and `back` out of one. Switching tabs, or a change
- * that stays on its page, such as opening a thread's computer, does not slide.
+ * type: `forward` into a page further in, as a project opened from Home or a
+ * chat from its project, and `back` out of one. Switching tabs, or a change
+ * that stays on its page, such as opening a bot's computer, does not slide.
  */
 function phoneSlide({
 	fromLocation,
@@ -1820,7 +224,7 @@ function phoneSlide({
 	toLocation: ParsedLocation;
 	hrefChanged: boolean;
 }): string[] | false {
-	if (!fromLocation || !hrefChanged || matchesMedia(SIDE_BY_SIDE)) return false;
+	if (!fromLocation || !hrefChanged) return false;
 	const fromIndex = historyIndex(fromLocation);
 	const toIndex = historyIndex(toLocation);
 	const from = locationDepth(fromLocation);
@@ -1831,80 +235,81 @@ function phoneSlide({
 	if (to !== from) return [to > from ? "forward" : "back"];
 	// A tab for another tab.
 	if (to === 0) return false;
-	// Pages as deep as each other, as a bot's channel and a thread in it both are: a step
+	// Pages as deep as each other, as two chats in a project are: a step
 	// through history tells which way, a page opened going forward and Back going back.
 	return [toIndex > fromIndex ? "forward" : "back"];
 }
 
-/**
- * Opens a thread over a chat, or closes it, with `go`, which names it in the
- * address. On a phone a thread covers its chat as a page of its own, so
- * closing one shows its chat: back to it when the chat is the page behind,
- * else the chat in the thread's place, as when the thread was opened from
- * Inbox. Opening the chat as a page after the thread would have the chat's
- * own Back return to the thread.
- */
-function useThreadChange(go: (thread: string | undefined, replace: boolean) => void) {
-	const { leaveFor } = useLeave();
-	const { pathname } = useLocation();
-	return (thread: string | undefined) => {
-		if (thread !== undefined || matchesMedia(SIDE_BY_SIDE)) {
-			go(thread, false);
-			return;
-		}
-		leaveFor(
-			(page) => page.pathname === pathname && page.search.thread === undefined,
-			() => go(undefined, true),
-		);
-	};
-}
-
-/** Whether `pathname` is one of the settings, or a phone's You tab, which lists them. */
-function isSettingsPath(pathname: string): boolean {
-	const [section] = pathname.split("/").filter(Boolean).slice(1);
-	return section === "settings" || section === "you";
+/** Whether `location` has settings open, or is a phone's You tab, which lists them. */
+function isSettingsLocation(location: ParsedLocation): boolean {
+	const [section] = location.pathname.split("/").filter(Boolean).slice(1);
+	return section === "you" || hasSettingsOpen(location);
 }
 
 /**
- * A page's depth, and a step more while a thread is open over it: a thread
- * opened from a chat, or a run or collaboration from Inbox, which the address
- * names in its search rather than its path.
+ * A page's depth, and more for any settings page its search opens over it,
+ * rather than its path.
  */
 function locationDepth(location: ParsedLocation): number {
-	const search = location.search as { thread?: unknown; threadPage?: unknown };
-	const threadOpen = search.thread !== undefined || search.threadPage !== undefined;
-	return pageDepth(location.pathname) + (threadOpen ? 1 : 0);
+	const settings = settingsLocationOf((location.search as { settings?: unknown }).settings);
+	return pageDepth(location.pathname) + (settings ? settingsDepth(settings) : 0);
+}
+
+/**
+ * How far into the settings a page of them is on a phone, from the page they
+ * are open over: a section is one in, as is the list a wider screen opens;
+ * a member, a provider or a default model, a step past its section; and
+ * Notifications, opened from your account, a step past it too.
+ */
+function settingsDepth(page: SettingsLocation): number {
+	switch (page.kind) {
+		case "sections":
+			return 1;
+		case "section":
+			return page.section === "notifications" ? 2 : 1;
+		case "member":
+		case "provider":
+		case "model":
+			return 2;
+	}
 }
 
 /**
  * How far into the app a page is on a phone: a tab is 0; what it opens, 1; and
- * so on. A bot's thread is a step past the bot's chat, though its address is
- * no longer, so depth is told from what the address names, not its length.
+ * so on. A bot's page, /bots/$bot, is 1, and its chat, /bots/$bot/chats/$chat,
+ * is 3. A chat opened from a notification at the shorter /chats/$chat is 2, a
+ * step past the tab it was opened from.
  */
 function pageDepth(pathname: string): number {
 	// The workspace's own part of the address is the same everywhere, so it counts for nothing.
 	const [section, ...rest] = pathname.split("/").filter(Boolean).slice(1);
 	switch (section) {
-		case "pods": {
-			// pods/$pod is Home; its chat, a bot's chat, Artifacts or Routines one in; what those open, two.
+		case "projects":
+		case "bots": {
+			// projects/$project or bots/$bot is one in; what those open, two; files/$file or chats/$chat, three.
 			const [, place, item] = rest;
-			if (place === undefined) return 0;
-			if (place === "threads") return 2;
-			return item === undefined || place === "agents" ? 1 : 2;
+			if (rest.length === 0) return 0;
+			if (place === undefined) return 1;
+			return item === undefined ? 2 : 3;
 		}
-		case "activity":
+		case "chats":
+			return 2;
 		case "approvals":
-		case "dm":
 			return rest.length === 0 ? 0 : 1;
 		case "you":
-			// you/pods/$pod is one in.
-			return rest.length === 0 ? 0 : 1;
-		case "settings":
-			// Opened from You, so one in at least, and a step more for each part of the address.
-			return 1 + rest.length;
+		case "home":
+			return 0;
 		default:
 			return 0;
 	}
+}
+
+/**
+ * The search as the router writes it, but with its slashes left as they are,
+ * which a query may hold: `?settings=members/…` rather than `members%2F…`.
+ */
+function stringifySearchWithReadableSlashes(search: Record<string, unknown>): string {
+	return defaultStringifySearch(search).replaceAll("%2F", "/");
 }
 
 export function createAppRouter(options?: {
@@ -1917,11 +322,11 @@ export function createAppRouter(options?: {
 		// Supplied by `RouterProvider` once the session is known.
 		context: undefined as unknown as RouterContext,
 		defaultPreload: "intent",
-		// On a phone, a page further in slides over the one it was opened from, and back slides it away.
-		defaultViewTransition: { types: phoneSlide },
+		defaultViewTransition: { types: pageTransitions() },
 		// Back to a list of settings returns to where it was left, not its top. Only settings:
 		// a chat opens at its latest instead. What scrolls is named by `data-scroll-restoration-id`.
-		scrollRestoration: ({ location }) => isSettingsPath(location.pathname),
+		scrollRestoration: ({ location }) => isSettingsLocation(location),
+		stringifySearch: stringifySearchWithReadableSlashes,
 		// A boundary for every route, so a failed page is replaced inside its parent and the sidebar
 		// stays. The router's own boundary is above the root.
 		defaultErrorComponent: PageFailure,
@@ -1945,7 +350,7 @@ export function AppRouterProvider({
 	const queries = useQueryClient();
 	return (
 		<SessionContext value={session}>
-			<RouterProvider router={router} context={{ user: session.user, queries }} />
+			<RouterProvider router={router} context={{ member: session.member, queries }} />
 		</SessionContext>
 	);
 }

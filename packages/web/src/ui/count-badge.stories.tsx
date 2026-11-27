@@ -6,23 +6,17 @@ const meta = preview.meta({
 	title: "Controls/CountBadge",
 	component: CountBadge,
 	tags: ["ai-generated"],
-	args: { count: 3, size: "md" as const, label: "3 unread messages" },
+	args: { count: 2, label: "2 waiting on you" },
 });
 
-/** Row counts what is unread at the end of a list row, and says what it counts to a screen reader. */
-export const Row = meta.story({
-	play: async ({ canvas }) => {
-		await expect(canvas.getByText("3 unread messages")).toBeInTheDocument();
-	},
-});
+/** Waiting counts the approvals waiting on the viewer, as the phone's approvals tab shows it. */
+export const Waiting = meta.story();
 
-/** Tab sits beside a tab's name, such as how many approvals wait. */
-export const Tab = meta.story({ args: { size: "sm", count: 2, label: "2 waiting" } });
-
-/** Capped shows more than 99 as 99+. */
+/** Capped shows more than 99 as 99+, and still says the full count to a screen reader. */
 export const Capped = meta.story({
-	args: { count: 140, label: "140 unread messages" },
+	args: { count: 140, label: "140 waiting on you" },
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText("99+")).toBeInTheDocument();
+		await expect(canvas.getByText("140 waiting on you")).toBeInTheDocument();
 	},
 });

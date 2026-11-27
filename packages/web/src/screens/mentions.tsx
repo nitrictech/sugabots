@@ -1,15 +1,16 @@
+import { botColorVariables } from "@sugabots/avatars";
 import {
-	type AgentParticipant,
+	type BotParticipant,
+	type ChatDetails,
+	type ChatKind,
 	GROUP_MENTION_HANDLES,
 	type GroupMentionHandle,
+	type MemberParticipant,
 	type MessageAuthor,
 	mentionedHandles,
-	NOTIFYING_THREAD_TYPES,
-	type PersonParticipant,
+	notifiesMembers,
+	type Participant,
 	splitAroundMentions,
-	type ThreadDetails,
-	type ThreadParticipant,
-	type ThreadType,
 } from "@sugabots/contracts";
 import { cn } from "cn";
 import type { PhrasingContent, Root } from "mdast";
@@ -17,7 +18,7 @@ import { type ComponentProps, createContext, type ReactNode, useContext, useStat
 import type { ExtraProps } from "streamdown";
 import type { Plugin } from "unified";
 import { SKIP, visit } from "unist-util-visit";
-import { AgentAvatar } from "@/shell/Agent.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { MentionCard } from "./MentionCard.tsx";
 
 /*
@@ -30,77 +31,85 @@ import { MentionCard } from "./MentionCard.tsx";
  */
 
 /**
- * Everyone a mention in the thread can name: those in it, then the pod's bots
- * and people who are not.
+ * Everyone a mention in the chat can name: those in it, then the project's bots
+ * and the members who reach the project who are not.
  */
 export function mentionableIn(
-	details: Pick<ThreadDetails, "participants" | "crew" | "members">,
-): ThreadParticipant[] {
+	details: Pick<ChatDetails, "participants" | "projectBots" | "membersReachingProject">,
+): Participant[] {
 	const joined = new Set(details.participants.map(({ id }) => id));
 	return [
 		...details.participants,
-		...details.crew.filter(({ id }) => !joined.has(id)),
-		...details.members.filter(({ id }) => !joined.has(id)),
+		...details.projectBots.filter(({ id }) => !joined.has(id)),
+		...details.membersReachingProject.filter(({ id }) => !joined.has(id)),
 	];
 }
 
-/** The bots among `crew` that `draft` names, each once, in the order it first names them. */
-export function botsNamed(draft: string, crew: readonly ThreadParticipant[]): AgentParticipant[] {
-	const bots = crew.filter((member): member is AgentParticipant => member.kind === "agent");
-	const handles = new Set(mentionedHandles(draft));
-	return [...handles].flatMap((handle) => bots.filter((bot) => bot.handle === handle));
+/** The bots among `projectBots` that `draft` names, each once, in the order it first names them. */
+export function botsNamed(draft: string, projectBots: readonly BotParticipant[]): BotParticipant[] {
+	return mentionedHandles(draft).flatMap((handle) =>
+		projectBots.filter((bot) => bot.handle === handle),
+	);
 }
 
-/**
- * The bot named first in `draft` among `crew`, which sending a new thread's
- * first message starts it with; any named after it are only mentioned.
- */
-export function firstBotNamed(
-	draft: string,
-	crew: readonly ThreadParticipant[],
-): AgentParticipant | undefined {
-	return botsNamed(draft, crew).at(0);
-}
-
-/** `@here` or `@channel`, which a person writes to notify everyone who can see the conversation. */
+/** `@here` or `@channel`, which a member writes in a chat to notify the members who reach its project. */
 export interface GroupMention {
 	kind: "group";
 	handle: GroupMentionHandle;
 	/**
-	 * The people it would notify: the pod's people but its writer, never a bot.
+	 * The members it would notify: those who reach the project but its writer, never a bot.
 	 * Each one's own notification settings can still hold theirs back.
 	 */
-	notifies: readonly PersonParticipant[];
+	notifies: readonly MemberParticipant[];
 }
 
-/** Whom a mention can name: a person or a bot, or with `@here` or `@channel`, everyone. */
-export type MentionTarget = ThreadParticipant | GroupMention;
+/** Whom a mention can name: a member or a bot, or with `@here` or `@channel`, everyone. */
+export type MentionTarget = Participant | GroupMention;
 
-/** Who writes a message, as far as `@here` and `@channel` care: a person, by id, or not a person. */
-type Writer = { kind: "person"; id: string } | { kind: Exclude<MessageAuthor["kind"], "person"> };
+/** Who writes a message, as far as `@here` and `@channel` care: a member, by id, or not a member. */
+type Writer = { kind: "member"; id: string } | { kind: Exclude<MessageAuthor["kind"], "member"> };
 
 /**
- * `@here` and `@channel` as `writer` can use them in a thread of `threadType`,
- * each notifying `members`, the pod's people, but the writer. None where they
- * would notify nobody, so they stay text: written by a bot or a routine, in a
- * thread that notifies nobody, or in a pod with nobody else in it. None in a
- * direct message either, where everybody in it is told of every message.
+ * `@here` and `@channel` as `writer` can use them in a chat of kind
+ * `chatKind`, each notifying `membersReachingProject` but the writer.
+ * None where they would notify nobody, so they stay text: written by a bot or
+ * an automation, in a chat that notifies nobody, or in a project
+ * nobody else reaches.
  */
 export function groupMentionsBy(
 	writer: Writer,
-	members: readonly PersonParticipant[],
-	threadType: ThreadType,
+	membersReachingProject: readonly MemberParticipant[],
+	chatKind: ChatKind,
 ): GroupMention[] {
-	if (writer.kind !== "person" || !NOTIFYING_THREAD_TYPES.has(threadType)) return [];
-	if (threadType === "direct") return [];
-	const notifies = members.filter((member) => member.id !== writer.id);
+	if (writer.kind !== "member" || !notifiesMembers(chatKind)) return [];
+	const notifies = membersReachingProject.filter((member) => member.id !== writer.id);
 	if (notifies.length === 0) return [];
 	return GROUP_MENTION_HANDLES.map((handle) => ({ kind: "group", handle, notifies }));
 }
 
 /**
+ * Whom `signedIn`'s composer offers to mention in a chat of kind
+ * `chatKind`: everyone `mentionableIn` gives but the current user, then
+ * `@here` and `@channel` where they would notify anyone.
+ */
+export function composerMentionable(
+	details: Pick<ChatDetails, "participants" | "projectBots" | "membersReachingProject">,
+	signedIn: { id: string },
+	chatKind: ChatKind,
+): MentionTarget[] {
+	return [
+		...mentionableIn(details).filter((candidate) => candidate.id !== signedIn.id),
+		...groupMentionsBy(
+			{ kind: "member", id: signedIn.id },
+			details.membersReachingProject,
+			chatKind,
+		),
+	];
+}
+
+/**
  * Whom the handle `handle`, as a mention writes it, names among `mentionable`.
- * A person whose handle is `here` or `channel` is mentioned with everyone else.
+ * A member whose handle is that of `@here` or `@channel` is mentioned with everyone else.
  */
 export function targetWithHandle(
 	mentionable: readonly MentionTarget[],
@@ -120,7 +129,7 @@ export function mentionTargetKey(target: MentionTarget): string {
 
 /**
  * A mention as a chip that stands off the words around it: a bot by its face
- * and name, a person or everyone by the handle. Sent messages and the composer
+ * and name, a member or everyone by the handle. Sent messages and the composer
  * both draw it, so a mention looks the same before and after it is sent, and
  * both open its `MentionCard` from it.
  */
@@ -134,19 +143,24 @@ export function MentionChip({
 	/** Shown after the name, inside the chip, such as a × that removes it. */
 	after?: ReactNode;
 } & ComponentProps<"span">) {
+	// A bot's in its own colour, a member's on a light wash that sits on any surface.
+	const bot = target.kind === "bot" ? target : undefined;
 	return (
 		<span
 			{...rest}
+			data-mention-chip
+			style={bot ? { ...botColorVariables(bot.color), ...rest.style } : rest.style}
 			className={cn(
-				"focus-ring mx-px inline-flex cursor-pointer items-baseline gap-1 rounded-xs bg-chip px-1 font-semibold text-foreground leading-normal hover:bg-hover",
+				"focus-ring mx-px inline-flex cursor-pointer items-baseline gap-1 rounded-md px-1.5 font-medium leading-normal transition hover:brightness-125",
+				bot ? "bg-bot-tint text-bot-text" : "bg-foreground/10 text-foreground",
 				className,
 			)}
 		>
-			{target.kind === "agent" ? (
+			{target.kind === "bot" ? (
 				<>
-					<AgentAvatar
+					<BotAvatar
 						color={target.color}
-						face={target.face}
+						eyes={target.eyes}
 						shape={target.shape}
 						size={14}
 						className="shrink-0 self-center"
@@ -183,7 +197,7 @@ export const MENTION_TAG = "mention";
  * context rather than the renderer's props because Streamdown redraws only when
  * its text changes: someone who becomes mentionable after a reply is drawn is
  * still marked in it. `@here` and `@channel` are among them only in a
- * person's message, the one kind that notifies anyone; see `groupMentionsBy`.
+ * member's message, the one kind that notifies anyone; see `groupMentionsBy`.
  */
 export const MentionableContext = createContext<readonly MentionTarget[]>([]);
 

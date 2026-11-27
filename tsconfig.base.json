@@ -30,11 +30,46 @@
 				"overrides": [
 					{
 						// Code that uses DomainError: a caught error must become a typed class.
-						// Keep this list the same as the DomainError override in biome.json.
+						// Keep this list in sync with the typed Effect and user-text override in biome.json.
 						"include": [
-							"packages/core/src/integrations/**/*.ts",
+							"packages/core/src/providers/connectors/github/**/*.ts",
 							"packages/core/src/providers/models/**/*.ts",
 							"packages/core/src/providers/model-providers/remote.ts",
+							"packages/core/src/providers/model-providers/model-providers.ts",
+							"packages/core/src/providers/model-providers/held-models.ts",
+							"packages/core/src/providers/model-providers/sign-in/*.ts",
+							"packages/core/src/providers/search-providers/search-providers.ts",
+							"packages/core/src/providers/search-providers/search-provider-store.ts",
+							"packages/core/src/providers/web/web.ts",
+							"packages/core/src/operations/**/*.ts",
+							"packages/core/src/files/files.ts",
+							"packages/core/src/authentication/**/*.ts",
+							"packages/core/src/proofs/**/*.ts",
+							"packages/core/src/workspaces/projects/**/*.ts",
+							"packages/core/src/workspaces/bots/**/*.ts",
+							"packages/core/src/chats/automations/automation.ts",
+							"packages/core/src/chats/automations/automation-view.ts",
+							"packages/core/src/chats/automations/automation-webhooks.ts",
+							"packages/core/src/chats/automations/automation-writes.ts",
+							"packages/core/src/chats/automations/automations.ts",
+							"packages/core/src/chats/automations/project-automations.ts",
+							"packages/core/src/chats/automations/schedule.ts",
+							"packages/core/src/workspaces/membership/**/*.ts",
+							"packages/core/src/workspaces/time-zone/**/*.ts",
+							"packages/core/src/workspaces/workspace-setup/**/*.ts",
+							"packages/core/src/accounting/usage.ts",
+							"packages/core/src/workspaces/workspace-reference.ts",
+							"packages/core/src/computers/computer-provider-setup.ts",
+							"packages/core/src/computers/computer-network.ts",
+							"packages/core/src/computers/project-computer-setup.ts",
+							"packages/core/src/chats/chats/chats.ts",
+							"packages/core/src/chats/chats/chat-files.ts",
+							"packages/core/src/chats/chats/chat-view.ts",
+							"packages/core/src/chats/chats/reached-chat.ts",
+							"packages/core/src/chats/chat-details-view.ts",
+							"packages/core/src/chats/reactions/reactions.ts",
+							"packages/core/src/chats/turns/controls.ts",
+							"packages/contracts/src/errors/**/*.ts",
 							"packages/server/src/http/errors.ts"
 						],
 						"options": {

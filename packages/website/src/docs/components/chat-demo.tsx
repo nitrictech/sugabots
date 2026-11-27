@@ -1,46 +1,39 @@
 import { RotateCcwIcon } from "lucide-react";
 import { Children, type ReactNode, useState } from "react";
-import { ChatCollaboration, ChatMessage, ChatText } from "@/components/chat";
-import { MotionCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
+import { type CastName, cast } from "@/cast";
+import { ChatMessage, ChatText } from "@/components/chat";
+import { MotionDemoCard, Reveal, RevealItem, riseIn } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
-import { type CastName, cast } from "@/docs/cast";
 
 /** Seconds between one line of a demo chat and the next. */
 const LINE_STAGGER_S = 0.55;
 
 interface SayProps {
 	from: CastName;
-	/** Another bot this bot's message asked, shown as the collaboration line under its words. */
-	collaboratesWith?: CastName;
 	children: ReactNode;
 }
 
 /** One message in a `Chat`, said by a member of the docs' cast. */
-export function Say({ from, collaboratesWith, children }: SayProps) {
-	const author = cast[from];
-	const collaborator = collaboratesWith ? cast[collaboratesWith] : undefined;
+export function Say({ from, children }: SayProps) {
 	return (
-		<ChatMessage author={author}>
+		<ChatMessage author={cast[from]}>
 			<ChatText>{children}</ChatText>
-			{author.kind === "bot" && collaborator?.kind === "bot" && (
-				<ChatCollaboration from={author.look} to={collaborator} status="Done" />
-			)}
 		</ChatMessage>
 	);
 }
 
 interface ChatProps {
-	/** Where the chat happens, e.g. "Family · Trip Planner". */
+	/** Where the chat happens, e.g. "Lisbon trip". */
 	title: string;
 	children: ReactNode;
 }
 
-/** A pretend conversation that plays out line by line when it scrolls into view, and again on request. */
+/** A pretend chat that plays out line by line when it scrolls into view, and again on request. */
 export function Chat({ title, children }: ChatProps) {
 	const [playCount, setPlayCount] = useState(0);
 	return (
-		<Reveal className="my-8">
-			<MotionCard variants={riseIn} className="gap-0 rounded-3xl py-0 shadow-xl">
+		<Reveal>
+			<MotionDemoCard variants={riseIn}>
 				<div className="flex items-center gap-3 border-b px-5 py-3">
 					<p className="flex-1 text-sm font-semibold">{title}</p>
 					<Button
@@ -63,7 +56,7 @@ export function Chat({ title, children }: ChatProps) {
 						<RevealItem>{line}</RevealItem>
 					))}
 				</Reveal>
-			</MotionCard>
+			</MotionDemoCard>
 		</Reveal>
 	);
 }

@@ -1,5 +1,10 @@
 import { Effect, Schema, SchemaGetter } from "effect";
-import { discoveredModel, type ProviderDialect, type ProviderModelFields } from "./dialect.ts";
+import {
+	discoveredModel,
+	lenientOptional,
+	type ProviderDialect,
+	type ProviderModelFields,
+} from "./dialect.ts";
 import { openaiClient, recognizeOpenAIFailure } from "./openai-compatible.ts";
 
 /**
@@ -10,7 +15,6 @@ import { openaiClient, recognizeOpenAIFailure } from "./openai-compatible.ts";
 const CODEX_CLIENT_VERSION = "0.166.0";
 
 export const chatgpt: ProviderDialect = {
-	name: "ChatGPT",
 	listingUrl: (root) => `${root}/models?client_version=${CODEX_CLIENT_VERSION}`,
 	authorization: (apiKey): Record<string, string> =>
 		apiKey ? { authorization: `Bearer ${apiKey}` } : {},
@@ -30,12 +34,8 @@ export const chatgpt: ProviderDialect = {
 	),
 	model: Schema.Struct({
 		slug: Schema.String,
-		display_name: Schema.optional(Schema.String).pipe(
-			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-		),
-		context_window: Schema.optional(Schema.Finite).pipe(
-			Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-		),
+		display_name: lenientOptional(Schema.String),
+		context_window: lenientOptional(Schema.Finite),
 		// Codex assumes images are accepted when a model does not say.
 		input_modalities: Schema.Array(Schema.String).pipe(
 			Schema.withDecodingDefault(Effect.succeed(["text", "image"])),
@@ -47,10 +47,10 @@ export const chatgpt: ProviderDialect = {
 				(entry): ProviderModelFields => ({
 					modelId: entry.slug,
 					displayName: entry.display_name,
-					// Every model Codex offers is an agent model: it reasons and calls tools.
+					// Every model Codex offers is made to work through tools: it reasons and calls them.
 					capabilities: [
 						"tools",
-						"reasoning",
+						"thinking",
 						...(entry.input_modalities.includes("image") ? (["vision"] as const) : []),
 					],
 					contextLength: entry.context_window,

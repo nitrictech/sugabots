@@ -1,40 +1,35 @@
-import { BotFace } from "@sugabots/avatars";
-import type { ProviderPresetId } from "@sugabots/contracts";
+import { StillBotFace } from "@sugabots/avatars";
+import type { BuiltInProviderId } from "@sugabots/contracts";
 import { providerLogos } from "@sugabots/provider-logos";
 import { cn } from "cn";
 import { CheckIcon, XIcon } from "lucide-react";
 import { useInView, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { cast } from "@/cast";
 import { StripeIcon } from "@/components/brand-icons";
-import { arrive, type Bot, crew, MessageRow, people } from "@/landing/chat-parts";
-
-/*
- * The four card demos. The first two open on a finished moment in the app
- * and wait for the visitor: react to a message, or answer a request. The
- * handoff card shows an exchange between two bots, and the models card steps
- * through its bots and follows the pointer.
- */
+import type { ChatBot } from "@/components/chat";
+import { arrive, MessageRow } from "@/landing/chat-parts";
 
 const demoArea =
 	// A little taller on phones, where the messages wrap onto more lines.
 	"relative flex h-68 flex-col rounded-xl border border-landing-line bg-landing-page sm:h-64";
 
 /** Gary asks, Growth Desk drafts, and Lorraine replies; the visitor can add their own 👍 to the draft. */
-export function ThreadDemo() {
+export function ChatDemo() {
 	const [reacted, setReacted] = useState(false);
 
 	return (
 		// As tall as its three messages, so there's no gap above Gary's.
 		<div className={cn(demoArea, "h-auto gap-3 overflow-hidden p-4 sm:h-auto sm:px-5")}>
 			<MessageRow
-				author={{ kind: "person", person: people.gary }}
+				author={cast.gary}
 				time="6:02"
 				text="Fernhill replied about pricing. Can someone draft the answer?"
 			/>
 			<MessageRow
-				author={{ kind: "bot", bot: crew.growthDesk }}
+				author={cast.growthDesk}
 				time="6:03"
-				text="Drafted. It’s in the thread with their usage numbers."
+				text="Drafted. It’s in the chat with their usage numbers."
 			>
 				<button
 					type="button"
@@ -52,7 +47,7 @@ export function ThreadDemo() {
 				</button>
 			</MessageRow>
 			<MessageRow
-				author={{ kind: "person", person: people.lorraine }}
+				author={cast.lorraine}
 				time="6:04"
 				text="Hold it until I’ve spoken to their team tomorrow."
 			/>
@@ -68,13 +63,15 @@ export function ApprovalDemo() {
 
 	return (
 		<div className={cn(demoArea, "justify-center p-4 sm:p-6")}>
-			<div className="flex min-w-0 flex-col gap-2.5 rounded-3xl rounded-tl-sm bg-landing-bubble py-2.5 pr-3 pb-3 pl-2.5 text-landing-text">
+			<div className="flex min-w-0 flex-col gap-2.5 rounded-3xl bg-landing-bubble py-2.5 pr-3 pb-3 pl-2.5 text-landing-text">
 				<div className="flex min-w-0 items-start gap-2.5">
-					<span className="mt-px grid size-6 shrink-0 place-items-center rounded-md bg-indigo-500 text-white">
+					<span className="mt-px grid size-6 shrink-0 place-items-center rounded-md bg-landing-stripe text-landing-text-strong">
 						<StripeIcon className="size-3.25" />
 					</span>
 					<div className="flex min-w-0 flex-col gap-0.5">
-						<span className="text-xs/snug text-landing-muted">Ticket Desk wants to use Stripe</span>
+						<span className="text-xs/snug text-landing-muted">
+							{cast.ticketDesk.name} wants to use Stripe
+						</span>
 						<span className="text-sm/snug font-medium">Refund payment</span>
 					</div>
 				</div>
@@ -89,7 +86,7 @@ export function ApprovalDemo() {
 				<div className="ml-8.5 flex min-h-8 items-center">
 					{answer === "waiting" ? (
 						<fieldset className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-							<legend className="sr-only">Answer Ticket Desk’s request</legend>
+							<legend className="sr-only">Answer {cast.ticketDesk.name}’s request</legend>
 							<button
 								type="button"
 								onClick={() => setAnswer("allowed")}
@@ -132,30 +129,30 @@ export function ApprovalDemo() {
 }
 
 /** The bots' exchange. */
-const handoffMessages: readonly { from: Bot; time: string; text: string }[] = [
+const collaborationMessages: readonly { from: ChatBot; time: string; text: string }[] = [
 	{
-		from: crew.growthDesk,
+		from: cast.growthDesk,
 		time: "6:08",
 		text: "Can Brightwater have 25% off the annual tier and still clear our margin?",
 	},
 	{
-		from: crew.pricingAnalyst,
+		from: cast.pricingAnalyst,
 		time: "6:09",
 		text: "Yes: $36 a seat is a 72% margin. I’ve drafted quote Q-1182.",
 	},
-	{ from: crew.growthDesk, time: "6:09", text: "Thanks. Taking it back to Gary." },
+	{ from: cast.growthDesk, time: "6:09", text: "Thanks. Taking it back to Gary." },
 ];
 
 /** Growth Desk and Pricing Analyst's own exchange, as the app shows a collaboration. */
-export function HandoffDemo() {
+export function CollaborationDemo() {
 	return (
 		<div className={cn(demoArea, "overflow-hidden")}>
 			<div className="flex items-center gap-2 border-b border-landing-line px-4 py-2.5 sm:px-5">
 				<span aria-hidden className="flex shrink-0">
-					{[crew.growthDesk, crew.pricingAnalyst].map((bot) => (
+					{[cast.growthDesk, cast.pricingAnalyst].map((bot) => (
 						<span key={bot.name} className="-mr-1.75">
-							<BotFace
-								{...bot.look}
+							<StillBotFace
+								{...bot.avatar}
 								ring={{ color: "var(--color-landing-page)", width: 2 }}
 								className="block size-5"
 							/>
@@ -163,14 +160,14 @@ export function HandoffDemo() {
 					))}
 				</span>
 				<span className="truncate pl-2 text-xs font-semibold text-landing-text">
-					Collaboration with {crew.pricingAnalyst.name}
+					Collaboration with {cast.pricingAnalyst.name}
 				</span>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col justify-end gap-3 p-4 sm:px-5">
-				{handoffMessages.map((message) => (
+				{collaborationMessages.map((message) => (
 					<MessageRow
 						key={message.text}
-						author={{ kind: "bot", bot: message.from }}
+						author={message.from}
 						time={message.time}
 						text={message.text}
 					/>
@@ -181,41 +178,41 @@ export function HandoffDemo() {
 }
 
 interface ModelChoice {
-	bot: Bot;
+	bot: ChatBot;
 	job: string;
 	model: string;
 	provider: string;
-	preset: ProviderPresetId;
+	builtIn: BuiltInProviderId;
 }
 
 const modelChoices: readonly ModelChoice[] = [
 	{
-		bot: crew.copywriter,
+		bot: cast.copywriter,
 		job: "Drafts replies, posts and invites",
 		model: "ChatGPT",
 		provider: "OpenAI",
-		preset: "chatgpt",
+		builtIn: "chatgpt",
 	},
 	{
-		bot: crew.researcher,
+		bot: cast.researcher,
 		job: "Reads the long stuff so you don’t have to",
 		model: "Claude",
 		provider: "Anthropic",
-		preset: "anthropic",
+		builtIn: "anthropic",
 	},
 	{
-		bot: crew.inboxSorter,
+		bot: cast.inboxSorter,
 		job: "Triage, reminders and quick jobs",
 		model: "Gemini Flash",
 		provider: "Google",
-		preset: "gemini",
+		builtIn: "gemini",
 	},
 	{
-		bot: crew.journal,
+		bot: cast.journal,
 		job: "Private notes that stay private",
 		model: "Llama",
 		provider: "Ollama, local",
-		preset: "ollama",
+		builtIn: "ollama",
 	},
 ];
 
@@ -263,7 +260,7 @@ export function ModelsDemo() {
 							: "border-transparent bg-transparent",
 					)}
 				>
-					<BotFace {...choice.bot.look} className="size-7.5" />
+					<StillBotFace {...choice.bot.avatar} className="size-7.5" />
 					<span className="flex min-w-0 flex-1 flex-col gap-px">
 						<span className="truncate text-sm font-semibold text-landing-text">
 							{choice.bot.name}
@@ -272,7 +269,7 @@ export function ModelsDemo() {
 					</span>
 					{/* One width for every model, wide enough for the longest, so they line up down the card. */}
 					<span className="flex w-34 shrink-0 items-center gap-2 rounded-lg border border-landing-frame bg-landing-raised px-2.5 py-1.5">
-						<ProviderMark preset={choice.preset} />
+						<ProviderMark builtIn={choice.builtIn} />
 						<span className="flex min-w-0 flex-col leading-tight">
 							<span className="truncate text-xs font-medium text-landing-text">{choice.model}</span>
 							<span className="truncate text-xs text-landing-faint">{choice.provider}</span>
@@ -285,8 +282,8 @@ export function ModelsDemo() {
 }
 
 /** A provider's logo in its version for dark backgrounds, since the landing page is always dark. */
-function ProviderMark({ preset }: { preset: ProviderPresetId }) {
-	const logo = providerLogos[preset];
+function ProviderMark({ builtIn }: { builtIn: BuiltInProviderId }) {
+	const logo = providerLogos[builtIn];
 	return (
 		<img
 			src={logo.dark ?? logo.light}

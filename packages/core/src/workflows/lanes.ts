@@ -1,10 +1,11 @@
 export * as Lanes from "./lanes.ts";
 
 import type { Activities } from "@sugabots/workflow/activities";
-import { and, asc, eq, lt, type SQLWrapper, sql } from "drizzle-orm";
+import { and, asc, eq, lt, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Exit, Layer, Option, Schema } from "effect";
-import { Activity, type Workflow, WorkflowEngine } from "effect/unstable/workflow";
+import { Activity, DurableDeferred, type Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { afterCommit, Database, query, transaction } from "../database/database.ts";
+import { processLayer, Tier } from "../tiers.ts";
 import { lane, laneRequest } from "./sql.ts";
 
 /**
@@ -19,18 +20,25 @@ import { lane, laneRequest } from "./sql.ts";
  */
 export interface Interface {
 	/** Starts the workflow now if the lane is idle; otherwise leaves it to wait, by `whenBusy`. */
-	readonly admit: <W extends Workflow.Any>(request: {
-		readonly key: string;
-		/** What the lane's work is about (a thread, say), for `laneBusy`. */
-		readonly subject?: string;
-		readonly workflow: W;
-		readonly payload: W["payloadSchema"]["Type"];
-		readonly whenBusy: WhenBusy;
-	}) => Effect.Effect<Admission>;
+	readonly admit: <W extends Workflow.Any>(
+		request: {
+			readonly key: string;
+			/** What the lane's work is about (a chat, say), for `laneBusy`. */
+			readonly subject?: string;
+			readonly workflow: W;
+			readonly payload: W["payloadSchema"]["Type"];
+			/**
+			 * For `coalesce`: whether this request may join the waiting request
+			 * whose payload is `waiting`. Any, when unset.
+			 */
+			readonly joins?: (waiting: W["payloadSchema"]["Type"]) => boolean;
+		} & (WaitingPolicy | ResumePolicy),
+	) => Effect.Effect<Admission>;
 	/**
-	 * Frees the lane an execution holds and starts the next request waiting in
-	 * it. Called from the execution's last activity; doing nothing when the lane
-	 * has already moved on makes it safe to repeat.
+	 * Hands the lane to the oldest queued request, starting a new workflow or
+	 * waking the execution waiting to resume. Safe to repeat after the lane
+	 * has moved on. An execution that doesn't hold the lane gives up the
+	 * requests it has waiting there instead, as it is ending.
 	 */
 	readonly release: (execution: {
 		readonly key: string;
@@ -51,15 +59,27 @@ export interface Interface {
 
 /**
  * What a request does when its lane is busy:
- * - `coalesce`: joins a request already waiting (which keeps its payload), or waits.
+ * - `coalesce`: joins the oldest request already waiting that it `joins`
+ *   (which keeps its payload), or waits.
  * - `replace`: gives a request already waiting its payload, or waits.
  * - `queue`: waits behind every request already waiting.
  */
 export type WhenBusy = "coalesce" | "replace" | "queue";
 
+type WaitingPolicy = { readonly whenBusy: WhenBusy; readonly resumeRound?: never };
+
+/** Queues a suspended execution once, or reports that it holds the lane. */
+type ResumePolicy = { readonly whenBusy: "resume"; readonly resumeRound: string };
+
+/** The signal a queued execution waits for after its approvals were decided. */
+export const laneGranted = (round: string) => DurableDeferred.make(`laneGranted/${round}`);
+
+/** What became of a request: its workflow started, it waits, or it joined or replaced one waiting. */
 export type Admission = "started" | "waiting" | "coalesced" | "replaced";
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Lanes") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Lanes") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * The engine's methods take a fully typed workflow, but a lane only knows
@@ -76,7 +96,7 @@ const general = (workflow: Workflow.Any) =>
 
 /**
  * Whether any lane about `subject` is running one of `workflows`, as a
- * condition for a query: "is an agent answering in this thread". A lane holds
+ * condition for a query: "is a bot answering in this chat". A lane holds
  * waiting requests only while it runs, so a running lane covers those too.
  */
 export const laneBusy = (subject: SQLWrapper, workflows: ReadonlyArray<string>) =>
@@ -102,6 +122,30 @@ export const waitingSince = (subject: SQLWrapper, workflow: string) =>
 		join ${lane} on ${lane.key} = waiting.lane_key
 		where ${lane.subject} = (${subject})::text and ${lane.workflow} = ${workflow}
 	)`;
+
+/**
+ * Whether a lane about `subject` holds a request for `workflow` whose payload
+ * `matches`, starting, running or waiting to start, as a condition for a
+ * query. `matches` is given the payload as its JSON encoding.
+ */
+export const holdsRequest = (
+	subject: SQLWrapper,
+	workflow: string,
+	matches: (payload: SQLWrapper) => SQL | undefined,
+) =>
+	sql<boolean>`(exists (
+		select 1 from ${lane}
+		where ${lane.subject} = (${subject})::text
+			and ${lane.workflow} = ${workflow}
+			and ${lane.state} <> 'idle'
+			and ${matches(lane.payload) ?? sql`true`}
+	) or exists (
+		select 1 from ${laneRequest} waiting
+		join ${lane} on ${lane.key} = waiting.lane_key
+		where ${lane.subject} = (${subject})::text
+			and waiting.workflow = ${workflow}
+			and ${matches(sql`waiting.payload`) ?? sql`true`}
+	))`;
 
 /** The statement behind `Interface.dropWaiting`. */
 const dropWaitingStatement = (subjects: ReadonlyArray<string>, workflows: ReadonlyArray<string>) =>
@@ -139,6 +183,36 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 			return workflow;
 		};
 
+		/**
+		 * The workflow a lane a crash left behind holds, for `reconcile`; none for
+		 * one no process runs, such as a workflow since removed, which is logged
+		 * and left as it is, so one such lane never stops the others' repair.
+		 */
+		const repairableWorkflow = (row: { key: string; workflow: string }) => {
+			const workflow = byName.get(row.workflow);
+			return workflow
+				? Effect.succeed(workflow)
+				: Effect.as(
+						Effect.logWarning("A lane holds a workflow no process runs, so it is left as it is", {
+							key: row.key,
+							workflow: row.workflow,
+						}),
+						undefined,
+					);
+		};
+
+		// A queued execution may have been interrupted before it got the lane.
+		const releaseIfFinished = (key: string, workflow: Workflow.Any, executionId: string) =>
+			Effect.flatMap(
+				engine.poll(general(workflow), executionId) as Effect.Effect<
+					Option.Option<Workflow.Result<unknown, unknown>>
+				>,
+				(result) =>
+					Option.isSome(result) && result.value._tag === "Complete"
+						? Effect.suspend(() => release({ key, executionId }))
+						: Effect.void,
+			);
+
 		/** Starts the lane's workflow after the enclosing transaction commits. */
 		const startAfterCommit = (
 			key: string,
@@ -168,40 +242,68 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 								),
 						),
 					),
-					// An execution that had already finished is not run again, so it
-					// will never release the lane itself.
-					Effect.andThen(
-						engine.poll(general(workflow), executionId) as Effect.Effect<
-							Option.Option<Workflow.Result<unknown, unknown>>
-						>,
-					),
-					Effect.flatMap((result) =>
-						Option.isSome(result) && result.value._tag === "Complete"
-							? Effect.suspend(() => release({ key, executionId }))
-							: Effect.void,
-					),
+					Effect.andThen(releaseIfFinished(key, workflow, executionId)),
 					provide,
 					Effect.asVoid,
 				),
 			);
 
 		/** Hands the lane to a workflow; the caller holds the lane's row lock. */
-		const occupy = (key: string, workflow: Workflow.Any, payload: unknown) =>
+		const occupy = (
+			key: string,
+			workflow: Workflow.Any,
+			payload: unknown,
+			alreadyExecuting = false,
+		) =>
 			Effect.gen(function* () {
 				const executionId = yield* workflow.executionId(decodePayload(workflow, payload));
+				const round = approvalResumeRound(payload);
+				const state = alreadyExecuting || typeof round === "string" ? "running" : "starting";
 				yield* query((db) =>
 					db
 						.update(lane)
-						.set({ state: "starting", workflow: workflow._tag, executionId, payload })
+						.set({ state, workflow: workflow._tag, executionId, payload })
 						.where(eq(lane.key, key)),
 				);
-				yield* startAfterCommit(key, workflow, executionId, payload);
+				if (alreadyExecuting) return;
+				if (typeof round !== "string") {
+					yield* startAfterCommit(key, workflow, executionId, payload);
+					return;
+				}
+				// The durable grant and the handoff commit together. A replay can
+				// read the grant even if the turn wasn't yet waiting for it.
+				const granted = laneGranted(round);
+				const grant = DurableDeferred.succeed(granted, {
+					token: DurableDeferred.tokenFromExecutionId(granted, {
+						workflow: general(workflow),
+						executionId,
+					}),
+					value: undefined,
+				}).pipe(Effect.provideService(WorkflowEngine.WorkflowEngine, engine));
+				yield* grant;
+				// The engine looks for the grant as it is written, before this
+				// transaction commits, and missing it there, waits for its next
+				// poll, seconds later. Sent again once committed, the grant wakes
+				// the execution at once; the first sent stands.
+				yield* afterCommit(
+					grant.pipe(Effect.andThen(releaseIfFinished(key, workflow, executionId))),
+				);
 			});
 
-		const admit: Interface["admit"] = ({ key, subject, workflow, payload, whenBusy }) =>
+		const admit: Interface["admit"] = ({
+			key,
+			subject,
+			workflow,
+			payload,
+			whenBusy,
+			resumeRound,
+			joins,
+		}) =>
 			transaction(
 				Effect.gen(function* () {
 					const encoded = encodePayload(workflow, payload);
+					const retained =
+						whenBusy === "resume" ? { ...encoded, resumeAfterApproval: resumeRound } : encoded;
 					yield* query((db) =>
 						db
 							.insert(lane)
@@ -211,19 +313,50 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 					const [current] = yield* query((db) =>
 						db.select().from(lane).where(eq(lane.key, key)).for("update"),
 					);
+					const resuming = whenBusy === "resume" ? yield* workflow.executionId(payload) : undefined;
+					if (resuming && current?.executionId === resuming) return "started" as const;
 					if (current?.state === "idle") {
-						yield* occupy(key, workflow, encoded);
+						yield* occupy(key, workflow, encoded, whenBusy === "resume");
 						return "started" as const;
 					}
-					const [waiting] = yield* query((db) =>
+					const allWaiting = yield* query((db) =>
 						db
-							.select({ id: laneRequest.id })
+							.select({
+								id: laneRequest.id,
+								payload: laneRequest.payload,
+								workflow: laneRequest.workflow,
+							})
 							.from(laneRequest)
 							.where(eq(laneRequest.laneKey, key))
-							.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id))
-							.limit(1),
+							.orderBy(asc(laneRequest.createdAt), asc(laneRequest.id)),
 					);
-					if (waiting && whenBusy === "coalesce") return "coalesced" as const;
+					if (resuming) {
+						for (const candidate of allWaiting) {
+							if (candidate.workflow !== workflow._tag) continue;
+							const queued = decodePayload(workflow, candidate.payload) as typeof payload;
+							if ((yield* workflow.executionId(queued)) !== resuming) continue;
+							if (resumeRound && approvalResumeRound(candidate.payload) !== resumeRound) {
+								yield* query((db) =>
+									db
+										.update(laneRequest)
+										.set({ payload: retained })
+										.where(eq(laneRequest.id, candidate.id)),
+								);
+							}
+							return "waiting" as const;
+						}
+					}
+					const waiting = allWaiting.find((candidate) => !approvalResumeRound(candidate.payload));
+					if (
+						whenBusy === "coalesce" &&
+						allWaiting.some(
+							(candidate) =>
+								!approvalResumeRound(candidate.payload) &&
+								(!joins || joins(decodePayload(workflow, candidate.payload) as typeof payload)),
+						)
+					) {
+						return "coalesced" as const;
+					}
 					if (waiting && whenBusy === "replace") {
 						yield* query((db) =>
 							db
@@ -236,7 +369,7 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 					yield* query((db) =>
 						db
 							.insert(laneRequest)
-							.values({ laneKey: key, workflow: workflow._tag, payload: encoded }),
+							.values({ laneKey: key, workflow: workflow._tag, payload: retained }),
 					);
 					return "waiting" as const;
 				}),
@@ -266,13 +399,43 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 				}
 			});
 
+		/**
+		 * Drops the requests waiting in the lane for the execution
+		 * `executionId`; the caller holds the lane's row lock.
+		 */
+		const dropRequestsOf = (key: string, executionId: string) =>
+			Effect.gen(function* () {
+				const waiting = yield* query((db) =>
+					db
+						.select({
+							id: laneRequest.id,
+							workflow: laneRequest.workflow,
+							payload: laneRequest.payload,
+						})
+						.from(laneRequest)
+						.where(eq(laneRequest.laneKey, key)),
+				);
+				for (const request of waiting) {
+					const workflow = workflowNamed(request.workflow);
+					const queued = yield* workflow.executionId(decodePayload(workflow, request.payload));
+					if (queued !== executionId) continue;
+					yield* query((db) => db.delete(laneRequest).where(eq(laneRequest.id, request.id)));
+				}
+			});
+
 		const release: Interface["release"] = ({ key, executionId }) =>
 			transaction(
 				Effect.gen(function* () {
 					const [current] = yield* query((db) =>
 						db.select().from(lane).where(eq(lane.key, key)).for("update"),
 					);
-					if (current?.executionId !== executionId) return;
+					// An execution releasing a lane it doesn't hold is ending, as one
+					// interrupted while queued to resume is: it gives up its place, so
+					// the lane is never handed to it once it has finished.
+					if (current?.executionId !== executionId) {
+						yield* dropRequestsOf(key, executionId);
+						return;
+					}
 					const next = yield* nextRequest(key, executionId);
 					if (!next) {
 						yield* query((db) =>
@@ -305,7 +468,9 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 			);
 			for (const row of stale) {
 				if (!row.workflow || !row.executionId) continue;
-				yield* startAfterCommit(row.key, workflowNamed(row.workflow), row.executionId, row.payload);
+				const workflow = yield* repairableWorkflow({ key: row.key, workflow: row.workflow });
+				if (!workflow) continue;
+				yield* startAfterCommit(row.key, workflow, row.executionId, row.payload);
 			}
 			const long = yield* query((db) =>
 				db
@@ -323,10 +488,11 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 			);
 			for (const row of long) {
 				if (!row.workflow || !row.executionId) continue;
-				const result = yield* engine.poll(
-					general(workflowNamed(row.workflow)),
-					row.executionId,
-				) as Effect.Effect<Option.Option<Workflow.Result<unknown, unknown>>>;
+				const workflow = yield* repairableWorkflow({ key: row.key, workflow: row.workflow });
+				if (!workflow) continue;
+				const result = yield* engine.poll(general(workflow), row.executionId) as Effect.Effect<
+					Option.Option<Workflow.Result<unknown, unknown>>
+				>;
 				// Only a finished execution is released. One the engine cannot see yet
 				// may still be starting, and is left to a later pass.
 				if (Option.isSome(result) && result.value._tag === "Complete") {
@@ -348,7 +514,7 @@ export const make = (workflows: ReadonlyArray<Workflow.Any>) =>
 
 /** Lanes for `workflows`, as {@link make} builds them. */
 export const layerFor = (workflows: ReadonlyArray<Workflow.Any>) =>
-	Layer.effect(Service, make(workflows));
+	processLayer(Layer.effect(Service, make(workflows)));
 
 /**
  * `definition`'s implementation, run in the lane `lane(payload)`. However the
@@ -416,7 +582,11 @@ export const workflow = <
 				const instance = yield* WorkflowEngine.WorkflowInstance;
 				if (instance.suspended) return yield* Effect.interrupt;
 				if (Exit.isFailure(ended)) {
-					yield* Effect.logError(`The ${definition._tag} workflow failed`, ended.cause);
+					yield* Effect.logError(
+						`The ${definition._tag} workflow failed`,
+						{ referenceId: instance.executionId },
+						ended.cause,
+					);
 					if (options.onFailure) yield* ending(options.onFailure, payload);
 				}
 				yield* releaseLane(payload);
@@ -438,10 +608,15 @@ export const workflow = <
 /** The name of the activity that releases a lane workflow's lane. */
 const RELEASE_LANE = "releaseLane";
 
-/** Payloads are stored as their JSON encoding, so a waiting request can be decoded by name later. */
-const encodePayload = (workflow: Workflow.Any, payload: unknown): unknown =>
+/** Older queued approvals have a boolean marker and are still resumed by their journaled timer. */
+const approvalResumeRound = (payload: unknown) =>
+	typeof payload === "object" && payload !== null && "resumeAfterApproval" in payload
+		? payload.resumeAfterApproval
+		: undefined;
+
+const encodePayload = (workflow: Workflow.Any, payload: unknown): object =>
 	Schema.encodeUnknownSync(
-		Schema.toCodecJson(workflow.payloadSchema) as unknown as Schema.Codec<unknown, unknown>,
+		Schema.toCodecJson(workflow.payloadSchema) as unknown as Schema.Codec<unknown, object>,
 	)(payload);
 
 const decodePayload = (workflow: Workflow.Any, payload: unknown): object =>
@@ -479,4 +654,4 @@ export const reconcileLayer = Layer.effectDiscard(
 			pass.pipe(Effect.delay(RECONCILE_INTERVAL), Effect.forever, Effect.withTracerEnabled(false)),
 		);
 	}),
-);
+).pipe(processLayer);

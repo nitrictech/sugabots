@@ -1,21 +1,25 @@
 import {
-	type ActivityItem,
-	type Agent,
+	type AttentionCounts,
+	type AttentionMark,
+	type AutomationUpdate,
+	type Bot,
+	type ChatDetails,
 	type ChatMessageItem,
+	type ChatMessagesPage,
+	type CurrentUser,
 	type FilePart,
+	type FirstChatMessage,
 	handleFromName,
+	type ListedChat,
+	type MemberParticipant,
+	type Message,
 	type MessageReplyTo,
 	type NewMessage,
-	type NewThread,
-	type PersonParticipant,
-	type Pod,
-	type RoutineUpdate,
-	type SessionUser,
-	type StartedThread,
-	type ThreadDetails,
+	type Project,
+	type StartedChat,
 } from "@sugabots/contracts";
-import { isApiFailure } from "@sugabots/sdk";
 import {
+	type InfiniteData,
 	infiniteQueryOptions,
 	type QueryClient,
 	queryOptions,
@@ -27,90 +31,112 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
-import { useEffect, useMemo } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
-import { useAgents } from "@/lib/agents.ts";
-import type { ComposerAttachments } from "@/lib/composer-attachments.ts";
-import { NotReadyError } from "@/lib/failure.ts";
-import { countOf, listNames } from "@/lib/name-list.ts";
-import { findPod, usePods } from "@/lib/pods.ts";
-import { useRoutineActions } from "@/lib/routines.ts";
-import { threadQuery } from "@/lib/threads.ts";
+import { pollWhileAutomationsRun, useAutomationActions } from "@/lib/automations.ts";
+import { useBots } from "@/lib/bots.ts";
+import { chatQuery } from "@/lib/chat-query.ts";
+import { findProject, useProjects } from "@/lib/projects.ts";
+import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import { useWorkspace } from "@/lib/workspace.ts";
 
 const PAGE_SIZE = 30;
-const RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS = 1_000;
+
+/*
+ * The keys of the queries below. Each takes its scope from the widest part to
+ * the narrowest, and a shorter key matches every query under it, so
+ * `projectChatsKey(workspaceId)` refreshes every project's list there.
+ */
+
+export const projectChatsKey = (...scope: [workspaceId?: string, projectId?: string]) => [
+	"project-chats",
+	...scope,
+];
+const attentionCountsKey = (...scope: [workspaceId?: string]) => ["attention-counts", ...scope];
+const attentionMarksKey = (workspaceId: string | undefined) => ["attention-marks", workspaceId];
+const workspaceApprovalsKey = (...scope: [workspaceId?: string]) => [
+	"workspace-approvals",
+	...scope,
+];
+const chatMessagesKey = (...scope: [chatId?: string]) => ["chat-messages", ...scope];
+const optimisticMessagesKey = (chatId: string | undefined) => ["optimistic-messages", chatId];
+const automationFeedKey = (workspaceId: string | undefined, automationId: string) => [
+	"automation-feed",
+	workspaceId,
+	automationId,
+];
 
 /**
- * A pod's conversation list, by the pod's slug: what a chat page's address
- * names, so a page can ask for it before it knows the pod's id.
+ * A project's chats, the newest message first, and its automations, by the
+ * project's id: a bot's are its default project's.
  */
-function chatListQuery(workspaceId: string | undefined, podSlug: string | undefined) {
+function projectChatsQuery(workspaceId: string | undefined, projectId: string | undefined) {
 	return queryOptions({
-		queryKey: ["chat-list", workspaceId, podSlug],
+		queryKey: projectChatsKey(workspaceId, projectId),
 		queryFn:
-			workspaceId && podSlug
+			workspaceId && projectId
 				? ({ signal }) =>
-						Effect.runPromise(
-							client.api.chats.list({
-								params: { workspace: workspaceId },
-								query: { pod: podSlug },
-							}),
-							{ signal },
-						)
+						Effect.runPromise(client.api.chats.projectChats({ params: { projectId } }), { signal })
 				: skipToken,
+		refetchInterval: (query) => pollWhileAutomationsRun(query.state.data?.automations),
 	});
 }
-
-/** The conversation list for a pod, by its slug: its chats, its threads newest first, and its routines. */
-export function useChatList(podSlug: string | undefined) {
-	return useQuery(chatListQuery(useWorkspace().workspace?.id, podSlug));
-}
-
-/** How each pod stands for the pod menu: its unread messages, and whether any chat waits on the person. */
-export function usePodChatMarkers() {
-	const workspaceId = useWorkspace().workspace?.id;
-	return useQuery({
-		queryKey: ["chat-pod-markers", workspaceId],
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(client.api.chats.podMarkers({ params: { workspace: workspaceId } }), {
-						signal,
-					})
-			: skipToken,
-	});
-}
-
-const activityFeedKey = (workspaceId: string | undefined) => ["chat-activity", workspaceId];
-const APPROVAL_INBOX = "chat-approvals";
-const approvalInboxKey = (workspaceId: string | undefined) => [APPROVAL_INBOX, workspaceId];
 
 /**
- * What is new for the person across the workspace's chats: messages that
- * mention them or they have not read, routine runs, and collaborations.
+ * A project's chats, the newest message first, and its
+ * automations, by its id; a bot's by its default project's. Read again while
+ * one of its automations runs. Nothing is asked while it is undefined.
  */
-export function useActivityFeed() {
+export function useProjectChats(projectId: string | undefined) {
+	return useQuery(projectChatsQuery(useWorkspace().workspace?.id, projectId));
+}
+
+/** Whether an open chat waits on the viewer: a tool call for them to approve, or a mention of them. */
+export function needsViewer(row: ListedChat): boolean {
+	return row.chat.resolvedAt === null && (row.needsApproval || row.mentionsYou);
+}
+
+/** When a chat last had something in it: its newest message, else when it was started. */
+export function lastMovedAt(row: ListedChat): number {
+	return Date.parse(row.lastMessageAt ?? row.chat.createdAt);
+}
+
+/** How a project stands while the attention marks have nothing for it, or have not loaded. */
+const NO_ATTENTION_MARK: AttentionMark = {
+	unreadMessages: 0,
+	needsApproval: false,
+	failedAutomations: 0,
+};
+
+/**
+ * How each project stands for the sidebar, by its id: its unread messages,
+ * whether any chat waits on the member, and how many of its
+ * automations are failing unseen. A bot's is its default project's.
+ */
+export function useAttentionMarks(): { attentionMarkOf: (projectId: string) => AttentionMark } {
 	const workspaceId = useWorkspace().workspace?.id;
-	return useQuery({
-		queryKey: activityFeedKey(workspaceId),
+	const { data } = useQuery({
+		queryKey: attentionMarksKey(workspaceId),
 		queryFn: workspaceId
 			? ({ signal }) =>
-					Effect.runPromise(client.api.chats.activity({ params: { workspace: workspaceId } }), {
-						signal,
-					})
+					Effect.runPromise(
+						client.api.chats.attentionMarks({ params: { workspace: workspaceId } }),
+						{ signal },
+					)
 			: skipToken,
 	});
+	return { attentionMarkOf: (projectId) => data?.projects[projectId] ?? NO_ATTENTION_MARK };
 }
 
 /**
- * The approvals across the workspace: those waiting on the person, and the
+ * The approvals across the workspace: those waiting on the member, and the
  * latest answered.
  */
-export function useApprovalInbox() {
+export function useWorkspaceApprovals() {
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
-		queryKey: approvalInboxKey(workspaceId),
+		queryKey: workspaceApprovalsKey(workspaceId),
 		queryFn: workspaceId
 			? ({ signal }) =>
 					Effect.runPromise(client.api.chats.approvals({ params: { workspace: workspaceId } }), {
@@ -120,503 +146,282 @@ export function useApprovalInbox() {
 	});
 }
 
-const directMessagesKey = (workspaceId: string | undefined) => ["direct-messages", workspaceId];
-
-/** The person's direct messages with other people, the most recent first. */
-export function useDirectMessages() {
-	const workspaceId = useWorkspace().workspace?.id;
-	return useQuery({
-		queryKey: directMessagesKey(workspaceId),
-		queryFn: workspaceId
-			? ({ signal }) =>
-					Effect.runPromise(
-						client.api.chats.directMessages({ params: { workspace: workspaceId } }),
-						{ signal },
-					)
-			: skipToken,
-	});
-}
-
-/**
- * Sends a message to `userIds`, in the direct message between the person and
- * them, which the API opens when they have none. Resolves once the lists that
- * show it know of it, with the direct message it went to.
- */
-export function useSendDirectMessage() {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	return useMutation({
-		mutationFn: ({ userIds, message }: { userIds: readonly string[]; message: string }) => {
-			if (!workspaceId) throw new NotReadyError();
-			return Effect.runPromise(
-				client.api.chats.sendDirectMessage({
-					params: { workspace: workspaceId },
-					payload: { userIds: [...userIds], id: uuidv4(), message },
-				}),
-			);
-		},
-		onSuccess: ({ conversation }) =>
-			Promise.all([
-				queries.invalidateQueries({ queryKey: directMessagesKey(workspaceId) }),
-				queries.invalidateQueries({ queryKey: directMessageKey(conversation.id) }),
-				queries.invalidateQueries({ queryKey: ["chat-messages", conversation.id] }),
-				queries.invalidateQueries({ queryKey: ["thread", conversation.id] }),
-			]),
-	});
-}
-
-/** What a direct message with somebody who has left the workspace goes by. */
-const FORMER_MEMBER = "Former member";
-
-/** The others in a direct message between people: those still here, by name, and how many have left. */
-export interface DirectPeople {
-	people: readonly PersonParticipant[];
-	formerMembers: number;
-}
-
-/** How many have left, as words: "1 former member". */
-function formerMembersOf(count: number): string {
-	return countOf(count, "former member", "former members");
-}
-
-/** A person, as a message's author or somebody it is written to. */
-export function personParticipantOf(person: {
+/** A member, as a message's author or somebody it is written to. */
+function memberParticipantOf(member: {
 	id: string;
 	name: string;
 	email: string;
 	image?: string | null;
-}): PersonParticipant {
+}): MemberParticipant {
 	return {
-		kind: "person",
-		id: person.id,
-		name: person.name,
-		email: person.email,
-		handle: handleFromName(person.name),
-		image: person.image ?? null,
+		kind: "member",
+		id: member.id,
+		name: member.name,
+		email: member.email,
+		handle: handleFromName(member.name),
+		image: member.image ?? null,
 	};
 }
 
-/** Whether a direct message is with one other person, rather than a group; who has left counts as one. */
-export function isOneToOne({ people, formerMembers }: DirectPeople): boolean {
-	return people.length + formerMembers <= 1;
-}
-
-/**
- * The others in a direct message as its title says them: "Juno, Theo and
- * Sam", then any who have left, "and 1 former member". One person who has
- * left is a Former member.
- */
-export function directPeopleTitle({ people, formerMembers }: DirectPeople): string {
-	if (people.length === 0)
-		return formerMembers <= 1 ? FORMER_MEMBER : formerMembersOf(formerMembers);
-	const names = people.map((person) => person.name);
-	if (formerMembers === 0) return listNames(names);
-	return `${names.join(", ")} and ${formerMembersOf(formerMembers)}`;
-}
-
-/** The others in a direct message as a list's row names them, shortest first: "Juno, Theo". */
-export function directPeopleRowName(direct: DirectPeople): string {
-	if (direct.people.length === 0) return directPeopleTitle(direct);
-	return directPeopleNames(direct).join(", ");
-}
-
-/** The others in a direct message, by name, then those who have left as how many: "1 former member". */
-export function directPeopleNames({ people, formerMembers }: DirectPeople): string[] {
-	return [
-		...people.map((person) => person.name),
-		...(formerMembers > 0 ? [formerMembersOf(formerMembers)] : []),
-	];
-}
-
-const directMessageKey = (conversationId: string) => ["direct-message", conversationId];
-
-/**
- * The direct message `conversationId`, and who is in it, once loaded:
- * `found` is `undefined` when it is not one of the person's in the workspace
- * open, as one from another of their workspaces is not shown in this one's
- * place, and `error` set only when it could not be loaded at all.
- */
-export function useDirectMessage(conversationId: string): {
-	found: DirectPlace | undefined;
-	isPending: boolean;
-	error: unknown;
-} {
-	const workspace = useWorkspace();
-	// The list is fetched afresh as the workspace's events come and the window
-	// regains focus, so once it has the conversation, who is in it comes from
-	// there. Until the list is loaded the conversation is asked for alongside
-	// it, so the page does not wait on both in turn; once loaded, only one it
-	// does not have is.
-	const listed = useDirectMessages().data?.items.find(
-		(candidate) => candidate.conversation.id === conversationId,
-	);
-	const item = useQuery({
-		queryKey: directMessageKey(conversationId),
-		queryFn: ({ signal }) =>
-			Effect.runPromise(client.api.chats.directMessage({ params: { conversationId } }), {
-				signal,
-			}),
-		enabled: !listed,
-	});
-	const missing = isApiFailure(item.error) && item.error._tag === "NotFound";
-	const loaded = listed ?? item.data;
-	const shown = loaded?.conversation.workspaceId === workspace.workspace?.id ? loaded : undefined;
-	// Kept while the conversation's people stay the same, so its screen is not
-	// handed a new one at every render.
-	const people = shown?.people;
-	const formerMembers = shown?.formerMembers;
-	const found = useMemo((): DirectPlace | undefined => {
-		if (!people || formerMembers === undefined) return undefined;
-		return { pod: null, conversation: { kind: "direct", people, formerMembers } };
-	}, [people, formerMembers]);
-	return {
-		found,
-		isPending: (!listed && item.isPending) || workspace.isPending,
-		error: missing ? undefined : item.error,
-	};
-}
-
-/** How much in the workspace is waiting for the person. */
-export type AttentionCounts = {
-	/**
-	 * Messages written to the person that they have not read: those and
-	 * routine results that mention them, and every message in their direct
-	 * messages.
-	 */
-	unreadForYou: number;
-	/** Everything in Inbox the person has not read: mentions, messages, runs and collaborations. */
-	unreadInInbox: number;
-	/** Approvals waiting on the person. */
-	waitingApprovals: number;
+/** How much waits for the member while the counts are loading: nothing. */
+const NO_ATTENTION: AttentionCounts = {
+	waitingApprovals: 0,
+	unreadForYou: 0,
 };
 
 /**
- * How much in the workspace is waiting for the person, which the sidebar and the
- * app's badge count. Mentions in pods, and what else is unread, come from the
- * activity feed, so they are counted among its latest items only; what is
- * unread in direct messages comes from their list, which counts all of it.
+ * How much in the workspace is waiting for the member, which the app's badge
+ * and the Approvals tab count.
  */
 export function useAttentionCounts(): AttentionCounts {
-	const { data: approvals } = useApprovalInbox();
-	const { data: activity } = useActivityFeed();
-	const { data: directMessages } = useDirectMessages();
-	const mentionsInPods =
-		activity?.items.filter((item) => item.unread && item.podId !== null && mentionsYou(item))
-			.length ?? 0;
-	const unreadInDirectMessages =
-		directMessages?.items.reduce((sum, item) => sum + item.unreadMessages, 0) ?? 0;
-	return {
-		unreadForYou: mentionsInPods + unreadInDirectMessages,
-		unreadInInbox: activity?.items.filter((item) => item.unread).length ?? 0,
-		waitingApprovals: approvals?.waiting.length ?? 0,
-	};
-}
-
-/** Whether an Inbox item names the person: a mention, or a routine run whose result asks for them. */
-function mentionsYou(item: ActivityItem): boolean {
-	return item.kind === "mention" || (item.kind === "routine" && item.mentionsYou);
+	const workspaceId = useWorkspace().workspace?.id;
+	const { data } = useQuery({
+		queryKey: attentionCountsKey(workspaceId),
+		queryFn: workspaceId
+			? ({ signal }) =>
+					Effect.runPromise(client.api.chats.attention({ params: { workspace: workspaceId } }), {
+						signal,
+					})
+			: skipToken,
+	});
+	return data ?? NO_ATTENTION;
 }
 
 /**
- * Records that the person has read the conversation up to its newest message, and
+ * Records that the member has read the chat up to its newest message, and
  * clears its dot and its count in the sidebar.
  */
-export function useMarkChatRead(conversationId: string | undefined) {
+function useMarkChatRead(chatId: string | undefined) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
 		mutationFn: () =>
-			conversationId
-				? Effect.runPromise(client.api.chats.markRead({ params: { conversationId } }))
+			chatId
+				? Effect.runPromise(client.api.chats.markRead({ params: { chatId } }))
 				: Promise.resolve(),
-		onSuccess: () => refreshChatMarkers(queries, workspaceId),
+		onSuccess: () => refreshListsAndAttention(queries, workspaceId),
 	});
 }
 
 /**
- * Records that the person has read each of `conversationIds` up to its newest
- * message, as Inbox's Mark all as read does, and clears what marks them.
+ * Marks an automation run read, by its own chat `runChatId`, while the window
+ * has focus and `isInView` reports the run is visible. Checks when
+ * `runChatId` is first given and each time the window gains focus.
  */
-export function useMarkChatsRead() {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	return useMutation({
-		mutationFn: (conversationIds: readonly string[]) =>
-			Effect.runPromise(
-				Effect.forEach(
-					conversationIds,
-					(conversationId) => client.api.chats.markRead({ params: { conversationId } }),
-					{ concurrency: MARK_READ_CONCURRENCY, discard: true },
-				),
-			),
-		onSettled: () => refreshChatMarkers(queries, workspaceId),
-	});
-}
-
-/**
- * Marks one routine run or collaboration read, by its thread, while the
- * window has focus, without reading the rest of the conversation it is in.
- * Checks when the item opens and when the window gains focus.
- */
-export function useMarkItemReadWhileSeen(threadId: string) {
+export function useMarkRunReadWhileSeen(runChatId: string | undefined, isInView: () => boolean) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	const { mutate } = useMutation({
-		mutationFn: (itemThreadId: string) =>
-			Effect.runPromise(client.api.chats.markItemRead({ params: { threadId: itemThreadId } })),
-		onSuccess: () => refreshChatMarkers(queries, workspaceId),
+		mutationFn: (chatId: string) =>
+			Effect.runPromise(client.api.chats.markNestedChatRead({ params: { chatId } })),
+		onSuccess: () => refreshListsAndAttention(queries, workspaceId),
 	});
-	useEffect(() => {
-		const markIfFocused = () => {
-			if (document.hasFocus()) mutate(threadId);
-		};
-		markIfFocused();
-		window.addEventListener("focus", markIfFocused);
-		return () => window.removeEventListener("focus", markIfFocused);
-	}, [threadId, mutate]);
+	useWhileFocused(runChatId, () => {
+		if (runChatId && isInView()) mutate(runChatId);
+	});
 }
 
-/** How many conversations Mark all as read marks at once. */
-const MARK_READ_CONCURRENCY = 4;
-
 /**
- * Marks the chat read while the person can see `newest`, its latest item: the
- * window has focus and `latestInView` holds. Checks when the chat opens, when
+ * Marks the chat read while the member can see `newest`, its latest item: the
+ * window has focus and `latestInView` holds. Checks when it opens, when
  * `newest` arrives or finishes, when `latestInView` turns true, and when the
  * window gains focus.
  *
  * Focus, not visibility: a window beside the one being worked in is visible,
- * and what arrives there is unseen until the person comes back to it.
+ * and what arrives there is unseen until the member comes back to it.
  */
 export function useMarkReadWhileSeen(
-	conversationId: string | undefined,
+	chatId: string | undefined,
 	newest: ChatMessageItem | undefined,
 	latestInView: boolean,
 ) {
-	const { mutate } = useMarkChatRead(conversationId);
-	const newestRevision = newest && readRevision(newest);
+	const { mutate } = useMarkChatRead(chatId);
+	const seen = chatId && newest && latestInView ? `${chatId}:${readRevision(newest)}` : undefined;
+	useWhileFocused(seen, () => mutate());
+}
+
+/**
+ * Calls `act` while the window has focus and `seen` names something to act
+ * on: at once for each new `seen`, and again each time the window regains
+ * focus. Nothing while `seen` is undefined.
+ */
+function useWhileFocused(seen: string | undefined, act: () => void) {
+	const actNow = useEffectEvent(act);
 	useEffect(() => {
-		if (!conversationId || newestRevision === undefined || !latestInView) return;
-		const markIfFocused = () => {
-			if (document.hasFocus()) mutate();
+		if (seen === undefined) return;
+		const actIfFocused = () => {
+			if (document.hasFocus()) actNow();
 		};
-		markIfFocused();
-		window.addEventListener("focus", markIfFocused);
-		return () => window.removeEventListener("focus", markIfFocused);
-	}, [conversationId, newestRevision, latestInView, mutate]);
+		actIfFocused();
+		window.addEventListener("focus", actIfFocused);
+		return () => window.removeEventListener("focus", actIfFocused);
+	}, [seen]);
 }
 
 /**
  * What marking a chat read waits on in `item`: a message's id and status, so
- * a reply streaming in marks it once when it arrives and once when it
+ * a reply arriving on the token stream marks it once when it arrives and once when it
  * finishes, not at every word.
  */
 function readRevision(item: ChatMessageItem): string {
 	if (item.kind === "message") return `${item.message.id}:${item.message.status}`;
-	// A run or a collaboration seen while it runs is read again once it ends.
-	return item.kind === "routine" || item.kind === "collaboration"
-		? `${item.id}:${item.state}`
-		: item.id;
+	// A run seen while it runs is read again once it ends.
+	return item.kind === "run" ? `${item.id}:${item.state}` : item.id;
 }
 
-/** Fetches again what shows which chats are unread: the lists, the sidebar and activity. */
-export function refreshChatMarkers(queries: QueryClient, workspaceId: string | undefined) {
+/** Fetches again what shows which chats are unread or resolved: the lists, the sidebar and the app's badge. */
+export function refreshListsAndAttention(queries: QueryClient, workspaceId: string | undefined) {
 	return Promise.all([
-		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
-		queries.invalidateQueries({ queryKey: ["chat-pod-markers", workspaceId] }),
-		queries.invalidateQueries({ queryKey: activityFeedKey(workspaceId) }),
-		queries.invalidateQueries({ queryKey: directMessagesKey(workspaceId) }),
+		queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
+		queries.invalidateQueries({ queryKey: attentionMarksKey(workspaceId) }),
+		queries.invalidateQueries({ queryKey: attentionCountsKey(workspaceId) }),
 	]);
 }
 
 /**
- * Fetches every workspace's approvals inbox again, for a request answered
- * where only its pod is known.
+ * Fetches every workspace's approvals again, for a request answered
+ * where its workspace is not known.
  */
-export function refreshEveryApprovalInbox(queries: QueryClient) {
-	return queries.invalidateQueries({ queryKey: [APPROVAL_INBOX] });
-}
-
-/**
- * Fetches again everything a change in one of the workspace's threads can
- * move: the chats' unread markers and activity, and the approvals inbox.
- */
-export function refreshAfterThreadChange(queries: QueryClient, workspaceId: string | undefined) {
+export function refreshEveryWorkspaceApprovals(queries: QueryClient) {
 	return Promise.all([
-		refreshChatMarkers(queries, workspaceId),
-		queries.invalidateQueries({ queryKey: approvalInboxKey(workspaceId) }),
+		queries.invalidateQueries({ queryKey: workspaceApprovalsKey() }),
+		queries.invalidateQueries({ queryKey: attentionCountsKey() }),
 	]);
 }
 
 /**
- * The bot's channel in the pod, for an address that names the bot rather
- * than the channel. It is read from the pod's conversation list, which the
- * screen loads anyway, so one that exists costs no request of its own. Only
- * a bot the list shows without one, because nobody opened it yet or it was
- * opened after the list loaded, has one opened with a request. Waits while
- * `hostAgentId` is not yet known.
+ * Fetches again everything a change in one of the workspace's chats can
+ * move: the chats' attention marks, and the workspace's approvals.
  */
-export function useOpenBotChannel(pod: Pod, hostAgentId: string | undefined) {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	return useQuery({
-		queryKey: ["bot-channel", workspaceId, pod.id, hostAgentId],
-		queryFn:
-			workspaceId && hostAgentId
-				? async ({ signal }) => {
-						const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
-						const listed = list.channels.find(
-							(item) => item.conversation.hostAgentId === hostAgentId,
-						)?.conversation;
-						if (listed) return listed;
-						const opened = await Effect.runPromise(
-							client.api.chats.openBotChannel({
-								params: { workspace: workspaceId },
-								payload: { podId: pod.id, hostAgentId },
-							}),
-							{ signal },
-						);
-						// The list was loaded without the channel just opened.
-						void queries.invalidateQueries({ queryKey: ["chat-list", workspaceId, pod.slug] });
-						return opened;
-					}
-				: skipToken,
-	});
+export function refreshAfterChatChange(queries: QueryClient, workspaceId: string | undefined) {
+	return Promise.all([
+		refreshListsAndAttention(queries, workspaceId),
+		queries.invalidateQueries({ queryKey: workspaceApprovalsKey(workspaceId) }),
+	]);
 }
 
 /**
- * Which kind of conversation is open, and the bot it is with when it has one:
- * a direct message is between people, one other or a group, with no bot.
+ * Whose a chat is: a project members made, for its chats and its
+ * automations' feeds; or a bot, for its own, which are its default project's.
+ * That project is hidden and has no address of its own, so the place names the bot.
  */
-export type ConversationKind =
-	| { kind: "podChat" }
-	| { kind: "botChannel"; agent: Agent }
-	| { kind: "botThread"; agent: Agent }
-	| { kind: "peopleThread" }
-	| ({ kind: "direct" } & DirectPeople);
+export type ChatLocation = ResourceOwner;
 
-/** A conversation's pod, and which kind of conversation it is. */
-export interface ConversationPlace {
-	pod: Pod;
-	conversation: Exclude<ConversationKind, { kind: "direct" }>;
-}
-
-/** A direct message between people, which is in no pod, and who is in it. */
-export interface DirectPlace {
-	pod: null;
-	conversation: Extract<ConversationKind, { kind: "direct" }>;
+/** The bot a place's chat is with, if any. */
+export function placeBot(place: ChatLocation): Bot | undefined {
+	return "bot" in place ? place.bot : undefined;
 }
 
 /**
- * Where the conversation `conversationId` is, in the pod at `podSlug`;
- * `undefined` when there is none or it is not one in that pod. Read from the
- * pod's conversation list, which the screen loads anyway, and from the
- * conversation itself only when the list does not have it, so the screen does
- * not wait on the conversation to know whose it is.
+ * Where the chat `chatId` is, in the project at `projectSlug`;
+ * `undefined` when there is none or it is not one in that project.
  */
-export function useConversationPlace(
-	podSlug: string,
-	conversationId: string | undefined,
-): { found: ConversationPlace | undefined; isPending: boolean; error: unknown } {
-	const pods = usePods();
-	const roster = useAgents();
-	const list = useChatList(podSlug);
-	const listedPodChat =
-		list.data?.chats.some((chat) => chat.conversation.id === conversationId) ?? false;
-	const listedChannel = list.data?.channels.find((item) => item.conversation.id === conversationId);
-	const listedThread =
-		list.data?.threads.find((item) => item.conversation.id === conversationId) ??
-		list.data?.routines.find((item) => item.conversation?.id === conversationId);
-	const listed = listedPodChat || listedChannel !== undefined || listedThread !== undefined;
-	const unlisted = useQuery({
-		...threadQuery(conversationId),
-		enabled: conversationId !== undefined && list.isSuccess && !listed,
-	});
-	const pod = findPod(pods.data, podSlug);
-	const thread = unlisted.data?.thread?.podId === pod?.id ? unlisted.data?.thread : undefined;
-	const hostAgentId =
-		listedChannel?.agent.id ??
-		(listedThread ? (listedThread.agent?.id ?? null) : thread?.hostAgentId);
-	const agent =
-		roster.agents?.find((candidate) => candidate.id === hostAgentId) ?? listedChannel?.agent;
-	const conversation = conversationKindOf({
-		isPodChat: listedPodChat || thread?.type === "pod_chat",
-		isBotChannel: listedChannel !== undefined || thread?.type === "bot_channel",
-		isThread:
-			listedThread !== undefined ||
-			thread?.type === "conversation" ||
-			thread?.type === "routine_feed",
-		hostAgentId,
-		agent,
-	});
+export function useProjectChatPlace(
+	projectSlug: string,
+	chatId: string | undefined,
+): { found: { project: Project } | undefined; isPending: boolean; error: unknown } {
+	const projects = useProjects();
+	const project = findProject(projects.data, projectSlug);
+	const { inProject, isPending, error } = useChatInProject(project?.id, chatId);
 	return {
-		found: pod && conversation ? { pod, conversation } : undefined,
-		isPending:
-			pods.isPending ||
-			roster.isPending ||
-			list.isPending ||
-			(list.isSuccess && !listed && unlisted.isPending),
-		error: pods.error ?? roster.error ?? list.error ?? unlisted.error,
+		found: project && inProject ? { project } : undefined,
+		isPending: projects.isPending || isPending,
+		error: projects.error ?? error,
 	};
 }
 
-/** Which kind a conversation is, once enough is known to say; a channel or thread with a bot waits for the bot. */
-function conversationKindOf(known: {
-	isPodChat: boolean;
-	isBotChannel: boolean;
-	isThread: boolean;
-	hostAgentId: string | null | undefined;
-	agent: Agent | undefined;
-}): ConversationPlace["conversation"] | undefined {
-	if (known.isPodChat) return { kind: "podChat" };
-	if (known.isBotChannel) return known.agent && { kind: "botChannel", agent: known.agent };
-	if (!known.isThread) return undefined;
-	if (known.hostAgentId === null) return { kind: "peopleThread" };
-	return known.agent && { kind: "botThread", agent: known.agent };
+/**
+ * Where the chat `chatId` is when it is one of the bot
+ * `bot`'s: one of its chats or automations; `undefined` when it is
+ * not.
+ */
+export function useBotChatPlace(
+	bot: Bot,
+	chatId: string | undefined,
+): { found: { bot: Bot } | undefined; isPending: boolean; error: unknown } {
+	const { inProject, isPending, error } = useChatInProject(bot.defaultProjectId, chatId);
+	return { found: inProject ? { bot } : undefined, isPending, error };
 }
 
 /**
- * The pod's first chat, read from its conversation list when somebody has
- * opened it, and otherwise opened with a request. A Personal pod has none,
- * so it waits there.
+ * Whether the chat `chatId` is in the project `projectId`, a
+ * bot's default one or one members made: one of its chats or automations'
+ * feeds. Read from the project's list, and from the chat itself only
+ * when the list does not have it, such as one started since the list was read.
  */
-export function useOpenPodChat(pod: Pod) {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	return useQuery({
-		queryKey: ["pod-chat", workspaceId, pod.id],
-		queryFn:
-			workspaceId && pod.kind === "shared"
-				? async ({ signal }) => {
-						const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
-						return (
-							list.chats.find((chat) => chat.conversation.main)?.conversation ??
-							Effect.runPromise(
-								client.api.chats.openPodChat({ params: { workspace: workspaceId, podId: pod.id } }),
-								{ signal },
-							)
-						);
-					}
-				: skipToken,
+function useChatInProject(
+	projectId: string | undefined,
+	chatId: string | undefined,
+): { inProject: boolean; isPending: boolean; error: unknown } {
+	const list = useProjectChats(projectId);
+	const listed =
+		list.data?.chats.some((item) => item.chat.id === chatId) ||
+		list.data?.automations.some((item) => item.chat?.id === chatId) ||
+		false;
+	const unlisted = useQuery({
+		...chatQuery(chatId),
+		enabled: chatId !== undefined && list.isSuccess && !listed,
 	});
+	const unlistedKind = unlisted.data?.chat?.kind;
+	const inProject =
+		listed ||
+		((unlistedKind === "project_chat" || unlistedKind === "automation_feed") &&
+			unlisted.data?.chat?.projectId === projectId);
+	return {
+		inProject,
+		isPending: list.isPending || (list.isSuccess && !listed && unlisted.isPending),
+		error: list.error ?? unlisted.error,
+	};
 }
 
 /**
- * The routine's own thread, read from its pod's list when it has one, and
- * otherwise opened with a request.
+ * Where any chat `chatId` is, read from the chat
+ * itself: in a project, or a bot's. For a page whose address names only
+ * the chat.
  */
-export function useOpenRoutineFeed(pod: Pod, routineId: string) {
+export function useAnyChatLocation(chatId: string): {
+	found: ChatLocation | undefined;
+	isPending: boolean;
+	error: unknown;
+} {
+	const projects = useProjects();
+	const roster = useBots();
+	const opened = useQuery(chatQuery(chatId));
+	const details = opened.data?.chat;
+	const project = details?.projectId
+		? projects.data?.find((one) => one.id === details.projectId)
+		: undefined;
+	const bot = details?.botId ? roster.bots?.find((one) => one.id === details.botId) : undefined;
+	const found: ChatLocation | undefined = project ? { project } : bot ? { bot } : undefined;
+	return {
+		found,
+		isPending: opened.isPending || projects.isPending || roster.isPending,
+		error: opened.error ?? projects.error ?? roster.error,
+	};
+}
+
+/**
+ * The automation's feed: read from its project's list, `projectId`, when given
+ * and it has one, and otherwise opened with a request.
+ */
+export function useOpenAutomationFeed(projectId: string | undefined, automationId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useQuery({
-		queryKey: ["routine-feed", workspaceId, routineId],
+		queryKey: automationFeedKey(workspaceId, automationId),
 		queryFn: workspaceId
 			? async ({ signal }) => {
-					const list = await queries.ensureQueryData(chatListQuery(workspaceId, pod.slug));
+					const listed = projectId
+						? (
+								await queries.ensureQueryData(projectChatsQuery(workspaceId, projectId))
+							).automations.find((item) => item.automation.id === automationId)?.chat
+						: undefined;
 					return (
-						list.routines.find((item) => item.routine.id === routineId)?.conversation ??
+						listed ??
 						Effect.runPromise(
-							client.api.chats.openRoutineFeed({ params: { workspace: workspaceId, routineId } }),
+							client.api.chats.openAutomationFeed({
+								params: { workspace: workspaceId, automationId },
+							}),
 							{ signal },
 						)
 					);
@@ -626,25 +431,24 @@ export function useOpenRoutineFeed(pod: Pod, routineId: string) {
 }
 
 /**
- * Starts loading the conversation an address names: as its page first loads,
+ * Starts loading the chat an address names: as its page first loads,
  * and for a link the pointer is on, so it is on screen when the click lands.
  * A failure is left for the screen's own queries to meet and show.
  */
-export function prefetchConversation(queries: QueryClient, conversationId: string): void {
-	void queries.prefetchInfiniteQuery(chatMessagesQuery(conversationId));
-	void queries.prefetchInfiniteQuery(chatHistoryQuery(conversationId));
-	void queries.prefetchQuery(threadQuery(conversationId));
+export function prefetchChat(queries: QueryClient, chatId: string): void {
+	void queries.prefetchInfiniteQuery(chatMessagesQuery(chatId));
+	void queries.prefetchQuery(chatQuery(chatId));
 }
 
-/** The conversation, a page at a time, newest page first. */
-function chatMessagesQuery(conversationId: string | undefined) {
+/** The chat, a page at a time, newest page first. */
+function chatMessagesQuery(chatId: string | undefined) {
 	return infiniteQueryOptions({
-		queryKey: ["chat-messages", conversationId],
-		queryFn: conversationId
+		queryKey: chatMessagesKey(chatId),
+		queryFn: chatId
 			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
 					Effect.runPromise(
 						client.api.chats.messages({
-							params: { conversationId },
+							params: { chatId },
 							query: { limit: PAGE_SIZE, cursor: pageParam },
 						}),
 						{ signal },
@@ -655,33 +459,37 @@ function chatMessagesQuery(conversationId: string | undefined) {
 	});
 }
 
-/** The threads opened beside the conversation, a page at a time, newest activity first. */
-function chatHistoryQuery(conversationId: string | undefined) {
-	return infiniteQueryOptions({
-		queryKey: ["chat-history", conversationId],
-		refetchInterval: (current) =>
-			current.state.data?.pages.some((page) =>
-				page?.items.some((entry) => entry.status === "queued" || entry.status === "running"),
-			)
-				? RUNNING_CHAT_HISTORY_REFETCH_INTERVAL_MS
-				: false,
-		queryFn: conversationId
-			? ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
-					Effect.runPromise(
-						client.api.chats.history({
-							params: { conversationId },
-							query: { limit: PAGE_SIZE, cursor: pageParam },
-						}),
-						{ signal },
-					)
-			: skipToken,
-		initialPageParam: undefined as string | undefined,
-		getNextPageParam: (page) => page?.nextCursor ?? undefined,
-	});
+/**
+ * Takes out of the chat's loaded pages each reply its turn removed, as a turn
+ * that stays silent removes its empty reply: one still being written there
+ * that `latest`, the chat's newest messages as fetched since, no longer holds.
+ */
+export function removeRepliesGoneFromTimeline(
+	queries: QueryClient,
+	chatId: string,
+	latest: readonly Message[],
+): void {
+	const oldestLatest = latest[0]?.createdAt;
+	const stillThere = new Set(latest.map((message) => message.id));
+	const gone = (item: ChatMessageItem) =>
+		item.kind === "message" &&
+		item.message.status === "writing" &&
+		!stillThere.has(item.message.id) &&
+		(oldestLatest === undefined || item.message.createdAt >= oldestLatest);
+	queries.setQueryData<InfiniteData<ChatMessagesPage | undefined>>(
+		chatMessagesKey(chatId),
+		(timeline) =>
+			timeline && {
+				...timeline,
+				pages: timeline.pages.map(
+					(page) => page && { ...page, items: page.items.filter((item) => !gone(item)) },
+				),
+			},
+	);
 }
 
-export function useChatMessages(conversationId: string | undefined) {
-	const query = useInfiniteQuery(chatMessagesQuery(conversationId));
+export function useChatMessages(chatId: string | undefined) {
+	const query = useInfiniteQuery(chatMessagesQuery(chatId));
 	const items = query.data?.pages
 		.slice()
 		.reverse()
@@ -689,24 +497,16 @@ export function useChatMessages(conversationId: string | undefined) {
 	return { ...query, items: items ?? [] };
 }
 
-export function useChatHistory(conversationId: string | undefined) {
-	const query = useInfiniteQuery(chatHistoryQuery(conversationId));
-	return {
-		...query,
-		entries: query.data?.pages.flatMap((page) => page?.items ?? []) ?? [],
-	};
-}
-
 /**
  * A message to send, with the whole quote it answers and the files it
  * attaches, so it shows both before the API answers.
  */
-export type MessageToSend = Omit<NewMessage, "replyTo" | "attachments"> & {
+type MessageToSend = Omit<NewMessage, "replyTo" | "attachments"> & {
 	replyTo?: MessageReplyTo;
 	files?: readonly FilePart[];
 };
 
-export function useSendChatMessage(conversationId: string, user: SessionUser) {
+export function useSendMessage(chatId: string, signedIn: CurrentUser) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
@@ -716,17 +516,17 @@ export function useSendChatMessage(conversationId: string, user: SessionUser) {
 				...(replyTo && { replyTo: replyTo.id }),
 				...(files.length > 0 && { attachments: files.map((file) => file.id) }),
 			};
-			return Effect.runPromise(client.api.chats.send({ params: { conversationId }, payload }));
+			return Effect.runPromise(client.api.chats.send({ params: { chatId }, payload }));
 		},
 		onMutate: async (input) => {
-			await queries.cancelQueries({ queryKey: ["chat-messages", conversationId] });
+			await queries.cancelQueries({ queryKey: chatMessagesKey(chatId) });
 			const optimistic: ChatMessageItem = {
 				kind: "message",
 				message: {
-					id: input.id,
-					threadId: conversationId,
-					author: personParticipantOf(user),
-					kind: "text",
+					id: input.retryKey,
+					retryKey: input.retryKey,
+					chatId,
+					author: memberParticipantOf(signedIn),
 					status: "complete",
 					parts: [
 						...(input.message === "" ? [] : [{ type: "text" as const, text: input.message }]),
@@ -735,158 +535,131 @@ export function useSendChatMessage(conversationId: string, user: SessionUser) {
 					content: input.message,
 					...(input.replyTo ? { replyTo: input.replyTo } : {}),
 					createdAt: timestampAfter(
-						queries.getQueryData<ThreadDetails>(["thread", conversationId])?.messages ?? [],
+						queries.getQueryData<ChatDetails>(chatQuery(chatId).queryKey)?.messages ?? [],
 					),
 				},
 			};
-			queries.setQueryData(["chat-optimistic", conversationId], (items: ChatMessageItem[] = []) => [
+			queries.setQueryData(optimisticMessagesKey(chatId), (items: ChatMessageItem[] = []) => [
 				...items,
 				optimistic,
 			]);
 		},
 		onSettled: async (_result, _error, input) => {
-			queries.setQueryData<ChatMessageItem[]>(["chat-optimistic", conversationId], (items) =>
-				items?.filter((item) => item.kind !== "message" || item.message.id !== input.id),
+			queries.setQueryData<ChatMessageItem[]>(optimisticMessagesKey(chatId), (items) =>
+				items?.filter((item) => item.kind !== "message" || item.message.id !== input.retryKey),
 			);
 			await Promise.all([
-				queries.invalidateQueries({ queryKey: ["chat-messages", conversationId] }),
-				queries.invalidateQueries({ queryKey: ["chat-history", conversationId] }),
-				queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
-				queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+				queries.invalidateQueries({ queryKey: chatMessagesKey(chatId) }),
+				queries.invalidateQueries({ queryKey: chatQuery(chatId).queryKey }),
+				queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
 			]);
 		},
 	});
 }
 
-/** A thread to start, with the files uploaded to the conversation that its first message attaches. */
-export type ThreadToStart = Omit<NewThread, "attachments"> & { files?: readonly FilePart[] };
+/** What the composer says when the API did not start a chat. */
+export const CHAT_NOT_STARTED = "The chat was not started. Your draft is still here.";
 
 /**
- * Starts a thread from `conversationId`, a pod's chat or a bot's channel,
- * with its first message, for the bot it names. The conversation and its
- * list show the thread once it has.
+ * How starting a chat from a draft went: started; refused by the API; or not
+ * sent, because the draft has no words to title it.
  */
-function useStartThread(conversationId: string | undefined) {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	return useMutation({
-		mutationFn: ({ files = [], ...thread }: ThreadToStart) => {
-			if (!conversationId)
-				throw new Error("A thread was started before its conversation had opened");
-			const payload: NewThread = {
-				...thread,
-				...(files.length > 0 && { attachments: files.map((file) => file.id) }),
-			};
-			return Effect.runPromise(
-				client.api.chats.startThread({ params: { conversationId }, payload }),
-			);
-		},
-		onSettled: () => conversationId && refreshThreadsFrom(queries, workspaceId, conversationId),
-	});
-}
-
-/** What the composer says when the API did not start a thread. */
-export const THREAD_NOT_STARTED = "The thread was not started. Your draft is still here.";
-
-/**
- * How starting a thread from a draft went: started; refused by the API, with
- * its files put back; or not sent, because the draft has no words to title it
- * or its files are not ready.
- */
-export type ThreadStart =
-	| { outcome: "started"; thread: StartedThread }
+type ChatStart =
+	| { outcome: "started"; chat: StartedChat }
 	| { outcome: "refused" }
 	| { outcome: "notSent" };
 
 /**
- * Starts threads from `conversationId`, a pod's chat or a bot's channel, each
- * with a draft as its first message and the files staged in `attachments`.
+ * Starts chats with a bot, or in a project, each with a draft as its first
+ * message; files are added once it has started. The bot's or project's list
+ * shows each chat once it has.
  */
-export function useThreadStarter(
-	conversationId: string | undefined,
-	attachments: ComposerAttachments,
-) {
-	const startThread = useStartThread(conversationId);
-	async function start(
-		draft: string,
-		options: { hostAgentId?: string; replyTo?: string } = {},
-	): Promise<ThreadStart> {
+export function useChatStarter(starting: { projectId: string }) {
+	const queries = useQueryClient();
+	const workspaceId = useWorkspace().workspace?.id;
+	const startChat = useMutation({
+		mutationFn: (payload: FirstChatMessage) =>
+			Effect.runPromise(
+				client.api.chats.startProjectChat({ params: { projectId: starting.projectId }, payload }),
+			),
+		onSettled: () => queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
+	});
+	/**
+	 * The last draft sent that did not come back started, with its retry key.
+	 * Its chat may have started all the same, its answer lost, so sending the
+	 * same draft to the same project again reuses the key, which the API answers
+	 * with the chat it started rather than starting a second.
+	 */
+	const unconfirmed = useRef<{ projectId: string; message: string; retryKey: string }>(undefined);
+	async function start(draft: string): Promise<ChatStart> {
 		const message = draft.trim();
-		if (!conversationId || startThread.isPending || message === "") return { outcome: "notSent" };
-		const files = attachments.takeForSending(draft);
-		if (!files) return { outcome: "notSent" };
+		if (startChat.isPending || message === "") return { outcome: "notSent" };
+		const retried = unconfirmed.current;
+		const retryKey =
+			retried?.projectId === starting.projectId && retried.message === message
+				? retried.retryKey
+				: uuidv4();
+		unconfirmed.current = { projectId: starting.projectId, message, retryKey };
 		try {
-			const thread = await startThread.mutateAsync({
-				id: uuidv4(),
-				message,
-				files: files.parts,
-				...options,
-			});
-			return { outcome: "started", thread };
-		} catch (failure) {
-			files.putBack(failure);
+			const chat = await startChat.mutateAsync({ retryKey, message });
+			unconfirmed.current = undefined;
+			return { outcome: "started", chat };
+		} catch {
 			return { outcome: "refused" };
 		}
 	}
-	return { start, isPending: startThread.isPending };
+	return { start, isPending: startChat.isPending };
 }
 
 /**
- * Starts a thread from a message in `conversationId`, a pod's chat or a bot's
- * channel, or finds the one it has.
+ * Starts the chat in which a bot its maker just made interviews them, when
+ * the bot is due one; resolves to the chat, or null.
  */
-export function useThreadFrom(conversationId: string) {
+export function useStartInterview() {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return useMutation({
-		mutationFn: (messageId: string) =>
-			Effect.runPromise(client.api.chats.threadFrom({ params: { messageId } })),
-		onSettled: () => refreshThreadsFrom(queries, workspaceId, conversationId),
+		mutationFn: (botId: string) =>
+			Effect.runPromise(client.api.chats.startInterview({ params: { botId } })),
+		onSettled: () => queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
 	});
 }
 
-/** Marks the conversation done, or reopens it. Its thread and the pod's list show it once it has. */
-export function useSetDone(conversationId: string) {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
+/** Marks the chat resolved, or reopens it. The chat and the lists show it once it has. */
+export function useSetResolved(chatId: string) {
+	const refresh = useRefreshChat(chatId);
 	return useMutation({
-		mutationFn: (done: boolean) =>
+		mutationFn: (resolved: boolean) =>
 			Effect.runPromise(
-				done
-					? client.api.chats.markDone({ params: { conversationId } })
-					: client.api.chats.reopen({ params: { conversationId } }),
+				client.api.chats.setResolved({ params: { chatId }, payload: { resolved } }),
 			),
-		onSettled: () =>
-			Promise.all([
-				queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
-				queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
-			]),
+		onSettled: refresh,
 	});
 }
 
 /**
- * What a routine's own thread does with its routine: run it again, which
+ * What an automation's feed does with its automation: run it again, which
  * turns on one that paused itself after failing, pause or resume it, and
  * rename it.
- * `pending` is shared by every control of the routine on screen, so none
- * starts another change while one is on its way. The thread, its page and
- * the pod's list are fetched again after each.
+ * `pending` is shared by every control of the automation on screen, so none
+ * starts another change while one is on its way. The feed is fetched again
+ * after each; the automation's own actions refresh the lists it is in.
  */
-export function useRoutineControls(
-	conversationId: string,
-	routine: { id: string; agentId: string },
+export function useAutomationControls(
+	/** Its feed, or undefined where it is controlled without one. */
+	chatId: string | undefined,
+	automation: { id: string; projectId: string },
 ) {
 	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
-	const actions = useRoutineActions();
-	const mutationKey = ["routine-controls", routine.id];
+	const actions = useAutomationActions();
+	const mutationKey = ["automation-controls", automation.id];
 	const refresh = () =>
+		chatId &&
 		Promise.all([
-			queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
-			queries.invalidateQueries({ queryKey: ["chat-messages", conversationId] }),
-			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+			queries.invalidateQueries({ queryKey: chatQuery(chatId).queryKey }),
+			queries.invalidateQueries({ queryKey: chatMessagesKey(chatId) }),
 		]);
-	const scope = { agentId: routine.agentId, routineId: routine.id };
+	const scope = { projectId: automation.projectId, automationId: automation.id };
 	const runAgain = useMutation({
 		mutationKey,
 		mutationFn: () => actions.run.mutateAsync(scope),
@@ -894,74 +667,37 @@ export function useRoutineControls(
 	});
 	const update = useMutation({
 		mutationKey,
-		mutationFn: (json: RoutineUpdate) => actions.update.mutateAsync({ ...scope, json }),
+		mutationFn: (json: AutomationUpdate) => actions.update.mutateAsync({ ...scope, json }),
 		onSuccess: refresh,
 	});
 	return {
 		runAgain: () => runAgain.mutateAsync(),
 		setPaused: (paused: boolean) => update.mutateAsync({ state: paused ? "paused" : "enabled" }),
-		/** Renames the routine, and its thread with it. */
+		/** Renames the automation, and its feed with it. */
 		rename: (name: string) => update.mutateAsync({ name }),
 		pending: useIsMutating({ mutationKey }) > 0,
 	};
 }
 
-/** Starts another chat in the pod, named `name`. The pod's list shows it once it has. */
-export function useStartChat(pod: Pod) {
-	const queries = useQueryClient();
-	const workspaceId = useWorkspace().workspace?.id;
+/** Renames the chat `chatId`. The lists and the chat show it once it has. */
+export function useRenameChat(chatId: string) {
+	const refresh = useRefreshChat(chatId);
 	return useMutation({
 		mutationFn: (name: string) =>
-			Effect.runPromise(
-				client.api.chats.startChat({ params: { podId: pod.id }, payload: { name } }),
-			),
-		onSettled: () => queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
-	});
-}
-
-/** Renames the pod's chat `conversationId`. The pod's list and the chat show it once it has. */
-export function useRenameChat(conversationId: string) {
-	const refresh = useRefreshChat(conversationId);
-	return useMutation({
-		mutationFn: (name: string) =>
-			Effect.runPromise(
-				client.api.chats.renameChat({ params: { conversationId }, payload: { name } }),
-			),
+			Effect.runPromise(client.api.chats.renameChat({ params: { chatId }, payload: { name } })),
 		onSettled: refresh,
 	});
 }
 
-/** Archives the pod's chat `conversationId`, which takes it off the pod's list. */
-export function useArchiveChat(conversationId: string) {
-	const refresh = useRefreshChat(conversationId);
-	return useMutation({
-		mutationFn: () =>
-			Effect.runPromise(client.api.chats.archiveChat({ params: { conversationId } })),
-		onSettled: refresh,
-	});
-}
-
-/** Fetches again what shows a pod's chat as it is: the chat, and the pod's list. */
-function useRefreshChat(conversationId: string) {
+/** Fetches again what shows a chat as it is: the chat, and the lists and attention marks it is in. */
+function useRefreshChat(chatId: string) {
 	const queries = useQueryClient();
 	const workspaceId = useWorkspace().workspace?.id;
 	return () =>
 		Promise.all([
-			queries.invalidateQueries({ queryKey: ["thread", conversationId] }),
-			queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
+			queries.invalidateQueries({ queryKey: chatQuery(chatId).queryKey }),
+			refreshListsAndAttention(queries, workspaceId),
 		]);
-}
-
-/** Fetches again what shows the threads started from `conversationId`: it and the pod's list. */
-function refreshThreadsFrom(
-	queries: QueryClient,
-	workspaceId: string | undefined,
-	conversationId: string,
-) {
-	return Promise.all([
-		queries.invalidateQueries({ queryKey: ["chat-messages", conversationId] }),
-		queries.invalidateQueries({ queryKey: ["chat-list", workspaceId] }),
-	]);
 }
 
 /**
@@ -979,9 +715,9 @@ export function chatItemCreatedAt(item: ChatMessageItem): string {
 	return item.kind === "message" ? item.message.createdAt : item.createdAt;
 }
 
-export function useOptimisticChatItems(conversationId: string | undefined): ChatMessageItem[] {
+export function useOptimisticChatItems(chatId: string | undefined): ChatMessageItem[] {
 	const query = useQuery<ChatMessageItem[]>({
-		queryKey: ["chat-optimistic", conversationId],
+		queryKey: optimisticMessagesKey(chatId),
 		queryFn: skipToken,
 		initialData: [],
 	});

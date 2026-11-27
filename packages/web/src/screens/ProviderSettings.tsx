@@ -1,23 +1,24 @@
 import { type LivelyFace, LivelyGroup } from "@sugabots/avatars";
 import {
-	type Agent,
+	type Bot,
+	type BuiltInProviderId,
+	builtInSignInService,
+	builtInSignsIn,
 	effectiveCapabilities,
 	type ModelProvider,
 	type ProviderModel,
 	type ProviderModelCapability,
-	type ProviderPresetId,
 	type ProviderSwitchOff,
-	presetSignInService,
-	presetSignsIn,
+	providerBuiltIn,
 	providerIsUsable,
 	providerLacksCredential,
 	providerModelCapabilityCatalog,
-	providerPreset,
-	seededPresets,
+	seededBuiltIns,
 	type WorkspaceModelsResponse,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
-import { Link, linkOptions, useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
+import { cn } from "cn";
 import {
 	Brain,
 	ChevronDown,
@@ -28,7 +29,6 @@ import {
 	Mic,
 	Pencil,
 	RefreshCw,
-	Search,
 	Wrench,
 } from "lucide-react";
 import {
@@ -36,24 +36,24 @@ import {
 	type FormEvent,
 	type ReactNode,
 	useDeferredValue,
-	useId,
 	useLayoutEffect,
 	useRef,
 	useState,
 } from "react";
-import { useAgents, useModels } from "@/lib/agents.ts";
-import { useBuiltInAgents } from "@/lib/built-in-agents.ts";
+import { useBots, useModels } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
+import { settingsSectionLink } from "@/lib/links.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { MODEL_MAKER_NAMES } from "@/lib/model-makers.ts";
-import { useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
+import { modelName, useModelProviders, useProviderActions } from "@/lib/model-providers.ts";
 import { searchModels } from "@/lib/model-search.ts";
-import { parseProviderBaseUrl } from "@/lib/provider-url.ts";
+import { capitalise, countOf } from "@/lib/name-list.ts";
+import { NOT_A_SERVER_ADDRESS, parseProviderBaseUrl } from "@/lib/provider-url.ts";
 import { MODEL_SEARCH_THRESHOLD } from "@/lib/screen-limits.ts";
-import { useBackTarget } from "@/lib/settings-back.tsx";
-import { AgentAvatar, TurnTakingAvatar } from "@/shell/Agent.tsx";
+import { useSystemBots } from "@/lib/system-bots.ts";
+import { BotAvatar, TurnTakingAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { useLeave } from "@/ui/back-button.tsx";
+import { useBackToLinkedPage, useLeave } from "@/ui/back-button.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Dialog, DialogDescription } from "@/ui/dialog.tsx";
@@ -62,6 +62,7 @@ import {
 	DialogFormBody,
 	DialogFormFooter,
 	DialogFormHeader,
+	DialogFormScroll,
 } from "@/ui/dialog-form.tsx";
 import {
 	DropdownMenu,
@@ -72,6 +73,8 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
+import { SearchField } from "@/ui/search-field.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	PageBackLink,
@@ -80,14 +83,16 @@ import {
 	SettingsGroup,
 	SettingsPage,
 	SettingsRow,
+	SettingsRowAlert,
 	SettingsRowIcon,
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
+import { TitleTag } from "@/ui/title-tag.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
-import { ConnectionRow, savedKeyMask, valueText } from "./connection-row.tsx";
 import { ModelChoiceList } from "./ModelChoiceList.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
+import { ProviderFieldRow, savedKeyMask, valueText } from "./provider-field-row.tsx";
 
 /*
  * One provider: how it is reached, which of its models bots may use, and
@@ -96,42 +101,40 @@ import { ProviderSignInRow } from "./ProviderSignIn.tsx";
  */
 
 /**
- * A provider's tile: its official logo for a preset, and its first letter for
+ * A provider's tile: its official logo for a built-in provider, and its first letter for
  * a custom provider, which has only a name.
  */
 export function ProviderTile({
 	name,
-	preset,
+	builtIn,
 	size = 28,
 }: {
 	name: string;
-	preset: ProviderPresetId | null;
+	builtIn: BuiltInProviderId | null;
 	size?: 28 | 44;
 }) {
 	const large = size === 44;
+	const tile = large ? "size-11 rounded-xl border-0 bg-chip text-sm" : undefined;
+	if (!builtIn) return <LetterTile name={name} className={tile} />;
 	return (
-		<SettingsRowIcon className={large ? "size-11 rounded-xl border-0 bg-chip text-sm" : undefined}>
-			{preset ? (
-				<ProviderLogo preset={preset} className={large ? "size-5.5" : "size-3.5"} />
-			) : (
-				name.trim().charAt(0).toUpperCase()
-			)}
+		<SettingsRowIcon className={tile}>
+			<ProviderLogo builtIn={builtIn} className={large ? "size-5.5" : "size-3.5"} />
 		</SettingsRowIcon>
 	);
 }
 
 /** The bots on a model, as overlapping faces with a count past the first few. */
-export function BotFaces({ bots }: { bots: readonly Agent[] }) {
+function BotFaces({ bots }: { bots: readonly Bot[] }) {
 	if (bots.length === 0) return null;
 	const shown = bots.slice(0, bots.length > 3 ? 2 : 3);
 	const more = bots.length - shown.length;
 	return (
 		<span aria-hidden className="flex shrink-0 items-center">
 			{shown.map((bot, index) => (
-				<AgentAvatar
+				<BotAvatar
 					key={bot.id}
 					color={bot.color}
-					face={bot.face}
+					eyes={bot.eyes}
 					shape={bot.shape}
 					size={22}
 					ringed={{ color: "var(--settings-card)", width: 2 }}
@@ -166,7 +169,7 @@ function NamedBotFaces({
 	label,
 	layout = "dialog",
 }: {
-	bots: readonly Agent[];
+	bots: readonly Bot[];
 	label: string;
 	layout?: keyof typeof FACE_ROWS;
 }) {
@@ -178,7 +181,7 @@ function NamedBotFaces({
 			<ul
 				aria-label={label}
 				// Room around each face for its focus ring and its hop.
-				className={`-m-1.5 flex list-none items-center p-1.5 ${className}`}
+				className={cn("-m-1.5 flex list-none items-center p-1.5", className)}
 			>
 				{faced.map((bot) => (
 					<li key={bot.id} className="flex">
@@ -196,7 +199,7 @@ function NamedBotFaces({
 }
 
 /** "N others", naming them on hover or keyboard focus. */
-function OtherBots({ bots }: { bots: readonly Agent[] }) {
+function OtherBots({ bots }: { bots: readonly Bot[] }) {
 	return (
 		<Tooltip
 			label={<OtherBotsList bots={bots} />}
@@ -208,7 +211,7 @@ function OtherBots({ bots }: { bots: readonly Agent[] }) {
 				tabIndex={0}
 				className="focus-ring cursor-default rounded-sm text-foreground underline decoration-dotted underline-offset-2"
 			>
-				{bots.length} {bots.length === 1 ? "other" : "others"}
+				{countOf(bots.length, "other", "others")}
 				<span className="sr-only">: {LIST.format(bots.map((bot) => bot.name))}</span>
 			</span>
 		</Tooltip>
@@ -222,7 +225,7 @@ const LIST = new Intl.ListFormat("en", { type: "conjunction" });
  * the bottom while there are more below, as the scrollbar shows only while
  * scrolling.
  */
-function OtherBotsList({ bots }: { bots: readonly Agent[] }) {
+function OtherBotsList({ bots }: { bots: readonly Bot[] }) {
 	const list = useRef<HTMLUListElement>(null);
 	const [moreBelow, setMoreBelow] = useState(false);
 	const checkMoreBelow = () => {
@@ -240,11 +243,14 @@ function OtherBotsList({ bots }: { bots: readonly Agent[] }) {
 			// biome-ignore lint/a11y/noNoninteractiveTabindex: a list that scrolls must be reachable to scroll it.
 			tabIndex={0}
 			onScroll={checkMoreBelow}
-			className={`focus-ring -mx-1 flex max-h-64 list-none flex-col gap-1 overflow-y-auto rounded-sm px-1 py-0.5 ${moreBelow ? "mask-b-from-75%" : ""}`}
+			className={cn(
+				"focus-ring -mx-1 flex max-h-64 list-none flex-col gap-1 overflow-y-auto rounded-sm px-1 py-0.5",
+				moreBelow && "mask-b-from-75%",
+			)}
 		>
 			{bots.map((bot) => (
 				<li key={bot.id} className="flex items-center gap-1.5">
-					<AgentAvatar color={bot.color} face={bot.face} shape={bot.shape} size={16} />
+					<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={16} />
 					<span className="truncate">{bot.name}</span>
 				</li>
 			))}
@@ -267,7 +273,7 @@ function nameOnKeyboardFocusOnly(
 }
 
 /** One bot's face, which hops as the pointer or keyboard comes onto it and names the bot. */
-function NamedBotFace({ bot, size }: { bot: Agent; size: number }) {
+function NamedBotFace({ bot, size }: { bot: Bot; size: number }) {
 	const face = useRef<LivelyFace>(null);
 	return (
 		<Tooltip label={bot.name} side="top" onOpenChange={nameOnKeyboardFocusOnly}>
@@ -277,10 +283,8 @@ function NamedBotFace({ bot, size }: { bot: Agent; size: number }) {
 				// biome-ignore lint/a11y/noNoninteractiveTabindex: its name shows only on hover or focus, so it must be reachable from the keyboard.
 				tabIndex={0}
 				className="focus-ring flex rounded-full"
-				onPointerEnter={() => face.current?.play("hop")}
-				onFocus={(event) =>
-					event.currentTarget.matches(":focus-visible") && face.current?.play("hop")
-				}
+				onPointerEnter={() => face.current?.hop()}
+				onFocus={(event) => event.currentTarget.matches(":focus-visible") && face.current?.hop()}
 			>
 				<TurnTakingAvatar bot={bot} size={size} faceRef={face} />
 			</span>
@@ -288,15 +292,9 @@ function NamedBotFace({ bot, size }: { bot: Agent; size: number }) {
 	);
 }
 
-/** The crew bots on each model id, which is what a bot's `model` names. */
-export function useBotsByModel(): (modelId: string) => Agent[] {
-	const { agents } = useAgents();
-	return (modelId) => crewBotsOn(agents ?? [], modelId);
-}
-
-/** The crew bots among `agents` on `modelId`. */
-function crewBotsOn(agents: readonly Agent[], modelId: string): Agent[] {
-	return agents.filter((agent) => agent.systemAgentKey === null && agent.model === modelId);
+/** The bots members talk to among `bots` on `modelId`. */
+function memberFacingBotsOn(bots: readonly Bot[], modelId: string): Bot[] {
+	return bots.filter((bot) => bot.model === modelId);
 }
 
 /**
@@ -305,34 +303,30 @@ function crewBotsOn(agents: readonly Agent[], modelId: string): Agent[] {
  * provider, moves them to another as it goes; the server refuses any other
  * change that would stop offering it, such as removing its provider's key.
  */
-export function useModelHolders(): (modelId: string) => ModelHolders | undefined {
+function useModelHolders(): (modelId: string) => ModelHolders | undefined {
 	const defaultModel = useModels().data?.defaultModel ?? null;
-	const systemAgents = useBuiltInAgents().data ?? [];
+	const systemBotList = useSystemBots().data ?? [];
 	return (modelId) => {
 		const newBots = modelId === defaultModel;
-		const systemBots = systemAgents.some((agent) => agent.model === modelId);
+		const systemBots = systemBotList.some((bot) => bot.model === modelId);
 		return newBots || systemBots ? { newBots, systemBots } : undefined;
 	};
 }
 
-export interface ModelHolders {
+interface ModelHolders {
 	newBots: boolean;
 	systemBots: boolean;
 }
 
 /** Why a model, or its provider, cannot be switched off. */
-export function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
+function heldReason({ newBots, systemBots }: ModelHolders, subject: string): string {
 	const holders =
 		newBots && systemBots
-			? "New bots and system agents use"
+			? "New bots and system bots use"
 			: newBots
 				? "New bots use"
-				: "System agents use";
-	return `${holders} ${subject}. Choose another model for them under Models → Default first.`;
-}
-
-export function modelName(model: Pick<ProviderModel, "displayName" | "modelId">): string {
-	return model.displayName ?? model.modelId;
+				: "System bots use";
+	return `${holders} ${subject}. Choose another model for them under Models → Defaults first.`;
 }
 
 export function ProviderSettings({ providerId }: { providerId: string }) {
@@ -341,13 +335,14 @@ export function ProviderSettings({ providerId }: { providerId: string }) {
 	const provider = providers.data?.find((one) => one.id === providerId);
 	if (!provider) {
 		return (
-			<div className="grid min-h-80 place-items-center p-6">
-				<EmptyState title={providers.error ? "Could not load this provider" : "No such provider"}>
-					{providers.error
-						? failureMessage(providers.error)
-						: "It may have been disconnected. Its models are no longer offered."}
-				</EmptyState>
-			</div>
+			<EmptyState
+				page="min"
+				title={providers.error ? "Could not load this provider" : "No such provider"}
+			>
+				{providers.error
+					? failureMessage(providers.error)
+					: "It may have been disconnected. Its models are no longer offered."}
+			</EmptyState>
 		);
 	}
 	return <ProviderPage key={provider.id} provider={provider} />;
@@ -358,11 +353,11 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 	const router = useRouter();
 	const { leaveForPage } = useLeave();
 	const [disconnecting, setDisconnecting] = useState(false);
-	const preset = provider.preset === null ? null : providerPreset(provider.preset);
+	const builtIn = provider.builtIn === null ? null : providerBuiltIn(provider.builtIn);
 	// The ones every workspace starts with cannot be deleted, so disconnecting
 	// one takes its key or sign-in away and switches it off, and adding it again brings it back.
-	const seeded = provider.preset !== null && seededPresets.includes(provider.preset);
-	const signsIn = presetSignsIn(provider.preset);
+	const seeded = provider.builtIn !== null && seededBuiltIns.includes(provider.builtIn);
+	const signsIn = builtInSignsIn(provider.builtIn);
 	const disconnect = seeded ? actions.update : actions.remove;
 	const disconnectPending = disconnect.isPending || actions.signOut.isPending;
 	const disconnectError = disconnect.error ?? actions.signOut.error;
@@ -426,28 +421,20 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 		setDisconnecting(false);
 		// Back to Models, or Models in the provider's place, so Back never returns to one
 		// no longer connected.
-		leaveForPage(
-			router.buildLocation(
-				linkOptions({
-					from: "/$workspace",
-					to: "./settings/$section",
-					params: { section: "providers" },
-				}),
-			).href,
-		);
+		leaveForPage(router.buildLocation(settingsSectionLink("providers")).href);
 	}
 
 	return (
 		<SettingsPage
 			back={<BackToModels />}
 			backOnWide
-			hero={<ProviderTile name={provider.name} preset={provider.preset} size={44} />}
+			hero={<ProviderTile name={provider.name} builtIn={provider.builtIn} size={44} />}
 			title={provider.name}
 			description={[
-				// A preset every workspace starts with was seeded, not added: its date is when the
+				// A built-in provider every workspace starts with was seeded, not added: its date is when the
 				// workspace got it, not when anybody connected it.
 				!seeded && `Added ${formatTimeAfterVerb(new Date(provider.createdAt), new Date())}`,
-				provider.connectedBy && `Connected by ${provider.connectedBy}`,
+				provider.connectedBy && `Connected by ${provider.connectedBy.name}`,
 			]
 				.filter(Boolean)
 				.join(" · ")}
@@ -482,7 +469,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 					}
 				/>
 			</SettingsGroup>
-			<Connection provider={provider} local={preset?.hosting === "local"} />
+			<ProviderAccessGroup provider={provider} local={builtIn?.hosting === "local"} />
 			<Models provider={provider} />
 			<SettingsDanger
 				label={`Disconnect ${provider.name}`}
@@ -532,14 +519,17 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 }
 
 export function BackToModels() {
+	const backToModels = useBackToLinkedPage();
 	return (
 		<PageBackLink
-			{...useBackTarget({
-				label: "Models",
-				render: (
-					<Link from="/$workspace" to="./settings/$section" params={{ section: "providers" }} />
-				),
-			})}
+			label="Models"
+			render={
+				<Link
+					{...settingsSectionLink("providers")}
+					aria-label="Back to Models"
+					onClick={backToModels}
+				/>
+			}
 		/>
 	);
 }
@@ -549,17 +539,17 @@ export function BackToModels() {
  * subscription a sign-in; one you run is its address and an optional key; a custom one also
  * says which API it speaks.
  */
-function Connection({ provider, local }: { provider: ModelProvider; local: boolean }) {
+function ProviderAccessGroup({ provider, local }: { provider: ModelProvider; local: boolean }) {
 	const actions = useProviderActions();
-	const custom = provider.preset === null;
-	const signInService = presetSignInService(provider.preset);
+	const custom = provider.builtIn === null;
+	const signInService = builtInSignInService(provider.builtIn);
 	const error = actions.update.error ?? actions.test.error;
 	const tested = actions.test.data;
 	const held = useHoldersOf(offeredModelsOf(provider));
 
 	return (
 		<SettingsGroup
-			label="Connection"
+			label="Access"
 			note={
 				// The result sits beside the button, so a test never moves what is below it.
 				<span className="flex items-center gap-2.5">
@@ -570,7 +560,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 						onClick={() => actions.test.mutate({ providerId: provider.id })}
 					>
 						{actions.test.isPending && <RefreshCw className="animate-spin" />}
-						Test connection
+						Test provider
 					</Button>
 					{!actions.test.isPending && (
 						<TestOutcome
@@ -587,11 +577,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 					value={provider.baseUrl}
 					placeholder={local ? "http://localhost:11434" : "https://llm.example.com/v1"}
 					pending={actions.update.isPending}
-					problemWith={(typed) =>
-						parseProviderBaseUrl(typed)
-							? undefined
-							: "That is not a server address. A host and port, like 192.168.1.10:11434, is enough."
-					}
+					problemWith={(typed) => (parseProviderBaseUrl(typed) ? undefined : NOT_A_SERVER_ADDRESS)}
 					onSave={async (typed) => {
 						await actions.update.mutateAsync({
 							providerId: provider.id,
@@ -601,7 +587,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 				/>
 			)}
 			{custom && (
-				<ConnectionRow
+				<ProviderFieldRow
 					label="Format"
 					action={
 						<SegmentedControl
@@ -613,9 +599,7 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 							}
 						/>
 					}
-				>
-					{null}
-				</ConnectionRow>
+				/>
 			)}
 			{signInService ? (
 				<ProviderSignInRow
@@ -626,17 +610,13 @@ function Connection({ provider, local }: { provider: ModelProvider; local: boole
 			) : (
 				<KeyRow provider={provider} optional={local || custom} />
 			)}
-			{error && (
-				<div className="border-border border-t px-4 py-3">
-					<Alert>{failureMessage(error)}</Alert>
-				</div>
-			)}
+			{error && <SettingsRowAlert>{failureMessage(error)}</SettingsRowAlert>}
 		</SettingsGroup>
 	);
 }
 
 /**
- * How the last test went, as a dot and a few words beside Test connection:
+ * How the last test went, as a dot and a few words beside Test provider:
  * green for working, red with the reason for not. A reason too long for the
  * line is cut short, and given whole when pointed at.
  */
@@ -651,7 +631,7 @@ function TestOutcome({
 	if (reachable === undefined) return null;
 	return (
 		<SettingsTestOutcome good={reachable}>
-			{reachable ? "Connection successful" : (error ?? "It did not answer.")}
+			{reachable ? "Provider answered" : (error ?? "Provider didn't answer.")}
 		</SettingsTestOutcome>
 	);
 }
@@ -663,7 +643,7 @@ export const API_FORMATS = [
 ] as const;
 
 const fieldText =
-	"w-full min-w-0 bg-transparent font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground";
+	"w-full min-w-0 bg-transparent font-mono text-xs rounded-sm text-foreground focus-ring placeholder:text-muted-foreground";
 
 function EditableRow({
 	label,
@@ -683,7 +663,6 @@ function EditableRow({
 }) {
 	const [draft, setDraft] = useState<string>();
 	const [problem, setProblem] = useState<string>();
-	const id = useId();
 
 	async function save(event: FormEvent) {
 		event.preventDefault();
@@ -702,51 +681,82 @@ function EditableRow({
 
 	if (draft === undefined) {
 		return (
-			<ConnectionRow
+			<ProviderFieldRow
 				label={label}
 				action={
-					<Button variant="link" size="bare" className="text-xs" onClick={() => setDraft(value)}>
+					<Button variant="link" size="text" onClick={() => setDraft(value)}>
 						Change
 					</Button>
 				}
 			>
 				<span className={valueText}>{value}</span>
-			</ConnectionRow>
+			</ProviderFieldRow>
 		);
 	}
 	return (
-		<form onSubmit={save}>
-			<ConnectionRow
+		<ProviderFieldForm
+			label={label}
+			field={{
+				value: draft,
+				onChange: (event) => setDraft(event.target.value),
+				placeholder,
+			}}
+			submitDisabled={pending}
+			problem={problem}
+			onSubmit={save}
+			onCancel={() => setDraft(undefined)}
+		/>
+	);
+}
+
+/**
+ * A provider's row while it is typed into: its field, Save or `submitLabel`,
+ * Cancel when it can be, and what went wrong under the field.
+ */
+function ProviderFieldForm({
+	label,
+	fieldLabel = label,
+	field,
+	submitLabel = "Save",
+	submitDisabled,
+	problem,
+	onSubmit,
+	onCancel,
+}: {
+	label: string;
+	/** Names the field for a screen reader, where `label` alone is too little. */
+	fieldLabel?: string;
+	field: ComponentProps<"input">;
+	submitLabel?: string;
+	submitDisabled: boolean;
+	problem: string | undefined;
+	onSubmit: (event: FormEvent) => void;
+	onCancel?: () => void;
+}) {
+	return (
+		<form onSubmit={onSubmit}>
+			<ProviderFieldRow
 				label={label}
 				action={
 					<span className="flex shrink-0 items-center gap-3">
-						<Button variant="link" size="bare" className="text-xs" type="submit" disabled={pending}>
-							Save
+						<Button variant="link" size="text" type="submit" disabled={submitDisabled}>
+							{submitLabel}
 						</Button>
-						<Button
-							variant="ghost"
-							size="bare"
-							className="text-xs"
-							type="button"
-							onClick={() => setDraft(undefined)}
-						>
-							Cancel
-						</Button>
+						{onCancel && (
+							<Button variant="ghost" size="text" type="button" onClick={onCancel}>
+								Cancel
+							</Button>
+						)}
 					</span>
 				}
 			>
-				<label htmlFor={id} className="sr-only">
-					{label}
-				</label>
-				<input
-					id={id}
-					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
-					placeholder={placeholder}
-					className={fieldText}
-				/>
-				{problem && <span className="block pt-1 text-destructive-text text-xs">{problem}</span>}
-			</ConnectionRow>
+				<input aria-label={fieldLabel} autoComplete="off" className={fieldText} {...field} />
+				{problem && (
+					<span role="alert" className="block pt-1 text-destructive-text text-xs">
+						{problem}
+					</span>
+				)}
+			</ProviderFieldRow>
 		</form>
 	);
 }
@@ -771,58 +781,58 @@ function useHoldersOf(models: readonly ProviderModel[]): ModelHolders | undefine
  * may predate another tab's changes.
  */
 function useModelUsage() {
-	const agents = useAgents();
+	const bots = useBots();
 	const models = useModels();
 	return {
-		agents: agents.agents ?? [],
-		known: agents.agents !== undefined && models.data !== undefined,
-		latest: async (): Promise<readonly Agent[]> => {
-			const [latestAgents] = await Promise.all([agents.refetch(), models.refetch()]);
-			return latestAgents.data ?? [];
+		bots: bots.bots ?? [],
+		known: bots.bots !== undefined && models.data !== undefined,
+		latest: async (): Promise<readonly Bot[]> => {
+			const [latestBots] = await Promise.all([bots.refetch(), models.refetch()]);
+			return latestBots.data ?? [];
 		},
 	};
 }
 
 type OfferedModel = WorkspaceModelsResponse["models"][number];
 
-type SettingMoves = Pick<ProviderSwitchOff, "newBotsTo" | "summariesTo">;
-
-/** The model to suggest moving to: the one new bots use, if it is among `candidates`, else the first. */
-function suggestedModel(
-	candidates: readonly OfferedModel[],
-	defaultModel: string | null | undefined,
-): string | undefined {
-	return candidates.some((candidate) => candidate.modelId === defaultModel)
-		? (defaultModel ?? undefined)
-		: candidates[0]?.modelId;
-}
+type SettingMoves = Pick<ProviderSwitchOff, "newBotsTo" | "systemBotsTo">;
 
 /**
- * Where each of `held` moves: what was chosen for it while `candidates` still
- * offers it, else `fallback`. Each moves only as it is chosen, never with the
- * bots, so the default changes only when someone means it to.
+ * Where what runs on models going off can move: `candidates`, the switched-on
+ * models but those `leaving`, and the moves of the workspace's settings in
+ * `held`. Each setting moves only as it is chosen, never with the bots, so the
+ * default changes only when someone means it to.
  */
-function settingMovesFor(
+function useMoveChoices(
 	held: ModelHolders | undefined,
-	chosen: SettingMoves,
-	candidates: readonly OfferedModel[],
-	fallback: string | undefined,
-): SettingMoves {
-	const stillOffered = (modelId: string | undefined) =>
-		candidates.some((candidate) => candidate.modelId === modelId) ? modelId : fallback;
+	leaving: (candidate: OfferedModel) => boolean,
+) {
+	const models = useModels().data;
+	const candidates = (models?.models ?? []).filter((candidate) => !leaving(candidate));
+	// The one new bots use, if it is among them, else the first.
+	const suggested = candidates.some((candidate) => candidate.modelId === models?.defaultModel)
+		? (models?.defaultModel ?? undefined)
+		: candidates[0]?.modelId;
+	/** `picked` while it is still offered, else the suggested one, so a pick switched off since falls back. */
+	const offeredOr = (picked: string | undefined) =>
+		candidates.some((candidate) => candidate.modelId === picked) ? picked : suggested;
+	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
+	const settingMoves: SettingMoves = {
+		newBotsTo: held?.newBots ? offeredOr(chosenSettings.newBotsTo) : undefined,
+		systemBotsTo: held?.systemBots ? offeredOr(chosenSettings.systemBotsTo) : undefined,
+	};
 	return {
-		newBotsTo: held?.newBots ? stillOffered(chosen.newBotsTo) : undefined,
-		summariesTo: held?.systemBots ? stillOffered(chosen.summariesTo) : undefined,
+		candidates,
+		offeredOr,
+		settingMoves,
+		changeSettingMoves: (change: SettingMoves) =>
+			setChosenSettings((was) => ({ ...was, ...change })),
 	};
 }
 
-/** What `held` names, as a sentence would: new bots, summaries, or both. */
+/** What `held` names, as a sentence would: new bots, compaction, or both. */
 function holderNames({ newBots, systemBots }: ModelHolders): string[] {
-	return [...(newBots ? ["new bots"] : []), ...(systemBots ? ["summaries"] : [])];
-}
-
-function capitalised(text: string): string {
-	return text.charAt(0).toUpperCase() + text.slice(1);
+	return [...(newBots ? ["new bots"] : []), ...(systemBots ? ["compaction"] : [])];
 }
 
 /** A model to move something to, picked from `candidates` in a menu. */
@@ -838,7 +848,8 @@ function MoveToMenu({
 	value: string | undefined;
 	onChange: (modelId: string) => void;
 }) {
-	const name = candidates.find((candidate) => candidate.modelId === value)?.displayName ?? value;
+	const chosen = candidates.find((candidate) => candidate.modelId === value);
+	const name = chosen ? modelName(chosen) : value;
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
@@ -858,7 +869,7 @@ function MoveToMenu({
 							key={`${candidate.providerId}:${candidate.modelId}`}
 							value={candidate.modelId}
 						>
-							{candidate.displayName ?? candidate.modelId}
+							{modelName(candidate)}
 						</DropdownMenuRadioItem>
 					))}
 				</DropdownMenuRadioGroup>
@@ -897,14 +908,14 @@ function SettingMoveRows({
 			)}
 			{held.systemBots && (
 				<SettingsRow
-					label="Summaries"
-					sub="Summaries, chat titles and compacting"
+					label="System bots"
+					sub="Built-in system tasks, like compacting long chats"
 					trailing={
 						<MoveToMenu
-							label="Move summaries to"
+							label="Move system bots to"
 							candidates={candidates}
-							value={moves.summariesTo}
-							onChange={(summariesTo) => onChange({ summariesTo })}
+							value={moves.systemBotsTo}
+							onChange={(systemBotsTo) => onChange({ systemBotsTo })}
 						/>
 					}
 				/>
@@ -915,20 +926,20 @@ function SettingMoveRows({
 
 interface StrandedModel {
 	model: ProviderModel;
-	bots: Agent[];
+	bots: Bot[];
 }
 
 /** The provider's offered models that bots would be left on if it went off. */
-function strandedModelsOf(provider: ModelProvider, agents: readonly Agent[]): StrandedModel[] {
+function strandedModelsOf(provider: ModelProvider, workspaceBots: readonly Bot[]): StrandedModel[] {
 	return offeredModelsOf(provider).flatMap((model) => {
-		const bots = crewBotsOn(agents, model.modelId);
+		const bots = memberFacingBotsOn(workspaceBots, model.modelId);
 		return bots.length > 0 ? [{ model, bots }] : [];
 	});
 }
 
 /**
  * Switching off or disconnecting a provider whose models bots, new bots or
- * summaries still run on: where each moves, from the models other providers
+ * compaction still run on: where each moves, from the models other providers
  * offer, starting on the one new bots use. They move and the provider goes off
  * together, so nothing is left on a model that is off.
  */
@@ -952,19 +963,12 @@ function MoveBotsOffProviderDialog({
 	done: () => void;
 }) {
 	const actions = useProviderActions();
-	const models = useModels().data;
-	const candidates = (models?.models ?? []).filter(
-		(candidate) => candidate.providerId !== provider.id,
+	const { candidates, offeredOr, settingMoves, changeSettingMoves } = useMoveChoices(
+		held,
+		(candidate) => candidate.providerId === provider.id,
 	);
-	const firstChoice = suggestedModel(candidates, models?.defaultModel);
 	const [chosen, setChosen] = useState<Record<string, string>>({});
-	// Follows the models as they change, so a pick switched off since falls back.
-	const destinationOf = (modelId: string) => {
-		const picked = chosen[modelId];
-		return candidates.some((candidate) => candidate.modelId === picked) ? picked : firstChoice;
-	};
-	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
-	const settingMoves = settingMovesFor(held, chosenSettings, candidates, firstChoice);
+	const destinationOf = (modelId: string) => offeredOr(chosen[modelId]);
 	const moveBots = stranded.flatMap(({ model }) => {
 		const to = destinationOf(model.modelId);
 		return to ? [{ from: model.modelId, to }] : [];
@@ -974,7 +978,7 @@ function MoveBotsOffProviderDialog({
 	const botCount = stranded.reduce((total, { bots }) => total + bots.length, 0);
 	const verb = then === "disconnect" ? "disconnect" : "switch off";
 	const users = [
-		...(botCount > 0 ? [`${botCount} ${botCount === 1 ? "bot" : "bots"}`] : []),
+		...(botCount > 0 ? [countOf(botCount, "bot", "bots")] : []),
 		...(held ? holderNames(held) : []),
 	];
 	const uses = users.length === 1 && botCount === 1 ? "uses" : "use";
@@ -1002,7 +1006,7 @@ function MoveBotsOffProviderDialog({
 			/>
 			<DialogFormBody>
 				<DialogDescription>
-					{capitalised(LIST.format(users))} {uses} {provider.name}'s models. Choose the model each
+					{capitalise(LIST.format(users))} {uses} {provider.name}'s models. Choose the model each
 					moves to.
 				</DialogDescription>
 				{warning && <DialogDescription>{warning}</DialogDescription>}
@@ -1034,7 +1038,7 @@ function MoveBotsOffProviderDialog({
 								held={held}
 								candidates={candidates}
 								moves={settingMoves}
-								onChange={(change) => setChosenSettings({ ...chosenSettings, ...change })}
+								onChange={changeSettingMoves}
 							/>
 						)}
 					</SettingsGroup>
@@ -1050,7 +1054,7 @@ function MoveBotsOffProviderDialog({
 	);
 }
 
-/** The models the provider offers agents: none unless it is usable, connected and switched on. */
+/** The models the provider offers bots: none unless it is usable, connected and switched on. */
 function offeredModelsOf(provider: ModelProvider): ProviderModel[] {
 	return providerIsUsable(provider) ? provider.models.filter((model) => model.enabled) : [];
 }
@@ -1061,7 +1065,6 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 	const held = useHoldersOf(offeredModelsOf(provider));
 	const [replacing, setReplacing] = useState(!provider.hasApiKey && !optional);
 	const [apiKey, setApiKey] = useState("");
-	const id = useId();
 
 	async function save(event: FormEvent) {
 		event.preventDefault();
@@ -1081,15 +1084,14 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 
 	if (!replacing) {
 		return (
-			<ConnectionRow
+			<ProviderFieldRow
 				label="API key"
 				action={
 					<span className="flex shrink-0 items-center gap-3">
 						{optional && provider.hasApiKey && (
 							<Button
 								variant="ghost"
-								size="bare"
-								className="text-xs"
+								size="text"
 								disabled={actions.update.isPending || held !== undefined}
 								title={held && heldReason(held, "one of its models")}
 								onClick={() =>
@@ -1099,72 +1101,38 @@ function KeyRow({ provider, optional }: { provider: ModelProvider; optional: boo
 								Remove
 							</Button>
 						)}
-						<Button
-							variant="link"
-							size="bare"
-							className="text-xs"
-							onClick={() => setReplacing(true)}
-						>
+						<Button variant="link" size="text" onClick={() => setReplacing(true)}>
 							{provider.hasApiKey ? "Replace" : "Add"}
 						</Button>
 					</span>
 				}
 			>
 				<span className={valueText}>{provider.hasApiKey ? savedKeyMask : "None"}</span>
-			</ConnectionRow>
+			</ProviderFieldRow>
 		);
 	}
 	return (
-		<form onSubmit={save}>
-			<ConnectionRow
-				label="API key"
-				action={
-					<span className="flex shrink-0 items-center gap-3">
-						<Button
-							variant="link"
-							size="bare"
-							className="text-xs"
-							type="submit"
-							disabled={!apiKey || actions.update.isPending}
-						>
-							Save
-						</Button>
-						{(provider.hasApiKey || optional) && (
-							<Button
-								variant="ghost"
-								size="bare"
-								className="text-xs"
-								type="button"
-								onClick={() => {
-									setApiKey("");
-									setReplacing(false);
-								}}
-							>
-								Cancel
-							</Button>
-						)}
-					</span>
-				}
-			>
-				<label htmlFor={id} className="sr-only">
-					{provider.name} API key
-				</label>
-				<input
-					id={id}
-					type="password"
-					autoComplete="off"
-					value={apiKey}
-					onChange={(event) => setApiKey(event.target.value)}
-					placeholder="Paste your key"
-					className={fieldText}
-				/>
-				{actions.update.error && (
-					<span role="alert" className="block pt-1 text-destructive-text text-xs">
-						{failureMessage(actions.update.error)}
-					</span>
-				)}
-			</ConnectionRow>
-		</form>
+		<ProviderFieldForm
+			label="API key"
+			fieldLabel={`${provider.name} API key`}
+			field={{
+				type: "password",
+				value: apiKey,
+				onChange: (event) => setApiKey(event.target.value),
+				placeholder: "Paste your key",
+			}}
+			submitDisabled={!apiKey || actions.update.isPending}
+			problem={actions.update.error ? failureMessage(actions.update.error) : undefined}
+			onSubmit={save}
+			onCancel={
+				provider.hasApiKey || optional
+					? () => {
+							setApiKey("");
+							setReplacing(false);
+						}
+					: undefined
+			}
+		/>
 	);
 }
 
@@ -1173,7 +1141,7 @@ const capabilityIcons: Record<ProviderModelCapability, LucideIcon> = {
 	vision: Eye,
 	images: Image,
 	audio: Mic,
-	reasoning: Brain,
+	thinking: Brain,
 	embeddings: Grid2X2,
 };
 
@@ -1220,31 +1188,6 @@ function ScrollingWhen({ large, children }: { large: boolean; children: ReactNod
 	);
 }
 
-/** A box to search a list of `count` models, for one too long to scan. */
-function ModelSearch({
-	value,
-	onChange,
-	count,
-}: {
-	value: string;
-	onChange: (value: string) => void;
-	count: number;
-}) {
-	return (
-		<label className="focus-ring-within flex h-8.5 items-center gap-2 rounded-lg border border-border-strong bg-background px-2.5">
-			<Search aria-hidden size={14} className="shrink-0 text-subtle-foreground" />
-			<input
-				type="search"
-				value={value}
-				onChange={(event) => onChange(event.target.value)}
-				placeholder={`Search ${count} models`}
-				aria-label="Search models"
-				className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle-foreground"
-			/>
-		</label>
-	);
-}
-
 /** Who makes a model on a provider that resells many: OpenRouter names it `maker/model`. */
 function makerOf(model: ProviderModel): string | undefined {
 	const slash = model.modelId.indexOf("/");
@@ -1257,7 +1200,6 @@ function makerLabel(maker: string): string {
 
 function Models({ provider }: { provider: ModelProvider }) {
 	const actions = useProviderActions();
-	const botsOn = useBotsByModel();
 	const usage = useModelUsage();
 	const holdersOf = useModelHolders();
 	const [search, setSearch] = useState("");
@@ -1273,18 +1215,18 @@ function Models({ provider }: { provider: ModelProvider }) {
 	const shown = searchModels(provider.models, needle).sort(
 		(a, b) => Number(onWhenOpened.has(b.id)) - Number(onWhenOpened.has(a.id)),
 	);
-	const error = actions.setModel.error ?? actions.fetchModels.error;
-	const custom = provider.preset === null;
+	const error = actions.setModel.error ?? actions.discoverModels.error;
+	const custom = provider.builtIn === null;
 
 	/**
-	 * Switches the model off, or asks where its bots, new bots or summaries go
+	 * Switches the model off, or asks where its bots, new bots or compaction go
 	 * first. Decided on fresh bots and models, as the cached ones may predate
 	 * another tab's changes.
 	 */
 	async function switchOff(model: ProviderModel) {
 		setCheckingUsage(true);
 		const latest = await usage.latest().finally(() => setCheckingUsage(false));
-		const strandsBots = crewBotsOn(latest, model.modelId).length > 0;
+		const strandsBots = memberFacingBotsOn(latest, model.modelId).length > 0;
 		if (strandsBots || holdersOf(model.modelId) !== undefined) {
 			setMovingOff(model);
 			return;
@@ -1298,19 +1240,24 @@ function Models({ provider }: { provider: ModelProvider }) {
 			action={
 				<Button
 					variant="link"
-					size="bare"
-					className="text-xs"
-					disabled={actions.fetchModels.isPending || providerLacksCredential(provider)}
-					onClick={() => actions.fetchModels.mutate({ providerId: provider.id })}
+					size="text"
+					disabled={actions.discoverModels.isPending || providerLacksCredential(provider)}
+					onClick={() => actions.discoverModels.mutate({ providerId: provider.id })}
 				>
-					{actions.fetchModels.isPending ? "Refreshing…" : "Refresh list"}
+					{actions.discoverModels.isPending ? "Refreshing…" : "Refresh list"}
 				</Button>
 			}
 			note="Only switched-on models show up when choosing a bot's model."
 		>
 			{large && (
 				<div className="border-border border-b p-2.5">
-					<ModelSearch value={search} onChange={setSearch} count={provider.models.length} />
+					<SearchField
+						label="Search models"
+						placeholder={`Search ${provider.models.length} models`}
+						look="outline"
+						value={search}
+						onChange={setSearch}
+					/>
 				</div>
 			)}
 			<ScrollingWhen large={large}>
@@ -1322,20 +1269,24 @@ function Models({ provider }: { provider: ModelProvider }) {
 					/>
 				)}
 				{shown.map((model) => {
-					const bots = botsOn(model.modelId);
-					const used =
-						bots.length === 0
-							? "Not used yet"
-							: `${bots.length} ${bots.length === 1 ? "bot" : "bots"}`;
+					const bots = memberFacingBotsOn(usage.bots, model.modelId);
+					const used = bots.length === 0 ? "Not used yet" : countOf(bots.length, "bot", "bots");
 					const who = large ? makerLabel(makerOf(model) ?? provider.name) : used;
 					const held = model.enabled ? holdersOf(model.modelId) : undefined;
 					return (
 						<SettingsRow
 							key={model.id}
-							label={modelName(model)}
+							label={
+								// Beside its name, what the workspace's defaults hold it for.
+								<span className="flex min-w-0 items-center gap-1.5">
+									<span className="truncate">{modelName(model)}</span>
+									{held?.newBots && <TitleTag>Default</TitleTag>}
+									{held?.systemBots && <TitleTag>System bots</TitleTag>}
+								</span>
+							}
 							sub={
 								<span className="flex items-center gap-1.5">
-									{held ? `${held.newBots ? "Default" : "Summaries"} · ${who}` : who}
+									{who}
 									<CapabilityIcons model={model} />
 								</span>
 							}
@@ -1377,7 +1328,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 					<MoveBotsDialog
 						provider={provider}
 						model={movingOff}
-						bots={crewBotsOn(usage.agents, movingOff.modelId)}
+						bots={memberFacingBotsOn(usage.bots, movingOff.modelId)}
 						held={holdersOf(movingOff.modelId)}
 						done={() => setMovingOff(undefined)}
 					/>
@@ -1389,17 +1340,13 @@ function Models({ provider }: { provider: ModelProvider }) {
 				) : (
 					<SettingsAddRow label="Add model" onClick={() => setAdding(true)} />
 				))}
-			{error && (
-				<div className="border-border border-t px-4 py-3">
-					<Alert>{failureMessage(error)}</Alert>
-				</div>
-			)}
+			{error && <SettingsRowAlert>{failureMessage(error)}</SettingsRowAlert>}
 		</SettingsGroup>
 	);
 }
 
 /**
- * Switching off a model bots, new bots or summaries still run on: which of the
+ * Switching off a model bots, new bots or compaction still run on: which of the
  * other switched-on models each moves to, starting on the one new bots use.
  * They move and the model goes off together, so nothing is left on a model
  * that is off.
@@ -1413,23 +1360,20 @@ function MoveBotsDialog({
 }: {
 	provider: ModelProvider;
 	model: ProviderModel;
-	bots: readonly Agent[];
+	bots: readonly Bot[];
 	held: ModelHolders | undefined;
 	done: () => void;
 }) {
 	const actions = useProviderActions();
-	const models = useModels().data;
-	const candidates = (models?.models ?? []).filter(
-		(candidate) => candidate.modelId !== model.modelId,
+	const { candidates, offeredOr, settingMoves, changeSettingMoves } = useMoveChoices(
+		held,
+		(candidate) => candidate.modelId === model.modelId,
 	);
 	const [search, setSearch] = useState("");
 	const needle = useDeferredValue(search.trim().toLowerCase());
 	const [picked, setPicked] = useState<string>();
-	const suggested = suggestedModel(candidates, models?.defaultModel);
 	// Follows the models as they load or change, until someone picks one.
-	const chosen = candidates.some((candidate) => candidate.modelId === picked) ? picked : suggested;
-	const [chosenSettings, setChosenSettings] = useState<SettingMoves>({});
-	const settingMoves = settingMovesFor(held, chosenSettings, candidates, suggested);
+	const chosen = offeredOr(picked);
 	const shown = searchModels(candidates, needle);
 	const name = modelName(model);
 	const hasBots = bots.length > 0;
@@ -1457,7 +1401,7 @@ function MoveBotsDialog({
 				<DialogDescription>
 					{hasBots
 						? `${bots.length === 1 ? "This bot uses" : "These bots use"} ${name}${held ? `, and so do ${LIST.format(holderNames(held))}` : ""}.`
-						: `${capitalised(LIST.format(held ? holderNames(held) : []))} use ${name}.`}
+						: `${capitalise(LIST.format(held ? holderNames(held) : []))} use ${name}.`}
 					{candidates.length > 0 &&
 						(hasBots
 							? ` Choose the model to move ${bots.length === 1 && !held ? "it" : "them"} to.`
@@ -1472,17 +1416,23 @@ function MoveBotsDialog({
 				) : (
 					<>
 						{hasBots && candidates.length > MODEL_SEARCH_THRESHOLD && (
-							<ModelSearch value={search} onChange={setSearch} count={candidates.length} />
+							<SearchField
+								label="Search models"
+								placeholder={`Search ${candidates.length} models`}
+								look="outline"
+								value={search}
+								onChange={setSearch}
+							/>
 						)}
 						{hasBots && (
-							<div className="-mx-1 flex max-h-picker-tall flex-col gap-5 overflow-y-auto px-1 max-md:max-h-none max-md:overflow-visible">
+							<DialogFormScroll height="picker-tall">
 								<ModelChoiceList
 									models={shown}
 									chosen={chosen}
 									onChoose={setPicked}
 									empty="No models match."
 								/>
-							</div>
+							</DialogFormScroll>
 						)}
 						{held && (
 							<SettingsGroup>
@@ -1490,7 +1440,7 @@ function MoveBotsDialog({
 									held={held}
 									candidates={candidates}
 									moves={settingMoves}
-									onChange={(change) => setChosenSettings({ ...chosenSettings, ...change })}
+									onChange={changeSettingMoves}
 								/>
 							</SettingsGroup>
 						)}
@@ -1519,9 +1469,17 @@ function MoveBotsDialog({
 function AddModelRow({ provider, done }: { provider: ModelProvider; done: () => void }) {
 	const actions = useProviderActions();
 	const [modelId, setModelId] = useState("");
-	const id = useId();
 	return (
-		<form
+		<ProviderFieldForm
+			label="Model ID"
+			field={{
+				value: modelId,
+				onChange: (event) => setModelId(event.target.value),
+				placeholder: "e.g. llama-3.3-70b",
+			}}
+			submitLabel="Add"
+			submitDisabled={!modelId.trim() || actions.addModel.isPending}
+			problem={actions.addModel.error ? failureMessage(actions.addModel.error) : undefined}
 			onSubmit={(event) => {
 				event.preventDefault();
 				if (!modelId.trim()) return;
@@ -1530,43 +1488,8 @@ function AddModelRow({ provider, done }: { provider: ModelProvider; done: () => 
 					{ onSuccess: done },
 				);
 			}}
-		>
-			<ConnectionRow
-				label="Model ID"
-				action={
-					<span className="flex shrink-0 items-center gap-3">
-						<Button
-							variant="link"
-							size="bare"
-							className="text-xs"
-							type="submit"
-							disabled={!modelId.trim() || actions.addModel.isPending}
-						>
-							Add
-						</Button>
-						<Button variant="ghost" size="bare" className="text-xs" type="button" onClick={done}>
-							Cancel
-						</Button>
-					</span>
-				}
-			>
-				<label htmlFor={id} className="sr-only">
-					Model ID
-				</label>
-				<input
-					id={id}
-					value={modelId}
-					onChange={(event) => setModelId(event.target.value)}
-					placeholder="e.g. llama-3.3-70b"
-					className={fieldText}
-				/>
-				{actions.addModel.error && (
-					<span role="alert" className="block pt-1 text-destructive-text text-xs">
-						{failureMessage(actions.addModel.error)}
-					</span>
-				)}
-			</ConnectionRow>
-		</form>
+			onCancel={done}
+		/>
 	);
 }
 

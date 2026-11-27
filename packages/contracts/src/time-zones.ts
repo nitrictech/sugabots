@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
 /** Longer than any IANA name, short enough that nothing slow runs on a long one. */
-export const MAX_TIMEZONE_CHARACTERS = 100;
+const MAX_TIMEZONE_CHARACTERS = 100;
 
 /**
  * An IANA time zone, such as `Australia/Sydney`. Named zones only: an offset
@@ -15,7 +15,7 @@ export const timeZoneSchema = Schema.String.check(
 );
 export type TimeZone = typeof timeZoneSchema.Type;
 
-/** The time zone of a workspace created without one, and of every workspace made before they had one. */
+/** The time zone of a workspace created without one. */
 export const DEFAULT_TIME_ZONE = "UTC";
 
 function isTimeZone(zone: string): boolean {

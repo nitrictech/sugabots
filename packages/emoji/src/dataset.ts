@@ -12,13 +12,13 @@ export interface EmojiDataset {
 	emojis: Emoji[];
 }
 
-export interface EmojiCategory {
+interface EmojiCategory {
 	/** What an emoji's `category` refers to, which is also the category's place in the picker. */
 	index: number;
 	label: string;
 }
 
-export type SkinTone = "light" | "medium-light" | "medium" | "medium-dark" | "dark";
+type SkinTone = "light" | "medium-light" | "medium" | "medium-dark" | "dark";
 
 export interface Emoji {
 	emoji: string;
@@ -34,7 +34,7 @@ export interface Emoji {
 	skins?: Record<SkinTone, string>;
 	/** One of the flags of a country or region, which Windows draws as two letters. */
 	countryFlag?: true;
-	/** The same emoji with a different skin tone for each person in it, as 🧑🏻‍🤝‍🧑🏿, which names it by this one. */
+	/** The same emoji with a different skin tone for each figure in it, as 🧑🏻‍🤝‍🧑🏿, which names it by this one. */
 	aliases?: string[];
 }
 

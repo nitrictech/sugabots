@@ -1,19 +1,20 @@
-import { handleFromName } from "./agents.ts";
+import type { AutomationTrigger } from "./automations.ts";
+import { handleFromName } from "./bots.ts";
+import type { ListedChat, ProjectChat } from "./chats.ts";
 import {
-	type Connection,
-	type ConnectionToolWithAccess,
-	type ConnectionWithTools,
+	type Connector,
+	type ConnectorToolWithAccess,
+	type ConnectorWithTools,
 	toolAccessCountsOf,
-} from "./connections.ts";
-import type { RoutineTrigger } from "./routines.ts";
-import type { PersonParticipant } from "./threads.ts";
+} from "./connectors.ts";
+import type { MemberParticipant } from "./messages.ts";
 
 /**
- * A person as the API shows them, for tests and stories. The handle is derived
+ * A member as the API shows them, for tests and stories. The handle is derived
  * from the name, as the server derives it; the email is made from the handle
  * unless given; and they have no photo unless given one.
  */
-export function testPerson({
+export function testMember({
 	id,
 	name,
 	email,
@@ -23,47 +24,65 @@ export function testPerson({
 	name: string;
 	email?: string;
 	image?: string | null;
-}): PersonParticipant {
+}): MemberParticipant {
 	const handle = handleFromName(name);
-	return { kind: "person", id, name, email: email ?? `${handle}@example.com`, handle, image };
+	return { kind: "member", id, name, email: email ?? `${handle}@example.com`, handle, image };
 }
 
-/** A connection for tests and stories, with every tool in full, as the server holds it. */
-export type TestConnection = Omit<Connection, "toolCounts"> & { tools: ConnectionToolWithAccess[] };
+/** A connector for tests and stories, with every tool in full, as the server holds it. */
+export type TestConnector = Omit<Connector, "toolCounts"> & { tools: ConnectorToolWithAccess[] };
 
-/** `connection` as the pod's list gives it: how many tools are at each setting, not the tools. */
-export function listedConnection({ tools, ...connection }: TestConnection): Connection {
-	return { ...connection, toolCounts: toolAccessCountsOf(tools) };
+/** `connector` as its bot's list gives it: how many tools are at each setting, not the tools. */
+export function listedConnector({ tools, ...connector }: TestConnector): Connector {
+	return { ...connector, toolCounts: toolAccessCountsOf(tools) };
 }
 
-/** `connection` as reading it on its own gives it: its tools, without their descriptions. */
-export function connectionWithTools(connection: TestConnection): ConnectionWithTools {
+/** `connector` as reading it on its own gives it: its tools, without their descriptions. */
+export function connectorWithTools(connector: TestConnector): ConnectorWithTools {
 	return {
-		...listedConnection(connection),
-		tools: connection.tools.map(({ description: _, ...tool }) => tool),
+		...listedConnector(connector),
+		tools: connector.tools.map(({ description: _, ...tool }) => tool),
 	};
 }
 
-/** A routine's trigger as a fixture writes it, before it is given an id. */
-export type TestRoutineTrigger = RoutineTrigger extends infer T
-	? T extends RoutineTrigger
+/** An automation's trigger as a fixture writes it, before it is given an id. */
+export type TestAutomationTrigger = AutomationTrigger extends infer T
+	? T extends AutomationTrigger
 		? Omit<T, "id">
 		: never
 	: never;
 
-/**
- * A routine's triggers, numbered by `routineId`: the first has the routine's
- * own id, as a trigger moved from when routines had one does.
- */
-export function routineTriggers(
-	routineId: string,
-	...triggers: TestRoutineTrigger[]
-): RoutineTrigger[] {
+/** An automation's triggers, numbered from `automationId`: the first takes the automation's own id. */
+export function automationTriggers(
+	automationId: string,
+	...triggers: TestAutomationTrigger[]
+): AutomationTrigger[] {
 	return triggers.map(
 		(trigger, index) =>
 			({
 				...trigger,
-				id: index === 0 ? routineId : `${routineId.slice(0, -2)}${String(index).padStart(2, "0")}`,
-			}) as RoutineTrigger,
+				id:
+					index === 0
+						? automationId
+						: `${automationId.slice(0, -2)}${String(index).padStart(2, "0")}`,
+			}) as AutomationTrigger,
 	);
+}
+
+/** A project's chat as its list shows it, with nothing new in it unless `standing` says. */
+export function listedChat(
+	chat: ProjectChat,
+	standing: Partial<Omit<ListedChat, "chat">> = {},
+): ListedChat {
+	return {
+		chat,
+		lastMessageAt: null,
+		participants: [],
+		messageCount: 1,
+		unreadMessages: 0,
+		needsApproval: false,
+		mentionsYou: false,
+		status: null,
+		...standing,
+	};
 }

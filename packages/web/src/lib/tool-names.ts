@@ -1,49 +1,50 @@
-import { builtInToolCatalog, CONNECTION_TOOL_SEPARATOR } from "@sugabots/contracts";
+import { builtInToolCatalog, CONNECTOR_TOOL_SEPARATOR } from "@sugabots/contracts";
+import { capitalise } from "@/lib/name-list.ts";
 
-/**
+/*
  * What a tool call is called wherever it is shown: the tool line and approval
- * card in a thread, and a chat list row waiting on one.
+ * card in a chat, and a chat list row waiting on one.
  */
 
-/** Calls to the product's own tools sit under this handle, which no connection can take. */
+/** Calls to the product's own tools sit under this handle, which no connector can take. */
 export const BUILT_IN_HANDLE = "";
 
-/** The built-in tool an agent asks with for its sandbox to reach another host. */
-export const NETWORK_REQUEST_TOOL = "request_network_access";
+/** The built-in tool a bot asks with for its computer to reach another host. */
+export const HOST_REQUEST_TOOL = "request_host";
 
 /**
  * The browser tools' names start with this. They are the product's own, all
- * one app, the agent's browser, and each step is named by what it does.
+ * one app, the bot's browser, and each step is named by what it does.
  */
 export const BROWSER_TOOL_PREFIX = "browser_";
 
-/** The artifact tools' names start with this: one app, the pod's artifacts, read and written. */
-export const ARTIFACT_TOOL_PREFIX = "artifact_";
+/** The file tools' names start with this: one app, the documents and pages bots write, read and written. */
+export const FILE_TOOL_PREFIX = "file_";
 
 /**
- * What a connection is called wherever one of its tools is shown. A handle with
- * no connection behind it any more is written out rather than shown raw, so a
- * deleted connection reads as `Linear` and not as `linear`.
+ * What a connector is called wherever one of its tools is shown. A handle with
+ * no connector behind it any more is written out rather than shown raw, so a
+ * deleted connector reads as `Linear` and not as `linear`.
  */
-export function connectionLabel(handle: string, name?: string): string {
+export function connectorLabel(handle: string, name?: string): string {
 	if (handle === BUILT_IN_HANDLE) return "Built-in tools";
 	return name ?? wordsFromKey(handle);
 }
 
 /**
- * A tool key as the connection and the tool it names. A key with no separator
- * is one of the product's own tools, which belong to no connection.
+ * A tool key as the connector and the tool it names. A key with no separator
+ * is one of the product's own tools, which belong to no connector.
  */
 export function splitToolKey(tool: string): { handle: string; name: string } {
-	const at = tool.indexOf(CONNECTION_TOOL_SEPARATOR);
+	const at = tool.indexOf(CONNECTOR_TOOL_SEPARATOR);
 	if (at < 0) return { handle: BUILT_IN_HANDLE, name: tool };
-	return { handle: tool.slice(0, at), name: tool.slice(at + CONNECTION_TOOL_SEPARATOR.length) };
+	return { handle: tool.slice(0, at), name: tool.slice(at + CONNECTOR_TOOL_SEPARATOR.length) };
 }
 
 /**
  * What a step is called in the log.
  *
- * The product's own tools have written names in the catalog. A connection's tool
+ * The product's own tools have written names in the catalog. A connector's tool
  * has only the key its server published, so the key is what gets written out:
  * `search_issues` reads as `Search issues`. That relies on the `verb_noun`
  * naming MCP servers conventionally use, and a server that names a tool
@@ -65,7 +66,7 @@ export function stepLabel(tool: string, name = splitToolKey(tool).name): string 
 export function toolTitle(tool: string): string {
 	const { handle, name } = splitToolKey(tool);
 	const label = stepLabel(tool, name);
-	return handle ? `${label} in ${connectionLabel(handle)}` : label;
+	return handle ? `${label} in ${connectorLabel(handle)}` : label;
 }
 
 /**
@@ -81,5 +82,5 @@ export function wordsFromKey(key: string): string {
 		.replace(/[_-]+/g, " ")
 		.trim();
 	if (!words) return key;
-	return words.charAt(0).toUpperCase() + words.slice(1);
+	return capitalise(words);
 }

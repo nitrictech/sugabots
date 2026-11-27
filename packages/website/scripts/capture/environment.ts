@@ -22,7 +22,7 @@ const POSTGRES_USER = "capture";
 /** Development-only secrets, as `.env.example` gives them: nothing real is ever stored here. */
 const DEVELOPMENT_SECRETS = {
 	BETTER_AUTH_SECRET: "development-secret-not-for-production",
-	CREDENTIALS_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+	SECRETS_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 };
 
 export interface Environment {
@@ -72,8 +72,6 @@ export async function start(): Promise<Environment> {
 			`POSTGRES_DB=${POSTGRES_USER}`,
 			"-p",
 			`127.0.0.1:${databasePort}:5432`,
-			"-v",
-			`${join(REPO, "postgres/init")}:/docker-entrypoint-initdb.d:ro`,
 			POSTGRES_IMAGE,
 		]);
 		await waitFor(() => {
@@ -92,7 +90,7 @@ export async function start(): Promise<Environment> {
 			run("node", ["src/database/migrate.ts"], { cwd: join(REPO, "packages/core"), env }),
 		);
 		run("node", ["packages/demo/src/showcase/seed.ts"], { cwd: REPO, env });
-		run("node", ["packages/demo/src/showcase/stage.ts", "sign-in-connections"], {
+		run("node", ["packages/demo/src/showcase/stage.ts", "sign-in-connectors"], {
 			cwd: REPO,
 			env,
 		});

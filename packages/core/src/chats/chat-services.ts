@@ -1,0 +1,73 @@
+export * as ChatServices from "./chat-services.ts";
+
+import { Context, Effect, Layer } from "effect";
+import { DomainEvents } from "../database/events/domain-events.ts";
+import { EventOutbox } from "../database/events/outbox.ts";
+import { Notifications } from "../notifications/notifications.ts";
+import { processLayer } from "../tiers.ts";
+import { WorkspaceTimeZone } from "../workspaces/time-zone/workspace-time-zone.ts";
+import { AutomationRunner } from "./automations/automation-runner.ts";
+import { Automations } from "./automations/automations.ts";
+import { AutomationSettlement } from "./automations/settlement.ts";
+import { AutomationWorkAdmission } from "./automations/work-admission.ts";
+import { ChatEventStream } from "./chat-event-stream.ts";
+import { ChatEvents } from "./chat-events.ts";
+import { Compactions } from "./compaction/compactions.ts";
+import type { ChatEvent } from "./events.ts";
+import { FloorControl } from "./floor/floor-control.ts";
+import { Turns } from "./turns/turns.ts";
+
+/**
+ * `Turns` is provided here, once, to all of these, with automation runs deciding
+ * which chats take more work (see `WorkAdmission`). Floor control asks for
+ * turns and reads what they wrote, so a service providing it itself would load
+ * it before it exists.
+ */
+const services = Layer.mergeAll(
+	Automations.connectorEventsLayer,
+	// Moving the workspace's zone moves its automations' routines, through the store that emits.
+	WorkspaceTimeZone.layer,
+	AutomationRunner.layer,
+	Compactions.layer,
+	AutomationSettlement.layer,
+	FloorControl.layer,
+).pipe(
+	Layer.provideMerge(Layer.merge(Turns.layer, Turns.controlsLayer)),
+	Layer.provideMerge(AutomationWorkAdmission.layer),
+);
+
+/** Everything `layer` provides. */
+export type Services = Layer.Success<typeof services> | ChatEvents.Service;
+
+/**
+ * The chat services, with `ChatEvents` handing what they
+ * emit to its handlers, in order: the chat event stream tells watching clients what
+ * happened, automation settlement ends the runs that work finished, the floor
+ * passes to the bots a completed reply asks for help and back to the asking
+ * bot once they are done, a reply past the compaction line asks for
+ * its chat's compaction once it commits, and
+ * members are notified of finished messages and approvals waiting on them.
+ */
+export const layer = Layer.effectContext(
+	Effect.gen(function* () {
+		const outbox = yield* EventOutbox.Service;
+		const notifications = yield* Notifications.Service;
+		// Settlement is built from the services that emit, so `emit` reaches the
+		// handlers through `dispatch`, which exists once they are built. Nothing
+		// emits while they are being built.
+		const events = ChatEvents.Service.of({ emit: (batch) => dispatch(batch) });
+		const built = yield* Layer.build(
+			services.pipe(Layer.provide(Layer.succeed(ChatEvents.Service, events).pipe(processLayer))),
+		);
+		const dispatch = DomainEvents.emitTo<ChatEvent>([
+			ChatEventStream.handler(outbox),
+			ChatEventStream.approvalHandler(outbox),
+			Context.get(built, AutomationSettlement.Service).handler,
+			Context.get(built, FloorControl.Service).handler,
+			Context.get(built, Compactions.Service).handler,
+			notifications.handler,
+		]);
+		// The workflows' steps and the operation registry reuse the chat services built here.
+		return Context.add(built, ChatEvents.Service, events);
+	}),
+).pipe(processLayer);

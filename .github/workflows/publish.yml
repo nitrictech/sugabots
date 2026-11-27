@@ -71,8 +71,8 @@ jobs:
             SUGABOTS_VERSION=${{ steps.meta.outputs.version }}
             SUGABOTS_COMMIT=${{ github.sha }}
 
-  sandbox-image:
-    name: Publish the sandbox image to GHCR and Docker Hub
+  computer-image:
+    name: Publish the computer image to GHCR and Docker Hub
     runs-on: depot-ubuntu-24.04
 
     permissions:
@@ -96,8 +96,8 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Tagged as the app is: latest is the newest release's, and a push to
-      # main is edge and sha-<commit>. Sandbox providers pull it: OpenSandbox
-      # for each sandbox, E2B to build a workspace's template. The package must
+      # main is edge and sha-<commit>. Computer providers pull it: OpenSandbox
+      # for each computer, E2B to build a workspace's template. The package must
       # be public for them to. Cloudflare can't pull from GHCR, so it pulls the
       # same image from Docker Hub.
       - id: meta
@@ -120,7 +120,7 @@ jobs:
           # Depot builds each platform natively, arm64 on arm64, rather than
           # emulating it, and keeps the layer cache between builds.
           project: ${{ vars.DEPOT_PROJECT_ID }}
-          context: docker/sandbox
+          context: docker/computer
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

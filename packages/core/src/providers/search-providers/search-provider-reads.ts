@@ -1,33 +1,45 @@
 import type { SearchProvider } from "@sugabots/contracts";
-import { searchProviderPreset } from "@sugabots/contracts";
-import { eq } from "drizzle-orm";
+import { searchBuiltInProvider } from "@sugabots/contracts";
+import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
 import { type SearchProviderRow, searchProvider } from "../../database/schema.ts";
 import { configurationStatus } from "../tested-configuration.ts";
 
+/** The row of the workspace's search provider, or nothing when it has none. */
+export const searchProviderRowOf = (workspaceId: string, providerId?: string) =>
+	query((db) =>
+		db
+			.select()
+			.from(searchProvider)
+			.where(
+				and(
+					eq(searchProvider.workspaceId, workspaceId),
+					providerId ? eq(searchProvider.id, providerId) : undefined,
+				),
+			)
+			.limit(1),
+	).pipe(Effect.map(([row]) => row));
+
 /** The workspace's search provider, or nothing when it has none. */
 export const searchProviderOf = (workspaceId: string) =>
-	query((db) =>
-		db.select().from(searchProvider).where(eq(searchProvider.workspaceId, workspaceId)).limit(1),
-	).pipe(Effect.map(([row]) => row && toSearchProvider(row)));
+	Effect.map(searchProviderRowOf(workspaceId), (row) => row && toSearchProvider(row));
 
 export function toSearchProvider(row: SearchProviderRow): SearchProvider {
-	const preset = searchProviderPreset(row.preset);
+	const builtIn = searchBuiltInProvider(row.builtIn);
 	return {
 		id: row.id,
 		workspaceId: row.workspaceId,
-		preset: row.preset,
-		name: preset.name,
+		builtIn: row.builtIn,
+		name: builtIn.name,
 		baseUrl: row.baseUrl,
 		enabled: row.enabled,
 		status: configurationStatus({
-			missingKey: preset.requiresApiKey && row.apiKeyEncrypted === null,
+			missingKey: builtIn.requiresApiKey && row.apiKeyEncrypted === null,
 			lastTestedAt: row.lastTestedAt,
 			lastTestError: row.lastTestError,
 		}),
 		hasApiKey: row.apiKeyEncrypted !== null,
-		lastTestedAt: row.lastTestedAt?.toISOString() ?? null,
 		lastTestError: row.lastTestError,
 		createdAt: row.createdAt.toISOString(),
 	};

@@ -4,7 +4,7 @@ import type { RequestUsage } from "./usage.ts";
 import { Usd } from "./usd.ts";
 
 /** What a model charges for one token of each kind, in US dollars. */
-export interface TokenPrices {
+interface TokenPrices {
 	readonly input: number;
 	readonly output: number;
 	/** Absent when the provider publishes no separate price, and the input price applies. */
@@ -20,7 +20,7 @@ export interface TokenPrices {
  * tier's prices. Only {@link ratesFromModelsDev} makes one, so the tiers are
  * always in order.
  */
-export type Rates = Brand.Branded<
+type Rates = Brand.Branded<
 	{
 		readonly base: TokenPrices;
 		/** Ordered by `overInputTokens`, lowest first. */
@@ -31,7 +31,7 @@ export type Rates = Brand.Branded<
 
 const Rates = Brand.nominal<Rates>();
 
-export interface LongContextTier {
+interface LongContextTier {
 	readonly overInputTokens: number;
 	readonly prices: TokenPrices;
 }
@@ -39,9 +39,9 @@ export interface LongContextTier {
 /** What one request cost, or why it can't be said. An unknown cost is never reported as zero. */
 export type CostEstimate =
 	| { readonly _tag: "Priced"; readonly usd: Usd }
-	| { readonly _tag: "Unpriced"; readonly reason: UnpricedReason };
+	| { readonly _tag: "UnknownCost"; readonly reason: UnknownCostReason };
 
-export type UnpricedReason =
+type UnknownCostReason =
 	/** The provider did not report the input or output token count. */
 	| "usage-not-reported"
 	/** The provider's counts contradict each other, such as more cached tokens than input tokens. */
@@ -95,14 +95,14 @@ function pricesOf(cost: Cost): TokenPrices {
 export function estimateCost(usage: RequestUsage, rates: Rates): CostEstimate {
 	const { inputTokens, outputTokens } = usage;
 	if (inputTokens === undefined || outputTokens === undefined) {
-		return { _tag: "Unpriced", reason: "usage-not-reported" };
+		return { _tag: "UnknownCost", reason: "usage-not-reported" };
 	}
 	const cacheReadTokens = usage.cacheReadTokens ?? 0;
 	const cacheWriteTokens = usage.cacheWriteTokens ?? 0;
 	const uncachedInputTokens = inputTokens - cacheReadTokens - cacheWriteTokens;
 	const reasoningTokens = usage.reasoningTokens ?? 0;
 	if (uncachedInputTokens < 0 || reasoningTokens > outputTokens) {
-		return { _tag: "Unpriced", reason: "usage-inconsistent" };
+		return { _tag: "UnknownCost", reason: "usage-inconsistent" };
 	}
 
 	const prices =

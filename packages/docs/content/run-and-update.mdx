@@ -38,14 +38,14 @@ Sugabots updates its database when it starts.
 
 <Tip>
 
-Before updating an installation with data you want to keep,
+Before updating a server with data you want to keep,
 [back it up](/docs/deploy-with-docker#backups).
 
 </Tip>
 
 ## Reset
 
-To delete all data and start again with an empty installation:
+To delete all data and start again with an empty server:
 
 ```sh
 docker compose down -v
@@ -55,7 +55,7 @@ docker compose up -d
 <Careful>
 
 `docker compose down -v` deletes the database volume: every account, workspace,
-conversation and saved API key. It can't be undone.
+chat and saved API key. It can't be undone.
 
 </Careful>
 

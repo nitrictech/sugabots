@@ -1,9 +1,9 @@
-import { botColors } from "@sugabots/avatars";
+import { botPalettes } from "@sugabots/avatars";
 import {
-	type AgentColor,
-	type AgentFace,
-	type AgentShape,
-	providerPreset,
+	type BotColor,
+	type BotEyes,
+	type BotShape,
+	providerBuiltIn,
 	type UsageMonth,
 	type WorkspaceUsage,
 } from "@sugabots/contracts";
@@ -11,6 +11,9 @@ import { cn } from "cn";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { modelName } from "@/lib/model-providers.ts";
+import { countOf } from "@/lib/name-list.ts";
+import { projectPalettes } from "@/lib/project-looks.ts";
 import { PROVIDER_HUES } from "@/lib/provider-hues.ts";
 import {
 	dateIn,
@@ -24,10 +27,10 @@ import {
 	useWorkspaceUsage,
 } from "@/lib/usage.ts";
 import { useWorkspace } from "@/lib/workspace.ts";
-import { AgentAvatar } from "@/shell/Agent.tsx";
-import { podPalettes } from "@/shell/PodTile.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
+import { LetterTile } from "@/ui/letter-tile.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SETTINGS_CARD, SettingsGroup, SettingsPage } from "@/ui/settings-page.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
@@ -35,7 +38,7 @@ import { ProviderTile } from "./ProviderSettings.tsx";
 
 /**
  * What the workspace's models cost, a month at a time: the total and each
- * day's spend, then the month broken down by bot, by model or by pod. Amounts
+ * day's cost, then the month broken down by bot or by model. Amounts
  * are estimates from each provider's published prices; a request that could
  * not be priced is counted, not guessed at.
  */
@@ -59,7 +62,7 @@ export function UsageSettings({
 				<Alert>{failureMessage(usage.error)}</Alert>
 			) : usage.data && timeZone ? (
 				<>
-					<SpendSummary
+					<UsageSummary
 						usage={usage.data}
 						today={dateIn(now, timeZone)}
 						stale={usage.isPlaceholderData}
@@ -107,7 +110,7 @@ function MonthStepper({
 }
 
 /** The month's total beside the way to another month, and a bar for each of its days. */
-function SpendSummary({
+function UsageSummary({
 	usage,
 	today,
 	stale,
@@ -123,7 +126,7 @@ function SpendSummary({
 	const last = usage.days.at(-1);
 	return (
 		<section
-			aria-label={`Spend in ${longMonthLabel(usage.month)}`}
+			aria-label={`Usage in ${longMonthLabel(usage.month)}`}
 			aria-busy={stale}
 			className={cn(SETTINGS_CARD, "-mt-2 flex flex-col gap-5 p-5")}
 		>
@@ -232,29 +235,30 @@ function DailySpend({ days, today }: { days: readonly UsageDay[]; today: string 
 	);
 }
 
-type BreakdownView = "bot" | "model" | "pod";
+type BreakdownView = "bot" | "model";
 
 const breakdownViews: readonly { value: BreakdownView; label: string }[] = [
 	{ value: "bot", label: "Bot" },
 	{ value: "model", label: "Model" },
-	{ value: "pod", label: "Pod" },
 ];
 
-/** One line of a breakdown: what the spend was for, and how much. */
+/** One line of a breakdown: what the cost was for, and how much. */
 interface Line {
 	key: string;
 	icon: ReactNode;
 	label: string;
-	sub: string;
+	sub?: string;
 	/** The bar's colour, as a CSS colour. */
 	color: string;
 	usd: number;
-	unpricedRequests: number;
+	unknownCostRequests: number;
 }
 
-const SYSTEM_AGENTS_WORK = "Summaries, titles, compaction, model tests";
+const SYSTEM_BOTS_WORK = "Compaction, model tests";
 
-/** A bar for what isn't one bot's or pod's, drawn in the neutral grey the design gives it. */
+const PERSONAL_ASSISTANTS_WORK = "Everyone's, together";
+
+/** A bar for what isn't one bot's, drawn in the neutral grey the design gives it. */
 const NEUTRAL_BAR = "var(--subtle-foreground)";
 
 function Breakdown({ usage, stale }: { usage: WorkspaceUsage; stale: boolean }) {
@@ -272,7 +276,7 @@ function Breakdown({ usage, stale }: { usage: WorkspaceUsage; stale: boolean }) 
 					onChange={setView}
 				/>
 			}
-			note={footnote(usage.unpricedRequests)}
+			note={footnote(usage.unknownCostRequests)}
 		>
 			{lines.length === 0 ? (
 				<p
@@ -295,7 +299,7 @@ function Breakdown({ usage, stale }: { usage: WorkspaceUsage; stale: boolean }) 
 }
 
 function BreakdownLine({ line, largest }: { line: Line; largest: number }) {
-	const unknown = line.usd === 0 && line.unpricedRequests > 0;
+	const unknown = line.usd === 0 && line.unknownCostRequests > 0;
 	return (
 		<li className="flex min-h-14 min-w-0 items-center gap-3 border-border border-b px-4 py-2.5 last:border-b-0 sm:gap-5">
 			<span className="flex min-w-0 flex-wide basis-0 items-center gap-3 sm:flex-1">
@@ -336,112 +340,104 @@ type ModelUsage = WorkspaceUsage["models"][number];
 
 /**
  * A colour for each provider, by the order its first model comes in the
- * breakdown, which is by spend: the provider spent most on gets the first.
+ * breakdown, which is by cost: the provider that cost most gets the first.
  * Every model through one provider shares its colour; past eight they repeat.
  */
 function providerColors(models: readonly ModelUsage[]): (model: ModelUsage) => string {
-	const providerOf = (model: ModelUsage) => model.preset ?? model.providerName ?? "removed";
+	const providerOf = (model: ModelUsage) => model.builtIn ?? model.providerName ?? "removed";
 	const order = [...new Set(models.map(providerOf))];
 	return (model) => {
 		const hue = PROVIDER_HUES[order.indexOf(providerOf(model)) % PROVIDER_HUES.length] ?? "blue";
-		return podPalettes[hue].swatch;
+		return projectPalettes[hue].swatch;
 	};
 }
 
 function linesFor(view: BreakdownView, usage: WorkspaceUsage): Line[] {
-	const systemAgents: Line = {
-		key: "system-agents",
-		icon: <LetterTile name="System agents" />,
-		label: "System agents",
-		sub: SYSTEM_AGENTS_WORK,
+	const spent = (line: Line) => line.usd > 0 || line.unknownCostRequests > 0;
+	// Each is its own member's, so they are shown together, never one by one.
+	const personalAssistants: Line = {
+		key: "personal-assistants",
+		icon: <FacelessTile name="Personal Assistants" />,
+		label: "Personal Assistants",
+		sub: PERSONAL_ASSISTANTS_WORK,
 		color: NEUTRAL_BAR,
-		...usage.systemAgents,
+		...usage.personalAssistants,
 	};
-	const withSystemAgents = (lines: Line[]) =>
-		usage.systemAgents.usd > 0 || usage.systemAgents.unpricedRequests > 0
-			? [...lines, systemAgents]
-			: lines;
+	const systemBots: Line = {
+		key: "system-bots",
+		icon: <FacelessTile name="System bots" />,
+		label: "System bots",
+		sub: SYSTEM_BOTS_WORK,
+		color: NEUTRAL_BAR,
+		...usage.systemBots,
+	};
+	const withSystemBots = (lines: Line[]) => [
+		...lines,
+		...[personalAssistants, systemBots].filter(spent),
+	];
 
 	switch (view) {
 		case "bot":
-			return withSystemAgents(
+			return withSystemBots(
 				usage.bots.map((bot) => ({
-					key: bot.agentId,
-					icon: <BotIcon color={bot.color} face={bot.face} shape={bot.shape} name={bot.name} />,
+					key: bot.botId,
+					icon: <BotIcon color={bot.color} eyes={bot.eyes} shape={bot.shape} name={bot.name} />,
 					label: bot.name ?? "Deleted bot",
-					sub: bot.podName ?? "No pod",
-					color: bot.color ? botColors[bot.color].face : NEUTRAL_BAR,
+					color: bot.color ? botPalettes[bot.color].face : NEUTRAL_BAR,
 					usd: bot.usd,
-					unpricedRequests: bot.unpricedRequests,
+					unknownCostRequests: bot.unknownCostRequests,
 				})),
 			);
 		case "model": {
 			const colorOf = providerColors(usage.models);
 			return usage.models.map((model) => {
-				const label = model.displayName ?? model.model;
+				const label = modelName({ displayName: model.displayName, modelId: model.model });
 				const providerName =
 					model.providerName ??
-					(model.preset ? providerPreset(model.preset).name : "Removed provider");
+					(model.builtIn ? providerBuiltIn(model.builtIn).name : "Removed provider");
 				return {
 					key: `${model.model}:${model.providerName}`,
-					icon: <ProviderTile name={providerName} preset={model.preset} />,
+					icon: <ProviderTile name={providerName} builtIn={model.builtIn} />,
 					label,
 					sub: providerName,
 					color: colorOf(model),
 					usd: model.usd,
-					unpricedRequests: model.unpricedRequests,
+					unknownCostRequests: model.unknownCostRequests,
 				};
 			});
 		}
-		case "pod":
-			return withSystemAgents(
-				usage.pods.map((pod) => {
-					const label = pod.name ?? "Deleted pod";
-					return {
-						key: pod.podId,
-						icon: <LetterTile name={label} />,
-						label,
-						sub: `${pod.botCount} ${pod.botCount === 1 ? "bot" : "bots"}`,
-						color: pod.color ? podPalettes[pod.color].swatch : NEUTRAL_BAR,
-						usd: pod.usd,
-						unpricedRequests: pod.unpricedRequests,
-					};
-				}),
-			);
 	}
 }
 
 function BotIcon({
 	color,
-	face,
+	eyes,
 	shape,
 	name,
 }: {
-	color: AgentColor | null;
-	face: AgentFace | null;
-	shape: AgentShape | null;
+	color: BotColor | null;
+	eyes: BotEyes | null;
+	shape: BotShape | null;
 	name: string | null;
 }) {
 	return color ? (
-		<AgentAvatar color={color} face={face ?? undefined} shape={shape ?? "circle"} size={24} />
+		<BotAvatar color={color} eyes={eyes ?? undefined} shape={shape ?? "circle"} size={24} />
 	) : (
-		<LetterTile name={name ?? "Deleted bot"} />
+		<FacelessTile name={name ?? "Deleted bot"} />
 	);
 }
 
-/** The first letter of `name` on a square, for what has no face of its own. */
-function LetterTile({ name }: { name: string }) {
+/** A letter tile as small as the bots' faces beside it, for a line with no face of its own. */
+function FacelessTile({ name }: { name: string }) {
 	return (
-		<span className="grid size-6 place-items-center rounded-sm bg-chip font-semibold text-2xs text-muted-foreground">
-			{name.trim().charAt(0).toUpperCase()}
-		</span>
+		<LetterTile name={name} className="size-6 border-0 bg-chip text-2xs text-muted-foreground" />
 	);
 }
 
-function footnote(unpricedRequests: number): string {
-	const unpriced =
-		unpricedRequests === 0
+function footnote(unknownCostRequests: number): string {
+	const unknownCost =
+		unknownCostRequests === 0
 			? ""
-			: ` ${unpricedRequests} ${unpricedRequests === 1 ? "request" : "requests"} couldn't be priced and ${unpricedRequests === 1 ? "isn't" : "aren't"} included.`;
-	return `Estimated from each provider's published prices.${unpriced} Your provider bills you directly.`;
+			: ` ${countOf(unknownCostRequests, "request", "requests")} ${unknownCostRequests === 1 ? "has" : "have"} an unknown cost and ${unknownCostRequests === 1 ? "isn't" : "aren't"} included.`;
+	return `Estimated from each provider's published prices.${unknownCost} Your provider bills you directly.`;
 }

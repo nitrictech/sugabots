@@ -1,19 +1,19 @@
-import { cn } from "cn";
 import { PlugIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { cast } from "@/cast";
 import { type ApprovalDecision, ChatApproval, ChatMessage, ChatToolLine } from "@/components/chat";
+import { DemoCard } from "@/components/demo-card";
 import { riseIn } from "@/components/reveal";
-import { Card } from "@/components/ui/card";
-import { cast } from "@/docs/cast";
+import { ChoiceChips } from "@/components/ui/choice-chips";
 
-/** A tool's approval setting, as the app labels it. */
-const approvals = {
+/** A tool's tool access, as the app labels it. */
+const toolAccesses = {
 	off: "Off",
 	ask: "Ask",
 	allow: "Allow",
 } as const;
-type ApprovalSetting = keyof typeof approvals;
+type ToolAccess = keyof typeof toolAccesses;
 
 const tools = {
 	read: { name: "linear__list_issues", label: "List issues", changes: false },
@@ -23,9 +23,9 @@ type ToolChoice = keyof typeof tools;
 
 type Outcome = "refused" | "waits" | "runs";
 
-function outcomeOf(setting: ApprovalSetting): Outcome {
-	if (setting === "off") return "refused";
-	return setting === "allow" ? "runs" : "waits";
+function outcomeOf(access: ToolAccess): Outcome {
+	if (access === "off") return "refused";
+	return access === "allow" ? "runs" : "waits";
 }
 
 const outcomeText: Record<Outcome, string> = {
@@ -39,48 +39,14 @@ const decisionOutcomes = {
 	denied: `Denied by you. ${cast.inboxSorter.name} won't go ahead.`,
 } as const;
 
-function Choice<T extends string>({
-	label,
-	options,
-	value,
-	onChange,
-}: {
-	label: string;
-	options: Record<T, string>;
-	value: T;
-	onChange: (value: T) => void;
-}) {
-	return (
-		<fieldset className="flex flex-col gap-2">
-			<legend className="pb-1.5 text-sm font-semibold">{label}</legend>
-			<div className="flex flex-wrap gap-2">
-				{(Object.keys(options) as T[]).map((option) => (
-					<button
-						key={option}
-						type="button"
-						aria-pressed={option === value}
-						onClick={() => onChange(option)}
-						className={cn(
-							"rounded-full border-2 px-3 py-0.5 text-sm font-semibold transition-colors",
-							option === value
-								? "border-foreground bg-foreground text-background"
-								: "border-input text-muted-foreground hover:text-foreground",
-						)}
-					>
-						{options[option]}
-					</button>
-				))}
-			</div>
-		</fieldset>
-	);
-}
+const CHOICE_LEGEND = "pb-1.5 text-sm font-semibold";
 
-/** The approval rules to play with: set a tool's approval, pick the tool, and answer the request. */
+/** The approval rules to play with: set a tool's access, pick the tool, and answer the request. */
 export function ApprovalPlayground() {
-	const [setting, setSetting] = useState<ApprovalSetting>("allow");
+	const [access, setAccess] = useState<ToolAccess>("allow");
 	const [tool, setTool] = useState<ToolChoice>("change");
 	const [decision, setDecision] = useState<ApprovalDecision>("pending");
-	const outcome = outcomeOf(setting);
+	const outcome = outcomeOf(access);
 	const bot = cast.inboxSorter;
 	const toolLabels = { read: tools.read.label, change: tools.change.label };
 
@@ -92,16 +58,18 @@ export function ApprovalPlayground() {
 	}
 
 	return (
-		<Card className="my-8 gap-0 rounded-3xl py-0 shadow-xl">
+		<DemoCard>
 			<div className="flex flex-wrap gap-6 border-b px-5 py-4">
-				<Choice
-					label="The tool's approval"
-					options={approvals}
-					value={setting}
-					onChange={reset(setSetting)}
+				<ChoiceChips
+					label="The tool's access"
+					labelClassName={CHOICE_LEGEND}
+					options={toolAccesses}
+					value={access}
+					onChange={reset(setAccess)}
 				/>
-				<Choice
+				<ChoiceChips
 					label="The bot wants to"
+					labelClassName={CHOICE_LEGEND}
 					options={toolLabels}
 					value={tool}
 					onChange={reset(setTool)}
@@ -109,7 +77,7 @@ export function ApprovalPlayground() {
 			</div>
 			<AnimatePresence mode="wait" initial={false}>
 				<motion.div
-					key={`${setting}-${tool}`}
+					key={`${access}-${tool}`}
 					variants={riseIn}
 					initial="hidden"
 					animate="visible"
@@ -136,6 +104,6 @@ export function ApprovalPlayground() {
 					<p className="text-pretty">{outcomeText[outcome]}</p>
 				</motion.div>
 			</AnimatePresence>
-		</Card>
+		</DemoCard>
 	);
 }

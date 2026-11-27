@@ -1,42 +1,21 @@
-import type { SessionUser } from "@sugabots/contracts";
+import type { CurrentUser } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
-import { Usage } from "@sugabots/core/accounting/usage";
-import { Accounts } from "@sugabots/core/accounts/accounts";
-import { Artifacts } from "@sugabots/core/artifacts/artifacts";
-import { ArtifactPages } from "@sugabots/core/artifacts/pages";
-import { ChatFiles } from "@sugabots/core/conversations/chats/chat-files";
-import { ChatView } from "@sugabots/core/conversations/chats/chat-view";
-import { Chats } from "@sugabots/core/conversations/chats/chats";
-import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
-import { Reactions } from "@sugabots/core/conversations/reactions/reactions";
-import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { ThreadView } from "@sugabots/core/conversations/thread-view";
-import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
-import { Turns } from "@sugabots/core/conversations/turns/turns";
+import { PageAuthentication } from "@sugabots/core/authentication/page";
+import type { SessionAuthentication } from "@sugabots/core/authentication/session";
+import { sessionsFromCookies } from "@sugabots/core/authentication/testing";
+import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
+import type { Database } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
-import { EventStore } from "@sugabots/core/database/events/store";
+import { inMemoryEventStore } from "@sugabots/core/database/events/testing";
 import { noDatabase } from "@sugabots/core/database/testing";
-import { Installation } from "@sugabots/core/installation/installation";
-import { Notifications } from "@sugabots/core/notifications/notifications";
-import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
-import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
-import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
-import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
-import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
-import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
+import { Ids } from "@sugabots/core/ids/ids";
+import { Operations } from "@sugabots/core/operations/registry";
+import { Egress } from "@sugabots/core/providers/network/egress";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { unimplemented } from "@sugabots/core/testing";
-import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
-import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
-import { WorkspaceTimeZone } from "@sugabots/core/workspaces/time-zone/workspace-time-zone";
 import { Effect, Layer } from "effect";
 import { Cookies, HttpRouter, HttpServer } from "effect/unstable/http";
 import { Authentication } from "../auth/authentication.ts";
-import { closedChannelAccess } from "../routes/events/access.test-support.ts";
-import { ChannelAccess } from "../routes/events/access.ts";
 import { apiLayer } from "./app.ts";
 import type { HttpServices } from "./services.ts";
 
@@ -45,15 +24,46 @@ export const BASE_URL = "http://localhost:3000";
 /** Where the test app's web app is served, a browser origin it trusts besides its own. */
 export const WEB_ORIGIN = "http://localhost:5173";
 
+/** The cookie better-auth keeps a browser's session in. */
+const SESSION_COOKIE = "better-auth.session_token";
+
+/**
+ * The headers a browser on the test app's web app sends once signed in with
+ * session `token`: the session cookie, and the web app's origin, without which
+ * a write with a cookie is refused.
+ */
+export function signedInWith(token: string): Record<string, string> {
+	return { cookie: `${SESSION_COOKIE}=${token}`, origin: WEB_ORIGIN };
+}
+
+/** The session token in a request's cookie, as `signedInWith` put it there. */
+export function sessionTokenIn(headers: Headers): string | undefined {
+	const prefix = `${SESSION_COOKIE}=`;
+	return headers
+		.get("cookie")
+		?.split(/;\s*/)
+		.find((cookie) => cookie.startsWith(prefix))
+		?.slice(prefix.length);
+}
+
 export interface TestApp {
-	/** A request to `path` under `API_BASE_PATH`, e.g. `/agents/…`. */
+	/** A request to `path` under `API_BASE_PATH`, e.g. `/bots/…`. */
 	request(path: string, init?: RequestInit): Promise<Response>;
 	/** A request as the server receives it, at any path. */
 	fetch(request: Request): Promise<Response>;
 }
 
 /** What a case may replace: the routes' services and what the API is built on. */
-type TestServices = HttpServices | Authentication.Service | Installation.Service | EventBus.Service;
+type TestServices =
+	| HttpServices
+	| Authentication.Service
+	| SessionAuthentication.Service
+	| WebhookAuthentication.Service
+	| PageAuthentication.Service
+	| Ids.Service
+	| ServerSettings.Service
+	| EventBus.Service
+	| Egress.Service;
 
 /**
  * The complete route table, built by `apiLayer` as the server builds it, over
@@ -85,72 +95,58 @@ export function testRoutes<Provided extends TestServices = never>(
 	);
 }
 
-/** `Authentication` asking `resolveUser` who holds a request's credentials. */
-export function identifiedBy(resolveUser: UserResolver): Layer.Layer<Authentication.Service> {
+/** `Authentication` asking `resolveMember` who holds a request's credentials. */
+export function identifiedBy(resolveMember: MemberResolver): Layer.Layer<Authentication.Service> {
 	return Layer.succeed(Authentication.Service, {
 		handler: () => Effect.succeed(new Response(null, { status: 404 })),
-		identify: identifyFromResolver(resolveUser),
+		identify: identifyFromResolver(resolveMember),
+		refreshedCookies: () => Effect.succeed(Cookies.empty),
+		member: () => Effect.succeed(undefined),
 	});
 }
 
-/** The test installation, with its web app at `webAppUrl`. */
-export function installationWithWebAppAt(webAppUrl: string): Layer.Layer<Installation.Service> {
+/** The test server, with its web app at `webAppUrl`. */
+export function serverSettingsWithWebAppAt(webAppUrl: string): Layer.Layer<ServerSettings.Service> {
 	return Layer.succeed(
-		Installation.Service,
-		Installation.fromUrls({ isProduction: false, publicUrl: BASE_URL, webAppUrl }),
+		ServerSettings.Service,
+		ServerSettings.fromUrls({ isProduction: false, publicUrl: BASE_URL, webAppUrl }),
 	);
 }
 
 /**
  * Services whose every method dies naming itself, nobody signed in, no
- * channel open to listen on, and a bus in memory, so a case supplies exactly
- * what it is about.
+ * event stream open to listen on, and a bus in memory, so a case supplies exactly
+ * what it is about. Sessions are authenticated by core's own authenticator,
+ * from what `identifiedBy`'s resolver says the cookie holds, a long-running
+ * operation's included, as there is no session row to read.
  */
-const fakes: Layer.Layer<TestServices> = Layer.mergeAll(
-	unimplemented(Accounts.Service),
-	// `/me` answers with these beside the user; a case about them supplies its own.
-	unimplemented(Membership.Service, { workspaces: Effect.succeed([]) }),
-	unimplemented(PodAdministration.Service),
-	unimplemented(WorkspaceTimeZone.Service),
-	unimplemented(Artifacts.Service),
-	unimplemented(ArtifactPages.Service),
-	unimplemented(AgentAdministration.Service),
-	unimplemented(Onboarding.Service),
-	unimplemented(ModelProviderSetup.Service),
-	unimplemented(SearchProviderSetup.Service),
-	unimplemented(SandboxProviderSetup.Service),
-	unimplemented(SandboxNetwork.Service),
-	unimplemented(DesktopViewer.Service),
-	unimplemented(PodSandboxSetup.Service),
-	unimplemented(GitHubApps.Service),
-	unimplemented(GitHubConnections.Service),
-	unimplemented(ConnectionSetup.Service),
-	unimplemented(ModelTrials.Service),
-	unimplemented(Usage.Service),
-	unimplemented(Notifications.Service),
-	unimplemented(Chats.Service),
-	unimplemented(ChatFiles.Service),
-	unimplemented(ChatView.Service),
-	unimplemented(Reactions.Service),
-	unimplemented(ThreadView.Service),
-	unimplemented(Turns.Controls),
-	unimplemented(Routines.Service),
-	unimplemented(Routines.Webhooks),
-	unimplemented(Routines.ConnectionEvents),
-	Layer.succeed(ChannelAccess.Service, closedChannelAccess),
+const fakes: Layer.Layer<TestServices, never, Database> = Layer.mergeAll(
+	// `/me` answers with the workspaces beside the current user; a case about them supplies its own.
+	unimplemented(Operations.Service, { "workspaces.list": () => Effect.succeed([]) }),
+	// A stream's case supplies the operation it follows.
+	unimplemented(Operations.LongRunning),
+	unimplemented(PageAuthentication.Service),
 	identifiedBy(async () => null),
-	installationWithWebAppAt(WEB_ORIGIN),
-	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: EventStore.inMemory() })),
+	sessionsFromCookies,
+	// A webhook route's case supplies who its calls authenticate as.
+	unimplemented(WebhookAuthentication.Service),
+	Ids.layer,
+	serverSettingsWithWebAppAt(WEB_ORIGIN),
+	Egress.layer.pipe(Layer.provide(serverSettingsWithWebAppAt(WEB_ORIGIN)), Layer.orDie),
+	Layer.sync(EventBus.Service, () => EventBus.inProcess({ store: inMemoryEventStore() })),
 );
 
-/** Who a test says holds the credentials in `headers`, so HTTP tests run without a database. */
-export type UserResolver = (headers: Headers) => Promise<SessionUser | null>;
+/** Whose session a test says the cookie in `headers` holds, so HTTP tests run without a database. */
+export type MemberResolver = (headers: Headers) => Promise<CurrentUser | null>;
 
 /** The `Authentication.identify` a test's resolver stands in for. */
-function identifyFromResolver(resolveUser: UserResolver) {
+function identifyFromResolver(resolveMember: MemberResolver) {
 	return (headers: Headers) =>
 		Effect.map(
-			Effect.promise(() => resolveUser(headers)),
-			(user) => (user ? { user, refreshedCookies: Cookies.empty } : undefined),
+			Effect.promise(() => resolveMember(headers)),
+			(member) =>
+				member
+					? { member, session: `session-of-${member.id}`, refreshedCookies: Cookies.empty }
+					: undefined,
 		);
 }

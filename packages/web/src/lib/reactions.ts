@@ -1,20 +1,21 @@
 import type {
+	ChatDetails,
 	ChatMessagesPage,
+	CurrentUser,
 	Message,
 	MessageReaction,
-	SessionUser,
-	ThreadDetails,
 } from "@sugabots/contracts";
 import {
 	type InfiniteData,
 	type QueryClient,
+	type QueryKey,
 	useMutation,
 	useQueryClient,
 } from "@tanstack/react-query";
 import { Effect } from "effect";
 import { client } from "@/api.ts";
 
-/** One person's emoji on a message, and whether they are adding it or taking it back. */
+/** One member's emoji on a message, and whether they are adding it or taking it back. */
 interface ReactionChange {
 	message: Message;
 	emoji: string;
@@ -23,54 +24,100 @@ interface ReactionChange {
 
 /**
  * Adds or takes back the user's reactions, showing each at once. They are sent
- * one at a time, in the order they were made. An answer, or a refusal putting
- * back what the message had, is only taken while nothing newer has changed
- * the message: another of the user's reactions, or the thread's event saying
- * what the message has.
+ * one at a time, in the order they were made. Whether a click adds or takes
+ * back is read from the user's last click still being sent, else from the
+ * message, so two clicks before the first shows still add and take back. An
+ * answer, or a refusal putting back what the message had and asking the server
+ * again, is only taken while nothing newer has changed the message: another of
+ * the user's reactions, or the chat's event saying what the message has.
  */
-export function useReactions(user: SessionUser) {
+export function useReactions(signedIn: CurrentUser) {
 	const queries = useQueryClient();
 	const mutation = useMutation({
+		mutationKey: REACTION_MUTATION_KEY,
 		scope: { id: "reactions" },
 		mutationFn: ({ message, emoji, reacting }: ReactionChange) => {
 			const request = { params: { messageId: message.id, emoji } };
 			return Effect.runPromise(
-				reacting ? client.api.threads.react(request) : client.api.threads.unreact(request),
+				reacting ? client.api.chats.react(request) : client.api.chats.unreact(request),
 			);
 		},
-		onMutate: ({ message, emoji, reacting }) => {
+		onMutate: async ({ message, emoji, reacting }) => {
+			// A load already under way answers with the message as it was, which would put back
+			// what this changes; it is called off here and made again once this is settled.
+			const interrupted = await cancelMessageLoads(queries, message);
 			const before = message.reactions ?? [];
-			const person = { id: user.id, name: user.name, at: new Date().toISOString() };
+			const member = { id: signedIn.id, name: signedIn.name, at: new Date().toISOString() };
 			const change = changeReactions(
 				queries,
 				message,
-				reacting ? withReaction(before, emoji, person) : withoutReaction(before, emoji, user.id),
+				reacting
+					? withReaction(before, emoji, member)
+					: withoutReaction(before, emoji, signedIn.id),
 			);
-			return { before, change };
+			return { before, change, interrupted };
 		},
 		onSuccess: (reactions, { message }, context) => {
 			if (isLatestChange(message.id, context.change))
 				setMessageReactions(queries, message, reactions);
 		},
 		onError: (_error, { message }, context) => {
-			if (context && isLatestChange(message.id, context.change)) {
-				setMessageReactions(queries, message, context.before);
+			if (!context || !isLatestChange(message.id, context.change)) return;
+			// `before` is the message as drawn when clicked, which misses the user's earlier
+			// clicks still being sent then, so the server is asked what the message has.
+			setMessageReactions(queries, message, context.before);
+			for (const queryKey of messageLoadKeys(message)) {
+				void queries.invalidateQueries({ queryKey });
+			}
+		},
+		onSettled: (_result, _error, _change, context) => {
+			for (const queryKey of context?.interrupted ?? []) {
+				void queries.invalidateQueries({ queryKey });
 			}
 		},
 	});
+	/** Whether the current user has `emoji` on the message, counting what they have asked for and is still being sent. */
+	const reacted = (message: Message, emoji: string) =>
+		lastSentChange(queries, message, emoji)?.reacting ?? hasReacted(message, emoji, signedIn.id);
 	return {
 		/** Adds the user's `emoji` to the message, or takes it back if they had it. */
 		toggle: (message: Message, emoji: string) =>
-			mutation.mutate({ message, emoji, reacting: !hasReacted(message, emoji, user.id) }),
+			mutation.mutate({ message, emoji, reacting: !reacted(message, emoji) }),
 		/** Adds the user's `emoji` to the message, unless they have it already. */
 		add: (message: Message, emoji: string) => {
-			if (!hasReacted(message, emoji, user.id)) mutation.mutate({ message, emoji, reacting: true });
+			if (!reacted(message, emoji)) mutation.mutate({ message, emoji, reacting: true });
 		},
 	};
 }
 
+/** Marks the member's reaction requests in the mutation cache, for `lastSentChange` to find. */
+const REACTION_MUTATION_KEY = ["reaction"];
+
 /**
- * How many times each message's reactions have been changed by the user or an
+ * The user's last change to `emoji` on the message that is still being sent,
+ * if any. Read from the mutation cache, which holds a request from its click,
+ * even while it waits behind earlier ones, rather than from the message, which
+ * shows a click only once its change is applied, after the click that follows
+ * may already have read it.
+ */
+function lastSentChange(
+	queries: QueryClient,
+	message: Message,
+	emoji: string,
+): ReactionChange | undefined {
+	const pending = queries.getMutationCache().findAll({
+		mutationKey: REACTION_MUTATION_KEY,
+		status: "pending",
+		predicate: ({ state }) => {
+			const change = state.variables as ReactionChange | undefined;
+			return change?.message.id === message.id && change.emoji === emoji;
+		},
+	});
+	return pending.at(-1)?.state.variables as ReactionChange | undefined;
+}
+
+/**
+ * How many times each message's reactions have been changed by the current user or an
  * event since the page loaded, so an answer can tell whether it is still the
  * newest word on them. Answers themselves do not count.
  */
@@ -79,11 +126,11 @@ const changesByMessage = new Map<string, number>();
 /**
  * Puts `reactions` on the message as its newest change, which an answer to an
  * earlier request will not then undo, returning which change it is. The
- * thread's events put in what the message has through this.
+ * chat's events put in what the message has through this.
  */
 export function changeReactions(
 	queries: QueryClient,
-	message: Pick<Message, "id" | "threadId">,
+	message: Pick<Message, "id" | "chatId">,
 	reactions: MessageReaction[],
 ): number {
 	const change = (changesByMessage.get(message.id) ?? 0) + 1;
@@ -96,23 +143,46 @@ function isLatestChange(messageId: string, change: number): boolean {
 	return changesByMessage.get(messageId) === change;
 }
 
-/** Whether the person is among those who reacted to the message with `emoji`. */
-export function hasReacted(message: Message, emoji: string, userId: string): boolean {
+/** Whether the member is among those who reacted to the message with `emoji`. */
+function hasReacted(message: Message, emoji: string, memberId: string): boolean {
 	return (
 		message.reactions?.some(
 			(reaction) =>
-				reaction.emoji === emoji && reaction.people.some((person) => person.id === userId),
+				reaction.emoji === emoji && reaction.members.some((member) => member.id === memberId),
 		) ?? false
 	);
 }
 
 /**
- * Puts `reactions` on the message wherever the cache holds it: its thread, and
+ * Calls off loads of the message's chat and its pages that are under
+ * way, returning the keys of those it called off.
+ */
+async function cancelMessageLoads(
+	queries: QueryClient,
+	message: Pick<Message, "chatId">,
+): Promise<QueryKey[]> {
+	const loading = messageLoadKeys(message).filter(
+		(queryKey) => queries.isFetching({ queryKey }) > 0,
+	);
+	await Promise.all(loading.map((queryKey) => queries.cancelQueries({ queryKey })));
+	return loading;
+}
+
+/** The queries that load the message's chat and its pages. */
+function messageLoadKeys(message: Pick<Message, "chatId">): QueryKey[] {
+	return [
+		["chat", message.chatId],
+		["chat-messages", message.chatId],
+	];
+}
+
+/**
+ * Puts `reactions` on the message wherever the cache holds it: its chat, and
  * the chat pages it was loaded in, which an older message may only be in.
  */
 function setMessageReactions(
 	queries: QueryClient,
-	message: Pick<Message, "id" | "threadId">,
+	message: Pick<Message, "id" | "chatId">,
 	reactions: MessageReaction[],
 ): void {
 	const withReactions = (current: Message): Message => {
@@ -120,7 +190,7 @@ function setMessageReactions(
 		const { reactions: _previous, ...rest } = current;
 		return reactions.length > 0 ? { ...rest, reactions } : rest;
 	};
-	queries.setQueryData<ThreadDetails>(["thread", message.threadId], (details) =>
+	queries.setQueryData<ChatDetails>(["chat", message.chatId], (details) =>
 		details ? { ...details, messages: details.messages.map(withReactions) } : details,
 	);
 	queries.setQueriesData<InfiniteData<ChatMessagesPage | undefined>>(
@@ -144,14 +214,14 @@ function setMessageReactions(
 function withReaction(
 	reactions: MessageReaction[],
 	emoji: string,
-	person: MessageReaction["people"][number],
+	member: MessageReaction["members"][number],
 ): MessageReaction[] {
 	if (!reactions.some((reaction) => reaction.emoji === emoji)) {
-		return [...reactions, { emoji, people: [person] }];
+		return [...reactions, { emoji, members: [member] }];
 	}
 	return reactions.map((reaction) =>
-		reaction.emoji === emoji && !reaction.people.some(({ id }) => id === person.id)
-			? { ...reaction, people: [...reaction.people, person] }
+		reaction.emoji === emoji && !reaction.members.some(({ id }) => id === member.id)
+			? { ...reaction, members: [...reaction.members, member] }
 			: reaction,
 	);
 }
@@ -159,13 +229,13 @@ function withReaction(
 function withoutReaction(
 	reactions: MessageReaction[],
 	emoji: string,
-	userId: string,
+	memberId: string,
 ): MessageReaction[] {
 	return reactions
 		.map((reaction) =>
 			reaction.emoji === emoji
-				? { ...reaction, people: reaction.people.filter(({ id }) => id !== userId) }
+				? { ...reaction, members: reaction.members.filter(({ id }) => id !== memberId) }
 				: reaction,
 		)
-		.filter((reaction) => reaction.people.length > 0);
+		.filter((reaction) => reaction.members.length > 0 || (reaction.bots?.length ?? 0) > 0);
 }

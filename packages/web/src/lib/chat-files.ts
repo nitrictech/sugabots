@@ -6,6 +6,7 @@ import { client } from "@/api.ts";
 const decodeUploadedAttachment = Schema.decodeUnknownSync(uploadedAttachmentSchema);
 
 /** An upload that never got an answer from the API: the connection dropped, or it was stopped. */
+// biome-ignore lint/plugin/errors-implement-domain-error: Browser transport signal from XMLHttpRequest.
 export class UploadInterrupted extends Error {
 	constructor() {
 		super("The upload did not finish");
@@ -14,19 +15,19 @@ export class UploadInterrupted extends Error {
 }
 
 /**
- * Uploads `file` to the conversation, ready to attach to a message, reporting how much
+ * Uploads `file` to the chat, ready to attach to a message, reporting how much
  * of it has gone as a fraction from 0 to 1. Sent with XMLHttpRequest, because
  * fetch cannot report an upload's progress. Fails with the API's failure when
  * it refuses the file, or `UploadInterrupted` when there is no answer,
  * including when `signal` aborts it.
  */
 export function uploadChatFile({
-	conversationId,
+	chatId,
 	file,
 	onProgress,
 	signal,
 }: {
-	conversationId: string;
+	chatId: string;
 	file: File;
 	onProgress: (fraction: number) => void;
 	signal: AbortSignal;
@@ -36,10 +37,7 @@ export function uploadChatFile({
 		// Left out when the browser has no type for it, so the API takes one from the name.
 		if (file.type) query.set("type", file.type);
 		const request = new XMLHttpRequest();
-		request.open(
-			"POST",
-			`${client.baseUrl}/conversations/${encodeURIComponent(conversationId)}/files?${query}`,
-		);
+		request.open("POST", `${client.baseUrl}/chats/${encodeURIComponent(chatId)}/files?${query}`);
 		request.withCredentials = true;
 		request.responseType = "json";
 		request.upload.addEventListener("progress", (event) => {
@@ -67,18 +65,16 @@ export function uploadChatFile({
 	});
 }
 
-/** Where a file attached to a message in the conversation is served, shown in place or downloaded. */
-export function chatFileUrl(conversationId: string, fileId: string): string {
-	return `${client.baseUrl}/conversations/${encodeURIComponent(conversationId)}/files/${encodeURIComponent(fileId)}`;
+/** Where a file attached to a message in the chat is served, shown in place or downloaded. */
+export function chatFileUrl(chatId: string, fileId: string): string {
+	return `${client.baseUrl}/chats/${encodeURIComponent(chatId)}/files/${encodeURIComponent(fileId)}`;
 }
 
 /**
  * Removes an upload that will not be sent, so it stops counting toward the
- * files a person can have waiting. Nothing waits on it, and a failure is left
+ * files a member can have waiting. Nothing waits on it, and a failure is left
  * alone: the API clears unsent uploads by itself after a day.
  */
-export function removeChatFile(conversationId: string, fileId: string): void {
-	Effect.runPromise(client.api.chats.removeFile({ params: { conversationId, fileId } })).catch(
-		() => {},
-	);
+export function removeChatFile(chatId: string, fileId: string): void {
+	Effect.runPromise(client.api.chats.removeFile({ params: { chatId, fileId } })).catch(() => {});
 }

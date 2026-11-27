@@ -21,8 +21,8 @@ export const SeveralLines = meta.story({
 	args: {
 		children: (
 			<>
-				<span style={{ display: "block" }}>kim@example.com: Offline</span>
-				<span style={{ display: "block" }}>jay@example.com: Already a member</span>
+				<span className="block">kim@example.com: Offline</span>
+				<span className="block">jay@example.com: Already in this workspace</span>
 			</>
 		),
 	},
@@ -33,8 +33,8 @@ export const SeveralLines = meta.story({
 
 /** Something worked, said in green with a tick where it was tried, and announced. */
 export const Succeeded = meta.story({
-	render: () => <Success>Connection successful</Success>,
+	render: () => <Success>Provider answered</Success>,
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("status")).toHaveTextContent("Connection successful");
+		await expect(canvas.getByRole("status")).toHaveTextContent("Provider answered");
 	},
 });

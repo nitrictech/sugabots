@@ -8,7 +8,7 @@ import { type Brand, type Cause, Duration, ErrorReporter, type LogLevel, Schema 
 const userTextSchema = Schema.String.pipe(Schema.brand("UserText"));
 
 /**
- * Text for people to read. Written with {@link userText}, which accepts only
+ * Text for members to read. Written with {@link userText}, which accepts only
  * our own words and display names, so an exception's message or another
  * service's response can't end up in front of someone.
  */
@@ -17,7 +17,7 @@ export type UserText = typeof userTextSchema.Type;
 export const UserText = {
 	/**
 	 * Treats `text` as user text without checking it, for code not yet moved to
-	 * `DomainError`. Each call can show people text we didn't write, so review
+	 * `DomainError`. Each call can show members text we didn't write, so review
 	 * every one. It goes once the last caller has moved: names become
 	 * `DisplayName`s, and the auth library's errors map to our own words.
 	 */
@@ -32,7 +32,7 @@ export const UserText = {
 const displayNameSchema = Schema.String.pipe(Schema.brand("DisplayName"));
 
 /**
- * A name people already see in the app, such as a bot's or a provider's.
+ * A name members already see in the app, such as a bot's or a provider's.
  * {@link userText} accepts these.
  */
 export type DisplayName = typeof displayNameSchema.Type;

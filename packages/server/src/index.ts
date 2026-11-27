@@ -1,49 +1,33 @@
 import { NodeRuntime } from "@effect/platform-node";
-import { Usage } from "@sugabots/core/accounting/usage";
+import { BotLoop } from "@sugabots/bot-loop/bot-loop";
 import { Accounts } from "@sugabots/core/accounts/accounts";
-import { Artifacts } from "@sugabots/core/artifacts/artifacts";
-import { ArtifactPages } from "@sugabots/core/artifacts/pages";
+import { PageAuthentication } from "@sugabots/core/authentication/page";
+import { SessionAuthentication } from "@sugabots/core/authentication/session";
+import { WebhookAuthentication } from "@sugabots/core/authentication/webhook";
 import { BlobStore } from "@sugabots/core/blob-store/blob-store";
 import { BlobDeletions } from "@sugabots/core/blob-store/deletions";
-import { Conversations } from "@sugabots/core/conversations/conversations";
-import { ModelTrials } from "@sugabots/core/conversations/model-trials/model-trials";
-import { Routines } from "@sugabots/core/conversations/routines/routines";
-import { RoutineRuns } from "@sugabots/core/conversations/routines/runs";
-import { UnsentUploads } from "@sugabots/core/conversations/thread-files/unsent-uploads";
-import { DesktopViewer } from "@sugabots/core/conversations/tools/browser/viewer";
-import { BuiltInTools } from "@sugabots/core/conversations/tools/built-in";
-import { ConnectionTools } from "@sugabots/core/conversations/tools/connections";
-import { SandboxTools } from "@sugabots/core/conversations/tools/sandbox";
-import { Turns } from "@sugabots/core/conversations/turns/turns";
-import { ConversationWorkflows } from "@sugabots/core/conversations/workflows";
-import { Credentials } from "@sugabots/core/credentials/credentials";
+import { AutomationRuns } from "@sugabots/core/chats/automations/runs";
+import { ChatServices } from "@sugabots/core/chats/chat-services";
+import { ChatWorkflows } from "@sugabots/core/chats/workflows";
+import { ProjectComputers } from "@sugabots/core/computers/project-computers";
 import { layer as databaseLayer, directClientLayer } from "@sugabots/core/database/database";
 import { EventBus } from "@sugabots/core/database/events/bus";
 import { EventOutbox } from "@sugabots/core/database/events/outbox";
 import { EventPruning } from "@sugabots/core/database/events/prune";
 import { EventStore } from "@sugabots/core/database/events/store";
 import { Email } from "@sugabots/core/email/email";
+import { UnsentAttachments } from "@sugabots/core/files/unsent-attachments";
 import { Ids } from "@sugabots/core/ids/ids";
-import { Installation } from "@sugabots/core/installation/installation";
 import { Notifications } from "@sugabots/core/notifications/notifications";
-import { ConnectionSetup } from "@sugabots/core/providers/connections/connection-setup";
-import { GitHubApps } from "@sugabots/core/providers/connections/github/github-app";
-import { GitHubConnections } from "@sugabots/core/providers/connections/github/github-connections";
-import { GitHubSignIn } from "@sugabots/core/providers/connections/github/github-sign-in";
-import { ModelProviderSetup } from "@sugabots/core/providers/model-providers/model-provider-setup";
-import { PresetSeeding } from "@sugabots/core/providers/model-providers/preset-seeding";
+import { layer as operationsLayer } from "@sugabots/core/operations/layer";
+import { GitHubSignIn } from "@sugabots/core/providers/connectors/github/github-sign-in";
 import { Models } from "@sugabots/core/providers/models/models";
 import { Egress } from "@sugabots/core/providers/network/egress";
-import { SearchProviderSetup } from "@sugabots/core/providers/search-providers/search-provider-setup";
-import { PodSandboxSetup } from "@sugabots/core/sandboxes/pod-sandbox-setup";
-import { PodSandboxes } from "@sugabots/core/sandboxes/pod-sandboxes";
-import { SandboxNetwork } from "@sugabots/core/sandboxes/sandbox-network";
-import { SandboxProviderSetup } from "@sugabots/core/sandboxes/sandbox-provider-setup";
-import { AgentAdministration } from "@sugabots/core/workspaces/agents/agent-administration";
-import { Membership } from "@sugabots/core/workspaces/membership/membership";
-import { Onboarding } from "@sugabots/core/workspaces/onboarding/onboarding";
-import { PodAdministration } from "@sugabots/core/workspaces/pods/pod-administration";
-import { Layer } from "effect";
+import { Secrets } from "@sugabots/core/secrets/secrets";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
+import { Lanes } from "@sugabots/core/workflows/lanes";
+import { WorkflowEngines } from "@sugabots/workflow/engine";
+import { Duration, Layer } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { Authentication } from "./auth/authentication.ts";
 import { apiLayer } from "./http/app.ts";
@@ -51,28 +35,40 @@ import { webAppLayer } from "./http/mount.ts";
 import { listeningLayer, nodeServerLayer } from "./http/serve.ts";
 import { requestSpanNames } from "./http/tracing.ts";
 import { observabilityLayer } from "./observability.ts";
-import { ChannelAccess } from "./routes/events/access.ts";
-import { Workflows } from "./workflows.ts";
+import { layer as schedulerLayer } from "./scheduler/scheduler.ts";
 
 /**
  * What the process owns once and every service above builds on: the pools,
- * ids, blob storage, the cipher, the installation's settings and egress
+ * ids, blob storage, the cipher, the server's settings and egress
  * policy, the durable events and the bus that fans them out, and the workflow
  * engine with its lanes. A service's `layer` never provides these, so there is one of each
  * however many services use them.
  */
+/**
+ * The workflow engine, embedded in this server on its Postgres; one server
+ * process only. Its messages go through the main pool, so a signal sent in a
+ * transaction commits with it; its locks go through the direct connection.
+ */
+const workflowEngine = WorkflowEngines.singleRunnerWith({
+	hostLockWait: Duration.seconds(30),
+	sessions: directClientLayer,
+});
+
+/** The lanes of every workflow that may wait in one: core's, and the bot loop's turns. */
+const lanes = Lanes.layerFor([...ChatWorkflows.definitions, ...BotLoop.definitions]);
+
 const Infrastructure = Layer.mergeAll(
 	BlobStore.layer,
-	Credentials.layer,
+	Secrets.layer,
 	Egress.layer,
 	EventOutbox.layer,
-	ConversationWorkflows.lanes,
+	lanes,
 ).pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
-			Installation.layer,
+			ServerSettings.layer,
 			EventBus.layer.pipe(Layer.provide(directClientLayer)),
-			Workflows.engine,
+			workflowEngine,
 		),
 	),
 	Layer.provideMerge(Layer.mergeAll(Ids.layer, EventStore.layer)),
@@ -80,61 +76,35 @@ const Infrastructure = Layer.mergeAll(
 );
 
 /** The outside systems: email, the workspaces' models, and the tools turns are offered. */
-const OutsideSystems = Layer.mergeAll(
-	Email.layer,
-	Models.layer,
-	BuiltInTools.layer,
-	SandboxTools.layer,
-	DesktopViewer.layer,
-	ConnectionTools.layer,
+const OutsideSystems = Layer.mergeAll(Email.layer, Models.layer);
+
+/**
+ * Accounts and notifying members.
+ */
+const WorkspacesAndProviders = Notifications.layer.pipe(Layer.provideMerge(Accounts.layer));
+
+/**
+ * The chats, over how they start and signal their workflows: a turn's from
+ * the bot loop, which owns its workflow. Their events go through the outbox.
+ */
+const ChatServiceLayers = ChatServices.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(BotLoop.edgeLayer, AutomationRuns.layer)),
 );
 
 /**
- * Accounts, members, pods, agents, their artifacts and the providers they
- * use, trying a model, and notifying people.
- */
-const WorkspacesAndProviders = Layer.mergeAll(
-	Membership.layer,
-	Notifications.layer,
-	Onboarding.layer,
-	PodAdministration.layer,
-	AgentAdministration.layer,
-	ModelProviderSetup.layer,
-	SearchProviderSetup.layer,
-	SandboxProviderSetup.layer,
-	SandboxNetwork.layer,
-	PodSandboxSetup.layer,
-	GitHubApps.layer,
-	GitHubConnections.layer,
-	ConnectionSetup.layer,
-	Artifacts.layer,
-	ArtifactPages.layer,
-	ModelTrials.layer,
-	Usage.layer,
-).pipe(Layer.provideMerge(Accounts.layer));
-
-/**
- * The conversations, over how they start and signal their workflows. Their
- * events go through the outbox.
- */
-const ConversationServices = Conversations.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(Turns.signalsLayer, RoutineRuns.layer)),
-);
-
-/**
- * What runs without a request: the workflows, the routine scheduler, the
- * nightly event prune, deleting queued blobs, seeding the preset providers
- * into every workspace, pausing idle sandboxes, and measuring running ones'
- * disks.
+ * Background runs the core and bot loop workflows, the scheduler, event
+ * pruning, blob deletion, computer measurement and upgrades, and sending the
+ * notifications a stopped process left.
  */
 const Background = Layer.mergeAll(
-	ConversationWorkflows.layer,
-	Routines.schedulerLayer,
+	ChatWorkflows.layer,
+	BotLoop.layer,
+	schedulerLayer,
 	EventPruning.layer,
 	BlobDeletions.layer,
-	UnsentUploads.layer,
-	PresetSeeding.layer,
-	PodSandboxes.sweepLayer,
+	UnsentAttachments.layer,
+	ProjectComputers.sweepLayer,
+	Notifications.sweepLayer,
 );
 
 /** The API and the web app on `PORT`, with better-auth answering who is calling. */
@@ -142,23 +112,36 @@ const Http = listeningLayer.pipe(
 	Layer.provideMerge(
 		HttpRouter.serve(Layer.merge(apiLayer, webAppLayer), { disableListenLog: true }),
 	),
-	Layer.provide([Authentication.layer, ChannelAccess.layer, requestSpanNames]),
+	Layer.provide([
+		Authentication.layer,
+		SessionAuthentication.layer,
+		WebhookAuthentication.layer,
+		PageAuthentication.layer,
+		requestSpanNames,
+	]),
 	Layer.provide(nodeServerLayer),
 );
 
 /**
- * The process, tier by tier. The tracer goes in at the bottom so that
+ * The process, layer by layer. The tracer goes in at the bottom so that
  * everything is traced: routes, better-auth's hooks, the background work, and
- * the statements they all send.
+ * the statements they all send. The operation registry, with the services of
+ * the domains moved onto operations, sits over the chat services, which some
+ * of those are built from: moving a workspace's time zone moves its routines
+ * through the store that emits.
  */
-const Main = Layer.mergeAll(Http, Background).pipe(
-	Layer.provide(ConversationServices),
+export const Main = Layer.mergeAll(Http, Background).pipe(
+	Layer.provide(operationsLayer),
+	Layer.provide(ChatServiceLayers),
 	Layer.provide(WorkspacesAndProviders),
 	Layer.provide(OutsideSystems),
-	// What pods' sandboxes are signed in to, which sandboxes leave to the edge.
+	// What bots' computers are signed in to, which computers leave to the edge.
 	Layer.provide(GitHubSignIn.layer),
 	Layer.provide(Infrastructure),
 	Layer.provide(observabilityLayer),
 );
 
-Layer.launch(Main).pipe(NodeRuntime.runMain);
+// Only when run, as `node src/index.ts`, so a test can import `Main` to check it loads.
+if (import.meta.main) {
+	Layer.launch(Main).pipe(NodeRuntime.runMain);
+}

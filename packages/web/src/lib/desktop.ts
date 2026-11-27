@@ -1,20 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { threadQuery } from "./threads.ts";
+import { chatQuery } from "./chat-query.ts";
 import { BROWSER_TOOL_PREFIX } from "./tool-names.ts";
 
 /**
- * Whether the agent is using its desktop in the thread right now: its reply
- * is still being written and has called a browser tool. Read from the thread
+ * Whether the bot is using its desktop in the chat right now: its reply
+ * is still being written and has called a browser tool. Read from the chat
  * the chat has loaded and its events keep current, so it asks the API for
  * nothing of its own.
  */
-export function useDesktopInUse(threadId: string | undefined, agentId: string): boolean {
-	const { data } = useQuery({ ...threadQuery(threadId), enabled: false });
+export function useDesktopInUse(chatId: string | undefined, botId: string): boolean {
+	const { data } = useQuery({ ...chatQuery(chatId), enabled: false });
 	const reply = data?.messages.findLast(
-		(message) => message.author.kind === "agent" && message.author.id === agentId,
+		(message) => message.author.kind === "bot" && message.author.id === botId,
 	);
 	return (
-		reply?.status === "streaming" &&
+		reply?.status === "writing" &&
 		reply.parts.some(
 			(part) => part.type === "tool_call" && part.tool.startsWith(BROWSER_TOOL_PREFIX),
 		)

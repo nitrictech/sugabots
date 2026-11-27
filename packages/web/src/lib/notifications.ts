@@ -1,13 +1,14 @@
 import {
-	conversationNotificationTag,
+	chatNotificationTag,
+	memberUpdateEventSchema,
 	type NotificationContent,
 	type NotificationLevel,
 	type NotificationPreferences,
 	type NotificationSettings,
 	PRESENCE_LIFETIME_MS,
 	type Presence,
-	personUpdateEventSchema,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { Effect, Schema } from "effect";
@@ -15,16 +16,18 @@ import { useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { MUTE_LENGTHS, type MuteLength } from "@/lib/notification-choices.ts";
+import { useSession } from "@/lib/session.ts";
+import { refreshEveryWorkspaceApprovals } from "./chats.ts";
 
-/**
+/*
  * Browser notifications, shown by Sugabots' open tabs as Slack's web app
- * shows them: what the person chose to be notified about, turning them on in
- * this browser, and telling the server which conversation this tab shows, so
+ * shows them: what the member chose to be notified about, turning them on in
+ * this browser, and telling the server which chat this tab shows, so
  * it does not notify them of what they are reading.
  */
 
 /**
- * Set in a browser whose notifications the person turned on, so they can turn
+ * Set in a browser whose notifications the member turned on, so they can turn
  * them off here without taking back the browser's permission.
  */
 const TURNED_ON_KEY = "sugabots-notifications-on";
@@ -38,31 +41,46 @@ export function useNotificationSettings() {
 	});
 }
 
-export function useUpdateNotificationPreferences() {
+/**
+ * Changes some of the member's notification preferences. The API takes them
+ * all at once, so the rest are sent as last saved. Changes are sent one at a
+ * time, in the order made, each once the one before has been saved, so a quick
+ * second change never sends the first one's old value back. Only for a page
+ * that has the settings loaded.
+ */
+export function useChangeNotificationPreferences() {
 	const queries = useQueryClient();
-	return useMutation({
-		mutationFn: (preferences: NotificationPreferences) =>
-			Effect.runPromise(client.api.notifications.updatePreferences({ payload: preferences })),
-		onSuccess: (settings) => queries.setQueryData(settingsKey, settings),
+	const update = useMutation({
+		scope: { id: "notification-preferences" },
+		mutationFn: (change: Partial<NotificationPreferences>) => {
+			const saved = queries.getQueryData<NotificationSettings>(settingsKey);
+			if (!saved) return Promise.reject(new Error("Notification settings aren't loaded"));
+			const preferences: NotificationPreferences = {
+				level: saved.level,
+				pausedUntil: saved.pausedUntil,
+				quietHours: saved.quietHours,
+				turnFailures: saved.turnFailures,
+				automationRuns: saved.automationRuns,
+				...change,
+			};
+			return Effect.runPromise(
+				client.api.notifications.updatePreferences({ payload: preferences }),
+			);
+		},
+		onSuccess: (saved) => queries.setQueryData(settingsKey, saved),
 	});
+	return (change: Partial<NotificationPreferences>) => update.mutate(change);
 }
 
-/**
- * Where a level applies in place of the one above it: a pod, in place of the
- * person's own, or one of its bots, in place of the pod's.
- */
-export type NotificationPlace =
-	| { kind: "pod"; id: string }
-	| { kind: "bot"; id: string; podId: string };
+/** Where a level applies in place of the member's own: a project, or a bot. */
+export type NotificationPlace = { kind: "project"; id: string } | { kind: "bot"; id: string };
 
 /** Sets the level for a place, or with null goes back to the one above it. */
 export function useSetNotificationLevel() {
 	const queries = useQueryClient();
 	return useMutation({
 		mutationFn: ({ place, level }: { place: NotificationPlace; level: NotificationLevel | null }) =>
-			Effect.runPromise(
-				client.api.notifications.setLevel({ params: paramsOf(place), payload: { level } }),
-			),
+			Effect.runPromise(client.api.notifications.setLevel({ params: place, payload: { level } })),
 		onMutate: ({ place, level }) => {
 			queries.setQueryData<NotificationSettings>(settingsKey, (settings) =>
 				settings ? withLevel(settings, place, level) : settings,
@@ -79,7 +97,7 @@ export function useMuteNotifications() {
 		mutationFn: ({ place, until }: { place: NotificationPlace; until: Date | null }) =>
 			Effect.runPromise(
 				client.api.notifications.mute({
-					params: paramsOf(place),
+					params: place,
 					payload: { until: until?.toISOString() ?? null },
 				}),
 			),
@@ -92,13 +110,9 @@ export function useMuteNotifications() {
 	});
 }
 
-function paramsOf(place: NotificationPlace) {
-	return { kind: place.kind, id: place.id };
-}
-
 /** Where a place's own choices are kept in the settings, and its id there. */
 function fieldOf(place: NotificationPlace) {
-	return [place.kind === "pod" ? "pods" : "bots", place.id] as const;
+	return [place.kind === "project" ? "projects" : "bots", place.id] as const;
 }
 
 /** `record` with `id` set to `value`, or without it when `value` is null. */
@@ -136,7 +150,7 @@ function withMute(
 }
 
 /** Whether this browser can be notified, and whether it is, while Sugabots is open in it. */
-export type BrowserNotifications =
+type BrowserNotifications =
 	| { state: "unsupported" }
 	| { state: "denied" }
 	| { state: "off" }
@@ -196,64 +210,72 @@ function writeTurnedOn(on: boolean) {
 }
 
 /**
- * Shows the signed-in person's notifications from this tab, while their
- * notifications are on in this browser, except those about a conversation one
+ * Shows the current user's notifications from this tab, while their
+ * notifications are on in this browser, except those about a chat one
  * of their tabs is looking at, and opens what a clicked one is about here.
  */
 export function useNotificationsInThisBrowser() {
 	const router = useRouter();
+	const queries = useQueryClient();
+	const { refresh: refreshSession } = useSession();
 
 	useEffect(() => {
-		if (!("Notification" in window)) return;
 		const stream = client.events.me();
 		const looking: LookingTabs = new Map();
 		void (async () => {
 			for await (const event of stream) {
-				const parsed = Schema.decodeUnknownResult(personUpdateEventSchema)(event);
+				const parsed = Schema.decodeUnknownResult(memberUpdateEventSchema)(event);
 				if (parsed._tag === "Failure") continue;
 				const update = parsed.success;
-				if (update.type === "presence") {
+				// Before the stream started, or across a reset, approvals may have changed unheard.
+				if (
+					update.type === "approvals.changed" ||
+					update.type === "ready" ||
+					update.type === "reset"
+				) {
+					void refreshEveryWorkspaceApprovals(queries);
+				} else if (update.type === "presence") {
 					rememberLooking(looking, update, Date.now());
 					// Every tab showed it, so each closes its own.
-					if (update.conversationId) closeNotificationsAbout(update.conversationId);
+					if (update.chatId) closeNotificationsAbout(update.chatId);
 				} else if (
 					update.type === "notification" &&
-					update.conversationId !== lookingHere &&
+					"Notification" in window &&
+					(update.chatId === null || update.chatId !== lookingHere) &&
 					!someTabLooksAt(looking, update, Date.now())
 				) {
 					showFromThisTab(update, (path) => router.history.push(path));
 				}
 			}
-			// A stream that ends or fails only costs the notifications it would have carried.
-		})().catch(() => {});
+			// A stream that ends or fails only costs the notifications it would have
+			// carried, unless it ended with the member's session, which is asked about again.
+		})().catch((refusal) => {
+			if (isApiFailure(refusal) && refusal._tag === "Unauthorized") {
+				void refreshSession().catch(() => {});
+			}
+		});
 		return () => stream.close();
-	}, [router]);
+	}, [queries, router, refreshSession]);
 }
 
 /**
- * The conversation each of the person's tabs is looking at, if any, from any
+ * The chat each of the member's tabs is looking at, if any, from any
  * browser or device, by tab: as of its latest report, and until when that
  * counts if the tab says no more.
  */
-type LookingTabs = Map<string, { conversationId: string | null; sequence: number; until: number }>;
+type LookingTabs = Map<string, { chatId: string | null; sequence: number; until: number }>;
 
-function rememberLooking(
-	tabs: LookingTabs,
-	{ clientId, conversationId, sequence }: Presence,
-	now: number,
-) {
+function rememberLooking(tabs: LookingTabs, { clientId, chatId, sequence }: Presence, now: number) {
 	const latest = tabs.get(clientId);
 	if (latest && latest.sequence >= sequence) return;
-	tabs.set(clientId, { conversationId, sequence, until: now + PRESENCE_LIFETIME_MS });
+	tabs.set(clientId, { chatId, sequence, until: now + PRESENCE_LIFETIME_MS });
 }
 
-/** Whether one of the person's tabs is looking at what `notification` is about. */
-function someTabLooksAt(
-	tabs: LookingTabs,
-	{ conversationId }: NotificationContent,
-	now: number,
-): boolean {
-	return [...tabs.values()].some((tab) => tab.conversationId === conversationId && tab.until > now);
+/** Whether one of the member's tabs is looking at what `notification` is about. */
+function someTabLooksAt(tabs: LookingTabs, { chatId }: NotificationContent, now: number): boolean {
+	return (
+		chatId !== null && [...tabs.values()].some((tab) => tab.chatId === chatId && tab.until > now)
+	);
 }
 
 /**
@@ -282,42 +304,42 @@ function showFromThisTab(notification: NotificationContent, open: (path: string)
 /** The notifications this tab is showing, by tag, so it can close them. */
 const shownByThisTab = new Map<string, Notification>();
 
-/** Tells this tab apart from the person's others, for as long as it is open. */
+/** Tells this tab apart from the member's others, for as long as it is open. */
 const TAB_ID = uuidv4();
 
 /** How many presence reports this tab has made. */
 let presenceReports = 0;
 
 /**
- * The conversation this tab is looking at, known here at once, before its
- * report comes back over the person's stream.
+ * The chat this tab is looking at, known here at once, before its
+ * report comes back over the member's stream.
  */
 let lookingHere: string | null = null;
 
-function reportPresence(conversationId: string | null) {
-	lookingHere = conversationId;
+function reportPresence(chatId: string | null) {
+	lookingHere = chatId;
 	presenceReports += 1;
 	void Effect.runPromise(
 		client.api.notifications.reportPresence({
-			payload: { clientId: TAB_ID, conversationId, sequence: presenceReports },
+			payload: { clientId: TAB_ID, chatId, sequence: presenceReports },
 		}),
-		// Best effort: a lost report only means one notification the person did not need.
+		// Best effort: a lost report only means one notification the member did not need.
 	).catch(() => {});
 }
 
-/** How often a tab showing a conversation says so again, well inside `PRESENCE_LIFETIME_MS`. */
+/** How often a tab showing a chat says so again, well inside `PRESENCE_LIFETIME_MS`. */
 const PRESENCE_INTERVAL_MS = PRESENCE_LIFETIME_MS / 3;
 
 /**
- * Tells the server this tab shows `conversationId` while the tab has focus,
- * so the person is not notified of what they are reading, and closes the
+ * Tells the server this tab shows `chatId` while the tab has focus,
+ * so the member is not notified of what they are reading, and closes the
  * notifications already shown for it.
  */
-export function usePresence(conversationId: string | undefined) {
+export function usePresence(chatId: string | undefined) {
 	useEffect(() => {
 		const report = () => {
 			const looking = document.visibilityState === "visible" && document.hasFocus();
-			const showing = looking && conversationId ? conversationId : null;
+			const showing = looking && chatId ? chatId : null;
 			reportPresence(showing);
 			if (showing) closeNotificationsAbout(showing);
 		};
@@ -332,13 +354,13 @@ export function usePresence(conversationId: string | undefined) {
 			window.removeEventListener("blur", report);
 			document.removeEventListener("visibilitychange", report);
 		};
-	}, [conversationId]);
+	}, [chatId]);
 
 	useEffect(() => () => reportPresence(null), []);
 }
 
-function closeNotificationsAbout(conversationId: string) {
-	shownByThisTab.get(conversationNotificationTag(conversationId))?.close();
+function closeNotificationsAbout(chatId: string) {
+	shownByThisTab.get(chatNotificationTag(chatId))?.close();
 }
 
 /** When the place's mute ends, or null when it is not muted for a while. */
@@ -390,10 +412,7 @@ export function levelChosenFor(
 	return settings[field][id] ?? null;
 }
 
-/** The level a place follows when none is chosen for it: its pod's, or the person's own. */
-export function levelAbove(
-	settings: NotificationSettings,
-	place: NotificationPlace,
-): NotificationLevel {
-	return (place.kind === "bot" ? settings.pods[place.podId] : undefined) ?? settings.level;
+/** The level a place follows when none is chosen for it: the member's own. */
+export function levelAbove(settings: NotificationSettings): NotificationLevel {
+	return settings.level;
 }

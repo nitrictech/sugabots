@@ -1,18 +1,19 @@
 export * as EventBus from "./bus.ts";
 
 import {
-	type Channel,
-	isDurableEventType,
+	type EphemeralEventType,
+	type EventStream,
 	resetEvent,
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { Context, Effect, Layer } from "effect";
+import { processLayer, Tier } from "../../tiers.ts";
 import type { CommittedEvent } from "./outbox.ts";
 import { type EventRelay, postgresEventRelay } from "./relay.ts";
 import { EventStore } from "./store.ts";
 
 /**
- * Publish and fan-out for live updates, in order within each channel.
+ * Publish and fan-out for live updates, in order within each stream.
  *
  * An in-process registry of subscribers plus a table for the events worth
  * replaying. A process is never alone for long (a second dev server, a rolling
@@ -22,9 +23,11 @@ import { EventStore } from "./store.ts";
  */
 
 export interface Interface {
-	publish(channel: Channel, event: StreamEvent): Promise<void>;
+	/** Sends an event that is never stored to the stream's live subscribers. */
+	publish(stream: EventStream, event: StreamEvent & { type: EphemeralEventType }): Promise<void>;
+	/** Sends events `EventOutbox` stored, once their transaction committed. */
 	publishCommitted(events: CommittedEvent[]): Promise<void>;
-	subscribe(channel: Channel, options?: SubscribeOptions): AsyncIterable<Delivery>;
+	subscribe(stream: EventStream, options?: SubscribeOptions): AsyncIterable<Delivery>;
 	/**
 	 * Stops listening to other processes and ends every subscription here.
 	 *
@@ -36,7 +39,9 @@ export interface Interface {
 	close(): Promise<void>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventBus") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/EventBus") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * The process's bus, over the event store and relayed to the other processes
@@ -54,7 +59,7 @@ export const make = Effect.gen(function* () {
 	);
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /** An event as a subscriber receives it. Only durable events carry a `seq`. */
 export interface Delivery {
@@ -62,7 +67,7 @@ export interface Delivery {
 	event: StreamEvent;
 }
 
-export interface SubscribeOptions {
+interface SubscribeOptions {
 	/** Resume after this `seq` — the client's `Last-Event-ID`. */
 	since?: number;
 	/** Ends the subscription. The stream route aborts on disconnect and on age. */
@@ -86,7 +91,7 @@ interface Subscriber {
 	overflowed: boolean;
 }
 
-export interface InProcessOptions {
+interface InProcessOptions {
 	store: EventStore.Interface;
 	/** Without one, deliveries stay in this process: right for tests, wrong for a server. */
 	relay?: EventRelay;
@@ -101,51 +106,46 @@ export function inProcess({
 	maxBuffered = MAX_BUFFERED,
 	log = console.error,
 }: InProcessOptions): Interface {
-	const channels = new Map<Channel, Set<Subscriber>>();
+	const streams = new Map<EventStream, Set<Subscriber>>();
 	let closed = false;
 
 	// Failing to tell the other processes must not fail the publish: the change
 	// is committed and this process's subscribers have it.
 	const broadcast = relay
-		? (channel: Channel, delivery: Delivery) =>
+		? (stream: EventStream, delivery: Delivery) =>
 				relay
-					.broadcast(channel, delivery)
+					.broadcast(stream, delivery)
 					.catch((cause) => log("Relaying an event to other processes failed", cause))
 		: async () => {};
-	const listening = relay
-		? relay.listen(deliver).catch((cause) => {
-				log("Listening for other processes' events failed; live updates are local only", cause);
-				return async () => {};
-			})
-		: Promise.resolve(async () => {});
+	const listening = relay ? superviseListening(relay, deliver, log) : undefined;
 
 	/**
-	 * One publish at a time per channel.
+	 * One publish at a time per stream.
 	 *
-	 * Subscribers receive a channel's events in sequence order, and two
-	 * overlapping publishes could otherwise take their sequence numbers in one
-	 * order and reach subscribers in the other.
+	 * Subscribers, here and in other processes, receive a stream's events in
+	 * the order they were published, because each waits for the relay to send
+	 * the one before it.
 	 */
-	const publishing = new Map<Channel, Promise<void>>();
+	const publishing = new Map<EventStream, Promise<void>>();
 
-	function serialize(channel: Channel, thread: () => Promise<void>): Promise<void> {
-		const done = (publishing.get(channel) ?? Promise.resolve()).then(thread, thread);
+	function serialize(stream: EventStream, publishOne: () => Promise<void>): Promise<void> {
+		const done = (publishing.get(stream) ?? Promise.resolve()).then(publishOne, publishOne);
 		// The queue holds a promise that never rejects, so one failed publish
 		// does not reject every publish queued behind it.
 		const queued = done.catch(() => {});
-		publishing.set(channel, queued);
+		publishing.set(stream, queued);
 
 		void queued.then(() => {
-			if (publishing.get(channel) === queued) {
-				publishing.delete(channel);
+			if (publishing.get(stream) === queued) {
+				publishing.delete(stream);
 			}
 		});
 
 		return done;
 	}
 
-	function deliver(channel: Channel, delivery: Delivery): void {
-		for (const subscriber of channels.get(channel) ?? []) {
+	function deliver(stream: EventStream, delivery: Delivery): void {
+		for (const subscriber of streams.get(stream) ?? []) {
 			if (subscriber.overflowed) {
 				continue;
 			}
@@ -162,24 +162,23 @@ export function inProcess({
 	}
 
 	return {
-		publish(channel, event) {
-			return serialize(channel, async () => {
-				const seq = isDurableEventType(event.type) ? await store.append(channel, event) : undefined;
-				const delivery: Delivery = seq === undefined ? { event } : { seq, event };
-				deliver(channel, delivery);
-				// Inside the serialised publish so this channel's notices leave in
-				// the order its events were numbered.
-				await broadcast(channel, delivery);
+		publish(stream, event) {
+			return serialize(stream, async () => {
+				const delivery: Delivery = { event };
+				deliver(stream, delivery);
+				// Inside the serialised publish so this stream's notices leave in
+				// the order its events were published.
+				await broadcast(stream, delivery);
 			});
 		},
 
 		async publishCommitted(events) {
 			await Promise.all(
 				events.map((committed) =>
-					serialize(committed.channel, async () => {
+					serialize(committed.stream, async () => {
 						const delivery: Delivery = { seq: committed.seq, event: committed.event };
-						deliver(committed.channel, delivery);
-						await broadcast(committed.channel, delivery);
+						deliver(committed.stream, delivery);
+						await broadcast(committed.stream, delivery);
 					}),
 				),
 			);
@@ -187,32 +186,31 @@ export function inProcess({
 
 		async close() {
 			closed = true;
-			for (const subscribers of channels.values()) {
+			for (const subscribers of streams.values()) {
 				for (const subscriber of subscribers) {
 					subscriber.wake?.();
 				}
 			}
-			const stop = await listening;
-			await stop();
+			await listening?.stop();
 		},
 
-		async *subscribe(channel, { since, signal } = {}) {
+		async *subscribe(stream, { since, signal } = {}) {
 			// Registered before the replay reads a row, so an event published
 			// during the replay is buffered rather than lost in the gap between
 			// the last row read and the first live delivery.
 			const subscriber: Subscriber = { queue: [], overflowed: false };
-			const subscribers = channels.get(channel) ?? new Set<Subscriber>();
+			const subscribers = streams.get(stream) ?? new Set<Subscriber>();
 			subscribers.add(subscriber);
-			channels.set(channel, subscribers);
+			streams.set(stream, subscribers);
 
 			try {
 				let replayed = since ?? 0;
 
 				if (since !== undefined && since > 0) {
-					if (await store.has(channel, since)) {
+					if (await store.has(stream, since)) {
 						// One row past the cap is how "too long to be worth
 						// sending" is detected without a second query.
-						const missed = await store.replay(channel, since, MAX_REPLAY + 1);
+						const missed = await store.replay(stream, since, MAX_REPLAY + 1);
 
 						if (missed.length > MAX_REPLAY) {
 							// Sending events the client is about to discard helps
@@ -228,7 +226,7 @@ export function inProcess({
 					} else {
 						// The resume point has been pruned, or was never ours.
 						// Nothing was replayed, so nothing live is a duplicate —
-						// and an id from another channel, or an invented one,
+						// and an id from another stream, or an invented one,
 						// must not go on suppressing events for being too small.
 						replayed = 0;
 						yield { event: resetEvent() };
@@ -256,9 +254,70 @@ export function inProcess({
 			} finally {
 				subscribers.delete(subscriber);
 				if (subscribers.size === 0) {
-					channels.delete(channel);
+					streams.delete(stream);
 				}
 			}
+		},
+	};
+}
+
+/** The wait before the first retry of listening to other processes, doubled after each failure. */
+const FIRST_LISTEN_RETRY_MS = 1000;
+const MAX_LISTEN_RETRY_MS = 60_000;
+
+/**
+ * Listens to other processes through `relay`, retrying a start that fails,
+ * its probe included, with a doubling wait, until it starts or `stop` is
+ * called. A failure is often brief, such as Postgres restarting while the
+ * process starts, so the process serves its own events meanwhile and joins
+ * the others once it can, rather than staying alone until it restarts. Once
+ * listening, the relay replaces a dropped connection itself.
+ */
+function superviseListening(
+	relay: EventRelay,
+	receive: (stream: EventStream, delivery: Delivery) => void,
+	log: (message: string, cause: unknown) => void,
+): { stop(): Promise<void> } {
+	let stopped = false;
+	let stopListening: (() => Promise<void>) | undefined;
+	let cancelWait = () => {};
+
+	const waitToRetry = (milliseconds: number) =>
+		new Promise<void>((resolve) => {
+			const timer = setTimeout(resolve, milliseconds);
+			cancelWait = () => {
+				clearTimeout(timer);
+				resolve();
+			};
+		});
+
+	const starting = (async () => {
+		for (
+			let wait = FIRST_LISTEN_RETRY_MS;
+			!stopped;
+			wait = Math.min(wait * 2, MAX_LISTEN_RETRY_MS)
+		) {
+			try {
+				stopListening = await relay.listen(receive);
+				return;
+			} catch (cause) {
+				// Stopped while this start was under way: there is nothing to wait for.
+				if (stopped) return;
+				log(
+					`Listening for other processes' events failed; live updates are local only until it starts. Trying again in ${wait / 1000} s`,
+					cause,
+				);
+				await waitToRetry(wait);
+			}
+		}
+	})();
+
+	return {
+		async stop() {
+			stopped = true;
+			cancelWait();
+			await starting;
+			await stopListening?.();
 		},
 	};
 }

@@ -2,19 +2,19 @@ import type { ToolCallPart } from "@sugabots/contracts";
 import { Conflict } from "@sugabots/contracts/http";
 import { userText } from "@sugabots/errors";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { client } from "@/client.test-support.ts";
 import { createQueryClient } from "@/lib/query.ts";
-import { client } from "@/test-client.ts";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
-const agent = {
+const bot = {
 	name: "Linear Handler",
 	color: "green" as const,
-	face: "pill" as const,
+	eyes: "pill" as const,
 	shape: "circle" as const,
 };
 
@@ -22,6 +22,7 @@ function asking(
 	input: ToolCallPart["input"],
 	approval: ToolCallPart["approval"] = {
 		status: "pending",
+		approvers: "chat",
 		decidedByName: null,
 		decidedAt: null,
 	},
@@ -34,7 +35,6 @@ function asking(
 		output: null,
 		status: "awaiting_approval",
 		error: null,
-		mutating: true,
 		atOffset: 0,
 		startedAt: "2026-09-18T09:00:00.000Z",
 		finishedAt: null,
@@ -48,11 +48,10 @@ function show(call: ToolCallPart, canApprove = true) {
 		<QueryClientProvider client={queries}>
 			<ToolApprovalCard
 				call={shown}
-				agent={agent}
-				threadId="0199a3a0-0000-7000-8000-0000000000b2"
-				podId="0199a3a0-0000-7000-8000-0000000000b1"
+				bot={bot}
+				chatId="0199a3a0-0000-7000-8000-0000000000b2"
 				canApprove={canApprove}
-				look={{ name: "Linear", presetId: "linear" }}
+				connector={{ name: "Linear", markId: "linear" }}
 			/>
 		</QueryClientProvider>
 	);
@@ -67,49 +66,38 @@ function inCard(name: RegExp) {
 }
 
 beforeEach(() => {
-	client.api.toolApprovals.decide.mockReturnValue(Effect.undefined);
-});
-
-afterEach(() => {
-	cleanup();
-	vi.clearAllMocks();
+	client.api.approvals.decide.mockReturnValue(Effect.undefined);
 });
 
 describe("an approval request", () => {
 	it("says who wants to use what, shows the request, and allows it once", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		show(asking({ team: "Platform" }));
 
 		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
-		expect(within(card).getByText("Linear Handler wants to use Linear")).toBeDefined();
-		expect(within(card).getByText("Platform")).toBeDefined();
-		expect(within(card).queryByRole("checkbox")).toBeNull();
+		within(card).getByText("Linear Handler wants to use Linear");
+		within(card).getByText("Platform");
 		fireEvent.click(inCard(/^Allow/));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
 		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
 	});
 
-	it("keeps the answer given once it is accepted, until the turn records it", async () => {
-		const approval = client.api.toolApprovals.decide;
-		show(asking({ team: "Platform" }));
-
-		fireEvent.click(inCard(/^Allow/));
-
-		await waitFor(() => expect(approval).toHaveBeenCalled());
-		await waitFor(() => expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(true));
-		expect(inCard(/^Deny/).hasAttribute("disabled")).toBe(true);
-	});
-
-	it("announces the answer given here once the turn records it", async () => {
+	it("keeps the answer given until the turn records it, then announces it", async () => {
 		const { recorded } = show(asking({ team: "Platform" }));
 
 		fireEvent.click(inCard(/^Allow/));
 		await waitFor(() => expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(true));
+		expect(inCard(/^Deny/).hasAttribute("disabled")).toBe(true);
 		recorded({
 			...asking(
 				{ team: "Platform" },
-				{ status: "allowed", decidedByName: "You", decidedAt: "2026-09-18T09:01:00.000Z" },
+				{
+					status: "allowed",
+					approvers: "chat",
+					decidedByName: "You",
+					decidedAt: "2026-09-18T09:01:00.000Z",
+				},
 			),
 			status: "running",
 		});
@@ -118,7 +106,7 @@ describe("an approval request", () => {
 	});
 
 	it("lets the answer be given again if sending it failed", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		approval.mockReturnValue(
 			Effect.fail(new Conflict({ message: userText`That tool approval has already been decided` })),
 		);
@@ -131,7 +119,7 @@ describe("an approval request", () => {
 	});
 
 	it("denies it", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		show(asking({ team: "Platform" }));
 
 		fireEvent.click(inCard(/^Deny/));
@@ -150,21 +138,21 @@ describe("an approval request", () => {
 		);
 
 		const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
-		expect(within(card).getByText("Field7")).toBeDefined();
-		expect(within(card).getByText("Name")).toBeDefined();
-		expect(within(card).getByText("Theo Hart")).toBeDefined();
+		within(card).getByText("Field7");
+		within(card).getByText("Name");
+		within(card).getByText("Theo Hart");
 		expect(within(card).getAllByRole("columnheader", { name: "Id" })).toHaveLength(1);
 		expect(within(card).getAllByRole("row")).toHaveLength(3);
 		expect(within(card).queryByText(/"name"/)).toBeNull();
 	});
 
 	it("opens the whole request full screen for review, and closes it once answered", async () => {
-		const approval = client.api.toolApprovals.decide;
+		const approval = client.api.approvals.decide;
 		show(asking({ team: "Platform" }));
 
 		fireEvent.click(screen.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog", { name: "Update issue" });
-		expect(within(request).getByText("Platform")).toBeDefined();
+		within(request).getByText("Platform");
 		fireEvent.click(within(request).getByRole("button", { name: /^Allow/ }));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
@@ -180,13 +168,13 @@ describe("an approval request", () => {
 		fireEvent.click(within(request).getByRole("button", { name: "Close" }));
 
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-		expect(client.api.toolApprovals.decide).not.toHaveBeenCalled();
+		expect(client.api.approvals.decide).not.toHaveBeenCalled();
 	});
 
 	it("says it waits on someone with permission when the reader cannot answer", () => {
 		show(asking({ team: "Platform" }), false);
 
-		expect(screen.getByText("Waiting for someone with permission to answer this.")).toBeDefined();
+		screen.getByText("Waiting for someone with permission to answer this.");
 		expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	});
 
@@ -196,18 +184,21 @@ describe("an approval request", () => {
 			show(
 				asking(
 					{ team: "Platform" },
-					{ status, decidedByName: "Mia Chen", decidedAt: "2026-09-18T09:01:00.000Z" },
+					{
+						status,
+						approvers: "chat",
+						decidedByName: "Mia Chen",
+						decidedAt: "2026-09-18T09:01:00.000Z",
+					},
 				),
 			);
 
 			const card = screen.getByRole("region", { name: "Approval request: Update issue in Linear" });
-			expect(within(card).getByText("Platform")).toBeDefined();
+			within(card).getByText("Platform");
 			expect(within(card).queryByRole("button", { name: /^(Allow|Deny)/ })).toBeNull();
-			expect(
-				within(card).getByText(`${status === "allowed" ? "Allowed" : "Denied"} by Mia Chen`, {
-					exact: false,
-				}),
-			).toBeDefined();
+			within(card).getByText(`${status === "allowed" ? "Allowed" : "Denied"} by Mia Chen`, {
+				exact: false,
+			});
 			// An answer already in the history is read, not announced as it loads.
 			expect(within(card).queryByRole("status")).toBeNull();
 		},

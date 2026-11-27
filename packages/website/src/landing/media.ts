@@ -28,8 +28,8 @@ export interface Screenshot {
 	title: string;
 	description: string;
 	/**
-	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/one-thread.webp`.
-	 * `bun run capture screenshots` makes them all; Sandboxes needs the image from `bun run build:sandbox`.
+	 * A 16:10 capture of the app, as WebP at 2240×1400: `/screenshots/project-chat.webp`.
+	 * `bun run capture screenshots` makes them all; Computers needs the image from `bun run build:computer`.
 	 */
 	image?: string;
 	/** What the screenshot should show, named on its placeholder until it exists. */
@@ -38,40 +38,42 @@ export interface Screenshot {
 
 export const screenshots: readonly [Screenshot, ...Screenshot[]] = [
 	{
-		title: "One thread",
-		description: "People and bots reply, thread and react the same way.",
-		image: "/screenshots/one-thread.webp",
-		shows: "A thread with two people and a bot",
+		title: "Projects",
+		description:
+			"Each piece of work gets a project, where members and bots share its chats, and reply and react the same way.",
+		image: "/screenshots/project-chat.webp",
+		shows: "A project's chat with two members and a bot",
 	},
 	{
-		title: "Routines",
-		description: "Scheduled work posts where the whole team sees it, not to one person’s inbox.",
-		image: "/screenshots/routines.webp",
-		shows: "Routines",
+		title: "Automations",
+		description: "Automations run on routines or triggers, each run in a chat of the project.",
+		image: "/screenshots/automations.webp",
+		shows: "Automations",
 	},
 	{
-		title: "Sandboxes",
-		description: "Each bot runs code in its own isolated environment, never on your machine.",
-		image: "/screenshots/sandboxes.webp",
-		shows: "The sandbox viewer",
+		title: "Computers",
+		description: "A project’s bots run code on its own computer, never on your machine.",
+		image: "/screenshots/computers.webp",
+		shows: "The computer viewer",
 	},
 	{
-		title: "Artifacts",
-		description: "Files and outputs bots make are saved for the team, ready to open and review.",
-		image: "/screenshots/artifacts.webp",
-		shows: "The artifacts viewer",
+		title: "Files",
+		description:
+			"What members upload and bots make is kept in the project, ready to open and review.",
+		image: "/screenshots/files.webp",
+		shows: "The files viewer",
 	},
 	{
 		title: "Usage",
-		description: "See what every bot, model and team costs, day by day.",
+		description: "See what every bot and model costs, day by day.",
 		image: "/screenshots/usage.webp",
 		shows: "The Usage page",
 	},
 	{
 		title: "Connect any MCP server",
 		description:
-			"Plug in Linear, Notion or anything else once for the whole team. Bots ask before each tool call, or run freely.",
-		image: "/screenshots/mcp-connections.webp",
-		shows: "A team’s connections to MCP servers",
+			"Connect a project to Linear, Notion or any MCP server; its bots use them in its chats. Bots ask before each tool call, or run freely.",
+		image: "/screenshots/mcp-connectors.webp",
+		shows: "A project’s connectors to MCP servers",
 	},
 ];

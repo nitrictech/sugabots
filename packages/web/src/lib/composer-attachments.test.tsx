@@ -4,76 +4,14 @@ import { userText } from "@sugabots/errors";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { client } from "@/client.test-support.ts";
+import { FakeRequest, stubAttachmentUploads } from "@/lib/attachment-upload.test-support.ts";
 import { sendReadiness, useComposerAttachments } from "@/lib/composer-attachments.ts";
-import { client } from "@/test-client.ts";
 
-vi.mock("@/api.ts", () => import("@/test-client.ts"));
+vi.mock("@/api.ts", () => import("@/client.test-support.ts"));
 
 const chatId = "0199a3a0-0000-7000-8000-0000000000e1";
 const fileId = "0199a3a0-0000-7000-8000-0000000000f1";
-
-/**
- * Stands in for the browser's XMLHttpRequest, the boundary uploads cross, so
- * a test says how far each upload has got and what the API answers.
- */
-class FakeRequest {
-	static made: FakeRequest[] = [];
-	method = "";
-	url = "";
-	withCredentials = false;
-	responseType = "";
-	status = 0;
-	response: unknown = null;
-	body: unknown;
-	aborted = false;
-	private readonly listeners = new Map<string, ((event?: unknown) => void)[]>();
-	private readonly uploadListeners = new Map<string, ((event: unknown) => void)[]>();
-	upload = {
-		addEventListener: (type: string, listener: (event: unknown) => void) => {
-			this.uploadListeners.set(type, [...(this.uploadListeners.get(type) ?? []), listener]);
-		},
-	};
-
-	open(method: string, url: string) {
-		this.method = method;
-		this.url = url;
-	}
-
-	addEventListener(type: string, listener: () => void) {
-		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-	}
-
-	send(body: unknown) {
-		this.body = body;
-		FakeRequest.made.push(this);
-	}
-
-	abort() {
-		this.aborted = true;
-		this.emit("abort");
-	}
-
-	progress(loaded: number, total: number) {
-		for (const listener of this.uploadListeners.get("progress") ?? []) {
-			listener({ lengthComputable: true, loaded, total });
-		}
-	}
-
-	/** The connection drops before the API answers. */
-	fail() {
-		this.emit("error");
-	}
-
-	answer(status: number, response: unknown) {
-		this.status = status;
-		this.response = response;
-		this.emit("load");
-	}
-
-	private emit(type: string) {
-		for (const listener of this.listeners.get(type) ?? []) listener();
-	}
-}
 
 function pdf(name = "report.pdf"): File {
 	return new File(["%PDF"], name, { type: "application/pdf" });
@@ -100,15 +38,13 @@ async function settle() {
 }
 
 beforeEach(() => {
-	FakeRequest.made = [];
-	vi.stubGlobal("XMLHttpRequest", FakeRequest);
+	stubAttachmentUploads();
 	client.api.chats.removeFile.mockReturnValue(Effect.void);
 });
 
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
-	vi.clearAllMocks();
 });
 
 describe("useComposerAttachments", () => {
@@ -120,7 +56,7 @@ describe("useComposerAttachments", () => {
 		const [request] = FakeRequest.made;
 		expect(request?.method).toBe("POST");
 		expect(request?.url).toBe(
-			`https://api.test/conversations/${chatId}/files?name=report.pdf&type=application%2Fpdf`,
+			`https://api.test/chats/${chatId}/files?name=report.pdf&type=application%2Fpdf`,
 		);
 		expect(request?.withCredentials).toBe(true);
 		expect(request?.body).toBe(file);
@@ -142,7 +78,7 @@ describe("useComposerAttachments", () => {
 		const { result } = renderHook(() => useComposerAttachments(chatId));
 		act(() => result.current.attach?.([new File(["x"], "notes.weird")]));
 		expect(FakeRequest.made[0]?.url).toBe(
-			`https://api.test/conversations/${chatId}/files?name=notes.weird`,
+			`https://api.test/chats/${chatId}/files?name=notes.weird`,
 		);
 	});
 
@@ -192,7 +128,7 @@ describe("useComposerAttachments", () => {
 		await settle();
 		expect(result.current.items).toEqual([]);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId: "0199a3a0-0000-7000-8000-0000000000f2" },
+			params: { chatId, fileId: "0199a3a0-0000-7000-8000-0000000000f2" },
 		});
 	});
 
@@ -206,7 +142,7 @@ describe("useComposerAttachments", () => {
 		act(() => result.current.remove(result.current.items[0]?.key ?? ""));
 		expect(result.current.items).toEqual([]);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 	});
 
@@ -266,13 +202,8 @@ describe("useComposerAttachments", () => {
 		unmount();
 		expect(inFlight?.aborted).toBe(true);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
-	});
-
-	it("has nothing to attach to until the chat exists", () => {
-		const { result } = renderHook(() => useComposerAttachments(undefined));
-		expect(result.current.attach).toBeUndefined();
 	});
 
 	it("sends text, files or both, but nothing empty and nothing still uploading", async () => {
@@ -361,7 +292,7 @@ describe("useComposerAttachments", () => {
 		const refusal = new BadRequest({
 			message: userText`A file to send is no longer there. Remove it and attach it again`,
 			error: {
-				_tag: "UploadsNotFound",
+				_tag: "UnsentAttachmentsNotFound",
 				userMessage: userText`A file to send is no longer there. Remove it and attach it again`,
 				isRetryable: false,
 			},
@@ -371,7 +302,7 @@ describe("useComposerAttachments", () => {
 		const [item] = result.current.items;
 		expect(item?.upload).toMatchObject({ state: "failed", retryable: true });
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 
 		const freshId = "0199a3a0-0000-7000-8000-0000000000f3";
@@ -412,7 +343,7 @@ describe("useComposerAttachments", () => {
 		expect(client.api.chats.removeFile).not.toHaveBeenCalled();
 		taken?.putBack(new Error("The connection dropped"));
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 	});
 
@@ -442,13 +373,13 @@ describe("useComposerAttachments", () => {
 		expect(result.current.leftOut).toBe(0);
 		expect(stillUploading?.aborted).toBe(true);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId: waitingId },
+			params: { chatId, fileId: waitingId },
 		});
 
 		act(() => taken?.putBack(new Error("The connection dropped")));
 		expect(result.current.items).toEqual([]);
 		expect(client.api.chats.removeFile).toHaveBeenCalledWith({
-			params: { conversationId: chatId, fileId },
+			params: { chatId, fileId },
 		});
 	});
 });

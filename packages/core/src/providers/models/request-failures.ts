@@ -7,16 +7,17 @@ import {
 	TypeValidationError,
 } from "ai";
 import { Duration, ErrorReporter, Schema } from "effect";
+import { causesOf } from "../causes.ts";
 import { EgressRefused } from "../network/egress.ts";
 
-/** Who a model request went to, as people see them in the Models settings. */
+/** Who a model request went to, as members see them in the Models settings. */
 export interface RequestContext {
 	readonly provider: DisplayName;
 	readonly model: DisplayName;
 }
 
 /** The parts of a provider's error that a dialect uses to classify it. */
-export interface FailureReport {
+interface FailureReport {
 	/** HTTP status. Undefined when the provider gave none, as with many errors sent mid-stream. */
 	status: number | undefined;
 	/** The error's `code`, or its `type` if it has no code. */
@@ -26,7 +27,7 @@ export interface FailureReport {
 }
 
 /** Failures a dialect can identify from an error when the status code isn't enough. */
-export type RecognizedFailure = "quota-exhausted" | "context-too-long" | "overloaded";
+type RecognizedFailure = "quota-exhausted" | "context-too-long" | "overloaded";
 
 /** Maps a provider's error to a shared failure, or undefined to fall back to the status. */
 export type RecognizeFailure = (report: FailureReport) => RecognizedFailure | undefined;
@@ -40,7 +41,7 @@ export const RequestStage = Schema.Literals(["asking", "answering", "calling-too
 export type RequestStage = typeof RequestStage.Type;
 
 /** Provider and model names and the stage for the failure message, and the dialect's error mapping. */
-export interface FailedRequest extends RequestContext {
+interface FailedRequest extends RequestContext {
 	readonly stage: RequestStage;
 	readonly recognize?: RecognizeFailure;
 }
@@ -277,7 +278,7 @@ export class ProviderContextLengthExceeded
 		return describe(this.cause);
 	}
 	get userMessage() {
-		return userText`The conversation is too long for ${this.model} to read. Start a new conversation, or choose a model that reads more.`;
+		return userText`The chat is too long for ${this.model} to read. Start a new chat, or choose a model that reads more.`;
 	}
 }
 
@@ -493,7 +494,7 @@ function classifyStatus(
 	return new ProviderRejectedRequest(fields);
 }
 
-/** A wait as people read it, rounded up: "10 seconds", "1 minute", "2 minutes". */
+/** A wait as members read it, rounded up: "10 seconds", "1 minute", "2 minutes". */
 function describeWait(wait: Duration.Duration): UserText {
 	const seconds = Math.ceil(Duration.toSeconds(wait));
 	if (seconds < 60) return seconds === 1 ? userText`1 second` : userText`${seconds} seconds`;
@@ -511,16 +512,9 @@ function parseRetryAfter(
 	return Number.isFinite(seconds) && seconds > 0 ? Duration.seconds(seconds) : undefined;
 }
 
-/** How many causes deep the classifier looks, so a cycle can't run forever. */
-const MAX_CAUSE_DEPTH = 5;
-
 /** The first of `error` and the errors it was caused by that `matches`. */
 function findInChain<T>(error: unknown, matches: (link: unknown) => link is T): T | undefined {
-	for (let link = error, depth = 0; link !== undefined && depth < MAX_CAUSE_DEPTH; depth++) {
-		if (matches(link)) return link;
-		link = link instanceof Error ? link.cause : undefined;
-	}
-	return undefined;
+	return causesOf(error).find(matches);
 }
 
 /** Whether `link` carries a socket or undici error code, such as `ECONNREFUSED`. */
@@ -593,6 +587,9 @@ function parsedBody(body: string | undefined): unknown {
 /** The error object: `error` if that's an object, otherwise the body itself. */
 function errorIn(reported: unknown): Record<string, unknown> | undefined {
 	if (typeof reported !== "object" || reported === null) return undefined;
+	if ("type" in reported && reported.type === "response.failed" && "response" in reported) {
+		return errorIn(reported.response);
+	}
 	const nested = (reported as { error?: unknown }).error;
 	return typeof nested === "object" && nested !== null
 		? (nested as Record<string, unknown>)

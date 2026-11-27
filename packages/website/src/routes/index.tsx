@@ -53,7 +53,7 @@ const sourceCode = {
 	targetProduct: { "@id": sugabots["@id"] },
 };
 
-/** Who and what the site is about, as schema.org data for search engines and agents. */
+/** Who and what the site is about, as schema.org data for search engines and AI assistants. */
 const structuredData = {
 	"@context": "https://schema.org",
 	"@graph": [nitric, website, sugabots, sourceCode],

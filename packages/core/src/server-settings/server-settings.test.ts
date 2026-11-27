@@ -1,0 +1,116 @@
+import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
+import { describe, expect, it } from "vitest";
+import { ServerSettings } from "./server-settings.ts";
+
+function installationFor(env: Record<string, string>) {
+	return Effect.runPromiseExit(
+		ServerSettings.Service.pipe(
+			Effect.provide(
+				ServerSettings.layer.pipe(
+					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+				),
+			),
+		),
+	);
+}
+
+describe("ServerSettings.layer", () => {
+	it("is a development server on its own port unless told otherwise", async () => {
+		expect(await installationFor({ PORT: "4000" })).toMatchObject({
+			_tag: "Success",
+			value: {
+				isProduction: false,
+				publicUrl: "http://localhost:4000",
+				webAppUrl: "http://localhost:4000",
+				trustedOrigins: ["http://localhost:4000"],
+				contentOrigin: undefined,
+			},
+		});
+	});
+
+	it("serves the web app apart from the API when WEB_APP_URL is set", async () => {
+		expect(
+			await installationFor({
+				NODE_ENV: "production",
+				PUBLIC_URL: "https://api.example.com/",
+				WEB_APP_URL: "https://app.example.com/",
+			}),
+		).toMatchObject({
+			_tag: "Success",
+			value: {
+				isProduction: true,
+				publicUrl: "https://api.example.com",
+				webAppUrl: "https://app.example.com",
+				trustedOrigins: ["https://api.example.com", "https://app.example.com"],
+			},
+		});
+	});
+
+	it("serves pages from CONTENT_ORIGIN's origin, kept out of the trusted origins", async () => {
+		expect(
+			await installationFor({
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "https://pages.example-content.com/ignored/path",
+			}),
+		).toMatchObject({
+			_tag: "Success",
+			value: {
+				trustedOrigins: ["https://sugabots.example.com"],
+				contentOrigin: "https://pages.example-content.com",
+			},
+		});
+	});
+
+	it("runs a test runner's NODE_ENV as development", async () => {
+		expect(await installationFor({ NODE_ENV: "test" })).toMatchObject({
+			_tag: "Success",
+			value: { isProduction: false },
+		});
+	});
+
+	it.each([
+		["an unknown NODE_ENV", { NODE_ENV: "prod" }, /NODE_ENV/],
+		["a PUBLIC_URL that is not a URL", { PUBLIC_URL: "sugabots.example.com" }, /PUBLIC_URL/],
+		[
+			"a WEB_APP_URL that is not HTTP",
+			{ WEB_APP_URL: "ftp://app.example.com" },
+			/WEB_APP_URL must use HTTP/,
+		],
+		[
+			"a CONTENT_ORIGIN that is the app's own",
+			{
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "https://sugabots.example.com/pages",
+			},
+			/CONTENT_ORIGIN must have a hostname apart/,
+		],
+		[
+			"a CONTENT_ORIGIN on the app's host by another scheme",
+			{
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "http://sugabots.example.com",
+			},
+			/CONTENT_ORIGIN must have a hostname apart/,
+		],
+		[
+			"a CONTENT_ORIGIN on the app's hostname at another port",
+			{
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "https://sugabots.example.com:8443",
+			},
+			/CONTENT_ORIGIN must have a hostname apart/,
+		],
+		[
+			"a CONTENT_ORIGIN on the app's hostname written with a trailing dot",
+			{
+				PUBLIC_URL: "https://sugabots.example.com",
+				CONTENT_ORIGIN: "https://sugabots.example.com.",
+			},
+			/CONTENT_ORIGIN must have a hostname apart/,
+		],
+	])("refuses to start with %s", async (_, env, message) => {
+		const exit = await installationFor(env);
+
+		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toMatch(message);
+	});
+});

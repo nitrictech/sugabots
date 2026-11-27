@@ -1,48 +1,52 @@
-import type { Pod } from "@sugabots/contracts";
-import {
-	type HistoryState,
-	Link,
-	Navigate,
-	useLocation,
-	useMatch,
-	useNavigate,
-} from "@tanstack/react-router";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { CatchBoundary, Link, Navigate } from "@tanstack/react-router";
 import { cn } from "cn";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import {
 	cloneElement,
 	Fragment,
+	type MouseEventHandler,
 	type ReactElement,
 	type ReactNode,
+	type RefObject,
 	Suspense,
 	useId,
 	useRef,
-	useState,
 } from "react";
-import { useAgents, usePodAgent } from "@/lib/agents.ts";
-import { useConnections } from "@/lib/connections.ts";
-import { podSettingsLink, podSettingsPageLink } from "@/lib/links.ts";
-import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { useModelProviders } from "@/lib/model-providers.ts";
-import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
-import { findPod, usePodMembers, usePods } from "@/lib/pods.ts";
-import { useSandboxAccess } from "@/lib/sandbox-providers.ts";
-import { useSession } from "@/lib/session.ts";
-import { useBackTarget } from "@/lib/settings-back.tsx";
-import { useWorkspace, useWorkspaceMembers, useWorkspacePermissions } from "@/lib/workspace.ts";
+import { useBots } from "@/lib/bots.ts";
 import {
-	podSettingsPage,
-	podSettingsPages,
-	podSettingsPagesOf,
+	botSettingsLink,
+	closeSettingsLink,
+	projectSettingsLink,
+	settingsLink,
+	settingsSectionLink,
+} from "@/lib/links.ts";
+import { useModelProviders } from "@/lib/model-providers.ts";
+import {
+	type ModelChoice,
+	type SettingsLocation,
+	sectionOf,
+	settingsSearchValue,
+	useCloseSettings,
+} from "@/lib/open-settings.ts";
+import { LIST_MIN_WIDTH_PX, usePaneWidth } from "@/lib/pane-width.ts";
+import { useProjects } from "@/lib/projects.ts";
+import { useSession } from "@/lib/session.ts";
+import { useMemberships, useWorkspace, useWorkspacePermissions } from "@/lib/workspace.ts";
+import {
 	type SettingSection,
 	workspaceSettingSection,
 	workspaceSettingSections,
 	yourSettingSections,
 } from "@/lib/workspace-settings.ts";
-import { NewPodDialog } from "@/shell/NewPod.tsx";
-import { PodInitial } from "@/shell/SidebarPod.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { lazyNamed } from "@/routes/lazy-screen.tsx";
+import { BotAvatar } from "@/shell/Bot.tsx";
+import { PageFailure } from "@/shell/PageFailure.tsx";
+import { ProjectInitial } from "@/shell/SidebarProject.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
+import { isPlainClick, useBackToLinkedPage } from "@/ui/back-button.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
 import {
 	type BackTarget,
@@ -52,14 +56,21 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Tooltip } from "@/ui/tooltip.tsx";
+
+const WorkspaceSettings = lazyNamed(
+	() => import("@/screens/WorkspaceSettings.tsx"),
+	"WorkspaceSettings",
+);
 
 /**
- * Settings, as a page of the app beside the sidebar: the workspace's sections
- * and each pod's pages down the left, the open page beside them under a trail
- * of where it sits. Below a laptop's width there is no room for both, so
- * settings drill down as a phone's do: the sections as one list, and each
- * opening with a way back to it.
+ * Settings, from a tablet up as a dialog over the page they were opened on,
+ * which stays as it was beneath them: your own and the workspace's sections
+ * down the left, the open page beside them under a trail of where it sits.
+ * A bot's and a project's settings are its own pages, beside its chats.
+ * Below a laptop's width there is no room for both, so settings drill down
+ * as a phone's do: the sections as one list, and each opening with a way
+ * back to it. On a phone they are pages over the page, which stays as it was
+ * beneath them, as it does beneath the dialog.
  *
  * The frame is deliberately NOT part of the settings bundle. The sections
  * behind it are a chunk of their own, and while it is on its way the click has
@@ -67,25 +78,26 @@ import { Tooltip } from "@/ui/tooltip.tsx";
  * section fills in beside it.
  */
 export function SettingsLayout({
-	index = false,
-	children,
+	page,
+	dialog,
 }: {
-	/** Whether this is `/settings` itself, which on a phone or tablet is the list of sections. */
-	index?: boolean;
-	children: ReactNode;
+	page: SettingsLocation;
+	dialog?: {
+		container: RefObject<HTMLDivElement | null>;
+		finalFocus: RefObject<HTMLElement | null>;
+	};
 }) {
-	const pathname = useSettingsPath();
-	const phone = !useMediaQuery(SIDE_BY_SIDE);
-	const { data: pods } = usePods();
-	// A phone lists settings in its You tab.
-	if (index && phone) return <Navigate from="/$workspace" to="./you" replace />;
-	return (
-		// A group, so the frame's Back can stand aside for one the page draws itself.
-		<div className="group/settings flex min-h-0 min-w-0 flex-1">
-			<SettingsNavigation />
+	const close = useCloseSettings();
+	const popup = useRef<HTMLDivElement>(null);
+	const index = page.kind === "sections";
+	if (index && !dialog) return <Navigate from="/$workspace" to="./you" replace />;
+	const frame = (
+		<div className="group/settings flex min-h-0 min-w-0 flex-1 outline-none md:relative md:h-full md:w-full md:overflow-hidden md:rounded-xl md:border md:border-border-strong md:bg-background md:shadow-dialog">
+			{dialog && <SettingsClose close={close} />}
+			<SettingsNavigation page={page} />
 			{index && <CompactSettingsList />}
 			<div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", index && "max-lg:hidden")}>
-				<SettingsTrail className="max-lg:hidden" />
+				<SettingsTrail page={page} />
 				{/*
 				 * The scrollbar's room is kept whether or not the page is long enough
 				 * to need one, so a long page, such as Usage, centres its column where
@@ -95,103 +107,129 @@ export function SettingsLayout({
 					data-scroll-restoration-id="settings"
 					className="tab-bar-clearance relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-background scrollbar-gutter-stable max-md:scrollbar-gutter-auto"
 				>
-					{!index && (
-						<CompactPageBackBar
-							parent={phone ? phoneParentPage(pathname, pods) : parentPage(pathname)}
-						/>
-					)}
+					{!index && <CompactPageBackBar page={page} phone={!dialog} />}
 					{/*
-					 * Nothing rather than a skeleton: the navigation has already answered
-					 * the click, and a shape that flashes beside it reads as a fault.
+					 * A page that fails to load fails inside the dialog, which still
+					 * closes, rather than taking the page beneath with it.
 					 */}
-					<Suspense fallback={null}>{children}</Suspense>
+					<CatchBoundary getResetKey={() => settingsSearchValue(page)} errorComponent={PageFailure}>
+						{/*
+						 * Nothing rather than a skeleton: the navigation has already answered
+						 * the click, and a shape that flashes beside it reads as a fault.
+						 */}
+						<Suspense fallback={null}>
+							<WorkspaceSettings page={index ? { kind: "section", section: "general" } : page} />
+						</Suspense>
+					</CatchBoundary>
 				</main>
 			</div>
 		</div>
 	);
-}
-
-/**
- * On a phone or tablet, where there is no trail, the bar above a page with
- * its Back: where you came from, or else the page it sits under. A page that
- * draws a Back of its own is left to it.
- */
-function CompactPageBackBar({ parent }: { parent: BackTarget }) {
-	const back = useBackTarget(parent);
+	// The shell's column holds the page beneath, so this covers it there, and the tabs stay over it.
+	if (!dialog) return <div className="absolute inset-0 z-10 flex bg-background">{frame}</div>;
 	return (
-		<CompactBackBar {...back} className="group-has-[[data-page-back]]/settings:hidden lg:hidden" />
+		<Dialog
+			open
+			onOpenChange={(open) => {
+				if (!open) close();
+			}}
+		>
+			<DialogPrimitive.Portal container={dialog.container}>
+				<div className="fixed inset-0 z-50 flex items-center justify-center p-10">
+					<DialogPrimitive.Backdrop className="absolute inset-0 bg-scrim" />
+					<DialogPrimitive.Popup
+						aria-label="Settings"
+						ref={popup}
+						initialFocus={popup}
+						finalFocus={dialog.finalFocus}
+						render={frame}
+					/>
+				</div>
+			</DialogPrimitive.Portal>
+		</Dialog>
 	);
 }
 
-const settingsList: BackTarget = {
-	label: "Settings",
-	render: <Link from="/$workspace" to="./settings" />,
-};
+function SettingsClose({ close }: { close: () => void }) {
+	const to = (
+		<Link
+			{...closeSettingsLink()}
+			onClick={(event) => {
+				// A click that opens a new tab or window follows the address instead.
+				if (!isPlainClick(event)) return;
+				event.preventDefault();
+				close();
+			}}
+		/>
+	);
+	return (
+		<IconButton
+			label="Close settings"
+			render={to}
+			className="absolute top-2.5 right-3 z-10 hidden md:inline-grid"
+		>
+			<X aria-hidden />
+		</IconButton>
+	);
+}
 
-/** The page `pathname` sits under, for its Back when nothing says where you came from. */
-function parentPage(pathname: string): BackTarget {
-	const [, sectionId, item, page, detail] = pathname.split("/").filter(Boolean);
-	if (sectionId === "pods" && item !== undefined && detail !== undefined) {
-		const podPage = page === "agents" ? "bots" : "connections";
-		return {
-			label: podPage === "bots" ? "Bots" : "Connections",
-			render: (
-				<Link
-					from="/$workspace"
-					to="./settings/pods/$pod/$page"
-					params={{ pod: item, page: podPage }}
-				/>
-			),
-		};
-	}
-	if (sectionId !== undefined && sectionId !== "pods" && item !== undefined) {
-		const section = workspaceSettingSection(sectionId);
-		if (section) {
-			return {
-				label: section.label,
-				render: (
-					<Link from="/$workspace" to="./settings/$section" params={{ section: section.id }} />
-				),
-			};
-		}
-	}
-	return settingsList;
+function CompactPageBackBar({ page, phone }: { page: SettingsLocation; phone: boolean }) {
+	const goToParent = useBackToLinkedPage();
+	const parent = phone
+		? phoneParentPage(page)
+		: (parentSection(page, goToParent) ?? {
+				label: "Settings",
+				render: <Link {...settingsLink()} onClick={goToParent} />,
+			});
+	return (
+		<CompactBackBar
+			{...parent}
+			className="group-has-[[data-page-back]]/settings:hidden lg:hidden"
+		/>
+	);
+}
+
+function parentSection(
+	page: SettingsLocation,
+	onClick?: MouseEventHandler<HTMLAnchorElement>,
+): BackTarget | undefined {
+	if (page.kind === "sections" || page.kind === "section") return undefined;
+	const section = workspaceSettingSection(page.kind === "member" ? "members" : "providers");
+	if (!section) return undefined;
+	return {
+		label: section.label,
+		render: (
+			<Link
+				{...settingsSectionLink(section.id)}
+				aria-label={`Back to ${section.label}`}
+				onClick={onClick}
+			/>
+		),
+	};
 }
 
 /**
- * The page `pathname` sits under on a phone, whose settings are listed in its
- * You tab: a pod's own pages sit under the pod's page there, Notifications
- * under your profile, and what would sit under the list of settings under the tab.
+ * The page `page` sits under on a phone, whose settings are listed in its
+ * You tab: Notifications under your account, a section under the page the
+ * settings were opened over, and what sits under a section under it.
  */
-function phoneParentPage(pathname: string, pods: readonly Pod[] | undefined): BackTarget {
-	const [, sectionId, item, , detail] = pathname.split("/").filter(Boolean);
-	if (sectionId === "pods" && item !== undefined && detail === undefined) {
-		return {
-			label: findPod(pods, item)?.name ?? "Pod",
-			render: <Link from="/$workspace" to="./you/pods/$pod" params={{ pod: item }} />,
-		};
+function phoneParentPage(page: SettingsLocation): BackTarget {
+	// Opened from a row on your account.
+	if (page.kind === "section" && page.section === "notifications") {
+		return { label: "You", render: <Link {...settingsSectionLink("account")} /> };
 	}
-	// Opened from a row on your profile.
-	if (sectionId === "notifications") {
-		return {
-			label: "You",
-			render: <Link from="/$workspace" to="./settings/$section" params={{ section: "profile" }} />,
-		};
-	}
-	const parent = parentPage(pathname);
-	if (parent !== settingsList) return parent;
-	return { label: "Settings", render: <Link from="/$workspace" to="./you" /> };
+	return parentSection(page) ?? { label: "Back", render: <Link {...closeSettingsLink()} /> };
 }
 
 /** The workspace's sections the viewer may open, with what each holds. */
 function useWorkspaceSections() {
 	const may = useWorkspacePermissions();
 	const { workspace } = useWorkspace();
-	const { data: members } = useWorkspaceMembers(workspace?.id);
+	const { data: memberships } = useMemberships(workspace?.id);
 	// The one member a workspace always has is you, so the roster starts at two.
-	const people = members?.length;
+	const members = memberships?.length;
 	const counts: Partial<Record<SettingSection["id"], number | undefined>> = {
-		members: people === 1 ? undefined : people,
+		members: members === 1 ? undefined : members,
 	};
 	const sections = workspaceSettingSections.filter(
 		(section: SettingSection) => !("needs" in section) || may[section.needs],
@@ -199,24 +237,22 @@ function useWorkspaceSections() {
 	return { sections, counts };
 }
 
-/** The pods you are in, shared ones first and yours apart, as the navigation lists them. */
-function useListedPods() {
-	const { data: pods } = usePods();
+/** The projects you are in and the bots you reach, as a phone's list of settings has them. */
+function useListed() {
+	const { data: projects } = useProjects();
+	const { bots } = useBots();
 	return {
-		shared: pods?.filter((pod) => pod.kind === "shared") ?? [],
-		personal: pods?.filter((pod) => pod.kind === "personal") ?? [],
+		projects: projects?.filter((project) => project.isMember) ?? [],
+		bots: bots ?? [],
 	};
 }
 
 /** How wide the navigation can be dragged: a third of the window, so the page beside it keeps its room. */
 const NAVIGATION_MAX_WIDTH = "33vw";
 
-function SettingsNavigation() {
+function SettingsNavigation({ page }: { page: SettingsLocation }) {
 	const { sections, counts } = useWorkspaceSections();
-	const { shared, personal } = useListedPods();
-	const may = useWorkspacePermissions();
 	const session = useSession();
-	const pathname = useSettingsPath();
 	const navigation = useRef<HTMLElement>(null);
 	const [width, setWidth] = usePaneWidth("settings-navigation");
 
@@ -224,7 +260,7 @@ function SettingsNavigation() {
 		<nav
 			ref={navigation}
 			aria-label="Settings"
-			// As wide as Inbox's list at its narrowest until dragged wider, and no wider than a third of the window.
+			// At its narrowest until dragged wider, and no wider than a third of the window.
 			style={{
 				width: `clamp(${LIST_MIN_WIDTH_PX}px, ${width ?? LIST_MIN_WIDTH_PX}px, ${NAVIGATION_MAX_WIDTH})`,
 			}}
@@ -239,13 +275,13 @@ function SettingsNavigation() {
 			/>
 			<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pt-3 pb-3">
 				{/* Your own settings first: they follow you from workspace to workspace. */}
-				{session.user && (
+				{session.member && (
 					<NavigationGroup label="You">
 						{yourSettingSections.map((section) => (
 							<SectionLink
 								key={section.id}
 								section={section}
-								selected={isSelected(section, pathname)}
+								selected={isSelected(section, page)}
 								count={undefined}
 							/>
 						))}
@@ -256,60 +292,34 @@ function SettingsNavigation() {
 						<SectionLink
 							key={section.id}
 							section={section}
-							selected={isSelected(section, pathname)}
+							selected={isSelected(section, page)}
 							count={counts[section.id]}
 						/>
 					))}
 				</NavigationGroup>
-				{(shared.length > 0 || may.createPods) && (
-					<NavigationGroup label="Pods" action={may.createPods && <NewPodButton />}>
-						{shared.map((pod) => (
-							<PodNavigation key={pod.id} pod={pod} pathname={pathname} />
-						))}
-					</NavigationGroup>
-				)}
-				{personal.length > 0 && (
-					<NavigationGroup label="Personal pods">
-						{personal.map((pod) => (
-							<PodNavigation key={pod.id} pod={pod} pathname={pathname} />
-						))}
-					</NavigationGroup>
-				)}
 			</div>
 		</nav>
 	);
 }
 
-function NavigationGroup({
-	label,
-	action,
-	children,
-}: {
-	label: string;
-	action?: ReactNode;
-	children: ReactNode;
-}) {
+function NavigationGroup({ label, children }: { label: string; children: ReactNode }) {
 	const headingId = useId();
 	return (
 		// Named by its heading, so the General under You is told apart from the workspace's.
 		// biome-ignore lint/a11y/useSemanticElements: this groups links, not form controls, so a fieldset is wrong.
 		<div role="group" aria-labelledby={headingId} className="flex flex-col gap-px">
-			{/* A sidebar row's height, so the first heading lines up with Inbox across from it. */}
+			{/* A sidebar row's height, so the first heading lines up with the sidebar's first row across from it. */}
 			<div className="flex h-8 items-center gap-2 pr-1.5 pl-2">
 				<h2 id={headingId} className="m-0 flex-1 font-medium text-subtle-foreground text-xs">
 					{label}
 				</h2>
-				{action}
 			</div>
 			{children}
 		</div>
 	);
 }
 
-/**
- * What sits at a line's right: a count, a pod's chevron, the + beside Pods.
- * One width for all, centred in it, so they line up down the navigation.
- */
+/** What sits at a line's right: a count. One width for all, centred in it, so they line up down the navigation. */
 const TRAILING_SLOT = "grid w-5.5 shrink-0 place-items-center";
 
 /** One line of the navigation, picked out when it is the open page. */
@@ -339,148 +349,6 @@ function NavigationItemContent({ label, count }: { label: string; count?: number
 }
 
 /**
- * A pod in the navigation, opening onto its pages. The pod you are in stays
- * open; the others open and close as you choose.
- */
-function PodNavigation({ pod, pathname }: { pod: Pod; pathname: string }) {
-	const openPage = podPageAt(pathname, pod);
-	const [chosenOpen, setChosenOpen] = useRememberedOpen(pod.id);
-	// Opened or closed as last chosen on this device; until then, open while you are on one of its pages.
-	const open = chosenOpen ?? openPage !== undefined;
-	const counts = usePodCounts(pod, open);
-	const computers = useSandboxAccess().data?.enabled === true;
-	const listId = `settings-pod-${pod.id}`;
-	return (
-		<div className="flex flex-col gap-px">
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-controls={listId}
-				onClick={() => setChosenOpen(!open)}
-				className={cn(
-					"focus-ring flex h-8 items-center gap-2.5 rounded-sm pr-1.5 pl-2 text-left text-sm transition-colors hover:bg-row-hover hover:text-foreground",
-					openPage ? "text-foreground" : "text-muted-foreground",
-				)}
-			>
-				<PodInitial pod={pod} size="sm" />
-				<span className="min-w-0 flex-1 truncate">{pod.name}</span>
-				<span aria-hidden className={TRAILING_SLOT}>
-					<ChevronRight
-						size={12}
-						strokeWidth={2}
-						className={cn("text-subtle-foreground transition-transform", open && "rotate-90")}
-					/>
-				</span>
-			</button>
-			{open && (
-				<div
-					id={listId}
-					className="mb-1 ml-4 flex flex-col gap-px border-border-strong border-l pl-2"
-				>
-					{podSettingsPagesOf(pod, computers).map((page) => {
-						const selected = openPage === page.id;
-						const className = cn(NAVIGATION_ITEM, navigationItemState(selected));
-						const count = counts[page.id];
-						const current = selected ? "page" : undefined;
-						const label = count === undefined ? undefined : `${page.label}, ${count}`;
-						return (
-							<Link
-								key={page.id}
-								{...podSettingsPageLink(pod, page.id)}
-								aria-label={label}
-								aria-current={current}
-								className={className}
-							>
-								<NavigationItemContent label={page.label} count={count} />
-							</Link>
-						);
-					})}
-				</div>
-			)}
-		</div>
-	);
-}
-
-const OPEN_PODS_KEY = "sugabots-settings-open-pods";
-
-/**
- * Whether `podId` was last opened or closed in the navigation on this device,
- * and the way to choose: undefined until somebody does. Kept in the browser,
- * like a pane's width, so it survives leaving settings and reloading.
- */
-function useRememberedOpen(podId: string): [boolean | undefined, (open: boolean) => void] {
-	const [chosen, setChosen] = useState(() => storedOpenPods()[podId]);
-	const choose = (open: boolean) => {
-		setChosen(open);
-		try {
-			localStorage.setItem(OPEN_PODS_KEY, JSON.stringify({ ...storedOpenPods(), [podId]: open }));
-		} catch {
-			// Storage can be off. The choice still holds until the page is left.
-		}
-	};
-	return [chosen, choose];
-}
-
-function storedOpenPods(): Record<string, boolean> {
-	try {
-		const stored: unknown = JSON.parse(localStorage.getItem(OPEN_PODS_KEY) ?? "{}");
-		if (typeof stored !== "object" || stored === null) return {};
-		return Object.fromEntries(
-			Object.entries(stored).filter(
-				(entry): entry is [string, boolean] => typeof entry[1] === "boolean",
-			),
-		);
-	} catch {
-		return {};
-	}
-}
-
-/** What each of a pod's pages holds, counted once the pod is open in the navigation. */
-export function usePodCounts(pod: Pod, open: boolean): Partial<Record<string, number>> {
-	const { agents } = useAgents();
-	const connections = useConnections(open ? pod.id : undefined);
-	// Only you are ever in a personal pod, so there is nobody to count.
-	const members = usePodMembers(open && pod.kind === "shared" ? pod.id : undefined);
-	const bots = agents?.filter((agent) => agent.podId === pod.id && agent.systemAgentKey === null);
-	return {
-		connections: connections.data?.length || undefined,
-		people: members.data?.length || undefined,
-		bots: bots?.length || undefined,
-	};
-}
-
-/** Makes a pod and opens its settings: the + beside Pods in the navigation. */
-function NewPodButton() {
-	const navigate = useNavigate();
-	const [creating, setCreating] = useState(false);
-	return (
-		<>
-			<Tooltip label="New pod">
-				<button
-					type="button"
-					aria-label="New pod"
-					onClick={() => setCreating(true)}
-					className={cn(
-						TRAILING_SLOT,
-						"focus-ring h-5.5 rounded-xs text-subtle-foreground transition-colors hover:bg-row-hover hover:text-foreground",
-					)}
-				>
-					<Plus size={13} strokeWidth={2} />
-				</button>
-			</Tooltip>
-			<Dialog open={creating} onOpenChange={setCreating}>
-				<NewPodDialog
-					onCreated={async (pod) => {
-						setCreating(false);
-						await navigate(podSettingsLink(pod));
-					}}
-				/>
-			</Dialog>
-		</>
-	);
-}
-
-/**
  * Settings on a tablet: one list, as a phone's own settings are, with you at
  * the top and every section a row that opens it full screen. The sidebar
  * beside it is the way out, so it has no Done.
@@ -498,40 +366,30 @@ function CompactSettingsList() {
 }
 
 /**
- * The groups of the list of settings: you, the workspace's sections, and its
- * pods. A phone's You tab lists them too, with `linkState` saying where each
- * page's Back returns, its pods opening `podLink` rather than their General,
- * and `you` in place of your own rows.
+ * The groups of the list of settings: you, the workspace's sections, its
+ * projects and its bots. A phone's You tab lists them too. A project's and a
+ * bot's settings are their own pages, with Back of their own.
  */
-export function SettingsListGroups({
-	linkState,
-	podLink = (pod) => <Link {...podSettingsLink(pod)} />,
-}: {
-	linkState?: (state: HistoryState) => HistoryState;
-	podLink?: (pod: Pod) => ReactElement;
-}) {
+export function SettingsListGroups() {
 	const { sections, counts } = useWorkspaceSections();
-	const { shared, personal } = useListedPods();
-	const { user } = useSession();
+	const { projects, bots } = useListed();
+	const { member: signedIn } = useSession();
 	return (
 		<>
-			{/* You first, on a card that opens your profile, which leads on to your Notifications. */}
-			{user && (
+			{/* You first, on a card that opens your account, which leads on to your Notifications. */}
+			{signedIn && (
 				<Link
-					from="/$workspace"
-					to="./settings/$section"
-					params={{ section: "profile" }}
-					state={linkState}
+					{...settingsSectionLink("account")}
 					className={cn(
 						SETTINGS_CARD,
 						"focus-ring flex shrink-0 items-center gap-4 px-4 py-4 active:bg-row-selected",
 					)}
 				>
-					<PersonAvatar person={user} size={64} />
+					<MemberAvatar member={signedIn} size={64} />
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="truncate font-semibold text-xl text-foreground">{user.name}</span>
+						<span className="truncate font-semibold text-xl text-foreground">{signedIn.name}</span>
 						<span className="truncate text-sm text-subtle-foreground">
-							Profile and notifications
+							Account and notifications
 						</span>
 					</span>
 					<ChevronRight aria-hidden size={18} className="shrink-0 text-subtle-foreground" />
@@ -548,35 +406,35 @@ export function SettingsListGroups({
 							)
 						}
 						chevron
-						render={
-							<Link
-								from="/$workspace"
-								to="./settings/$section"
-								params={{ section: section.id }}
-								state={linkState}
-							/>
-						}
+						render={<Link {...settingsSectionLink(section.id)} />}
 					/>
 				))}
 			</SettingsGroup>
-			{[
-				{ label: "Pods", pods: shared },
-				{ label: "Personal pods", pods: personal },
-			].map(
-				(group) =>
-					group.pods.length > 0 && (
-						<SettingsGroup key={group.label} label={group.label} headingLevel={2}>
-							{group.pods.map((pod) => (
-								<SettingsRow
-									key={pod.id}
-									icon={<PodInitial pod={pod} size="sm" />}
-									label={pod.name}
-									chevron
-									render={podLink(pod)}
-								/>
-							))}
-						</SettingsGroup>
-					),
+			{projects.length > 0 && (
+				<SettingsGroup label="Projects" headingLevel={2}>
+					{projects.map((project) => (
+						<SettingsRow
+							key={project.id}
+							icon={<ProjectInitial project={project} size="sm" />}
+							label={project.name}
+							chevron
+							render={<Link {...projectSettingsLink(project)} />}
+						/>
+					))}
+				</SettingsGroup>
+			)}
+			{bots.length > 0 && (
+				<SettingsGroup label="Bots" headingLevel={2}>
+					{bots.map((bot) => (
+						<SettingsRow
+							key={bot.id}
+							icon={<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={20} />}
+							label={bot.name}
+							chevron
+							render={<Link {...botSettingsLink(bot)} />}
+						/>
+					))}
+				</SettingsGroup>
 			)}
 		</>
 	);
@@ -587,15 +445,12 @@ export function SettingsListGroups({
  * settings these are, then each page on the way down to this one, each a
  * link back up but the last.
  */
-function SettingsTrail({ className }: { className: string }) {
-	const crumbs = useSettingsCrumbs();
+function SettingsTrail({ page }: { page: SettingsLocation }) {
+	const crumbs = settingsCrumbs(page);
 	return (
 		<nav
 			aria-label="Breadcrumb"
-			className={cn(
-				"flex h-13 shrink-0 items-center justify-center border-border border-b px-18",
-				className,
-			)}
+			className="flex h-13 shrink-0 items-center border-border border-b pr-14 pl-6 max-lg:hidden"
 		>
 			<ol className="m-0 flex min-w-0 list-none items-center gap-2.5 p-0 text-xs">
 				{crumbs.map((crumb, index) => {
@@ -645,107 +500,70 @@ interface Crumb {
 
 const workspaceCrumb: Crumb = {
 	label: "Workspace settings",
-	link: <Link from="/$workspace" to="./settings" />,
+	link: <Link {...settingsLink()} />,
 };
 
 function sectionCrumb(id: SettingSection["id"]): Crumb {
 	const section = workspaceSettingSection(id);
-	return {
-		label: section?.label ?? id,
-		link: <Link from="/$workspace" to="./settings/$section" params={{ section: id }} />,
-	};
+	return { label: section?.label ?? id, link: <Link {...settingsSectionLink(id)} /> };
 }
 
-/** The trail to the open page, read from its address. */
-function useSettingsCrumbs(): Crumb[] {
-	const pathname = useSettingsPath();
-	const { data: pods } = usePods();
-	const [, sectionId, item, page, detail] = pathname.split("/").filter(Boolean);
-	if (sectionId === undefined || sectionId === "general") {
-		return [workspaceCrumb, { label: "General" }];
+/** The trail to `page`. */
+function settingsCrumbs(page: SettingsLocation): Crumb[] {
+	switch (page.kind) {
+		case "sections":
+			return [workspaceCrumb, { label: "General" }];
+		case "member":
+			return [
+				workspaceCrumb,
+				sectionCrumb("members"),
+				{ label: <MemberName membershipId={page.membership} /> },
+			];
+		case "provider":
+			return [
+				workspaceCrumb,
+				sectionCrumb("providers"),
+				{ label: <ProviderPageName id={page.provider} /> },
+			];
+		case "model":
+			return [
+				workspaceCrumb,
+				sectionCrumb("providers"),
+				{ label: MODEL_CHOICE_NAMES[page.choice] },
+			];
+		case "section": {
+			const yours = yourSettingSections.find((section) => section.id === page.section);
+			if (yours) return [{ label: "Your settings" }, { label: yours.label }];
+			return [
+				workspaceCrumb,
+				{ label: workspaceSettingSection(page.section)?.label ?? page.section },
+			];
+		}
 	}
-	const yours = yourSettingSections.find((section) => section.id === sectionId);
-	if (yours) {
-		return [{ label: "Your settings" }, { label: yours.label }];
-	}
-	if (sectionId === "pods" && item !== undefined) {
-		const pod = findPod(pods, item);
-		return pod ? podCrumbs(pod, page, detail) : [];
-	}
-	if (item === undefined) {
-		return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
-	}
-	if (sectionId === "members") {
-		return [workspaceCrumb, sectionCrumb("members"), { label: <MemberName membershipId={item} /> }];
-	}
-	if (sectionId === "providers") {
-		return [workspaceCrumb, sectionCrumb("providers"), { label: <ProviderPageName id={item} /> }];
-	}
-	return [workspaceCrumb, { label: workspaceSettingSection(sectionId)?.label ?? sectionId }];
-}
-
-/** A pod's part of the trail: its settings, then the page, then what is open on it. */
-function podCrumbs(pod: Pod, page: string | undefined, detail: string | undefined): Crumb[] {
-	const podCrumb = { label: `${pod.name} settings`, link: <Link {...podSettingsLink(pod)} /> };
-	if (page === "agents" && detail !== undefined) {
-		return [
-			podCrumb,
-			{ label: "Bots", link: <Link {...podSettingsPageLink(pod, "bots")} /> },
-			{ label: <BotName podSlug={pod.slug} handle={detail} /> },
-		];
-	}
-	if (page === "connections" && detail !== undefined) {
-		return [
-			podCrumb,
-			{ label: "Connections", link: <Link {...podSettingsPageLink(pod, "connections")} /> },
-			{ label: <ConnectionName podId={pod.id} connectionId={detail} /> },
-		];
-	}
-	const label = podSettingsPages.find((one) => one.id === (page ?? "general"))?.label;
-	return [podCrumb, { label: label ?? page }];
-}
-
-function BotName({ podSlug, handle }: { podSlug: string; handle: string }) {
-	return usePodAgent(podSlug, handle).found?.agent.name ?? null;
-}
-
-function ConnectionName({ podId, connectionId }: { podId: string; connectionId: string }) {
-	return useConnections(podId).data?.find((one) => one.id === connectionId)?.name ?? null;
 }
 
 function MemberName({ membershipId }: { membershipId: string }) {
 	const { workspace } = useWorkspace();
-	const { data: members } = useWorkspaceMembers(workspace?.id);
-	return members?.find((member) => member.id === membershipId)?.user.name ?? null;
+	const { data: memberships } = useMemberships(workspace?.id);
+	return memberships?.find((membership) => membership.id === membershipId)?.member.name ?? null;
 }
 
-/** The provider an address names, or one of the two model choices kept beside them. */
+/** What the two models kept beside the providers are called. */
+const MODEL_CHOICE_NAMES: Record<ModelChoice, string> = {
+	default: "Default for new bots",
+	system: "Default for system bots",
+};
+
+/** The provider an address names. */
 function ProviderPageName({ id }: { id: string }) {
 	const { data: providers } = useModelProviders();
-	if (id === "default") return "Default for new bots";
-	if (id === "system") return "Summaries";
 	return providers?.find((provider) => provider.id === id)?.name ?? null;
 }
 
-/** The address below the workspace, since section paths are written from inside it. */
-function useSettingsPath(): string {
-	const workspacePath = useMatch({ from: "/$workspace", select: (match) => match.pathname });
-	return useLocation({ select: (location) => location.pathname.slice(workspacePath.length) });
-}
-
-/** Which of `pod`'s pages the address is on, counting what opens inside one as that page. */
-function podPageAt(pathname: string, pod: Pod) {
-	const [, section, slug, page] = pathname.split("/").filter(Boolean);
-	if (section !== "pods" || slug !== pod.slug) return undefined;
-	if (page === undefined) return "general";
-	if (page === "agents") return "bots";
-	return podSettingsPage(page);
-}
-
-/** `/settings` is General, so it matches itself alone; the rest stay selected while you are inside one of their pages. */
-function isSelected(section: SettingSection, pathname: string): boolean {
-	if (section.id === "general") return pathname === "/settings" || pathname === "/settings/general";
-	return pathname === section.path || pathname.startsWith(`${section.path}/`);
+/** The list of sections opens General, so General is selected on either; the rest stay selected while one of their pages is open. */
+function isSelected(section: SettingSection, page: SettingsLocation): boolean {
+	if (page.kind === "sections") return section.id === "general";
+	return sectionOf(page) === section.id;
 }
 
 function SectionLink({
@@ -760,24 +578,14 @@ function SectionLink({
 	const className = cn(NAVIGATION_ITEM, navigationItemState(selected));
 	const content = <NavigationItemContent label={section.label} count={count} />;
 	// Nothing separates the label from the count on screen but a gap, which a
-	// name taken from the contents does not hear: "People4".
+	// name taken from the contents does not hear: "Members4".
 	const label = count === undefined ? undefined : `${section.label}, ${count}`;
-	return section.id === "general" ? (
+	return (
 		<Link
-			from="/$workspace"
-			to="./settings"
-			activeOptions={{ exact: true }}
-			aria-label={label}
-			aria-current={selected ? "page" : undefined}
-			className={className}
-		>
-			{content}
-		</Link>
-	) : (
-		<Link
-			from="/$workspace"
-			to="./settings/$section"
-			params={{ section: section.id }}
+			// General is the list's own page, which a laptop opens beside it.
+			{...(section.id === "general" ? settingsLink() : settingsSectionLink(section.id))}
+			// From one section to another in place, so Back from any of them closes settings.
+			replace
 			aria-label={label}
 			aria-current={selected ? "page" : undefined}
 			className={className}

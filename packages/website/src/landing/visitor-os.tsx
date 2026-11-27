@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
  * The system a visitor is on, so the screenshots and the demo video show the
  * window's title bar as theirs draws it: macOS's traffic lights, Windows'
  * caption buttons, or for anything else, GNOME's round buttons. Each capture
- * is made for all three, `one-thread-mac.webp` and so on.
+ * is made for all three, `project-chat-mac.webp` and so on.
  */
 export type VisitorOs = "mac" | "windows" | "linux";
 
@@ -26,7 +26,7 @@ export function visitorOs(): VisitorOs {
 	return systems.find((system) => system === marked) ?? "mac";
 }
 
-/** `/screenshots/one-thread.webp` as the capture for `os`: `/screenshots/one-thread-mac.webp`. */
+/** `/screenshots/project-chat.webp` as the capture for `os`: `/screenshots/project-chat-mac.webp`. */
 export function captureFor(path: string, os: VisitorOs): string {
 	return path.replace(/(\.\w+)$/, `-${os}$1`);
 }

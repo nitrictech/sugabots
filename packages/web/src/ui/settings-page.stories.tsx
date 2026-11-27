@@ -8,7 +8,9 @@ import {
 	SettingsDanger,
 	SettingsGroup,
 	SettingsPage,
+	SettingsRadioList,
 	SettingsRow,
+	SettingsRowAlert,
 	SettingsRowIcon,
 	SettingsValue,
 } from "./settings-page.tsx";
@@ -64,7 +66,7 @@ export const Hero = meta.story({
 			</SettingsGroup>
 			<SettingsDanger
 				label="Delete workspace"
-				description="Removes every pod, bot and thread in Nitric."
+				description="Removes every project, bot and chat in Nitric."
 				action="Delete"
 				onClick={fn()}
 			/>
@@ -77,8 +79,14 @@ const opened = fn();
 /** Listing is a page of things to open, each row a way in, with a note under its group. */
 export const Listing = meta.story({
 	render: () => (
-		<SettingsPage title="Routines" description="What your bots do on a schedule, or when called.">
-			<SettingsGroup label="Growth Desk" note="Routines post into the bot's chat when they run.">
+		<SettingsPage
+			title="Automations"
+			description="What your bots do on a schedule, or when called."
+		>
+			<SettingsGroup
+				label="Growth Desk"
+				note="Each automation posts into its own chat when it runs."
+			>
 				<SettingsRow
 					icon={
 						<SettingsRowIcon>
@@ -136,5 +144,60 @@ export const OpenedFromAnother = meta.story({
 			.getByRole("heading", { name: "Default for new bots" })
 			.getBoundingClientRect();
 		await expect(opened.top).toBe(page.top);
+	},
+});
+
+const providers = [
+	{
+		id: "e2b",
+		name: "E2B",
+		description: "Online computers, made from an image.",
+		badge: "In use",
+	},
+	{ id: "daytona", name: "Daytona", description: "Workspaces on Daytona's cloud." },
+	{ id: "opensandbox", name: "OpenSandbox", description: "Containers on a server you run." },
+] as const;
+
+function ProviderList({ onChoose }: { onChoose: (id: string) => void }) {
+	const [chosen, setChosen] = useState<(typeof providers)[number]["id"]>("e2b");
+	return (
+		<SettingsPage title="Computers">
+			<SettingsRadioList
+				legend="Provider"
+				options={providers}
+				chosen={chosen}
+				disabled={false}
+				onChoose={(id) => {
+					setChosen(id);
+					onChoose(id);
+				}}
+			/>
+		</SettingsPage>
+	);
+}
+
+/** RadioList picks one of several, each with its initial, name and what it is; one may carry a word beside its name. */
+export const RadioList = meta.story({
+	render: () => <ProviderList onChoose={fn()} />,
+	play: async ({ canvas, userEvent }) => {
+		await expect(canvas.getByText("In use")).toBeVisible();
+		await expect(canvas.getByRole("radio", { name: /E2B/ })).toBeChecked();
+		await userEvent.click(canvas.getByText("Daytona"));
+		await expect(canvas.getByRole("radio", { name: /Daytona/ })).toBeChecked();
+	},
+});
+
+/** RowAlert says why something failed as a row of the group, among its rows. */
+export const RowAlert = meta.story({
+	render: () => (
+		<SettingsPage title="Members">
+			<SettingsGroup label="Role">
+				<SettingsRow label="Role" trailing={<SettingsValue>Editor</SettingsValue>} />
+				<SettingsRowAlert>The role could not be changed. Try again.</SettingsRowAlert>
+			</SettingsGroup>
+		</SettingsPage>
+	),
+	play: async ({ canvas }) => {
+		await expect(canvas.getByRole("alert")).toHaveTextContent("The role could not be changed.");
 	},
 });

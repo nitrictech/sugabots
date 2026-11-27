@@ -11,12 +11,12 @@ Admins manage providers in **Settings → Models**.
 
 ## Providers Sugabots knows
 
-Sugabots has presets for these. Pick one and it fills in the server URL for you.
+These are built-in providers. Pick one and it fills in the server URL for you.
 
 <ProviderGrid />
 
-Every workspace starts with **Anthropic**, **OpenAI** and **Ollama** listed, plus
-any provider you picked during onboarding. Paste a key to use a hosted provider. Local servers need a server URL, not a key.
+Every workspace starts with **Anthropic**, **OpenAI**, **ChatGPT** and **Ollama** listed, plus
+any provider you picked during workspace setup. Paste a key to use a hosted provider. Local servers need a server URL, not a key.
 
 <Tip title="Anything else">
 
@@ -38,23 +38,23 @@ paste it. Its requests are billed to your OpenRouter account.
 Each provider lists its models. Switch on the ones you want, and only those show up when someone picks a bot's model. Use **Refresh
 list** to fetch new ones, or **Add model** to type in a model ID.
 
-Each model also says what it can do, like tools, vision or reasoning. Bots use
+Each model also says what it can do, like tools, vision or thinking. Bots use
 tools, so pick models that support them.
 
 ## Default model
 
-New bots start on the workspace's default model, shown under **Default → New
-bots use**. Each bot can move to another model in its own settings.
+New bots start on the workspace's default model, shown under **Defaults →
+Default for new bots**. Each bot can move to another model in its own settings.
 
-## Behind-the-scenes model
+## System model
 
-Sugabots also uses a model for its own work: summarising, titling and
-compacting conversations. An admin picks it under **Default → System agents
-use**. A fast, cheap model is best. [Usage](/docs/usage) shows what it costs,
+Sugabots also uses a model for its own work: compacting a long chat
+when the bot in it has no model of its own. An admin picks it under
+**Defaults → Default for system bots**. A fast, cheap model is best. [Usage](/docs/usage) shows what it costs,
 beside each bot.
 
 Both this and the default model start on the first model you switch on, which
-is the one you pick for your first bot. After that there is always one of each:
+is the one you pick while setting up the workspace. After that there is always one of each:
 a model either of them uses cannot be switched off, and its provider cannot be
 switched off or removed, until you choose another.
 

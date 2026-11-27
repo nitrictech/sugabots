@@ -1,70 +1,70 @@
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Accounts } from "@sugabots/core/accounts/accounts";
 import { query } from "@sugabots/core/database/database";
-import { user } from "@sugabots/core/database/schema";
-import { Installation } from "@sugabots/core/installation/installation";
+import { member } from "@sugabots/core/database/schema";
+import { ServerSettings } from "@sugabots/core/server-settings/server-settings";
 import { Authentication } from "@sugabots/server/auth/authentication";
 import { eq } from "drizzle-orm";
 import { ConfigProvider, Effect, Layer } from "effect";
 
 /** Someone a development seed signs in as. */
-export interface SeedPerson {
+interface SeedMember {
 	name: string;
 	email: string;
 	password: string;
 }
 
 /**
- * The id of `person`'s account, with their address verified. Signs them up
+ * The id of `seed`'s account, with their address verified. Signs them up
  * first if there is no account, through the same route the web app signs up
  * with.
  */
-export const ensureAccount = (person: SeedPerson) =>
+export const ensureAccount = (seed: SeedMember) =>
 	Effect.gen(function* () {
 		const [existing] = yield* query((db) =>
-			db.select({ id: user.id }).from(user).where(eq(user.email, person.email)),
+			db.select({ id: member.id }).from(member).where(eq(member.email, seed.email)),
 		);
 		if (!existing) {
-			yield* signUp(person);
+			yield* signUp(seed);
 		}
 		const [account] = yield* query((db) =>
 			db
-				.select({ id: user.id, emailVerified: user.emailVerified })
-				.from(user)
-				.where(eq(user.email, person.email)),
+				.select({ id: member.id, emailVerified: member.emailVerified })
+				.from(member)
+				.where(eq(member.email, seed.email)),
 		);
 		if (!account) {
-			return yield* Effect.die(new Error(`could not create ${person.email}`));
+			return yield* Effect.die(new Error(`could not create ${seed.email}`));
 		}
 		if (!account.emailVerified) {
 			yield* query((db) =>
-				db.update(user).set({ emailVerified: true }).where(eq(user.id, account.id)),
+				db.update(member).set({ emailVerified: true }).where(eq(member.id, account.id)),
 			);
 		}
 		return account.id;
 	});
 
-const signUp = (person: SeedPerson) =>
+const signUp = (seed: SeedMember) =>
 	Effect.gen(function* () {
-		const installation = yield* Installation.Service;
+		const serverSettings = yield* ServerSettings.Service;
 		const authentication = yield* Authentication.Service;
 		const response = yield* authentication.handler(
-			new Request(`${installation.publicUrl}${API_BASE_PATH}/auth/sign-up/email`, {
+			new Request(`${serverSettings.publicUrl}${API_BASE_PATH}/auth/sign-up/email`, {
 				method: "POST",
 				headers: {
 					"content-type": "application/json",
-					origin: new URL(installation.publicUrl).origin,
+					origin: new URL(serverSettings.publicUrl).origin,
 				},
-				body: JSON.stringify(person),
+				body: JSON.stringify(seed),
 			}),
 		);
 		if (!response.ok) {
 			const reason = yield* Effect.promise(() => response.text());
-			return yield* Effect.die(new Error(`could not sign up ${person.email}: ${reason}`));
+			return yield* Effect.die(new Error(`could not sign up ${seed.email}: ${reason}`));
 		}
 	});
 
-/** Whoever may sign up and whether they must verify is the installation's to configure, so a seed configures its own. */
+/** Whoever may sign up and whether they must verify is the server's to configure, so a seed configures its own. */
 export const seedAccountsLayer = Accounts.layer.pipe(
 	Layer.provide(
 		ConfigProvider.layer(

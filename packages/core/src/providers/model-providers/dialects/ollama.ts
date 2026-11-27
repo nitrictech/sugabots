@@ -15,7 +15,7 @@ const OLLAMA_CAPABILITIES: CapabilityVocabulary = {
 	tools: "tools",
 	vision: "vision",
 	embedding: "embeddings",
-	thinking: "reasoning",
+	thinking: "thinking",
 };
 
 /** What `/api/show` says about a model, as the two fields the listing lacked. */
@@ -34,7 +34,6 @@ const shown = Schema.Struct({
  */
 export const ollama: ProviderDialect = {
 	...openaiCompatible,
-	name: "Ollama",
 	discoveryRoot: (baseUrl) => baseUrl.replace(/\/v1$/, ""),
 	listingUrl: (root) => `${root}/api/tags`,
 	listing: Schema.Struct({ models: Schema.mutable(Schema.Array(Schema.Unknown)) }).pipe(

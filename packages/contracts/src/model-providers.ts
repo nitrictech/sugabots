@@ -1,17 +1,18 @@
 import { Effect, Schema } from "effect";
-import { modelIdSchema } from "./agents.ts";
+import { namedMemberSchema } from "./api.ts";
+import { modelIdSchema } from "./bots.ts";
 import {
-	presetRequiresApiKey,
-	presetSignsIn,
-	presetTakesNoCredential,
-	providerCatalog,
-	providerPresetIdSchema,
-} from "./provider-catalog.ts";
+	builtInProviderIdSchema,
+	builtInProviders,
+	builtInRequiresApiKey,
+	builtInSignsIn,
+	builtInTakesNoCredential,
+} from "./built-in-providers.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { httpUrlSchema } from "./urls.ts";
 import { uuidSchema } from "./uuid.ts";
 
-export const providerApiFormatSchema = Schema.Literals(["openai", "anthropic"]);
+const providerApiFormatSchema = Schema.Literals(["openai", "anthropic"]);
 export type ProviderApiFormat = typeof providerApiFormatSchema.Type;
 export const providerStatusSchema = Schema.Literals([
 	"missing_key",
@@ -27,7 +28,7 @@ export const providerModelCapabilitySchema = Schema.Literals([
 	"images",
 	"audio",
 	"embeddings",
-	"reasoning",
+	"thinking",
 ]);
 export type ProviderModelCapability = typeof providerModelCapabilitySchema.Type;
 
@@ -78,7 +79,7 @@ export function isClientOwnedHeader(name: string): boolean {
 /**
  * The headers a provider's SDK sets from the stored API key. A custom header
  * with the same name would fight it, so a provider may not add one; a
- * connection's secret, which has no SDK behind it, goes in exactly these.
+ * connector's secret, which has no SDK behind it, goes in exactly these.
  */
 const providerCredentialHeaders = new Set(["authorization", "x-api-key"]);
 
@@ -113,7 +114,7 @@ export const MAX_PROVIDER_MODELS = 2_000;
 /*
  * The shape of a provider URL, which is all a schema can judge. Whether the API
  * may actually connect to it — HTTPS or plain HTTP, public or private address —
- * is the installation's network policy, which the API applies in one place to
+ * is the server's network policy, which the API applies in one place to
  * every provider alike.
  */
 export const providerUrlSchema = httpUrlSchema.check(
@@ -156,27 +157,27 @@ export const providerModelCapabilityCatalog: ReadonlyArray<{
 	{
 		key: "tools",
 		name: "Tools",
-		description: "Can call tools: collaborate, search, fetch a page.",
+		description: "Can call tools: search, fetch a page.",
 	},
 	{ key: "vision", name: "Vision", description: "Reads images sent to it." },
 	{ key: "images", name: "Images", description: "Makes images." },
 	{ key: "audio", name: "Audio", description: "Hears or speaks." },
-	{ key: "reasoning", name: "Reasoning", description: "Thinks before it answers." },
+	{ key: "thinking", name: "Thinking", description: "Thinks before it answers." },
 	{
 		key: "embeddings",
 		name: "Embeddings",
-		description: "Turns text into vectors. Not offered to agents as a chat model.",
+		description: "Turns text into vectors. Not offered to bots as a chat model.",
 	},
 ];
 
-export const providerModelSchema = Schema.Struct({
+const providerModelSchema = Schema.Struct({
 	id: uuidSchema,
 	modelId: modelIdSchema,
 	displayName: Schema.NullOr(Schema.String),
 	/** What the provider reports the model can do; for a model added by hand, what the admin said. */
 	capabilities: Schema.mutable(Schema.Array(providerModelCapabilitySchema)),
 	/**
-	 * Of `capabilities`, the ones an admin switched off for agents. The report
+	 * Of `capabilities`, the ones an admin switched off for bots. The report
 	 * is the ceiling: nothing can be switched on that is not in it, only off,
 	 * and a refresh brings the report up to date without touching this list.
 	 */
@@ -191,8 +192,8 @@ export type ProviderModel = typeof providerModelSchema.Type;
 export const modelProviderSchema = Schema.Struct({
 	id: uuidSchema,
 	workspaceId: uuidSchema,
-	/** The catalog entry this was made from; null is a custom endpoint. */
-	preset: Schema.NullOr(providerPresetIdSchema),
+	/** The built-in provider this was made from; null is a custom model provider. */
+	builtIn: Schema.NullOr(builtInProviderIdSchema),
 	name: Schema.String,
 	baseUrl: providerUrlSchema,
 	apiFormat: providerApiFormatSchema,
@@ -201,26 +202,32 @@ export const modelProviderSchema = Schema.Struct({
 	hasApiKey: Schema.Boolean,
 	/** For a provider signed in to rather than given a key (ChatGPT, SuperGrok), whether somebody has. */
 	signedIn: Schema.Boolean,
+	/**
+	 * The member whose subscription it signs in with, while they are still in
+	 * the workspace. They can't leave the workspace, or be removed from it,
+	 * until another member signs it in or it is given a key.
+	 */
+	signedInAs: Schema.NullOr(namedMemberSchema),
 	customHeaders: Schema.mutable(Schema.Array(Schema.Struct({ name: Schema.String }))),
-	modelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	enabledModelCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	lastTestedAt: Schema.NullOr(isoTimestampSchema),
 	lastTestError: Schema.NullOr(Schema.String),
-	/** The name of whoever connected it, while it is connected and they still have an account. */
-	connectedBy: Schema.NullOr(Schema.String),
-	/** When somebody added it, or, for a preset every workspace starts with, when it was seeded. */
+	/** Whoever connected it, while it is connected and they are still in the workspace. */
+	connectedBy: Schema.NullOr(namedMemberSchema),
+	/** When somebody added it, or, for a built-in provider every workspace starts with, when it was seeded. */
 	createdAt: isoTimestampSchema,
 	models: Schema.mutable(Schema.Array(providerModelSchema)),
 });
 
 export type ModelProvider = typeof modelProviderSchema.Type;
 
-/** Whether the provider still needs its key, or its sign-in, before it can be used. */
+/**
+ * Whether the provider still needs its key, or its sign-in, before it can be
+ * used. One signed in to takes a key in place of a sign-in.
+ */
 export function providerLacksCredential(
-	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn">,
+	provider: Pick<ModelProvider, "builtIn" | "hasApiKey" | "signedIn">,
 ): boolean {
-	if (presetSignsIn(provider.preset)) return !provider.signedIn;
-	return presetRequiresApiKey(provider.preset) && !provider.hasApiKey;
+	if (builtInSignsIn(provider.builtIn)) return !provider.signedIn && !provider.hasApiKey;
+	return builtInRequiresApiKey(provider.builtIn) && !provider.hasApiKey;
 }
 
 /**
@@ -229,15 +236,15 @@ export function providerLacksCredential(
  * key or sign-in only pauses it; it stays connected until Disconnect takes it away.
  */
 export function providerIsConnected(
-	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
+	provider: Pick<ModelProvider, "builtIn" | "hasApiKey" | "signedIn" | "active">,
 ): boolean {
 	if (provider.hasApiKey || provider.signedIn) return !providerLacksCredential(provider);
-	return presetTakesNoCredential(provider.preset) && provider.active;
+	return builtInTakesNoCredential(provider.builtIn) && provider.active;
 }
 
 /** Whether bots can use the provider's models now: it is connected and switched on. */
 export function providerIsUsable(
-	provider: Pick<ModelProvider, "preset" | "hasApiKey" | "signedIn" | "active">,
+	provider: Pick<ModelProvider, "builtIn" | "hasApiKey" | "signedIn" | "active">,
 ): boolean {
 	return provider.active && providerIsConnected(provider);
 }
@@ -249,14 +256,14 @@ export function providerIsUsable(
 export function providerIsReady(
 	provider: Pick<
 		ModelProvider,
-		"preset" | "hasApiKey" | "signedIn" | "active" | "status" | "modelCount"
+		"builtIn" | "hasApiKey" | "signedIn" | "active" | "status" | "models"
 	>,
 ): boolean {
-	return providerIsConnected(provider) && provider.status !== "error" && provider.modelCount > 0;
+	return providerIsConnected(provider) && provider.status !== "error" && provider.models.length > 0;
 }
 
 /**
- * A subscription sign-in waiting on the person: they open `verificationUrl`, enter
+ * A subscription sign-in waiting on the member: they open `verificationUrl`, enter
  * `userCode`, and the page asks for the outcome with `attempt` every
  * `pollIntervalMs` until it is no longer pending.
  */
@@ -271,27 +278,27 @@ export const providerSignInStartedSchema = Schema.Struct({
 export type ProviderSignInStarted = typeof providerSignInStartedSchema.Type;
 
 export const providerSignInCompletionSchema = Schema.Struct({
-	attempt: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
+	attempt: Schema.optional(Schema.String.check(Schema.isMaxLength(4096))),
 });
 
-const presetNames = new Set(providerCatalog.map(({ name }) => name.toLowerCase()));
+const builtInNames = new Set(builtInProviders.map(({ name }) => name.toLowerCase()));
 const apiKeySchema = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
 
-/** A provider from the catalog: the preset supplies everything but the key. */
-export const newProviderFromPresetSchema = Schema.Struct({
-	preset: providerPresetIdSchema,
+/** A built-in provider: Sugabots supplies everything but the key. */
+const newProviderFromBuiltInSchema = Schema.Struct({
+	builtIn: builtInProviderIdSchema,
 	apiKey: Schema.optional(apiKeySchema),
-	/** Only a local preset's address is worth changing at creation. */
+	/** Only a local built-in provider's address is worth changing at creation. */
 	baseUrl: Schema.optional(providerUrlSchema),
 });
 
-/** A provider the catalog does not know: every field is the caller's. */
+/** A provider that is no built-in provider: every field is the caller's. */
 export const newCustomProviderSchema = Schema.Struct({
 	name: Schema.Trim.check(
 		Schema.isMinLength(1),
 		Schema.isMaxLength(64),
-		Schema.makeFilter((name) => !presetNames.has(name.toLowerCase()), {
-			message: "That name belongs to a provider in the catalog; add it from there",
+		Schema.makeFilter((name) => !builtInNames.has(name.toLowerCase()), {
+			message: "That name belongs to a built-in provider; add it from there",
 		}),
 	),
 	baseUrl: providerUrlSchema,
@@ -301,12 +308,9 @@ export const newCustomProviderSchema = Schema.Struct({
 });
 
 export const newModelProviderSchema = Schema.Union([
-	newProviderFromPresetSchema,
+	newProviderFromBuiltInSchema,
 	newCustomProviderSchema,
 ]);
-
-export type NewProviderFromPreset = typeof newProviderFromPresetSchema.Type;
-export type NewCustomProvider = typeof newCustomProviderSchema.Type;
 export type NewModelProvider = typeof newModelProviderSchema.Type;
 
 export const modelProviderUpdateSchema = Schema.Struct({
@@ -346,7 +350,7 @@ const capabilityListSchema = Schema.mutable(Schema.Array(providerModelCapability
 
 export const providerModelUpdateSchema = Schema.Struct({
 	enabled: Schema.optional(Schema.Boolean),
-	/** The capabilities agents may not use, out of what the model has. */
+	/** The capabilities bots may not use, out of what the model has. */
 	disabledCapabilities: Schema.optional(capabilityListSchema),
 	/** What the model can do. Only for a model added by hand; the provider says for the rest. */
 	capabilities: Schema.optional(capabilityListSchema),
@@ -356,7 +360,7 @@ export const providerModelUpdateSchema = Schema.Struct({
 
 export type ProviderModelUpdate = typeof providerModelUpdateSchema.Type;
 
-/** What agents may actually use: the model's capabilities less the ones switched off. */
+/** What bots may actually use: the model's capabilities less the ones switched off. */
 export function effectiveCapabilities(
 	model: Pick<ProviderModel, "capabilities" | "disabledCapabilities">,
 ): ProviderModelCapability[] {
@@ -367,12 +371,12 @@ export function effectiveCapabilities(
 
 /**
  * Where the workspace's settings move when a change stops offering the model
- * they name: the model new bots start on, and the one summaries run on. Each
+ * they name: the model new bots start on, and the one system bots run on. Each
  * is needed only when it names a model being switched off.
  */
 const settingMovesFields = {
 	newBotsTo: Schema.optional(modelIdSchema),
-	summariesTo: Schema.optional(modelIdSchema),
+	systemBotsTo: Schema.optional(modelIdSchema),
 };
 
 /** Switching off a model and moving the bots that run on it to another the workspace offers. */
@@ -383,7 +387,7 @@ export const providerModelSwitchOffSchema = Schema.Struct({
 export type ProviderModelSwitchOff = typeof providerModelSwitchOffSchema.Type;
 
 /** Moving the bots on one model to another, as the model stops being offered. */
-export const botMoveSchema = Schema.Struct({
+const botMoveSchema = Schema.Struct({
 	from: modelIdSchema,
 	to: modelIdSchema,
 });
@@ -396,40 +400,30 @@ export const providerSwitchOffSchema = Schema.Struct({
 });
 export type ProviderSwitchOff = typeof providerSwitchOffSchema.Type;
 
-export const bulkProviderModelUpdateSchema = Schema.Struct({
-	modelIds: Schema.mutable(Schema.Array(uuidSchema)).check(
-		Schema.isMinLength(1),
-		Schema.isMaxLength(MAX_PROVIDER_MODELS),
-	),
-	enabled: Schema.Boolean,
-});
-
-export const workspaceModelSchema = Schema.Struct({
+const workspaceModelSchema = Schema.Struct({
 	providerId: uuidSchema,
 	providerName: Schema.String,
-	providerPreset: Schema.NullOr(providerPresetIdSchema),
-	providerActive: Schema.Boolean,
+	providerBuiltIn: Schema.NullOr(builtInProviderIdSchema),
 	modelId: modelIdSchema,
 	displayName: Schema.NullOr(Schema.String),
-	/** What agents may use it for: what it can do, less what an admin switched off. */
+	/** What bots may use it for: what it can do, less what an admin switched off. */
 	capabilities: Schema.mutable(Schema.Array(providerModelCapabilitySchema)),
 });
 
 export const workspaceModelsResponseSchema = Schema.Struct({
 	models: Schema.mutable(Schema.Array(workspaceModelSchema)),
 	/**
-	 * The model new agents start on. `null` only until the workspace first
+	 * The model new bots start on. `null` only until the workspace first
 	 * offers a model; from then on it always has one. Usually one of `models`,
 	 * but not while a failed test has its provider switched off.
 	 */
 	defaultModel: Schema.NullOr(modelIdSchema),
 });
 
-/** Choosing the model a workspace's new agents start on. */
+/** Choosing the model a workspace's new bots start on. */
 export const defaultModelUpdateSchema = Schema.Struct({
 	model: modelIdSchema,
 });
-export type DefaultModelUpdate = typeof defaultModelUpdateSchema.Type;
 export type WorkspaceModelsResponse = typeof workspaceModelsResponseSchema.Type;
 
 export const providerSignInOutcomeSchema = Schema.Union([
@@ -438,14 +432,11 @@ export const providerSignInOutcomeSchema = Schema.Union([
 ]);
 export type ProviderSignInOutcome = typeof providerSignInOutcomeSchema.Type;
 
+/** What testing a provider or connector found: whether it answered, how fast, and why not. */
 export const providerTestResultSchema = Schema.Struct({
 	reachable: Schema.Boolean,
 	latencyMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 	error: Schema.optional(Schema.String),
 });
-export const providerFetchResultSchema = Schema.Struct({
-	added: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	/** Models already listed whose capabilities, context length or name the provider now reports differently. */
-	updated: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-	unchanged: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
+
+export type ProviderTestResult = typeof providerTestResultSchema.Type;

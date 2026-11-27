@@ -1,6 +1,6 @@
 import { Cause, ConfigProvider, Effect, Exit, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import { Installation } from "../../installation/installation.ts";
+import { ServerSettings } from "../../server-settings/server-settings.ts";
 import { Egress } from "./egress.ts";
 
 /** Runs `use` against `Egress.layer` as `env` configures it, before its clients close. */
@@ -9,7 +9,7 @@ function withEgress<A>(env: Record<string, string>, use: (egress: Egress.Interfa
 		Effect.flatMap(Egress.Service, (egress) => Effect.promise(() => use(egress))).pipe(
 			Effect.provide(
 				Egress.layer.pipe(
-					Layer.provide(Installation.layer),
+					Layer.provide(ServerSettings.layer),
 					Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
 				),
 			),
@@ -45,19 +45,6 @@ describe("Egress.layer", () => {
 			"resolved",
 		],
 		["outside production when refused", { ALLOW_UNSAFE_WORKSPACE_URLS: "false" }, PRIVATE],
-		[
-			"in production when allowed by the deprecated name",
-			{ NODE_ENV: "production", ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "true" },
-			"resolved",
-		],
-		[
-			"when the new name refuses what the deprecated name allows",
-			{
-				ALLOW_UNSAFE_WORKSPACE_URLS: "false",
-				ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK: "true",
-			},
-			PRIVATE,
-		],
 	])(
 		"lets workspace addresses reach a private network %s as configured",
 		async (_, env, expected) => {
@@ -82,7 +69,6 @@ describe("Egress.layer", () => {
 
 	it.each([
 		["ALLOW_UNSAFE_WORKSPACE_URLS", "maybe"],
-		["ALLOW_PRIVATE_MODEL_PROVIDER_NETWORK", "maybe"],
 		["ALLOW_PRIVATE_WEB_FETCH_NETWORK", "ture"],
 	])("refuses to start when %s is not a boolean", async (name, value) => {
 		const exit = await withEgress({ [name]: value }, async () => undefined);

@@ -1,0 +1,138 @@
+import { type AcceptedRun, handleFromName, type NewAutomation } from "@sugabots/contracts";
+import type { InputOf } from "@sugabots/contracts/operations";
+import { and, eq, ne } from "drizzle-orm";
+import { Effect, Schema } from "effect";
+import { query } from "../../database/database.ts";
+import { automationRun } from "../../database/schema.ts";
+import { onDatabase, type Promised, runOnPostgres } from "../../database/testing.ts";
+import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
+import { signedIn } from "../../operations/chats/testing.ts";
+import {
+	type CallOperation,
+	type ChatServicesForTests,
+	servedOperations,
+} from "../../operations/testing.ts";
+import { authenticators, principals } from "../../proofs/world.test-support.ts";
+import { lane } from "../../workflows/sql.ts";
+import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
+import { lanesForTests } from "../testing.ts";
+import { releaseTurn, runningTurns } from "../turns/testing.ts";
+import { Automation, AutomationRun, automationLane } from "./automation.workflow.ts";
+import type { AutomationRunner } from "./automation-runner.ts";
+
+export function automationsAs(call: CallOperation, memberId: string) {
+	const principal = signedIn(memberId);
+	return {
+		create: async ({ projectId }: { projectId: string }, input: NewAutomation) =>
+			call(await principal, "automations.create", { projectId, ...input }),
+		list: async (input: InputOf<"automations.list">) =>
+			call(await principal, "automations.list", input),
+	};
+}
+
+/** Starts an automation's run by hand, as the web app's Run button does, returning it. */
+export type StartRun = (input: InputOf<"automations.run">) => Promise<AcceptedRun>;
+
+/**
+ * Starting runs by hand through the `automations.run` operation, over the
+ * chat services a case drives the runs with, for the member the returned
+ * function is given, signed in.
+ */
+export async function manualRunsOver(
+	services: ChatServicesForTests,
+): Promise<(memberId: string) => StartRun> {
+	const call = await servedOperations({ chats: services });
+	const signedIn = principals(await authenticators());
+	return (memberId) => async (input) =>
+		call(await signedIn.member(memberId), "automations.run", input);
+}
+
+/** The automation's run holding its lane, if any. */
+export const runningRun = (automationId: string) =>
+	Effect.map(
+		query((db) =>
+			db
+				.select()
+				.from(lane)
+				.where(
+					and(
+						eq(lane.key, automationLane({ automationId })),
+						eq(lane.workflow, Automation._tag),
+						ne(lane.state, "idle"),
+					),
+				),
+		),
+		([row]) => (row ? Schema.decodeUnknownSync(AutomationRun)(row.payload) : undefined),
+	);
+
+/** Frees the automation's lane, as its run's last step does, starting its next run. */
+export const releaseRun = (run: AutomationRun) =>
+	Effect.flatMap(lanesForTests, (lanes) =>
+		Effect.flatMap(Automation.executionId(run), (executionId) =>
+			lanes.release({ key: automationLane(run), executionId }),
+		),
+	);
+
+/**
+ * A member administering a new workspace with a project, which has no bots
+ * yet, and a bot whose default project (`ownProjectId`) holds its own
+ * automations.
+ */
+export async function anAutomationAdmin() {
+	const suffix = crypto.randomUUID();
+	const {
+		workspace: space,
+		project,
+		members: { admin },
+	} = await createWorkspaceFixture(
+		{ name: "Automation workspace", slug: `automation-${suffix}` },
+		{ admin: { name: "Automation admin", role: "admin" } },
+		({ admin }) => ({
+			bot: {
+				name: "Automation Bot",
+				handle: handleFromName(`Automation Bot ${suffix}`),
+				color: "green",
+				model: "test/model",
+				createdById: admin.id,
+			},
+			project: {
+				name: "Automation project",
+				slug: `automation-${suffix}`,
+				createdById: admin.id,
+			},
+		}),
+	);
+	const memberId = admin.id;
+	const workspaceId = space.id;
+	const projectId = project.id;
+	const botId = project.leadBotId;
+	return {
+		memberId,
+		workspaceId,
+		projectId,
+		botId,
+		ownProjectId: await runOnPostgres(defaultProjectOf(botId)),
+	};
+}
+
+/** Starts the automation's run holding its lane, as its workflow's first step does. */
+export async function startRunning(
+	runner: Pick<Promised<AutomationRunner.Interface>, "startRun">,
+	automationId: string,
+) {
+	const run = await runOnPostgres(runningRun(automationId));
+	if (!run) throw new Error("No run of the automation is running");
+	await runner.startRun(run);
+	const [execution] = await onDatabase((db) =>
+		db.select().from(automationRun).where(eq(automationRun.id, run.runId)),
+	);
+	if (!execution) throw new Error("The running run has no execution");
+	return { run, execution };
+}
+
+/** Ends the turns running in the chat, as their workflows do once done. */
+export async function finishTurnsIn(chatId: string) {
+	for (const run of await runOnPostgres(runningTurns(chatId))) {
+		await runOnPostgres(releaseTurn(run));
+	}
+}

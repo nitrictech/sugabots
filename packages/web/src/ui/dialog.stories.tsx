@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { expect, within } from "storybook/test";
+import { expect, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { Button } from "./button.tsx";
 import { DeleteDialog } from "./delete-dialog.tsx";
@@ -54,8 +54,11 @@ export const Scrim = meta.story({
 	play: async ({ canvas, canvasElement, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "Disconnect Anthropic" }));
 		const { body } = canvasElement.ownerDocument;
-		await within(body).findByRole("dialog", { name: "Disconnect Anthropic?" });
+		const dialog = await within(body).findByRole("dialog", { name: "Disconnect Anthropic?" });
 
-		await expect(body.querySelector('[data-slot="dialog-overlay"]')).not.toBeNull();
+		await waitFor(() => expect(dialog).toBeVisible());
+		await waitFor(() =>
+			expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus(),
+		);
 	},
 });

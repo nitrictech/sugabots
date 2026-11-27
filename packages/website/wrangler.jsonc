@@ -2,7 +2,7 @@
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "sugabots-website",
 	"compatibility_date": "2026-09-25",
-	// The site is prerendered. The Worker serves the built files, Markdown to agents that ask for it,
+	// The site is prerendered. The Worker serves the built files, Markdown to AI agents that ask for it,
 	// and the site's redirects.
 	"main": "./src/worker.ts",
 	"assets": {

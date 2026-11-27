@@ -1,48 +1,43 @@
 import { useRender } from "@base-ui/react/use-render";
-import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import { cn } from "cn";
-import { House, Inbox, ShieldCheck } from "lucide-react";
+import { House, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAttentionCounts } from "@/lib/chats.ts";
-import { findPod, usePods } from "@/lib/pods.ts";
+import { useOpenSettings } from "@/lib/open-settings.ts";
 import { useSession } from "@/lib/session.ts";
-import { InboxNews } from "@/shell/InboxNews.tsx";
-import { PersonAvatar } from "@/ui/avatar.tsx";
+import { MemberAvatar } from "@/ui/avatar.tsx";
 import { CountBadge } from "@/ui/count-badge.tsx";
 
-/** The phone's four places, along the foot of the screen, in their order there. */
-const TABS = ["home", "inbox", "approvals", "you"] as const;
+/** The phone's three places, along the foot of the screen, in their order there. */
+const TABS = ["home", "approvals", "you"] as const;
 
 type MobileTab = (typeof TABS)[number];
 
 /**
- * Home, Inbox, Approvals and You, floating along the foot of a phone's
+ * Home, Approvals and You, floating along the foot of a phone's
  * screen, the one the page is under marked. Out of the way while the
  * keyboard is up.
  */
-export function MobileTabBar({ className }: { className?: string }) {
+export function MobileTabBar() {
 	const tab = useMobileTab();
 	const typing = useTyping();
-	const home = useHomePlace();
-	const { unreadForYou, unreadInInbox, waitingApprovals } = useAttentionCounts();
-	const { user } = useSession();
+	const { waitingApprovals } = useAttentionCounts();
+	const { member: signedIn } = useSession();
 	if (typing) return null;
 	return (
 		<nav
 			aria-label="Tabs"
 			data-tab-bar=""
-			className={cn(
-				// Named apart from the page, so it stays still while a page slides past. It floats
-				// over the page, which scrolls on under it; only the bar itself takes a tap.
-				"pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-safe-or-3 view-transition-tabs md:hidden",
-				className,
-			)}
+			// Named apart from the page, so it stays still while a page slides past. It floats
+			// over the page, which scrolls on under it; only the bar itself takes a tap.
+			className="pointer-events-none absolute inset-x-0 bottom-0 z-40 px-4 pb-safe-or-3 view-transition-tabs md:hidden"
 		>
-			<div className="glass pointer-events-auto relative grid grid-cols-4 gap-0.5 rounded-4xl p-1.25">
+			<div className="glass pointer-events-auto relative grid grid-cols-3 gap-0.5 rounded-4xl p-1.25">
 				{/*
 				 * The highlight behind the open tab, one for the bar, so it slides
 				 * from tab to tab rather than one going dark as another lights.
-				 * A quarter of the bar inside its padding and the three gaps;
+				 * A third of the bar inside its padding and the two gaps;
 				 * each step is its own width and a gap.
 				 */}
 				<span
@@ -51,25 +46,10 @@ export function MobileTabBar({ className }: { className?: string }) {
 					style={{ transform: `translateX(calc(${TABS.indexOf(tab)} * (100% + 2px)))` }}
 				/>
 				<TabLink
-					render={
-						home?.kind === "directMessages" ? (
-							<Link from="/$workspace" to="./dm" />
-						) : home?.kind === "pod" ? (
-							<Link from="/$workspace" to="./pods/$pod" params={{ pod: home.slug }} />
-						) : (
-							<Link from="/$workspace" to="./agents" />
-						)
-					}
+					render={<Link from="/$workspace" to="./home" />}
 					current={tab === "home"}
 					icon={<House />}
 					label="Home"
-				/>
-				<TabLink
-					render={<Link from="/$workspace" to="./activity" />}
-					current={tab === "inbox"}
-					icon={<Inbox />}
-					label="Inbox"
-					count={<InboxNews unreadForYou={unreadForYou} unreadInInbox={unreadInInbox} size="sm" />}
 				/>
 				<TabLink
 					render={<Link from="/$workspace" to="./approvals" />}
@@ -78,11 +58,7 @@ export function MobileTabBar({ className }: { className?: string }) {
 					label="Approvals"
 					count={
 						waitingApprovals > 0 && (
-							<CountBadge
-								count={waitingApprovals}
-								size="sm"
-								label={`${waitingApprovals} waiting on you`}
-							/>
+							<CountBadge count={waitingApprovals} label={`${waitingApprovals} waiting on you`} />
 						)
 					}
 				/>
@@ -90,14 +66,14 @@ export function MobileTabBar({ className }: { className?: string }) {
 					render={<Link from="/$workspace" to="./you" />}
 					current={tab === "you"}
 					icon={
-						user ? (
-							<PersonAvatar
-								person={user}
+						signedIn ? (
+							<MemberAvatar
+								member={signedIn}
 								size={24}
-								className={cn(tab === "you" && "ring-2 ring-foreground")}
+								className={tab === "you" ? "ring-2 ring-foreground" : undefined}
 							/>
 						) : (
-							<span className="size-6 rounded-full bg-person-avatar" />
+							<span className="size-6 rounded-full bg-member-avatar" />
 						)
 					}
 					label="You"
@@ -143,19 +119,14 @@ function TabLink({
 }
 
 /**
- * Which tab the page is under: anything in a pod is Home's, a chat opened
- * from Inbox is Inbox's, and settings, reached from You, are You's.
+ * Which tab the page is under: anything in a project is Home's, an approval
+ * is Approvals', and settings, listed in You, are You's wherever they are open.
  */
 function useMobileTab(): MobileTab {
 	const matchRoute = useMatchRoute();
-	if (matchRoute({ to: "/$workspace/activity", fuzzy: true })) return "inbox";
+	const settingsOpen = useOpenSettings() !== undefined;
+	if (settingsOpen || matchRoute({ to: "/$workspace/you", fuzzy: true })) return "you";
 	if (matchRoute({ to: "/$workspace/approvals", fuzzy: true })) return "approvals";
-	if (
-		matchRoute({ to: "/$workspace/you", fuzzy: true }) ||
-		matchRoute({ to: "/$workspace/settings", fuzzy: true })
-	) {
-		return "you";
-	}
 	return "home";
 }
 
@@ -183,33 +154,4 @@ function isTextEntry(element: Element | null): boolean {
 	if (element instanceof HTMLTextAreaElement) return true;
 	if (element instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(element.type);
 	return element instanceof HTMLElement && element.isContentEditable;
-}
-
-/** Where Home goes back to: a pod, or the direct messages. */
-type HomePlace = { kind: "pod"; slug: string } | { kind: "directMessages" };
-
-/**
- * The pod or the direct messages Home last showed, so coming back to Home
- * from another tab returns there; until one is shown, Home opens the
- * workspace's first pod.
- */
-function useHomePlace(): HomePlace | undefined {
-	const { pod } = useParams({ strict: false });
-	const matchRoute = useMatchRoute();
-	const { data: pods } = usePods();
-	const [last, setLast] = useState<HomePlace>();
-	const showing: HomePlace | undefined = matchRoute({ to: "/$workspace/dm", fuzzy: true })
-		? { kind: "directMessages" }
-		: pod !== undefined
-			? { kind: "pod", slug: pod }
-			: undefined;
-	if (showing && !samePlace(showing, last)) setLast(showing);
-	const remembered = showing ?? last;
-	if (remembered?.kind === "pod" && !findPod(pods, remembered.slug)) return undefined;
-	return remembered;
-}
-
-function samePlace(left: HomePlace, right: HomePlace | undefined): boolean {
-	if (left.kind === "pod") return right?.kind === "pod" && right.slug === left.slug;
-	return right?.kind === left.kind;
 }

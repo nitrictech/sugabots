@@ -1,7 +1,7 @@
 /**
  * The HTML page Researcher makes in the showcase: a one-page comparison of
  * three Postgres job queues. Coloured with the app's CSS variables and with a
- * transparent background, as the artifact tool asks of a bot's pages.
+ * transparent background, as the file tool asks of a bot's pages.
  */
 export const QUEUE_REPORT_TITLE = "Postgres job queues for exports";
 

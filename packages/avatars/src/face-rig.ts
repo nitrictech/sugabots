@@ -77,7 +77,7 @@ const headLayerNames = Object.keys(layerKinds).filter(
 );
 
 /** The face's HTML layers, which the browser animates. */
-export type FaceLayers = Record<HeadLayerName, LayerRef> & {
+type FaceLayers = Record<HeadLayerName, LayerRef> & {
 	/** The thinking dots, left to right. */
 	dots: readonly [LayerRef, LayerRef, LayerRef];
 };
@@ -99,34 +99,34 @@ export interface FaceDrawing {
  * as depth.
  */
 /** How far the eyes slide sideways, and up or down, looking all the way. */
-export const EYE_TRAVEL_X = 5;
-export const EYE_TRAVEL_Y = 3;
+const EYE_TRAVEL_X = 5;
+const EYE_TRAVEL_Y = 3;
 /** How far the eyes dip as they near the side, so they follow the head's curve rather than a straight line. */
-export const EYE_EDGE_DIP = 0.8;
+const EYE_EDGE_DIP = 0.8;
 /** How much narrower the eyes get looking all the way to one side, as if turned away on a ball. */
-export const EYE_FORESHORTENING = 0.18;
-export const HEAD_TRAVEL_X = 1.2;
-export const HEAD_TRAVEL_Y = 0.6;
-export const HEAD_TILT_DEGREES = 4;
+const EYE_FORESHORTENING = 0.18;
+const HEAD_TRAVEL_X = 1.2;
+const HEAD_TRAVEL_Y = 0.6;
+const HEAD_TILT_DEGREES = 4;
 
 /** Eyes jump to what they look at almost at once; they never drift. */
-export const EYES_SPRING = { stiffness: 1000, damping: 60 } as const;
+const EYES_SPRING = { stiffness: 1000, damping: 60 } as const;
 /** The head follows the eyes late, and overshoots a little before it settles. */
-export const HEAD_SPRING = { stiffness: 140, damping: 13 } as const;
+const HEAD_SPRING = { stiffness: 140, damping: 13 } as const;
 /** How a mood settles in when it changes: gently, without overshoot. */
-export const MOOD_SPRING = { stiffness: 120, damping: 20 } as const;
+const MOOD_SPRING = { stiffness: 120, damping: 20 } as const;
 /**
  * The same, for the eyes' shapes, which ease in script: they stop once within
  * `restDelta` of where they're going and slower than `restSpeed`, far below
  * what shows even on a large face.
  */
-export const EYE_SHAPE_MOOD_SPRING = { ...MOOD_SPRING, restDelta: 0.01, restSpeed: 0.02 } as const;
+const EYE_SHAPE_MOOD_SPRING = { ...MOOD_SPRING, restDelta: 0.01, restSpeed: 0.02 } as const;
 
 /**
  * One value's keyframes, as motion's `animate` plays them on a motion value:
  * through `frames` at `times` (shares of `seconds`), eased between each pair by `ease`.
  */
-export interface ValueKeyframes {
+interface ValueKeyframes {
 	readonly frames: readonly number[];
 	readonly times: readonly number[];
 	readonly ease: readonly Easing[];
@@ -137,22 +137,22 @@ const easeEachWay = (segments: number): Easing[] =>
 	Array.from({ length: segments }, () => "easeInOut");
 
 /** How far a blink squeezes an eye. */
-export const BLINK_CLOSED = 0.1;
+const BLINK_CLOSED = 0.1;
 /** A blink, as how open the eye is: quick to shut, a beat closed, slower to open. */
-export const BLINK: ValueKeyframes = {
+const BLINK: ValueKeyframes = {
 	frames: [1, BLINK_CLOSED, BLINK_CLOSED, 1],
 	times: [0, 0.33, 0.5, 1],
 	ease: easeEachWay(3),
 	seconds: 0.24,
 };
 /** How long a double blink waits between its two blinks. */
-export const BLINK_TWICE_GAP_SECONDS = 0.08;
+const BLINK_TWICE_GAP_SECONDS = 0.08;
 /** Once the pointer and typing have rested this long, idle glances take over again. */
-export const WATCHING_REST_MS = 4000;
+const WATCHING_REST_MS = 4000;
 /** How far open a sleepy bot's eyes flutter. */
-export const FLUTTER_OPEN = 0.5;
+const FLUTTER_OPEN = 0.5;
 /** A flutter, as how far open it holds the eyes: quickly open, slowly shut. */
-export const FLUTTER: ValueKeyframes = {
+const FLUTTER: ValueKeyframes = {
 	frames: [0, FLUTTER_OPEN, 0],
 	times: [0, 0.3, 1],
 	ease: ["easeOut", "easeIn"],
@@ -183,8 +183,8 @@ function wiggleSway(reach: number): KeyframesPath {
 }
 
 /** One wiggle of the head's sideways move, in percentages of the face, and of its lean, in degrees. */
-export const WIGGLE_MOVE = wiggleSway(viewboxPercentage(WIGGLE_SHIFT));
-export const WIGGLE_TILT = wiggleSway(WIGGLE_DEGREES);
+const WIGGLE_MOVE = wiggleSway(viewboxPercentage(WIGGLE_SHIFT));
+const WIGGLE_TILT = wiggleSway(WIGGLE_DEGREES);
 
 /** How high a thinking dot rises against its own height, like the app's typing dots, and how bright it is then. */
 const DOT_RISE_SHARE = 2.6 / (THINKING_DOT_RADIUS * 2);
@@ -193,7 +193,7 @@ const DOT_BRIGHTEST = 1;
 const DOT_RISE_TIMES = [0, 0.3, 0.6, 1];
 
 /** One rise of a thinking dot, from where it rests and back. */
-export const DOT_RISE: KeyframesPath = {
+const DOT_RISE: KeyframesPath = {
 	kind: "keyframes",
 	frames: [
 		layerKinds.dot.rest,
@@ -206,16 +206,16 @@ export const DOT_RISE: KeyframesPath = {
 	seconds: 1.2,
 };
 /** How long each thinking dot rises after the one before. */
-export const DOT_STAGGER_SECONDS = 0.15;
+const DOT_STAGGER_SECONDS = 0.15;
 /**
  * How far the mood has turned to thinking when the outer dots, and then the
  * middle one, start and finish growing, from 0 to 1; the middle one comes last.
  */
-export const OUTER_DOTS_GROW = [0, 0.6] as const;
-export const MIDDLE_DOT_GROWS = [0.4, 1] as const;
+const OUTER_DOTS_GROW = [0, 0.6] as const;
+const MIDDLE_DOT_GROWS = [0.4, 1] as const;
 
 /** How a wiggle or the thinking dots ease back to rest when they stop: quickly, slowing as they arrive. */
-export const STILLING = { seconds: 0.25, ease: "easeOut" } as const;
+const STILLING = { seconds: 0.25, ease: "easeOut" } as const;
 
 /** Eases from wherever a layer is to `rest`, as a wiggle or the thinking dots do when they stop. */
 function stillingTo(rest: Values): KeyframesPath {

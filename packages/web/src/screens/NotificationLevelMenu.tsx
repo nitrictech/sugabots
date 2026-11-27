@@ -12,7 +12,8 @@ import {
 	Settings,
 } from "lucide-react";
 import type { ReactElement } from "react";
-import { NOTIFICATION_LEVEL_LABELS } from "@/lib/notification-choices.ts";
+import { settingsSectionLink } from "@/lib/links.ts";
+import { NOTIFICATION_LEVEL_LABELS, NOTIFICATION_LEVELS } from "@/lib/notification-choices.ts";
 import {
 	formatUntil,
 	levelAbove,
@@ -40,9 +41,9 @@ import {
 } from "@/ui/dropdown-menu.tsx";
 
 /**
- * Right-clicking `children`, a pod's or a bot's row in the sidebar, offers
- * what it notifies the person about, muting it among them, and, under More
- * options, muting it for a while, as Slack's channel menu does. Until
+ * Right-clicking `children`, a project's or a bot's row in the sidebar, offers
+ * what it notifies the member about, muting it among them, and, under More
+ * options, muting it for a while. Until
  * `settings` load, right-clicking does nothing; `children` stays the same
  * element either way, so the row isn't remounted when they arrive.
  */
@@ -70,7 +71,7 @@ export function NotificationsContextMenu({
 }
 
 /**
- * Slack's More options: muting the place for one of its durations or, while
+ * More options: muting the place for one of its durations or, while
  * it is muted for a while, unmuting it, then the way to every notification
  * setting. A place that notifies of nothing anyway has no durations to offer.
  */
@@ -83,8 +84,7 @@ function MoreOptions({
 }) {
 	const mute = useMuteNotifications();
 	const mutedUntil = mutedUntilFor(settings, place);
-	const notifiesOfNothing =
-		(levelChosenFor(settings, place) ?? levelAbove(settings, place)) === "nothing";
+	const notifiesOfNothing = (levelChosenFor(settings, place) ?? levelAbove(settings)) === "nothing";
 	return (
 		<DropdownMenuSub>
 			<DropdownMenuSubTrigger>
@@ -115,15 +115,7 @@ function MoreOptions({
 					))
 				)}
 				{(mutedUntil || !notifiesOfNothing) && <DropdownMenuSeparator />}
-				<DropdownMenuItem
-					render={
-						<Link
-							from="/$workspace"
-							to="./settings/$section"
-							params={{ section: "notifications" }}
-						/>
-					}
-				>
+				<DropdownMenuItem render={<Link {...settingsSectionLink("notifications")} />}>
 					<Settings />
 					Notification settings
 				</DropdownMenuItem>
@@ -132,7 +124,7 @@ function MoreOptions({
 	);
 }
 
-/** A bell struck through, after the name of a pod or bot the person muted, for good or for a while. */
+/** A bell struck through, after the name of a project or bot the member muted, for good or for a while. */
 export function MutedMark({
 	settings,
 	place,
@@ -190,8 +182,6 @@ const LEVEL_ICONS: Record<NotificationLevel, LucideIcon> = {
 	nothing: BellOff,
 };
 
-const LEVELS = Object.keys(LEVEL_ICONS) as NotificationLevel[];
-
 /** The levels a place can take, the one it follows from above first, under `label` when given. */
 function LevelChoices({
 	settings,
@@ -203,7 +193,7 @@ function LevelChoices({
 	label?: string;
 }) {
 	const setLevel = useSetNotificationLevel();
-	const followed = levelAbove(settings, place);
+	const followed = levelAbove(settings);
 	const FollowedIcon = LEVEL_ICONS[followed];
 	return (
 		<DropdownMenuRadioGroup
@@ -217,7 +207,7 @@ function LevelChoices({
 				<FollowedIcon className="text-muted-foreground" />
 				Default ({NOTIFICATION_LEVEL_LABELS[followed].toLowerCase()})
 			</DropdownMenuRadioItem>
-			{LEVELS.map((level) => {
+			{NOTIFICATION_LEVELS.map((level) => {
 				const Icon = LEVEL_ICONS[level];
 				return (
 					<DropdownMenuRadioItem key={level} value={level} closeOnClick>

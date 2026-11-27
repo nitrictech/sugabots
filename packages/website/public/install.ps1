@@ -4,7 +4,7 @@
 #   irm https://sugabots.ai/install.ps1 | iex
 #
 # Safe to run again: an existing compose.yml and .env are kept, so the keys that
-# sign people in and encrypt saved API keys never change under an installation.
+# sign members in and encrypt saved API keys never change under a server.
 #
 # Errors are thrown rather than exiting, because `exit` in a script run by
 # `iex` closes the reader's PowerShell window.
@@ -48,7 +48,7 @@
 		if (Test-Path .env) {
 			Write-Host "Keeping the existing keys in $installDir\.env"
 		} else {
-			$envFile = "BETTER_AUTH_SECRET=$(New-RandomKey)`nCREDENTIALS_ENCRYPTION_KEY=$(New-RandomKey)`n"
+			$envFile = "BETTER_AUTH_SECRET=$(New-RandomKey)`nSECRETS_ENCRYPTION_KEY=$(New-RandomKey)`n"
 			# Without a byte-order mark, which Windows PowerShell's own encoders add and Compose reads as part of the first name.
 			[System.IO.File]::WriteAllText((Join-Path (Get-Location) ".env"), $envFile, (New-Object System.Text.UTF8Encoding $false))
 			Write-Host "Wrote new keys to $installDir\.env. Back it up and keep it private."

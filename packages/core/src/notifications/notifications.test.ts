@@ -1,71 +1,143 @@
 import {
-	type Channel,
-	conversationNotificationTag,
+	chatNotificationTag,
+	type EventStream,
+	HOST_REQUEST_TOOL,
 	handleFromName,
 	type Message,
+	memberStream,
+	type NotificationLevel,
 	type NotificationPreferences,
-	personChannel,
+	type NotificationSettings,
+	type Presence,
 	type StreamEvent,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
-import { eq } from "drizzle-orm";
-import { Effect, Exit, Layer, Scope } from "effect";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CurrentActor } from "../authorization/current-actor.ts";
-import { ConversationEvent } from "../conversations/events.ts";
-import { transaction } from "../database/database.ts";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { Cause, Effect, Exit, Layer, Metric, Scope } from "effect";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { askerColumns } from "../authentication/turn-facts.ts";
+import { ChatEvent } from "../chats/events.ts";
+import { seedChat } from "../chats/seed.test-support.ts";
+import { query, transaction } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import {
-	agent,
+	automation,
+	automationRun,
+	bot as botTable,
+	chatParticipant,
+	membership,
 	message,
-	pod,
-	podMember,
-	routine,
-	routineExecution,
-	thread,
-	threadParticipant,
+	notificationDelivery,
+	pendingNotification,
+	project,
+	projectBot,
+	projectMember,
 	toolCall,
 	turn,
-	user,
 	workspace,
-	workspaceMember,
 } from "../database/schema.ts";
 import {
 	closeDatabase,
+	holdTransaction,
 	onDatabase,
 	runOnPostgres,
 	type TestInfrastructure,
+	waitUntilWaitingOnLocks,
 } from "../database/testing.ts";
+import { createWorkspaceFixture } from "../database/workspace.test-support.ts";
+import { servedOperations } from "../operations/testing.ts";
+import { authenticators, principals } from "../proofs/world.test-support.ts";
 import { unimplemented } from "../testing.ts";
+import { seedProject } from "../workspaces/projects/seed.test-support.ts";
 import { Notifications } from "./notifications.ts";
-import { inQuietHours } from "./recipients.ts";
 
-/** The preferences a person has before choosing, with `chosen` in their place. */
+/** The preferences a member has before choosing, with `chosen` in their place. */
 function preferences(chosen: Partial<NotificationPreferences>): NotificationPreferences {
 	return {
 		level: "mentions",
 		pausedUntil: null,
 		quietHours: null,
 		turnFailures: true,
-		routineRuns: "failures",
+		automationRuns: "failures",
 		...chosen,
 	};
 }
 
+/** `minutes` after midnight, wrapped round the day, as `HH:MM`. */
+function clockTime(minutes: number): string {
+	const wrapped = minutes % (24 * 60);
+	const pad = (value: number) => String(value).padStart(2, "0");
+	return `${pad(Math.floor(wrapped / 60))}:${pad(wrapped % 60)}`;
+}
+
 /** What the service published on the bus, for every test in the file. */
-const published: { channel: Channel; event: StreamEvent }[] = [];
+const published: { stream: EventStream; event: StreamEvent }[] = [];
+
+/** A bus that keeps what is published in `published`. */
+const capturingBus = unimplemented(EventBus.Service, {
+	publish: async (stream, event) => {
+		published.push({ stream, event });
+	},
+});
+
+/**
+ * `handled`, and a promise that settles once every fiber it started has
+ * ended: among them the batch of notifications it starts sending in the
+ * background once it commits, which `handled` itself does not wait for. A
+ * fiber inherits what records fiber lifecycles from the one that started it.
+ * The promise rejects with the first of them that failed other than by being
+ * interrupted, as a losing racer is.
+ */
+function joiningWhatItStarts<A, E, R>(handled: Effect.Effect<A, E, R>) {
+	const allEnded = Promise.withResolvers<void>();
+	let running = 0;
+	let returned = false;
+	let failure: { readonly cause: unknown } | undefined;
+	const settleOnceIdle = () => {
+		if (!returned || running > 0) return;
+		if (failure) allEnded.reject(failure.cause);
+		else allEnded.resolve();
+	};
+	const lifecycles: Metric.FiberRuntimeMetricsService = {
+		recordFiberStart: () => {
+			running++;
+		},
+		recordFiberEnd: (_context, exit) => {
+			running--;
+			if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
+				failure ??= { cause: Cause.squash(exit.cause) };
+			}
+			settleOnceIdle();
+		},
+	};
+	return {
+		handled: Effect.provideService(handled, Metric.FiberRuntimeMetrics, lifecycles).pipe(
+			Effect.ensuring(
+				Effect.sync(() => {
+					returned = true;
+					settleOnceIdle();
+				}),
+			),
+		),
+		allEnded: allEnded.promise,
+	};
+}
+
+/** The notifications operations for one member signed in, by the names these cases use. */
+interface NotificationsAs {
+	readonly settings: Promise<NotificationSettings>;
+	updatePreferences(preferences: NotificationPreferences): Promise<NotificationSettings>;
+	setLevel(place: Notifications.Place, level: NotificationLevel): Promise<void>;
+	mute(place: Notifications.Place, until: Date): Promise<void>;
+	reportPresence(presence: Presence): Promise<void>;
+}
 
 /**
  * The service over the test database's own pool, publishing to `published`,
  * with `run` to call it and `close` to stop what it is still sending.
  */
-async function served() {
+async function served(bus = capturingBus) {
 	const scope = Scope.makeUnsafe();
-	const bus = unimplemented(EventBus.Service, {
-		publish: async (channel, event) => {
-			published.push({ channel, event });
-		},
-	});
 	const context = await runOnPostgres(
 		Layer.buildWithScope(Notifications.layer.pipe(Layer.provide(bus)), scope),
 	);
@@ -76,56 +148,66 @@ async function served() {
 	};
 }
 
-describe("quiet hours", () => {
-	const overnight = { from: "22:00", to: "07:30", timeZone: "Pacific/Auckland" };
-
-	it("span midnight in the person's time zone", () => {
-		// 23:15 and 06:00 in Auckland (UTC+13 in January), and 12:00.
-		expect(inQuietHours(overnight, new Date("2026-01-15T10:15:00Z"))).toBe(true);
-		expect(inQuietHours(overnight, new Date("2026-01-15T17:00:00Z"))).toBe(true);
-		expect(inQuietHours(overnight, new Date("2026-01-14T23:00:00Z"))).toBe(false);
-	});
-
-	it("are none when they start and end together", () => {
-		expect(
-			inQuietHours({ ...overnight, to: overnight.from }, new Date("2026-01-15T10:15:00Z")),
-		).toBe(false);
-	});
-});
-
 describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", () => {
 	const service = served();
 	const run = async <A, E>(
 		effect: Effect.Effect<A, E, Notifications.Service | TestInfrastructure>,
 	) => (await service).run(effect);
 	const notifications = () => run(Notifications.Service);
-	const as = <A, E>(
-		userId: string,
-		effect: Effect.Effect<A, E, CurrentActor.Service | Notifications.Service>,
-	) => run(effect.pipe(CurrentActor.provide(CurrentActor.AuthenticatedUserId.vouchedFor(userId))));
-	const emit = async (...events: ConversationEvent[]) => {
-		const { handler } = await notifications();
-		await run(transaction(handler(events)));
+	/**
+	 * The notifications operations, called through the registry for a member
+	 * signed in, publishing to the same bus as `service`.
+	 */
+	const operations = (async () => {
+		const callOperation = await servedOperations({ bus: capturingBus });
+		const signedIn = principals(await authenticators());
+		return { callOperation, signedIn };
+	})();
+	/** What `use` comes to with the notifications operations called for `memberId` signed in. */
+	const as = async <A>(memberId: string, use: (service: NotificationsAs) => Promise<A>) => {
+		const { callOperation, signedIn } = await operations;
+		const principal = await signedIn.member(memberId);
+		return use({
+			get settings() {
+				return callOperation(principal, "notifications.settings", {});
+			},
+			updatePreferences: (chosen) =>
+				callOperation(principal, "notifications.updatePreferences", chosen),
+			setLevel: (place, level) =>
+				callOperation(principal, "notifications.setLevel", { ...place, level }),
+			mute: (place, until) =>
+				callOperation(principal, "notifications.mute", { ...place, until: until.toISOString() }),
+			reportPresence: (presence) =>
+				callOperation(principal, "notifications.reportPresence", presence),
+		});
 	};
-	const sentTo = (userId: string) =>
+	/**
+	 * Commits `events` as their handler. Returns the end of the batch of
+	 * notifications they start sending in the background.
+	 */
+	const emitting = async (...events: ChatEvent[]) => {
+		const { handler } = await notifications();
+		const { handled, allEnded } = joiningWhatItStarts(transaction(handler(events)));
+		await run(handled);
+		return { batchEnded: allEnded };
+	};
+	/** Commits `events` as their handler, and waits for everything they notify to be sent. */
+	const emit = async (...events: ChatEvent[]) => {
+		await (await emitting(...events)).batchEnded;
+	};
+	const sentTo = (memberId: string) =>
 		published
 			.filter(
-				({ channel, event }) => channel === personChannel(userId) && event.type === "notification",
+				({ stream, event }) => stream === memberStream(memberId) && event.type === "notification",
 			)
 			.map(({ event: { type: _type, v: _version, ...notification } }) => notification);
-	/** Waits for `userId` to be sent something, then for anything sent alongside it. */
-	const deliveredTo = async (userId: string) => {
-		await vi.waitFor(() => expect(sentTo(userId)).not.toHaveLength(0), { timeout: 5_000 });
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		return sentTo(userId);
-	};
 
 	let workspaceId: string;
 	let workspaceSlug: string;
-	let podId: string;
-	let podSlug: string;
+	let projectId: string;
+	let projectSlug: string;
 	let botId: string;
-	let people: Record<"ada" | "bob" | "cy" | "outsider", { id: string; name: string }>;
+	let members: Record<"ada" | "bob" | "cy" | "outsider", { id: string; name: string }>;
 
 	afterAll(async () => {
 		await (await service).close();
@@ -135,67 +217,45 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 	beforeEach(async () => {
 		published.length = 0;
 		const suffix = crypto.randomUUID().slice(0, 8);
-		const names = {
-			ada: `Ada ${suffix}`,
-			bob: `Bob ${suffix}`,
-			cy: `Cy ${suffix}`,
-			outsider: `Outsider ${suffix}`,
-		};
-		const rows = await onDatabase((db) =>
-			db
-				.insert(user)
-				.values(
-					Object.values(names).map((name) => ({
-						name,
-						email: `${handleFromName(name)}@example.com`,
-					})),
-				)
-				.returning(),
-		);
-		const [ada, bob, cy, outsider] = rows;
-		if (!ada || !bob || !cy || !outsider) throw new Error("Could not create the people");
-		people = { ada, bob, cy, outsider };
 		workspaceSlug = `notify-${suffix}`;
-		const [space] = await onDatabase((db) =>
-			db.insert(workspace).values({ name: "Notify", slug: workspaceSlug }).returning(),
+		const { workspace: space, members: seeded } = await createWorkspaceFixture(
+			{ name: "Notify", slug: workspaceSlug },
+			{
+				ada: { name: `Ada ${suffix}`, role: "editor" },
+				bob: { name: `Bob ${suffix}`, role: "editor" },
+				cy: { name: `Cy ${suffix}`, role: "editor" },
+				outsider: { name: `Outsider ${suffix}`, role: "editor" },
+			},
 		);
-		if (!space) throw new Error("Could not create the workspace");
+		members = seeded;
+		const { ada, bob, cy } = members;
 		workspaceId = space.id;
-		await onDatabase((db) =>
-			db.insert(workspaceMember).values(rows.map((person) => ({ workspaceId, userId: person.id }))),
+		projectSlug = `project-${suffix}`;
+		const room = await onDatabase((db) =>
+			seedProject(db, {
+				workspaceId,
+				name: "Launch",
+				slug: projectSlug,
+				createdById: ada.id,
+			}),
 		);
-		podSlug = `pod-${suffix}`;
-		const [room] = await onDatabase((db) =>
-			db
-				.insert(pod)
-				.values({
-					workspaceId,
-					ownerId: ada.id,
-					kind: "shared",
-					name: "Launch",
-					slug: podSlug,
-					createdById: ada.id,
-				})
-				.returning(),
-		);
-		if (!room) throw new Error("Could not create the pod");
-		podId = room.id;
-		// Everybody but the outsider is in the pod.
+		if (!room) throw new Error("Could not create the project");
+		projectId = room.id;
+		// Everybody but the outsider is in the project.
 		await onDatabase((db) =>
 			db
-				.insert(podMember)
-				.values([ada, bob, cy].map((person) => ({ workspaceId, podId, userId: person.id }))),
+				.insert(projectMember)
+				.values([ada, bob, cy].map((member) => ({ workspaceId, projectId, memberId: member.id }))),
 		);
 		const [bot] = await onDatabase((db) =>
 			db
-				.insert(agent)
+				.insert(botTable)
 				.values({
 					workspaceId,
-					podId,
 					name: "Scout",
 					handle: `scout-${suffix}`,
 					color: "green",
-					face: "pill",
+					eyes: "pill",
 					model: "test/model",
 					createdById: ada.id,
 				})
@@ -203,64 +263,64 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		);
 		if (!bot) throw new Error("Could not create the bot");
 		botId = bot.id;
+		await onDatabase((db) =>
+			db.insert(projectBot).values({ workspaceId, projectId, botId: botId }),
+		);
 	});
 
-	const conversationWithBot = async (participants: readonly string[]) => {
+	const chatWithBot = async (participants: readonly string[]) => {
 		const id = crypto.randomUUID();
 		await onDatabase((db) =>
-			db.insert(thread).values({
+			seedChat(db, {
 				id,
 				workspaceId,
-				podId,
-				hostAgentId: botId,
-				conversationId: id,
-				type: "conversation",
+				kind: "project_chat",
+				botId,
 				title: "Release notes",
+				startedById: members.ada.id,
 			}),
 		);
 		await onDatabase((db) =>
 			db
-				.insert(threadParticipant)
+				.insert(chatParticipant)
 				.values([
-					{ threadId: id, agentId: botId },
-					...participants.map((userId) => ({ threadId: id, userId })),
+					{ chatId: id, botId: botId },
+					...participants.map((memberId) => ({ chatId: id, memberId })),
 				]),
 		);
 		return id;
 	};
 
-	const podChat = async () => {
+	const projectChat = async () => {
 		const id = crypto.randomUUID();
 		await onDatabase((db) =>
-			db.insert(thread).values({
+			seedChat(db, {
 				id,
 				workspaceId,
-				podId,
-				conversationId: id,
-				type: "pod_chat",
+				kind: "project_chat",
+				projectId,
 				title: "Launch",
-				main: true,
+				startedById: members.ada.id,
 			}),
 		);
 		return id;
 	};
 
 	/**
-	 * The bot's turn answering `askedBy`, finished with `content`. Nobody in
-	 * the pod asks, unless a test says who did.
+	 * The bot's turn answering `askerId`, finished with `content`. Nobody in
+	 * the project asks, unless a test says who did.
 	 */
 	const botReplied = async (
-		threadId: string,
+		chatId: string,
 		content: string,
-		askedBy: { id: string } = people.outsider,
+		askerId: { id: string } = members.outsider,
 	) => {
 		const asked = crypto.randomUUID();
 		await onDatabase((db) =>
 			db.insert(message).values({
 				id: asked,
-				threadId,
-				authorUserId: askedBy.id,
-				kind: "text",
+				chatId,
+				authorMemberId: askerId.id,
 				status: "complete",
 				parts: [],
 				content: "Can you help?",
@@ -270,45 +330,46 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(turn).values({
 				id: turnId,
-				threadId,
-				agentId: botId,
+				chatId,
+				botId: botId,
 				triggerMessageId: asked,
 				status: "done",
 				model: "test/model",
 				startedAt: new Date(),
+				...askerColumns({ chatId: chatId, botId: botId, triggerMessageId: asked }),
 			}),
 		);
-		return ConversationEvent.TurnCompleted({
-			threadId,
+		return ChatEvent.TurnCompleted({
+			chatId,
 			workspaceId,
-			podId,
 			turnId,
-			agentId: botId,
+			botId: botId,
 			messageId: crypto.randomUUID(),
+			execution: 1,
 			content,
+			finishedAt: new Date(),
 			contextTokens: undefined,
 			contextCapacity: 0,
 			readKeptFrom: null,
 		});
 	};
 
-	const personPosted = (
-		threadId: string,
+	const memberPosted = (
+		chatId: string,
 		author: { id: string; name: string },
 		content: string,
 		more: Partial<Message> = {},
 	) =>
-		ConversationEvent.MessagePosted({
-			threadId,
+		ChatEvent.MessagePosted({
+			chatId,
 			workspaceId,
-			podId,
 			message: {
 				id: crypto.randomUUID(),
 				content,
 				parts: content === "" ? [] : [{ type: "text", text: content }],
 				...more,
 				author: {
-					kind: "person",
+					kind: "member",
 					id: author.id,
 					name: author.name,
 					email: `${handleFromName(author.name)}@example.com`,
@@ -318,75 +379,375 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			} as Message,
 		});
 
-	const chooseLevel = (userId: string, level: "all" | "mentions" | "nothing") =>
-		as(
-			userId,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(preferences({ level })),
-			),
-		);
+	const chooseLevel = (memberId: string, level: "all" | "mentions" | "nothing") =>
+		as(memberId, (service) => service.updatePreferences(preferences({ level })));
 
-	it("tells a person they were mentioned in the pod's chat, linking to the message", async () => {
-		const chat = await podChat();
-		const posted = personPosted(
+	it("tells a member they were mentioned in a project, linking to the message", async () => {
+		const chat = await projectChat();
+		const posted = memberPosted(
 			chat,
-			people.ada,
-			`@${handleFromName(people.bob.name)} can you look at the launch checklist?`,
+			members.ada,
+			`@${handleFromName(members.bob.name)} can you look at the launch checklist?`,
 		);
 
 		await emit(posted);
 
-		expect(await deliveredTo(people.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			{
-				title: `${people.ada.name} mentioned you in Launch`,
-				body: `@${handleFromName(people.bob.name)} can you look at the launch checklist?`,
-				tag: `conversation:${chat}`,
-				path: `/${workspaceSlug}/activity/${podSlug}/${chat}?message=${posted.message.id}`,
-				conversationId: chat,
+				title: `${members.ada.name} mentioned you in Launch`,
+				body: `@${handleFromName(members.bob.name)} can you look at the launch checklist?`,
+				tag: `chat:${chat}`,
+				path: `/${workspaceSlug}/projects/${projectSlug}/${chat}?message=${posted.message.id}`,
+				chatId: chat,
 			},
 		]);
-		// Not the author, nor somebody who was only in the pod.
-		expect(sentTo(people.ada.id)).toEqual([]);
-		expect(sentTo(people.cy.id)).toEqual([]);
+		// Not the author, nor somebody who was only in the project.
+		expect(sentTo(members.ada.id)).toEqual([]);
+		expect(sentTo(members.cy.id)).toEqual([]);
 	});
 
 	it.each(["@here the launch moved to Friday", "@channel the launch moved to Friday"])(
-		"tells everyone in the pod of a person's %s, but not the author or an outsider",
+		"tells everyone in the project of a member's %s, but not the author or an outsider",
 		async (text) => {
-			const chat = await podChat();
+			const chat = await projectChat();
 
-			await emit(personPosted(chat, people.ada, text));
+			await emit(memberPosted(chat, members.ada, text));
 
-			expect(await deliveredTo(people.bob.id)).toEqual([
+			expect(sentTo(members.bob.id)).toEqual([
 				expect.objectContaining({
-					title: `${people.ada.name} mentioned you in Launch`,
+					title: `${members.ada.name} mentioned you in Launch`,
 					body: text,
 				}),
 			]);
-			expect(await deliveredTo(people.cy.id)).toHaveLength(1);
-			expect(sentTo(people.ada.id)).toEqual([]);
-			expect(sentTo(people.outsider.id)).toEqual([]);
+			expect(sentTo(members.cy.id)).toHaveLength(1);
+			expect(sentTo(members.ada.id)).toEqual([]);
+			expect(sentTo(members.outsider.id)).toEqual([]);
 		},
 	);
 
-	it("does not let a bot reach everyone with @channel", async () => {
-		const conversation = await conversationWithBot([people.ada.id]);
-		await chooseLevel(people.ada.id, "all");
-
-		await emit(await botReplied(conversation, "@channel I am done."));
-
-		expect(await deliveredTo(people.ada.id)).toEqual([
-			expect.objectContaining({ title: "Scout in Release notes" }),
-		]);
-		expect(sentTo(people.bob.id)).toEqual([]);
-	});
-
-	it("tells a person of a reply to their message in the pod's chat, and names a file shared without text", async () => {
-		const chat = await podChat();
-		const asked = personPosted(chat, people.bob, "Who has the launch checklist?");
+	it("tells nobody who has stopped reaching the chat by the time it is sent", async () => {
+		const chat = await projectChat();
+		await onDatabase((db) =>
+			db
+				.delete(projectMember)
+				.where(
+					and(eq(projectMember.projectId, projectId), eq(projectMember.memberId, members.bob.id)),
+				),
+		);
 
 		await emit(
-			personPosted(chat, people.ada, "", {
+			memberPosted(
+				chat,
+				members.ada,
+				`@${handleFromName(members.bob.name)} @${handleFromName(members.cy.name)} the launch moved`,
+			),
+		);
+
+		expect(sentTo(members.cy.id)).toHaveLength(1);
+		expect(sentTo(members.bob.id)).toEqual([]);
+	});
+
+	it("tells nobody removed from the project while the notification was on its way to them", async () => {
+		const chat = await projectChat();
+		const removing = holdTransaction(
+			Effect.gen(function* () {
+				yield* query((db) =>
+					db
+						.select({ id: workspace.id })
+						.from(workspace)
+						.where(eq(workspace.id, workspaceId))
+						.for("no key update"),
+				);
+				yield* query((db) =>
+					db
+						.delete(projectMember)
+						.where(
+							and(
+								eq(projectMember.projectId, projectId),
+								eq(projectMember.memberId, members.bob.id),
+							),
+						),
+				);
+			}),
+		);
+		await removing.held;
+
+		const { batchEnded } = await emitting(
+			memberPosted(
+				chat,
+				members.ada,
+				`@${handleFromName(members.cy.name)} @${handleFromName(members.bob.name)} the launch moved`,
+			),
+		);
+		// Each notification is checked as it goes, behind the removal under way.
+		await waitUntilWaitingOnLocks(1);
+		await removing.release();
+		await batchEnded;
+
+		expect(sentTo(members.cy.id)).toHaveLength(1);
+		expect(sentTo(members.bob.id)).toEqual([]);
+	});
+
+	it("commits one notification across concurrent handlers and frees the database pool before publishing", async () => {
+		const chat = await projectChat();
+		const mention = `@${handleFromName(members.bob.name)}`;
+		const event = memberPosted(chat, members.ada, `${mention} look`);
+		const next = memberPosted(chat, members.ada, `${mention} next`);
+		const publishing = Promise.withResolvers<void>();
+		const unblock = Promise.withResolvers<void>();
+		const sent: unknown[] = [];
+		const bus = unimplemented(EventBus.Service, {
+			publish: async (_stream, event) => {
+				sent.push(event.body);
+				if (sent.length === 1) {
+					publishing.resolve();
+					await unblock.promise;
+				}
+			},
+		});
+		const service = await served(bus);
+		try {
+			const notifications = await service.run(Notifications.Service);
+			await service.run(transaction(notifications.handler([event])));
+			await publishing.promise;
+			const [pool] = await onDatabase((db) =>
+				db.execute<{ held: number }>(
+					sql`
+				select count(*)::int as held from pg_stat_activity
+				where datname = current_database() and state = 'idle in transaction'
+			`,
+					"objects",
+				),
+			);
+			expect(pool?.held).toBe(0);
+
+			const concurrent = joiningWhatItStarts(transaction(notifications.handler([event, next])));
+			await service.run(concurrent.handled);
+			await concurrent.allEnded;
+			expect(sent).toEqual([`${mention} look`, `${mention} next`]);
+		} finally {
+			unblock.resolve();
+			await service.close();
+		}
+	});
+
+	it("records a notification sent once it is published, in a Postgres session of its own", async () => {
+		const chat = await projectChat();
+		let other: ReturnType<typeof holdTransaction> | undefined;
+		const bus = unimplemented(EventBus.Service, {
+			publish: async (stream, event) => {
+				published.push({ stream, event });
+				// Another transaction takes the Postgres session the recording one let go
+				// of, and is rolled back.
+				other = holdTransaction(Effect.void, Effect.die("rolled back"));
+				await other.held;
+			},
+		});
+		const sending = await served(bus);
+		try {
+			const { handler } = await sending.run(Notifications.Service);
+			const handled = joiningWhatItStarts(
+				transaction(
+					handler([memberPosted(chat, members.ada, `@${handleFromName(members.bob.name)} look`)]),
+				),
+			);
+			await sending.run(handled.handled);
+			await handled.allEnded;
+		} finally {
+			await sending.close();
+		}
+		await other?.release().catch(() => undefined);
+
+		expect(sentTo(members.bob.id)).toHaveLength(1);
+		expect(
+			await onDatabase((db) =>
+				db
+					.select({ sentAt: notificationDelivery.sentAt })
+					.from(notificationDelivery)
+					.where(eq(notificationDelivery.chatId, chat)),
+			),
+		).toEqual([{ sentAt: expect.any(Date) }]);
+	});
+
+	describe("after the process sending them stops", () => {
+		/** Makes everything left unsent look old enough for the sweep, as if its process stopped a while ago. */
+		const aWhileLater = async () => {
+			const before = new Date(Date.now() - 60_000);
+			await onDatabase((db) => db.update(pendingNotification).set({ dueAt: before }));
+			await onDatabase((db) =>
+				db
+					.update(notificationDelivery)
+					.set({ createdAt: before, claimedUntil: before })
+					.where(isNull(notificationDelivery.sentAt)),
+			);
+		};
+
+		/** Records `events`' notifications without publishing them, as a process whose bus was down. */
+		const recordedUnsent = async (...events: ChatEvent[]) => {
+			const failing = await served(
+				unimplemented(EventBus.Service, {
+					publish: async () => {
+						throw new Error("The bus is down");
+					},
+				}),
+			);
+			try {
+				const { handler } = await failing.run(Notifications.Service);
+				const handled = joiningWhatItStarts(transaction(handler(events)));
+				await failing.run(handled.handled);
+				await handled.allEnded;
+			} finally {
+				await failing.close();
+			}
+		};
+
+		it("acknowledges each notification it sends again once it is published, and sends again one it failed to", async () => {
+			const chat = await projectChat();
+			const bob = `@${handleFromName(members.bob.name)}`;
+			const cy = `@${handleFromName(members.cy.name)}`;
+			const mention = `${bob} ${cy} look`;
+			await recordedUnsent(memberPosted(chat, members.ada, mention));
+			await aWhileLater();
+			let publishes = 0;
+			const failingOnce = await served(
+				unimplemented(EventBus.Service, {
+					publish: async (stream, event) => {
+						publishes += 1;
+						if (publishes === 1) throw new Error("The bus dropped it");
+						published.push({ stream, event });
+					},
+				}),
+			);
+			try {
+				await failingOnce.run(Effect.flatMap(Notifications.Service, (n) => n.sendLeftBehind));
+			} finally {
+				await failingOnce.close();
+			}
+			const sentByTheFirstSweep = sentTo(members.bob.id).length + sentTo(members.cy.id).length;
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+			await run(sendLeftBehind);
+
+			expect(sentByTheFirstSweep).toBe(1);
+			expect(sentTo(members.bob.id)).toEqual([expect.objectContaining({ body: mention })]);
+			expect(sentTo(members.cy.id)).toEqual([expect.objectContaining({ body: mention })]);
+		});
+
+		it("sends again only to those who still reach the chat", async () => {
+			const chat = await projectChat();
+			await recordedUnsent(
+				memberPosted(
+					chat,
+					members.ada,
+					`@${handleFromName(members.bob.name)} @${handleFromName(members.cy.name)} look`,
+				),
+			);
+			await onDatabase((db) =>
+				db
+					.delete(projectMember)
+					.where(
+						and(eq(projectMember.projectId, projectId), eq(projectMember.memberId, members.bob.id)),
+					),
+			);
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+
+			expect(sentTo(members.cy.id)).toHaveLength(1);
+			expect(sentTo(members.bob.id)).toEqual([]);
+		});
+
+		it("skips notifications another sweep already sent while the first sweep was held up", async () => {
+			const chat = await projectChat();
+			const bob = `@${handleFromName(members.bob.name)}`;
+			const cy = `@${handleFromName(members.cy.name)}`;
+			await recordedUnsent(memberPosted(chat, members.ada, `${bob} ${cy} look`));
+			await aWhileLater();
+			const publishing = Promise.withResolvers<EventStream>();
+			const resume = Promise.withResolvers<void>();
+			let held = false;
+			const first = await served(
+				unimplemented(EventBus.Service, {
+					publish: async (stream, event) => {
+						if (!held) {
+							held = true;
+							publishing.resolve(stream);
+							await resume.promise;
+						}
+						published.push({ stream, event });
+					},
+				}),
+			);
+			const sweeping = first.run(Effect.flatMap(Notifications.Service, (n) => n.sendLeftBehind));
+			try {
+				const alreadyPublishing = await publishing.promise;
+				await aWhileLater();
+				await run((await notifications()).sendLeftBehind);
+				resume.resolve();
+				await sweeping;
+
+				const otherMember =
+					alreadyPublishing === memberStream(members.bob.id) ? members.cy.id : members.bob.id;
+				expect(sentTo(otherMember)).toHaveLength(1);
+			} finally {
+				resume.resolve();
+				await first.close();
+			}
+		});
+
+		it("sends an event's notifications it stopped before working out", async () => {
+			const chat = await projectChat();
+			const mention = `@${handleFromName(members.bob.name)} look`;
+			const stopped = await served();
+			const { handler } = await stopped.run(Notifications.Service);
+			// Who may be told waits on the workspace's lock, which a change of reach holds.
+			const changingReach = holdTransaction(
+				query((db) =>
+					db
+						.select({ id: workspace.id })
+						.from(workspace)
+						.where(eq(workspace.id, workspaceId))
+						.for("update"),
+				),
+			);
+			await changingReach.held;
+			await stopped.run(transaction(handler([memberPosted(chat, members.ada, mention)])));
+			await waitUntilWaitingOnLocks(1);
+			const stopping = stopped.close();
+			await changingReach.release();
+			await stopping;
+			const sentBeforeStopping = sentTo(members.bob.id).length;
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+
+			expect(sentBeforeStopping).toBe(0);
+			expect(sentTo(members.bob.id)).toEqual([expect.objectContaining({ body: mention })]);
+		});
+	});
+
+	it("does not let a bot reach everyone with @channel", async () => {
+		const chat = await chatWithBot([members.ada.id]);
+		await chooseLevel(members.ada.id, "all");
+
+		await emit(await botReplied(chat, "@channel I am done."));
+
+		expect(sentTo(members.ada.id)).toEqual([
+			expect.objectContaining({ title: "Scout in Release notes" }),
+		]);
+		expect(sentTo(members.bob.id)).toEqual([]);
+	});
+
+	it("tells a member of a reply to their message in a project, and names a file shared without text", async () => {
+		const chat = await projectChat();
+		const asked = memberPosted(chat, members.bob, "Who has the launch checklist?");
+
+		await emit(
+			memberPosted(chat, members.ada, "", {
 				parts: [
 					{
 						type: "file",
@@ -404,39 +765,38 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			}),
 		);
 
-		expect(await deliveredTo(people.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			expect.objectContaining({
-				title: `${people.ada.name} in Launch`,
+				title: `${members.ada.name} in Launch`,
 				body: "Shared checklist.pdf",
 			}),
 		]);
 	});
 
-	it("names the artifacts a routine's result shares without text in the pod's chat", async () => {
-		const chat = await podChat();
-		await chooseLevel(people.bob.id, "all");
+	it("names the files an automation's result shares without text in a project", async () => {
+		const chat = await projectChat();
+		await chooseLevel(members.bob.id, "all");
 		const resultSharing = (titles: readonly string[]) =>
-			ConversationEvent.MessagePosted({
-				threadId: chat,
+			ChatEvent.MessagePosted({
+				chatId: chat,
 				workspaceId,
-				podId,
 				message: {
 					id: crypto.randomUUID(),
 					content: "",
 					parts: titles.map((title) => ({
-						type: "artifact",
-						artifactId: crypto.randomUUID(),
+						type: "written_file",
+						fileId: crypto.randomUUID(),
 						kind: "html",
 						title,
 						version: 1,
 					})),
 					author: {
-						kind: "agent",
+						kind: "bot",
 						id: botId,
 						name: "Scout",
 						handle: "scout",
 						color: "green",
-						face: "pill",
+						eyes: "pill",
 						shape: "circle",
 					},
 				} as Message,
@@ -445,368 +805,338 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await emit(resultSharing(["Weekly traction"]));
 		await emit(resultSharing(["Weekly traction", "Pipeline"]));
 
-		expect(await deliveredTo(people.bob.id)).toEqual([
-			expect.objectContaining({ body: "Shared Weekly traction" }),
-			expect.objectContaining({ body: "Shared 2 artifacts" }),
-		]);
+		// Each result is notified in its own time, so they may arrive in either order.
+		const delivered = sentTo(members.bob.id);
+		expect(delivered).toHaveLength(2);
+		expect(delivered).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ body: "Shared Weekly traction" }),
+				expect.objectContaining({ body: "Shared 2 files" }),
+			]),
+		);
 	});
 
-	it("tells the people in a conversation of a bot's reply, and those who chose everything", async () => {
-		const conversation = await conversationWithBot([people.ada.id]);
-		await chooseLevel(people.cy.id, "all");
+	it("tells the members in a bot's chat of the bot's reply, linking to the chat, and those who chose everything", async () => {
+		const chat = await chatWithBot([members.ada.id]);
+		await chooseLevel(members.cy.id, "all");
 
-		await emit(await botReplied(conversation, "The release notes are drafted."));
+		const reply = await botReplied(chat, "The release notes are drafted.", members.ada);
+		await emit(reply);
 
-		expect(await deliveredTo(people.ada.id)).toEqual([
-			expect.objectContaining({
+		expect(sentTo(members.ada.id)).toEqual([
+			{
 				title: "Scout in Release notes",
 				body: "The release notes are drafted.",
-			}),
+				tag: `chat:${chat}`,
+				path: `/${workspaceSlug}/chats/${chat}?message=${reply.messageId}`,
+				chatId: chat,
+			},
 		]);
-		expect(await deliveredTo(people.cy.id)).toHaveLength(1);
-		expect(sentTo(people.bob.id)).toEqual([]);
-		expect(sentTo(people.outsider.id)).toEqual([]);
+		expect(sentTo(members.cy.id)).toHaveLength(1);
+		expect(sentTo(members.bob.id)).toEqual([]);
+		expect(sentTo(members.outsider.id)).toEqual([]);
+	});
+
+	it("tells the members taking part in a project's chat of a bot's reply there, as in a bot's chat", async () => {
+		const chat = await projectChat();
+		await onDatabase((db) =>
+			db.insert(chatParticipant).values({ chatId: chat, memberId: members.ada.id }),
+		);
+
+		await emit(await botReplied(chat, "The checklist is done."));
+
+		expect(sentTo(members.ada.id)).toEqual([
+			expect.objectContaining({ title: "Scout in Launch", body: "The checklist is done." }),
+		]);
+		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 
 	it("leaves out somebody who muted the bot or paused", async () => {
-		const conversation = await conversationWithBot([people.ada.id, people.bob.id, people.cy.id]);
-		await as(
-			people.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.setLevel({ kind: "bot", id: botId }, "nothing"),
-			),
-		);
-		await as(
-			people.cy.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(
-					preferences({ pausedUntil: new Date(Date.now() + 60_000).toISOString() }),
-				),
+		const chat = await chatWithBot([members.ada.id, members.bob.id, members.cy.id]);
+		await as(members.bob.id, (service) => service.setLevel({ kind: "bot", id: botId }, "nothing"));
+		await as(members.cy.id, (service) =>
+			service.updatePreferences(
+				preferences({ pausedUntil: new Date(Date.now() + 60_000).toISOString() }),
 			),
 		);
 
-		await emit(await botReplied(conversation, "Done."));
+		await emit(await botReplied(chat, "Done."));
 
-		expect(await deliveredTo(people.ada.id)).toHaveLength(1);
-		expect(sentTo(people.bob.id)).toEqual([]);
-		expect(sentTo(people.cy.id)).toEqual([]);
+		expect(sentTo(members.ada.id)).toHaveLength(1);
+		expect(sentTo(members.bob.id)).toEqual([]);
+		expect(sentTo(members.cy.id)).toEqual([]);
 	});
 
-	it("passes what one of a person's tabs is looking at to their other tabs, and nobody else", async () => {
+	it("leaves out somebody in their quiet hours, which may span midnight", async () => {
+		const chat = await chatWithBot([members.ada.id, members.cy.id]);
+		// Twenty-two hours that end an hour from now, so they hold now
+		// whichever side of midnight they start and end.
+		const now = new Date();
+		const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+		await as(members.cy.id, (service) =>
+			service.updatePreferences(
+				preferences({
+					quietHours: {
+						from: clockTime(minutes + 120),
+						to: clockTime(minutes + 60),
+						timeZone: "UTC",
+					},
+				}),
+			),
+		);
+
+		await emit(await botReplied(chat, "Done."));
+
+		expect(sentTo(members.ada.id)).toHaveLength(1);
+		expect(sentTo(members.cy.id)).toEqual([]);
+	});
+
+	it("passes what one of a member's tabs is looking at to their other tabs, and nobody else", async () => {
 		const looking = {
 			clientId: crypto.randomUUID(),
-			conversationId: crypto.randomUUID(),
+			chatId: crypto.randomUUID(),
 			sequence: 1,
 		};
 
-		await as(
-			people.ada.id,
-			Effect.flatMap(Notifications.Service, (service) => service.reportPresence(looking)),
-		);
+		await as(members.ada.id, (service) => service.reportPresence(looking));
 
-		expect(published).toEqual([
+		expect(published.filter(({ event }) => event.type === "presence")).toEqual([
 			{
-				channel: personChannel(people.ada.id),
+				stream: memberStream(members.ada.id),
 				event: expect.objectContaining({ type: "presence", ...looking }),
 			},
 		]);
 	});
 
-	it("lets a pod's level quiet its bots, and a bot's level win over it", async () => {
-		const conversation = await conversationWithBot([people.ada.id, people.bob.id]);
-		for (const person of [people.ada, people.bob]) {
-			await as(
-				person.id,
-				Effect.flatMap(Notifications.Service, (service) =>
-					service.setLevel({ kind: "pod", id: podId }, "nothing"),
-				),
+	it("lets a project's level quiet its bots, and a bot's level win over it", async () => {
+		const chat = await projectChat();
+		for (const member of [members.ada, members.bob]) {
+			await as(member.id, (service) =>
+				service.setLevel({ kind: "project", id: projectId }, "nothing"),
 			);
 		}
-		await as(
-			people.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.setLevel({ kind: "bot", id: botId }, "mentions"),
-			),
-		);
+		await as(members.bob.id, (service) => service.setLevel({ kind: "bot", id: botId }, "all"));
 
-		await emit(await botReplied(conversation, "Shipped."));
+		await emit(await botReplied(chat, "Shipped."));
 
-		expect(await deliveredTo(people.bob.id)).toHaveLength(1);
-		expect(sentTo(people.ada.id)).toEqual([]);
+		expect(sentTo(members.bob.id)).toHaveLength(1);
+		expect(sentTo(members.ada.id)).toEqual([]);
 	});
 
-	it("quiets a muted bot's replies in the pod's chat, and not what people post there", async () => {
-		const chat = await podChat();
-		await chooseLevel(people.bob.id, "all");
-		await as(
-			people.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.setLevel({ kind: "bot", id: botId }, "nothing"),
-			),
-		);
+	it("quiets a muted bot's replies in a project, and not what members post there", async () => {
+		const chat = await projectChat();
+		await chooseLevel(members.bob.id, "all");
+		await as(members.bob.id, (service) => service.setLevel({ kind: "bot", id: botId }, "nothing"));
 
 		await emit(await botReplied(chat, "Here is the checklist."));
-		await emit(personPosted(chat, people.ada, "Thanks, Scout."));
+		await emit(memberPosted(chat, members.ada, "Thanks, Scout."));
 
-		expect(await deliveredTo(people.bob.id)).toEqual([
-			expect.objectContaining({ title: `${people.ada.name} in Launch` }),
+		expect(sentTo(members.bob.id)).toEqual([
+			expect.objectContaining({ title: `${members.ada.name} in Launch` }),
 		]);
 	});
 
 	it("quiets a bot muted for a while until the mute ends, then keeps its level", async () => {
-		const conversation = await conversationWithBot([people.ada.id, people.bob.id]);
-		const muteUntil = (person: { id: string }, until: Date) =>
-			as(
-				person.id,
-				Effect.flatMap(Notifications.Service, (service) =>
-					service.mute({ kind: "bot", id: botId }, until),
-				),
-			);
-		await as(
-			people.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.setLevel({ kind: "bot", id: botId }, "all"),
-			),
-		);
-		await muteUntil(people.ada, new Date(Date.now() + 60_000));
-		await muteUntil(people.bob, new Date(Date.now() - 60_000));
+		const chat = await chatWithBot([members.ada.id, members.bob.id]);
+		const muteUntil = (member: { id: string }, until: Date) =>
+			as(member.id, (service) => service.mute({ kind: "bot", id: botId }, until));
+		await as(members.bob.id, (service) => service.setLevel({ kind: "bot", id: botId }, "all"));
+		await muteUntil(members.ada, new Date(Date.now() + 60_000));
+		await muteUntil(members.bob, new Date(Date.now() - 60_000));
 
-		await emit(await botReplied(conversation, "Shipped."));
+		await emit(await botReplied(chat, "Shipped."));
 
-		expect(await deliveredTo(people.bob.id)).toHaveLength(1);
-		expect(sentTo(people.ada.id)).toEqual([]);
-		const settings = await as(
-			people.bob.id,
-			Effect.flatMap(Notifications.Service, (service) => service.settings),
-		);
+		expect(sentTo(members.bob.id)).toHaveLength(1);
+		expect(sentTo(members.ada.id)).toEqual([]);
+		const settings = await as(members.bob.id, (service) => service.settings);
 		expect(settings.bots).toEqual({ [botId]: "all" });
 		expect(settings.mutedUntil.bots).toEqual({});
 	});
 
-	it("quiets every bot in a pod muted for a while, even one with a level of its own", async () => {
-		const conversation = await conversationWithBot([people.ada.id, people.bob.id]);
-		for (const person of [people.ada, people.bob]) {
-			await as(
-				person.id,
-				Effect.flatMap(Notifications.Service, (service) =>
-					service.setLevel({ kind: "bot", id: botId }, "all"),
-				),
-			);
+	it("quiets every bot in a project muted for a while, even one with a level of its own", async () => {
+		const chat = await projectChat();
+		for (const member of [members.ada, members.bob]) {
+			await as(member.id, (service) => service.setLevel({ kind: "bot", id: botId }, "all"));
 		}
-		await as(
-			people.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.mute({ kind: "pod", id: podId }, new Date(Date.now() + 60_000)),
-			),
+		await as(members.bob.id, (service) =>
+			service.mute({ kind: "project", id: projectId }, new Date(Date.now() + 60_000)),
 		);
 
-		await emit(await botReplied(conversation, "Shipped."));
+		await emit(await botReplied(chat, "Shipped."));
 
-		expect(await deliveredTo(people.ada.id)).toHaveLength(1);
-		expect(sentTo(people.bob.id)).toEqual([]);
-	});
-
-	it("tells the person a bot answers in its channel of the reply, and the others only when they chose everything", async () => {
-		const channel = crypto.randomUUID();
-		await onDatabase((db) =>
-			db.insert(thread).values({
-				id: channel,
-				workspaceId,
-				podId,
-				hostAgentId: botId,
-				conversationId: channel,
-				type: "bot_channel",
-				title: "Scout",
-			}),
-		);
-		const reply = await botReplied(channel, "Two checklist items.", people.ada);
-		await chooseLevel(people.cy.id, "all");
-
-		await emit(reply);
-
-		expect(await deliveredTo(people.ada.id)).toEqual([
-			{
-				title: "Scout",
-				body: "Two checklist items.",
-				tag: `conversation:${channel}`,
-				path: `/${workspaceSlug}/activity/${podSlug}/${channel}?message=${reply.messageId}`,
-				conversationId: channel,
-			},
-		]);
-		expect(await deliveredTo(people.cy.id)).toHaveLength(1);
-		expect(sentTo(people.bob.id)).toEqual([]);
+		expect(sentTo(members.ada.id)).toHaveLength(1);
+		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 
 	/**
-	 * A run of one of the bot's routines, in a thread of its own, which Ada
-	 * started, of a routine `createdById` made, ended as `ended` when given.
+	 * A run the bot does, in a chat of its own, which Ada started, of an
+	 * automation `createdById` made in `inProjectId`, by default one of the
+	 * bot's own, ended as `ended` when given.
 	 */
-	const routineRunElsewhere = async (
+	const automationRunElsewhere = async (
 		ended?: { state: "completed" | "failed"; error?: UserText },
 		createdById?: string,
 		name = "Digest",
+		inProjectId?: string,
 	) => {
+		const [ownProject] = await onDatabase((db) =>
+			db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, botId)),
+		);
+		if (!ownProject) throw new Error("The bot has no default project");
 		const [defined] = await onDatabase((db) =>
 			db
-				.insert(routine)
+				.insert(automation)
 				.values({
 					workspaceId,
-					agentId: botId,
+					projectId: inProjectId ?? ownProject.id,
 					name,
 					instructions: "Summarise",
 					createdById,
 				})
 				.returning(),
 		);
-		if (!defined) throw new Error("Could not create the routine");
-		const threadId = crypto.randomUUID();
-		await onDatabase((db) =>
-			db.insert(thread).values({
-				id: threadId,
+		if (!defined) throw new Error("Could not create the automation");
+		const feed = await onDatabase((db) =>
+			seedChat(db, {
 				workspaceId,
-				podId,
-				hostAgentId: botId,
-				type: "routine",
-				title: "Digest",
+				kind: "automation_feed",
+				automationId: defined.id,
+				title: defined.name,
 			}),
 		);
 		const requestId = crypto.randomUUID();
-		await onDatabase((db) =>
-			db.insert(routineExecution).values({
-				routineId: defined.id,
+		const run = await onDatabase((db) =>
+			seedChat(db, {
 				workspaceId,
-				agentId: botId,
-				threadId,
-				triggerKind: "manual",
-				triggerIdentity: requestId,
-				trigger: {
-					kind: "manual",
-					requestId,
-					requestedAt: new Date().toISOString(),
-					requestedByUserId: people.ada.id,
+				kind: "run",
+				title: "Digest",
+				run: {
+					automationId: defined.id,
+					botId: botId,
+					triggerKind: "manual",
+					triggerIdentity: requestId,
+					trigger: {
+						kind: "manual",
+						requestId,
+						requestedAt: new Date().toISOString(),
+						requestedByMemberId: members.ada.id,
+					},
+					automationName: "Digest",
+					instructions: "Summarise",
+					...(ended && {
+						state: ended.state,
+						error: ended.error,
+						startedAt: new Date(),
+						finishedAt: new Date(),
+					}),
 				},
-				routineName: "Digest",
-				instructions: "Summarise",
-				...(ended && {
-					state: ended.state,
-					error: ended.error,
-					startedAt: new Date(),
-					finishedAt: new Date(),
-				}),
 			}),
 		);
-		return threadId;
+		return { chatId: run.id, rootChatId: feed.id, automationId: defined.id };
 	};
 
-	const runSettled = (threadId: string) =>
-		ConversationEvent.RoutineExecutionSettled({
-			workspaceId,
-			podId,
-			conversationId: threadId,
-			threadId,
-		});
+	const runSettled = ({ chatId, rootChatId }: { chatId: string; rootChatId: string }) =>
+		ChatEvent.RunSettled({ workspaceId, chatId, rootChatId });
 
-	it("tells the person who made a routine and the one who ran it when a run fails, and not when it finishes", async () => {
-		const failedRun = await routineRunElsewhere(
-			{ state: "failed", error: userText`The calendar could not be read.` },
-			people.bob.id,
-		);
-		const finishedRun = await routineRunElsewhere(
-			{ state: "completed" },
-			people.bob.id,
-			"Briefing",
-		);
+	it.each(["bot", "project"] as const)(
+		"links a failed %s run to its feed for the members who made and ran it",
+		async (owner) => {
+			const inProjectId = owner === "project" ? projectId : undefined;
+			const failedRun = await automationRunElsewhere(
+				{ state: "failed", error: userText`The calendar could not be read.` },
+				members.bob.id,
+				"Digest",
+				inProjectId,
+			);
+			const finishedRun = await automationRunElsewhere(
+				{ state: "completed" },
+				members.bob.id,
+				"Briefing",
+				inProjectId,
+			);
 
-		await emit(runSettled(failedRun), runSettled(finishedRun));
+			await emit(runSettled(failedRun), runSettled(finishedRun));
 
-		const failure = {
-			title: "Digest failed",
-			body: "The calendar could not be read.",
-			tag: `routine:${failedRun}`,
-			path: `/${workspaceSlug}/activity/${podSlug}/${failedRun}?threadPage=${failedRun}`,
-			conversationId: failedRun,
-		};
-		expect(await deliveredTo(people.bob.id)).toEqual([failure]);
-		expect(await deliveredTo(people.ada.id)).toEqual([failure]);
-		expect(sentTo(people.cy.id)).toEqual([]);
-	});
+			const { chatId: runChat, rootChatId: feed } = failedRun;
+			const failure = {
+				title: "Digest failed",
+				body: "The calendar could not be read.",
+				tag: `automation:${runChat}`,
+				path:
+					owner === "project"
+						? `/${workspaceSlug}/projects/${projectSlug}/${feed}?runChat=${runChat}`
+						: `/${workspaceSlug}/chats/${feed}?runChat=${runChat}`,
+				chatId: feed,
+			};
+			expect(sentTo(members.bob.id)).toEqual([failure]);
+			expect(sentTo(members.ada.id)).toEqual([failure]);
+			expect(sentTo(members.cy.id)).toEqual([]);
+		},
+	);
 
-	it("tells somebody of every run of their routine when they chose to", async () => {
-		const run = await routineRunElsewhere({ state: "completed" }, people.bob.id);
-		await as(
-			people.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(preferences({ routineRuns: "all" })),
-			),
+	it("tells somebody of every run of their automation when they chose to", async () => {
+		const run = await automationRunElsewhere({ state: "completed" }, members.bob.id);
+		await as(members.bob.id, (service) =>
+			service.updatePreferences(preferences({ automationRuns: "all" })),
 		);
 
 		await emit(runSettled(run));
 
-		expect(await deliveredTo(people.bob.id)).toEqual([
+		expect(sentTo(members.bob.id)).toEqual([
 			expect.objectContaining({ title: "Digest finished", body: "Scout finished the run." }),
 		]);
-		expect(sentTo(people.ada.id)).toEqual([]);
+		expect(sentTo(members.ada.id)).toEqual([]);
 	});
 
-	it("tells those a routine's result mentions in its routine's thread, unless it went to a pod's chat as well", async () => {
-		const runThread = await routineRunElsewhere({ state: "completed" }, people.bob.id);
+	it("tells those an automation's result mentions in its automation's feed", async () => {
+		const {
+			chatId: runChat,
+			rootChatId: feed,
+			automationId,
+		} = await automationRunElsewhere({ state: "completed" }, members.bob.id);
 		const [run] = await onDatabase((db) =>
 			db
-				.select({ id: routineExecution.id, routineId: routineExecution.routineId })
-				.from(routineExecution)
-				.where(eq(routineExecution.threadId, runThread)),
+				.select({ id: automationRun.id, automationId: automationRun.automationId })
+				.from(automationRun)
+				.where(eq(automationRun.chatId, runChat)),
 		);
 		if (!run) throw new Error("fixture");
-		const feed = crypto.randomUUID();
-		await onDatabase((db) =>
-			db.insert(thread).values({
-				id: feed,
-				workspaceId,
-				podId,
-				hostAgentId: botId,
-				routineId: run.routineId,
-				type: "routine_feed",
-				title: "Digest",
-			}),
-		);
-		await chooseLevel(people.cy.id, "all");
-		const content = `@${handleFromName(people.ada.name)} the calendar needs reconnecting.`;
-		const resultPosted = async (threadId: string) => {
+		await chooseLevel(members.cy.id, "all");
+		const content = `@${handleFromName(members.ada.name)} the calendar needs reconnecting.`;
+		const resultPosted = async (chatId: string) => {
 			const id = crypto.randomUUID();
 			await onDatabase((db) =>
 				db.insert(message).values({
 					id,
-					threadId,
-					authorAgentId: botId,
-					routineExecutionId: run.id,
-					kind: "text",
+					chatId,
+					authorBotId: botId,
+					runId: run.id,
 					status: "complete",
 					parts: [{ type: "text", text: content }],
 					content,
 				}),
 			);
-			return ConversationEvent.MessagePosted({
-				threadId,
+			return ChatEvent.MessagePosted({
+				chatId,
 				workspaceId,
-				podId,
 				message: {
 					id,
 					content,
 					parts: [{ type: "text", text: content }],
 					author: {
-						kind: "agent",
+						kind: "bot",
 						id: botId,
 						name: "Scout",
 						handle: "scout",
 						color: "green",
-						face: "pill",
+						eyes: "pill",
 						shape: "circle",
 					},
-					routineResultOf: {
-						executionId: run.id,
-						threadId: runThread,
-						routineId: run.routineId,
-						routineName: "Digest",
+					automationResultOf: {
+						runId: run.id,
+						chatId: runChat,
+						automationId,
+						automationName: "Digest",
 					},
 				} as Message,
 			});
@@ -815,38 +1145,28 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		const inFeed = await resultPosted(feed);
 		await emit(inFeed);
 
-		expect(await deliveredTo(people.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			{
 				title: "Scout mentioned you in Digest",
 				body: content,
-				tag: conversationNotificationTag(feed),
-				path: `/${workspaceSlug}/activity/${podSlug}/${feed}?threadPage=${runThread}`,
-				conversationId: feed,
+				tag: chatNotificationTag(feed),
+				path: `/${workspaceSlug}/chats/${feed}?runChat=${runChat}`,
+				chatId: feed,
 			},
 		]);
-		// Everything is what is said in chats; a routine's thread speaks up only for those it mentions.
-		expect(sentTo(people.cy.id)).toEqual([]);
-
-		published.length = 0;
-		const chat = await podChat();
-		const inChat = await resultPosted(chat);
-		await emit(inFeed, inChat);
-
-		expect(await deliveredTo(people.ada.id)).toEqual([
-			expect.objectContaining({ tag: conversationNotificationTag(chat) }),
-		]);
+		// Everything is what is said in chats; an automation's feed speaks up only for those it mentions.
+		expect(sentTo(members.cy.id)).toEqual([]);
 	});
 
-	it("tells the person a bot was answering that its reply failed, unless they turned that off", async () => {
-		const conversation = await conversationWithBot([people.ada.id, people.bob.id]);
+	it("tells the member a bot was answering that its reply failed, unless they turned that off", async () => {
+		const chat = await chatWithBot([members.ada.id, members.bob.id]);
 		const failedTurn = async (asker: { id: string }) => {
 			const asked = crypto.randomUUID();
 			await onDatabase((db) =>
 				db.insert(message).values({
 					id: asked,
-					threadId: conversation,
-					authorUserId: asker.id,
-					kind: "text",
+					chatId: chat,
+					authorMemberId: asker.id,
 					status: "complete",
 					parts: [],
 					content: "Draft the notes",
@@ -856,57 +1176,72 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			await onDatabase((db) =>
 				db.insert(turn).values({
 					id: turnId,
-					threadId: conversation,
-					agentId: botId,
+					chatId: chat,
+					botId: botId,
 					triggerMessageId: asked,
 					status: "failed",
+					error: userText`The model could not be reached.`,
 					model: "test/model",
 					startedAt: new Date(),
+					...askerColumns({ chatId: chat, botId: botId, triggerMessageId: asked }),
 				}),
 			);
-			return ConversationEvent.TurnFailed({
-				threadId: conversation,
+			return ChatEvent.TurnFailed({
+				chatId: chat,
 				workspaceId,
-				podId,
 				turnId,
-				agentId: botId,
+				botId: botId,
 				messageId: crypto.randomUUID(),
+				execution: 1,
 				userMessage: userText`The model is unavailable.`,
 				willRetry: false,
 			});
 		};
-		await as(
-			people.bob.id,
-			Effect.flatMap(Notifications.Service, (service) =>
-				service.updatePreferences(preferences({ turnFailures: false })),
-			),
+		await as(members.bob.id, (service) =>
+			service.updatePreferences(preferences({ turnFailures: false })),
 		);
 
-		await emit(await failedTurn(people.ada), await failedTurn(people.bob));
+		await emit(await failedTurn(members.ada), await failedTurn(members.bob));
 
-		expect(await deliveredTo(people.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			expect.objectContaining({
 				title: "Scout couldn't finish its reply",
 				body: "The model is unavailable.",
 			}),
 		]);
-		expect(sentTo(people.bob.id)).toEqual([]);
+		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 
-	it("asks the people who may decide a bot's tool call to approve it", async () => {
-		// A routine run elsewhere must not make this call one raised during a run.
-		await routineRunElsewhere();
-		const conversation = await conversationWithBot([people.ada.id]);
+	/**
+	 * A turn of the bot, asked by Ada in `chat`, waiting for approval
+	 * of a call to each of `tools`, raised in that order.
+	 */
+	/**
+	 * A turn in `chat` waiting on calls to `tools`, answering a message by
+	 * `askedBy`: a member, Ada unless said, or the trigger of the run `run`.
+	 */
+	const turnWaitingOn = async (
+		chat: string,
+		tools: readonly string[],
+		askedBy: { member: string } | { run: string } = { member: members.ada.id },
+	) => {
 		const triggerId = crypto.randomUUID();
 		const replyId = crypto.randomUUID();
 		const turnId = crypto.randomUUID();
-		const callId = crypto.randomUUID();
 		await onDatabase((db) =>
 			db.insert(message).values({
 				id: triggerId,
-				threadId: conversation,
-				authorUserId: people.ada.id,
-				kind: "text",
+				chatId: chat,
+				...("member" in askedBy
+					? { authorMemberId: askedBy.member }
+					: {
+							automationTrigger: {
+								kind: "automation_trigger" as const,
+								runId: askedBy.run,
+								automationName: "Digest",
+								triggerKind: "manual" as const,
+							},
+						}),
 				status: "complete",
 				parts: [],
 				content: "Post the notes",
@@ -915,53 +1250,183 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		await onDatabase((db) =>
 			db.insert(turn).values({
 				id: turnId,
-				threadId: conversation,
-				agentId: botId,
+				chatId: chat,
+				botId: botId,
 				triggerMessageId: triggerId,
 				status: "waiting",
 				model: "test/model",
 				startedAt: new Date(),
+				...askerColumns({ chatId: chat, botId: botId, triggerMessageId: triggerId }),
 			}),
 		);
 		await onDatabase((db) =>
 			db.insert(message).values({
 				id: replyId,
-				threadId: conversation,
-				authorAgentId: botId,
-				kind: "text",
+				chatId: chat,
+				authorBotId: botId,
 				status: "complete",
 				parts: [],
 				content: "",
 				turnId,
 			}),
 		);
+		const callIds = tools.map(() => crypto.randomUUID());
+		const startedAt = Date.now();
 		await onDatabase((db) =>
-			db.insert(toolCall).values({
-				id: callId,
-				threadId: conversation,
-				messageId: replyId,
-				turnId,
-				tool: "post_message",
-				approvalStatus: "pending",
-				input: {},
-				atOffset: 0,
-			}),
+			db.insert(toolCall).values(
+				tools.map((tool, index) => ({
+					id: callIds[index],
+					chatId: chat,
+					messageId: replyId,
+					turnId,
+					tool,
+					approvalComputerProjectId: tool === HOST_REQUEST_TOOL ? projectId : null,
+					approvalStatus: "pending" as const,
+					input: {},
+					atOffset: index,
+					startedAt: new Date(startedAt + index),
+				})),
+			),
 		);
+		return { turnId, callIds };
+	};
+
+	it("asks the members who may decide a bot's tool call to approve it", async () => {
+		// Only Ada, who made it, reaches a personal bot, so only she may decide its calls.
+		await onDatabase((db) =>
+			db.update(botTable).set({ visibility: "personal" }).where(eq(botTable.id, botId)),
+		);
+		// An automation run elsewhere must not make this call one raised during a run.
+		await automationRunElsewhere();
+		const chat = await chatWithBot([members.ada.id]);
+		const { turnId, callIds } = await turnWaitingOn(chat, ["post_message"]);
+		const [callId] = callIds;
 
 		await emit(
-			ConversationEvent.TurnSuspended({ threadId: conversation, workspaceId, podId, turnId }),
+			ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
 		);
 
-		expect(await deliveredTo(people.ada.id)).toEqual([
+		expect(sentTo(members.ada.id)).toEqual([
 			{
 				title: "Scout needs your approval",
 				body: "To run post_message in Release notes",
 				tag: `approval:${turnId}`,
 				path: `/${workspaceSlug}/approvals/${callId}`,
-				conversationId: conversation,
+				chatId: chat,
 			},
 		]);
-		// Outside the pod, so nobody asks them.
-		expect(sentTo(people.outsider.id)).toEqual([]);
+		expect(sentTo(members.bob.id)).toEqual([]);
+		expect(sentTo(members.outsider.id)).toEqual([]);
+	});
+
+	it("links each member to the approvals they may decide: a computer request to its project's managers, any other call to its asker", async () => {
+		// Ada administers the workspace, so she manages the project's computer; Bob, who asked, is only an editor.
+		await onDatabase((db) =>
+			db.update(membership).set({ role: "admin" }).where(eq(membership.memberId, members.ada.id)),
+		);
+		const chat = await projectChat();
+		const { turnId, callIds } = await turnWaitingOn(chat, [HOST_REQUEST_TOOL, "post_message"], {
+			member: members.bob.id,
+		});
+		const [networkCallId, postCallId] = callIds;
+
+		await emit(
+			ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
+		);
+
+		expect(sentTo(members.ada.id)).toEqual([
+			{
+				title: "Scout needs your approval",
+				body: `To run ${HOST_REQUEST_TOOL} in Launch`,
+				tag: `approval:${turnId}`,
+				path: `/${workspaceSlug}/approvals/${networkCallId}`,
+				chatId: chat,
+			},
+		]);
+		expect(sentTo(members.bob.id)).toEqual([
+			{
+				title: "Scout needs your approval",
+				body: "To run post_message in Launch",
+				tag: `approval:${turnId}`,
+				path: `/${workspaceSlug}/approvals/${postCallId}`,
+				chatId: chat,
+			},
+		]);
+	});
+
+	it("notifies the bound computer project’s manager without disclosing the private chat", async () => {
+		await onDatabase((db) =>
+			db.update(botTable).set({ visibility: "personal" }).where(eq(botTable.id, botId)),
+		);
+		await onDatabase((db) =>
+			db.update(membership).set({ role: "admin" }).where(eq(membership.memberId, members.bob.id)),
+		);
+		const chat = await chatWithBot([members.ada.id]);
+		const { turnId, callIds } = await turnWaitingOn(chat, [HOST_REQUEST_TOOL]);
+		const [callId] = callIds;
+		if (!callId) throw new Error("No host request");
+		await onDatabase((db) =>
+			db
+				.update(toolCall)
+				.set({
+					executionInput: { host: "docs.example", explanation: "private model text" },
+				})
+				.where(eq(toolCall.id, callId)),
+		);
+
+		await emit(
+			ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
+		);
+
+		expect(sentTo(members.bob.id)).toEqual([
+			{
+				title: "Scout needs your approval",
+				body: "To let its computer reach docs.example",
+				tag: `approval:${turnId}`,
+				path: `/${workspaceSlug}/approvals/${callId}`,
+				chatId: null,
+			},
+		]);
+	});
+
+	it("asks the lead bot's creator and admins to approve what a project's run asks, and no other editor", async () => {
+		// Scout, which Ada made, leads the project; Cy administers the workspace; Bob is only an editor.
+		await onDatabase((db) =>
+			db.update(project).set({ leadBotId: botId }).where(eq(project.id, projectId)),
+		);
+		await onDatabase((db) =>
+			db.update(membership).set({ role: "admin" }).where(eq(membership.memberId, members.cy.id)),
+		);
+		const { chatId: runChat } = await automationRunElsewhere(
+			undefined,
+			members.bob.id,
+			"Digest",
+			projectId,
+		);
+		const [run] = await onDatabase((db) =>
+			db
+				.select({ id: automationRun.id })
+				.from(automationRun)
+				.where(eq(automationRun.chatId, runChat)),
+		);
+		if (!run) throw new Error("The run has no row");
+		// The run's turn answers its trigger, so it asks for no member.
+		const { turnId, callIds } = await turnWaitingOn(runChat, ["post_message"], { run: run.id });
+		const [callId] = callIds;
+
+		await emit(
+			ChatEvent.TurnSuspended({ chatId: runChat, workspaceId, turnId, approvalCallIds: callIds }),
+		);
+
+		const asked = {
+			title: "Scout needs your approval",
+			body: "To run post_message in Digest",
+			tag: `approval:${turnId}`,
+			path: `/${workspaceSlug}/approvals/${callId}`,
+			chatId: expect.any(String),
+		};
+		expect(sentTo(members.ada.id)).toEqual([asked]);
+		expect(sentTo(members.cy.id)).toEqual([asked]);
+		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 });

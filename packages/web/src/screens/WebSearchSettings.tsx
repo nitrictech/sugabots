@@ -1,25 +1,24 @@
 import {
-	DEFAULT_SEARCH_PRESET,
+	type BuiltInSearchProviderId,
+	builtInSearchProviders,
+	DEFAULT_SEARCH_BUILT_IN,
 	type SearchProvider,
-	type SearchProviderPresetId,
 	type SearchProviderTestResult,
 	type SearchProviderUpdate,
-	searchProviderCatalog,
-	searchProviderPreset,
+	searchBuiltInProvider,
 } from "@sugabots/contracts";
 import { type ReactNode, useId, useState } from "react";
 import { failureMessage } from "@/lib/failure.ts";
+import { useProviderSettingsAction } from "@/lib/provider-settings-action.ts";
 import { useSearchProvider, useSearchProviderActions } from "@/lib/search-provider.ts";
-import { Alert, Success } from "@/ui/alert.tsx";
+import { Alert } from "@/ui/alert.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
-	SETTINGS_CARD,
-	SETTINGS_RADIO_ROW,
 	SettingsGroup,
-	SettingsRadioMark,
+	SettingsRadioList,
 	SettingsRow,
-	SettingsRowIcon,
+	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
@@ -42,12 +41,12 @@ export function WebSearchSettings() {
 
 function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 	const actions = useSearchProviderActions();
-	const chosen = provider?.preset ?? DEFAULT_SEARCH_PRESET;
-	const preset = searchProviderPreset(chosen);
-	const needsKey = preset.requiresApiKey && provider?.hasApiKey !== true;
+	const chosen = provider?.builtIn ?? DEFAULT_SEARCH_BUILT_IN;
+	const builtIn = searchBuiltInProvider(chosen);
+	const needsKey = builtIn.requiresApiKey && provider?.hasApiKey !== true;
 	// Opened for you when the switch is held off by a missing key, so the reason is in view.
 	const [advancedOpen, setAdvancedOpen] = useState(needsKey);
-	const [error, setError] = useState<string>();
+	const { error, act } = useProviderSettingsAction();
 	const pending =
 		actions.replace.isPending ||
 		actions.update.isPending ||
@@ -56,24 +55,15 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 	const enabled = provider?.enabled ?? false;
 	const advancedId = useId();
 
-	async function act(work: () => Promise<unknown>) {
-		setError(undefined);
-		try {
-			await work();
-		} catch (cause) {
-			setError(failureMessage(cause));
-		}
-	}
-
 	/**
 	 * Swaps the provider, keeping the switch as it was unless the new one needs a
 	 * key: a new provider starts without one, and the web can't be on with a
 	 * provider that can't search, so it goes off until the key is added.
 	 */
-	function choose(next: SearchProviderPresetId) {
+	function choose(next: BuiltInSearchProviderId) {
 		if (next === chosen) return;
-		const nextEnabled = enabled && !searchProviderPreset(next).requiresApiKey;
-		void act(() => actions.replace.mutateAsync({ preset: next, enabled: nextEnabled }));
+		const nextEnabled = enabled && !searchBuiltInProvider(next).requiresApiKey;
+		void act(() => actions.replace.mutateAsync({ builtIn: next, enabled: nextEnabled }));
 	}
 
 	/** Changes the provider's settings, setting the default provider up first when there is none. */
@@ -82,7 +72,7 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 			provider
 				? actions.update.mutateAsync(change)
 				: actions.replace.mutateAsync({
-						preset: chosen,
+						builtIn: chosen,
 						enabled: change.enabled ?? enabled,
 						baseUrl: change.baseUrl,
 						apiKey: change.apiKey ?? undefined,
@@ -93,7 +83,7 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 	return (
 		<>
 			<SettingsGroup
-				note={needsKey ? `${preset.name} needs an API key first. Add it below.` : undefined}
+				note={needsKey ? `${builtIn.name} needs an API key first. Add it below.` : undefined}
 			>
 				<SettingsRow
 					label="Bots can use the web"
@@ -103,7 +93,7 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 							checked={enabled}
 							disabled={needsKey || pending}
 							label="Bots can use the web"
-							tooltip={needsKey ? `${preset.name} requires an API key` : undefined}
+							tooltip={needsKey ? `${builtIn.name} requires an API key` : undefined}
 							onChange={(next) => configure({ enabled: next })}
 						/>
 					}
@@ -122,7 +112,13 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 				</Button>
 				{advancedOpen && (
 					<div id={advancedId} className="flex flex-col gap-7">
-						<ProviderChoice chosen={chosen} disabled={pending} onChoose={choose} />
+						<SettingsRadioList
+							legend="Provider"
+							options={builtInSearchProviders}
+							chosen={chosen}
+							disabled={pending}
+							onChoose={choose}
+						/>
 						<ProviderSettings
 							key={chosen}
 							chosen={chosen}
@@ -140,46 +136,6 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 	);
 }
 
-/** The providers as one pick-one list, the chosen one ticked. */
-function ProviderChoice({
-	chosen,
-	disabled,
-	onChoose,
-}: {
-	chosen: SearchProviderPresetId;
-	disabled: boolean;
-	onChoose: (preset: SearchProviderPresetId) => void;
-}) {
-	const name = useId();
-	return (
-		<fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" disabled={disabled}>
-			<legend className="px-0.5 pb-2.5 font-medium text-xs text-muted-foreground">Provider</legend>
-			<div className={SETTINGS_CARD}>
-				{searchProviderCatalog.map((candidate) => (
-					<label key={candidate.id} className={SETTINGS_RADIO_ROW}>
-						<input
-							type="radio"
-							name={name}
-							value={candidate.id}
-							checked={candidate.id === chosen}
-							onChange={() => onChoose(candidate.id)}
-							className="sr-only"
-						/>
-						<SettingsRowIcon>{candidate.name.charAt(0)}</SettingsRowIcon>
-						<span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
-							<span className="truncate font-medium text-sm text-foreground">{candidate.name}</span>
-							<span className="text-pretty text-subtle-foreground text-xs">
-								{candidate.description}
-							</span>
-						</span>
-						<SettingsRadioMark checked={candidate.id === chosen} />
-					</label>
-				))}
-			</div>
-		</fieldset>
-	);
-}
-
 /** The chosen provider's address, when it is a server you run, and its key. */
 function ProviderSettings({
 	chosen,
@@ -189,24 +145,27 @@ function ProviderSettings({
 	onConfigure,
 	onTest,
 }: {
-	chosen: SearchProviderPresetId;
+	chosen: BuiltInSearchProviderId;
 	provider: SearchProvider | null;
 	pending: boolean;
 	testResult: SearchProviderTestResult | undefined;
 	onConfigure: (change: SearchProviderUpdate) => Promise<void>;
 	onTest: () => void;
 }) {
-	const preset = searchProviderPreset(chosen);
+	const builtIn = searchBuiltInProvider(chosen);
 	const [removingKey, setRemovingKey] = useState(false);
 	const hasKey = provider?.hasApiKey === true;
 
 	return (
-		<SettingsGroup label={preset.name} note={testStanding(provider, testResult) ?? keyHint(chosen)}>
-			{preset.hosting === "local" && (
+		<SettingsGroup
+			label={builtIn.name}
+			note={testStanding(provider, testResult) ?? keyHint(chosen)}
+		>
+			{builtIn.hosting === "local" && (
 				<TextEntryRow
 					label="Server URL"
-					saved={provider?.baseUrl ?? preset.baseUrl}
-					placeholder={preset.baseUrl}
+					saved={provider?.baseUrl ?? builtIn.baseUrl}
+					placeholder={builtIn.baseUrl}
 					disabled={pending}
 					onSave={(baseUrl) => onConfigure({ baseUrl })}
 				/>
@@ -220,7 +179,7 @@ function ProviderSettings({
 				onSave={(apiKey) => onConfigure({ apiKey })}
 				onRemove={hasKey ? () => setRemovingKey(true) : undefined}
 			/>
-			{provider && (hasKey || !preset.requiresApiKey) && (
+			{provider && (hasKey || !builtIn.requiresApiKey) && (
 				<SettingsRow
 					label="Test search"
 					sub="Runs one search with these settings."
@@ -230,9 +189,9 @@ function ProviderSettings({
 			<DeleteDialog
 				open={removingKey}
 				onOpenChange={setRemovingKey}
-				title={`Remove the ${preset.name} key?`}
+				title={`Remove the ${builtIn.name} key?`}
 				description={
-					preset.requiresApiKey
+					builtIn.requiresApiKey
 						? "Bots stop using the web until another key is added."
 						: "Searches carry on without a key, within the provider's free limits."
 				}
@@ -247,11 +206,13 @@ function ProviderSettings({
 	);
 }
 
-function keyHint(preset: SearchProviderPresetId): string {
-	if (preset === "exa") {
+function keyHint(builtIn: BuiltInSearchProviderId): string {
+	if (builtIn === "exa") {
 		return "A key is optional. Without one, searches use Exa's free tier, which is rate limited.";
 	}
-	return searchProviderPreset(preset).requiresApiKey ? "A key is required." : "A key is optional.";
+	return searchBuiltInProvider(builtIn).requiresApiKey
+		? "A key is required."
+		: "A key is optional.";
 }
 
 /** What the last test search said, once one has run, or what the provider recorded. */
@@ -260,15 +221,19 @@ function testStanding(
 	latest: SearchProviderTestResult | undefined,
 ): ReactNode {
 	if (latest) {
-		return latest.reachable ? (
-			<Success>Search works</Success>
-		) : (
-			<Alert>{latest.error ?? "The search did not work."}</Alert>
+		return (
+			<SettingsTestOutcome good={latest.reachable}>
+				{latest.reachable ? "Search works" : (latest.error ?? "The search did not work.")}
+			</SettingsTestOutcome>
 		);
 	}
 	if (provider?.status === "connected") return "The last test search worked.";
 	if (provider?.status === "error") {
-		return <Alert>{provider.lastTestError ?? "The last test search failed."}</Alert>;
+		return (
+			<SettingsTestOutcome good={false}>
+				{provider.lastTestError ?? "The last test search failed."}
+			</SettingsTestOutcome>
+		);
 	}
 	return undefined;
 }

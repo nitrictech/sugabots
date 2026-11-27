@@ -3,7 +3,7 @@ import { useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
-import { growthDesk, revenue } from "@/shell/story-fixtures.ts";
+import { growthDesk } from "@/shell/story-fixtures.test-support.ts";
 import { DesktopScreen, DesktopStage, LiveDesktopCard } from "./DesktopViewer.tsx";
 
 const meta = preview.meta({
@@ -11,8 +11,8 @@ const meta = preview.meta({
 	component: DesktopScreen,
 	tags: ["ai-generated"],
 	args: {
-		threadId: "0199a3a0-0000-7000-8000-000000000501",
-		agentId: "0199a3a0-0000-7000-8000-000000000502",
+		chatId: "0199a3a0-0000-7000-8000-000000000501",
+		botId: "0199a3a0-0000-7000-8000-000000000502",
 		viewOnly: false,
 		offersReconnect: true,
 	},
@@ -28,7 +28,7 @@ const meta = preview.meta({
 });
 
 /**
- * A desktop that can't be reached, as a preview with no sandbox behind it
+ * A desktop that can't be reached, as a preview with no computer behind it
  * always is, with a way to try again.
  */
 export const Unreachable = meta.story({
@@ -38,18 +38,13 @@ export const Unreachable = meta.story({
 	},
 });
 
-/** The agent's screen in a reply that is browsing, watch-only, opening the desktop when clicked. */
+/** The bot's screen in a reply that is browsing, watch-only, opening the desktop when clicked. */
 const openDesktop = fn();
 
 export const LiveCard = meta.story({
-	render: ({ threadId, agentId }) => (
+	render: ({ chatId, botId }) => (
 		<div className="max-w-115">
-			<LiveDesktopCard
-				threadId={threadId}
-				agentId={agentId}
-				agentName="Growth Desk"
-				onOpen={openDesktop}
-			/>
+			<LiveDesktopCard chatId={chatId} botId={botId} botName="Growth Desk" onOpen={openDesktop} />
 		</div>
 	),
 	play: async ({ canvas, userEvent }) => {
@@ -72,7 +67,7 @@ export const Opened = meta.story({
 		function WithComputers(Story) {
 			const [client] = useState(() => {
 				const queries = createQueryClient();
-				queries.setQueryData(["sandbox-providers", undefined, "access"], { enabled: true });
+				queries.setQueryData(["computer-providers", undefined, "access"], { enabled: true });
 				return queries;
 			});
 			return (
@@ -82,17 +77,14 @@ export const Opened = meta.story({
 			);
 		},
 	],
-	render: ({ threadId }) => (
-		<div className="fixed inset-0 flex">
-			<DesktopStage
-				threadId={threadId}
-				agent={{ ...growthDesk, usesSandbox: true }}
-				pod={revenue}
-				mayUse
-				onClose={fn()}
-			/>
-		</div>
-	),
+	render: function Opened({ chatId }) {
+		const bot = { ...growthDesk, usesComputer: true };
+		return (
+			<div className="fixed inset-0 flex">
+				<DesktopStage chatId={chatId} owner={{ bot }} bot={bot} onClose={fn()} />
+			</div>
+		);
+	},
 	play: async ({ canvas }) => {
 		await expect(canvas.getByText("Growth Desk's computer")).toBeVisible();
 		await expect(await canvas.findByText(/couldn't be reached|Starting the desktop/)).toBeVisible();

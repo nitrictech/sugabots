@@ -1,17 +1,17 @@
 import {
-	type Agent,
-	agentColors,
-	agentFaces,
-	agentShapes,
+	type Bot,
+	botColors,
+	botEyes,
+	botShapes,
 	type ModelProvider,
 	type ProviderModel,
-	type SystemAgent,
+	type SystemBot,
 } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { HttpResponse, http } from "msw";
 import { type ReactNode, useEffect, useState } from "react";
 // The dialog is portalled to the body, so reaching it means `screen`.
-import { expect, fn, screen, within } from "storybook/test";
+import { expect, fn, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import {
 	accountManager,
@@ -20,7 +20,7 @@ import {
 	leadResearcher,
 	linearHandler,
 	oncall,
-} from "@/shell/story-fixtures.ts";
+} from "@/shell/story-fixtures.test-support.ts";
 import { Dialog } from "@/ui/dialog.tsx";
 import {
 	AddProviderDialog,
@@ -60,7 +60,7 @@ function model(
 
 function provider(
 	n: number,
-	preset: ModelProvider["preset"],
+	builtIn: ModelProvider["builtIn"],
 	name: string,
 	models: ProviderModel[],
 	over: Partial<ModelProvider> = {},
@@ -68,7 +68,7 @@ function provider(
 	return {
 		id: `0199a3a0-0000-7000-8000-0000000002${String(n).padStart(2, "0")}`,
 		workspaceId: WORKSPACE,
-		preset,
+		builtIn,
 		name,
 		baseUrl: "https://api.example.com/v1",
 		apiFormat: "openai",
@@ -77,11 +77,9 @@ function provider(
 		hasApiKey: true,
 		signedIn: false,
 		customHeaders: [],
-		modelCount: models.length,
-		enabledModelCount: models.filter((one) => one.enabled).length,
-		lastTestedAt: null,
 		lastTestError: null,
 		connectedBy: null,
+		signedInAs: null,
 		createdAt: "2026-09-11T00:00:00.000Z",
 		models,
 		...over,
@@ -89,13 +87,13 @@ function provider(
 }
 
 const anthropic = provider(1, "anthropic", "Anthropic", [
-	model("claude-opus", "Claude Opus", false, ["tools", "vision", "reasoning"]),
-	model("claude-sonnet", "Claude Sonnet", true, ["tools", "vision", "reasoning"]),
+	model("claude-opus", "Claude Opus", false, ["tools", "vision", "thinking"]),
+	model("claude-sonnet", "Claude Sonnet", true, ["tools", "vision", "thinking"]),
 	model("claude-haiku", "Claude Haiku", true, ["tools", "vision"]),
 ]);
 const openai = provider(2, "openai", "OpenAI", [
-	model("gpt-5", "GPT-5", true, ["tools", "vision", "images", "reasoning"]),
-	model("gpt-5-mini", "GPT-5 mini", false, ["tools", "vision", "reasoning"]),
+	model("gpt-5", "GPT-5", true, ["tools", "vision", "images", "thinking"]),
+	model("gpt-5-mini", "GPT-5 mini", false, ["tools", "vision", "thinking"]),
 	model("gpt-5-nano", "GPT-5 nano", false, ["tools"]),
 ]);
 const ollama = provider(
@@ -128,7 +126,14 @@ const openrouter = provider(
 			["tools", ...(index % 2 === 0 ? (["vision"] as const) : [])],
 		);
 	}),
-	{ connectedBy: "Theo Hart" },
+	{
+		connectedBy: {
+			id: "0199a3a0-0000-7000-8000-0000000000c2",
+			name: "Theo Hart",
+			email: "theo@example.com",
+			image: null,
+		},
+	},
 );
 const chatgpt = provider(5, "chatgpt", "ChatGPT", [], {
 	baseUrl: "https://chatgpt.com/backend-api/codex",
@@ -141,9 +146,13 @@ const chatgptSignedIn: ModelProvider = {
 	active: true,
 	status: "connected",
 	signedIn: true,
-	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "reasoning"])],
-	modelCount: 1,
-	enabledModelCount: 1,
+	signedInAs: {
+		id: "0199a3a0-0000-7000-8000-0000000000c2",
+		name: "Theo Hart",
+		email: "theo@example.com",
+		image: null,
+	},
+	models: [model("gpt-5.5", "GPT-5.5", true, ["tools", "vision", "thinking"])],
 };
 const supergrok = provider(6, "supergrok", "SuperGrok", [], {
 	baseUrl: "https://api.x.ai/v1",
@@ -157,14 +166,27 @@ const pausedDeepseek = provider(
 	"deepseek",
 	"DeepSeek",
 	[model("deepseek-chat", "DeepSeek Chat", true)],
-	{ active: false, connectedBy: "Theo Hart" },
+	{
+		active: false,
+		connectedBy: {
+			id: "0199a3a0-0000-7000-8000-0000000000c2",
+			name: "Theo Hart",
+			email: "theo@example.com",
+			image: null,
+		},
+	},
 );
 /** A new key whose test failed: it holds the key, but stays off until a key passes. */
 const rejectedGroq = provider(8, "groq", "Groq", [], {
 	active: false,
 	status: "error",
 	lastTestError: "The provider rejected the API key",
-	connectedBy: "Theo Hart",
+	connectedBy: {
+		id: "0199a3a0-0000-7000-8000-0000000000c2",
+		name: "Theo Hart",
+		email: "theo@example.com",
+		image: null,
+	},
 });
 const providers = [anthropic, openai, ollama, openrouter, chatgpt];
 
@@ -179,12 +201,12 @@ const bots = [
 	{ ...oncall, model: "gpt-5" },
 ];
 
-const systemAgents: SystemAgent[] = (["summarise", "compact"] as const).map((key) => ({
+const systemBots: SystemBot[] = (["compact"] as const).map((key) => ({
 	key,
-	name: key === "summarise" ? "Scribe" : "Compaction",
+	name: "Compaction",
 	description: null,
 	color: "ice",
-	face: "pill",
+	eyes: "pill",
 	shape: "circle",
 	model: "claude-haiku",
 }));
@@ -193,15 +215,15 @@ function Preview({
 	providers,
 	bots,
 	defaultModel,
-	summariesModel,
+	systemBotsModel,
 	children,
 }: {
 	providers: readonly ModelProvider[];
-	bots: readonly Agent[];
+	bots: readonly Bot[];
 	/** The model new bots start on. */
 	defaultModel: string;
-	/** The model the system agents use. */
-	summariesModel: string;
+	/** The model the system bots use. */
+	systemBotsModel: string;
 	children: ReactNode;
 }) {
 	const [queryClient] = useState(() => {
@@ -212,18 +234,18 @@ function Preview({
 		client.setQueryData(["workspace-standing", WORKSPACE], {
 			role: "admin",
 			permissions: {
-				createPods: true,
+				createProjects: true,
 				manageProviders: true,
 				manageMembers: true,
-				configureBuiltInAgents: true,
+				chooseSystemModel: true,
 				manageUsage: true,
 			},
 		});
 		client.setQueryData(["model-providers", WORKSPACE], providers);
-		client.setQueryData(["agents", WORKSPACE], bots);
+		client.setQueryData(["bots", WORKSPACE], bots);
 		client.setQueryData(
-			["built-in-agents", WORKSPACE],
-			systemAgents.map((agent) => ({ ...agent, model: summariesModel })),
+			["system-bots", WORKSPACE],
+			systemBots.map((bot) => ({ ...bot, model: systemBotsModel })),
 		);
 		client.setQueryData(["models", WORKSPACE], {
 			models: providers.flatMap((provider) =>
@@ -232,8 +254,7 @@ function Preview({
 					.map((model) => ({
 						providerId: provider.id,
 						providerName: provider.name,
-						providerPreset: provider.preset,
-						providerActive: provider.active,
+						providerBuiltIn: provider.builtIn,
 						modelId: model.modelId,
 						displayName: model.displayName,
 						capabilities: model.capabilities.filter(
@@ -265,7 +286,7 @@ const meta = preview.meta({
 				providers={context.parameters.providers ?? providers}
 				bots={context.parameters.bots ?? bots}
 				defaultModel={context.parameters.defaultModel ?? "claude-sonnet"}
-				summariesModel={context.parameters.summariesModel ?? "claude-haiku"}
+				systemBotsModel={context.parameters.systemBotsModel ?? "claude-haiku"}
 			>
 				<Story />
 			</Preview>
@@ -279,7 +300,9 @@ export const Overview = meta.story({
 		await expect(
 			await canvas.findByRole("link", { name: /Default for new bots/ }),
 		).toHaveTextContent("Claude Sonnet");
-		await expect(canvas.getByRole("link", { name: /Summaries/ })).toHaveTextContent("Claude Haiku");
+		await expect(canvas.getByRole("link", { name: /Default for system bots/ })).toHaveTextContent(
+			"Claude Haiku",
+		);
 		await expect(canvas.getByRole("link", { name: /Anthropic/ })).toHaveTextContent("Connected");
 		await expect(canvas.getAllByRole("button", { name: "Connect" }).length).toBeGreaterThan(0);
 		await expect(canvas.getByRole("button", { name: /^Add a provider/ })).toBeInTheDocument();
@@ -307,18 +330,18 @@ export const SortedByState = meta.story({
 		const order = canvas
 			.getAllByRole("link")
 			.map((link) => link.textContent ?? "")
-			.filter((text) => /Connected|Connection failed|Disabled/.test(text))
+			.filter((text) => /Connected|Didn't answer|Disabled/.test(text))
 			.map((text) => text.match(/^(OpenRouter|Anthropic|OpenAI|Ollama|Groq)/)?.[0]);
 		await expect(order).toEqual(["Anthropic", "OpenAI", "Ollama", "Groq", "OpenRouter"]);
 	},
 });
 
-/** A key that failed its test reads Connection failed, not Disabled: it wants a new key, not switching on. */
-export const ConnectionFailed = meta.story({
+/** A key that failed its test reads Didn't answer, not Disabled: it wants a new key, not switching on. */
+export const DidNotAnswer = meta.story({
 	parameters: { providers: [...providers, rejectedGroq] },
 	play: async ({ canvas }) => {
 		const row = await canvas.findByRole("link", { name: /Groq/ });
-		await expect(row).toHaveTextContent("Connection failed");
+		await expect(row).toHaveTextContent("Didn't answer");
 		await expect(row).not.toHaveTextContent("Disabled");
 	},
 });
@@ -336,14 +359,16 @@ export const SwitchedOffProvider = meta.story({
 
 /**
  * A provider with a few models: its key, which models are on (listed first),
- * and who uses each. Sonnet is the default and Haiku the system agents'.
+ * and who uses each. Sonnet is the default and Haiku the system bots'.
  */
 export const Provider = meta.story({
 	render: () => <ProviderSettings providerId={anthropic.id} />,
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("heading", { name: "Anthropic" })).toBeInTheDocument();
-		await expect(canvas.getByText(/^Default · 3 bots/)).toBeInTheDocument();
-		await expect(canvas.getByText(/^Summaries · 2 bots/)).toBeInTheDocument();
+		await expect(canvas.getByText("Default")).toBeInTheDocument();
+		await expect(canvas.getByText("3 bots")).toBeInTheDocument();
+		await expect(canvas.getByText("System bots")).toBeInTheDocument();
+		await expect(canvas.getByText("2 bots")).toBeInTheDocument();
 		await expect(canvas.getByText("Not used yet")).toBeInTheDocument();
 		await expect(canvas.getByRole("switch", { name: "Bots can use Claude Opus" })).toHaveAttribute(
 			"aria-checked",
@@ -358,14 +383,14 @@ export const Provider = meta.story({
 });
 
 /** Forty bots on GPT-5, and every OpenRouter model switched on. */
-const crowdOnGpt5: Agent[] = Array.from({ length: 40 }, (_, index) => ({
+const crowdOnGpt5: Bot[] = Array.from({ length: 40 }, (_, index) => ({
 	...oncall,
 	id: `0199a3a0-0000-7000-8000-000000000${String(500 + index)}`,
 	name: `Helper ${index + 1}`,
 	handle: `helper-${index + 1}`,
-	color: agentColors[index % agentColors.length] as Agent["color"],
-	face: agentFaces[index % agentFaces.length] as Agent["face"],
-	shape: agentShapes[index % agentShapes.length] as Agent["shape"],
+	color: botColors[index % botColors.length] as Bot["color"],
+	face: botEyes[index % botEyes.length] as Bot["eyes"],
+	shape: botShapes[index % botShapes.length] as Bot["shape"],
 	model: "gpt-5",
 }));
 const everyModelOn = providers.map((one) =>
@@ -430,7 +455,7 @@ export const SwitchOffDefaultModel = meta.story({
 });
 
 /**
- * Switching off a provider whose models new bots and summaries use asks where
+ * Switching off a provider whose models new bots and compaction use asks where
  * each of those moves, beside each model's bots.
  */
 export const SwitchOffProviderWithDefaults = meta.story({
@@ -440,11 +465,11 @@ export const SwitchOffProviderWithDefaults = meta.story({
 		const dialog = await screen.findByRole("dialog", { name: "Switch off Anthropic" });
 		await expect(
 			within(dialog).getByText(
-				"5 bots, new bots, and summaries use Anthropic's models. Choose the model each moves to.",
+				"5 bots, new bots, and compaction use Anthropic's models. Choose the model each moves to.",
 			),
 		).toBeInTheDocument();
 		await expect(
-			within(dialog).getByRole("button", { name: "Move summaries to: GPT-5" }),
+			within(dialog).getByRole("button", { name: "Move system bots to: GPT-5" }),
 		).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Move and switch off" })).toBeEnabled();
 	},
@@ -455,7 +480,7 @@ export const SwitchOffProviderWithDefaults = meta.story({
  * the dialog says to switch another on first and cannot go ahead.
  */
 export const SwitchOffLastModel = meta.story({
-	parameters: { providers: [openai], defaultModel: "gpt-5", summariesModel: "gpt-5" },
+	parameters: { providers: [openai], defaultModel: "gpt-5", systemBotsModel: "gpt-5" },
 	render: () => <ProviderSettings providerId={openai.id} />,
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("switch", { name: "Bots can use GPT-5" }));
@@ -547,7 +572,7 @@ export const SwitchOffProviderInUse = meta.story({
 });
 
 /** A provider that resells hundreds of models: a search, which also finds them by who makes them. */
-export const LargeCatalog = meta.story({
+export const ManyBuiltInProviders = meta.story({
 	render: () => <ProviderSettings providerId={openrouter.id} />,
 	play: async ({ canvas, userEvent }) => {
 		const search = await canvas.findByRole("searchbox", { name: "Search models" });
@@ -567,7 +592,7 @@ export const LocalServer = meta.story({
 	},
 });
 
-/** ChatGPT is signed in to rather than given a key, after a warning that a plan is one person's. */
+/** ChatGPT is signed in to rather than given a key, after a warning that a plan is one member's. */
 export const ChatgptSignIn = meta.story({
 	render: () => <ProviderSettings providerId={chatgpt.id} />,
 	beforeEach({ msw }) {
@@ -586,7 +611,7 @@ export const ChatgptSignIn = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await expect(await canvas.findByText("Not signed in")).toBeInTheDocument();
 		await userEvent.click(canvas.getByRole("button", { name: "Sign in with ChatGPT" }));
-		const warning = await screen.findByRole("dialog", { name: "Single-user installs only" });
+		const warning = await screen.findByRole("dialog", { name: "Single-member servers only" });
 		await expect(within(warning).getByRole("link", { name: "OpenAI's terms" })).toHaveAttribute(
 			"href",
 			"https://openai.com/policies/terms-of-use/#registration-and-access",
@@ -620,8 +645,10 @@ export const SupergrokSignIn = meta.story({
 	},
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: "Sign in with xAI" }));
-		const warning = await screen.findByRole("dialog", { name: "Single-user installs only" });
-		await expect(within(warning).getByText(/A SuperGrok plan is for one person/)).toBeVisible();
+		const warning = await screen.findByRole("dialog", { name: "Single-member servers only" });
+		await waitFor(() =>
+			expect(within(warning).getByText(/A SuperGrok plan is for one member/)).toBeVisible(),
+		);
 		await expect(within(warning).getByRole("link", { name: "xAI's terms" })).toHaveAttribute(
 			"href",
 			"https://x.ai/legal/terms-of-service",
@@ -637,17 +664,19 @@ export const ChatgptSignedIn = meta.story({
 	parameters: { providers: [chatgptSignedIn] },
 	render: () => <ProviderSettings providerId={chatgptSignedIn.id} />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("Signed in")).toBeInTheDocument();
+		await expect(await canvas.findByText("Signed in as Theo Hart")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
 		await expect(canvas.queryByText("API key")).toBeNull();
 	},
 });
 
 /** One model for every system bot, from the models that are switched on. */
-export const SystemAgents = meta.story({
+export const SystemBots = meta.story({
 	render: () => <SystemModelSettings />,
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByRole("heading", { name: "Summaries" })).toBeInTheDocument();
+		await expect(
+			await canvas.findByRole("heading", { name: "Default for system bots" }),
+		).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Claude Opus" })).toBeNull();
 		await expect(canvas.getByRole("button", { name: "GPT-5" })).toBeInTheDocument();
 	},
@@ -679,7 +708,7 @@ function AddProviderPreview({
 	);
 }
 
-/** Adding a provider: the catalog, minus what is already connected, and a custom one. */
+/** Adding a provider: the built-in providers, minus what is already connected, and a custom one. */
 export const AddProvider = meta.story({
 	render: () => <AddProviderPreview />,
 	play: async () => {
@@ -692,7 +721,7 @@ export const AddProvider = meta.story({
 	},
 });
 
-/** A preset's one step: its key, with where to get one. */
+/** A built-in provider's one step: its key, with where to get one. */
 export const AddProviderKey = meta.story({
 	render: () => <AddProviderPreview />,
 	play: async ({ userEvent }) => {
@@ -708,7 +737,7 @@ const chatgptAdded = fn(async (_provider: ModelProvider) => {});
 
 /**
  * ChatGPT is in every workspace from the start, so choosing it goes on to its
- * page, where the person signs in, rather than switching it on without one.
+ * page, where the member signs in, rather than switching it on without one.
  */
 export const AddChatgpt = meta.story({
 	render: () => <AddProviderPreview onAdded={chatgptAdded} />,

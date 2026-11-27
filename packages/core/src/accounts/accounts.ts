@@ -1,14 +1,17 @@
+export { ReferralsOff } from "@sugabots/contracts/errors/workspace";
 export * as Accounts from "./accounts.ts";
 
 import { randomBytes } from "node:crypto";
-import { userText } from "@sugabots/errors";
+import { ReferralsOff } from "@sugabots/contracts/errors/workspace";
+import { type DomainError, userText } from "@sugabots/errors";
 import { and, eq, gt } from "drizzle-orm";
-import { Config, Context, Data, DateTime, Effect, Layer } from "effect";
-import { CurrentActor } from "../authorization/current-actor.ts";
+import { Config, Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
 import { Database, query } from "../database/database.ts";
-import { user, workspaceInvite } from "../database/schema.ts";
-import { Installation } from "../installation/installation.ts";
-import type { UserFacing } from "../user-message.ts";
+import { invitation, member } from "../database/schema.ts";
+import type { IsMember } from "../proofs/is-member.ts";
+import { ServerSettings } from "../server-settings/server-settings.ts";
+import { referralPath } from "../server-settings/web-app-paths.ts";
+import { processLayer, Tier } from "../tiers.ts";
 
 /** Who may have an account here. */
 export interface Interface {
@@ -21,13 +24,15 @@ export interface Interface {
 	) => Effect.Effect<Admission, SignUpClosed | ReferralLinkInvalid>;
 	/** Whether an account must prove its address before it gets a session or joins a workspace. */
 	readonly requireEmailVerification: boolean;
-	/** The link the actor can send people to let them sign up, or `undefined` when sign-up is not by referral. */
-	readonly referralLink: Effect.Effect<string | undefined, never, CurrentActor.Service>;
-	/** Stops the actor's referral link working, and returns the one that replaces it. */
-	readonly resetReferralLink: Effect.Effect<string, ReferralsOff, CurrentActor.Service>;
+	/** The link the member can send others to let them sign up, or `undefined` when sign-up is not by referral. */
+	readonly referralLink: <P>(isMember: IsMember<P>) => Effect.Effect<string | undefined>;
+	/** Stops the member's referral link working, and returns the one that replaces it. */
+	readonly resetReferralLink: <P>(isMember: IsMember<P>) => Effect.Effect<string, ReferralsOff>;
 }
 
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Accounts") {}
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Accounts") {
+	declare readonly [Tier]: "process";
+}
 
 /**
  * Sign-up follows `SIGNUP_MODE`, closed unless set. Verification is
@@ -35,14 +40,14 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
  */
 export const make = Effect.gen(function* () {
 	const database = yield* Database;
-	const installation = yield* Installation.Service;
+	const serverSettings = yield* ServerSettings.Service;
 	const mode = yield* Config.Literals(SIGNUP_MODES, "SIGNUP_MODE").pipe(
 		Config.withDefault("closed"),
 	);
 	const requireEmailVerification = yield* Config.Boolean("REQUIRE_EMAIL_VERIFICATION").pipe(
 		Config.withDefault(false),
 	);
-	const referrals = mode === "referral" ? referralLinks(installation.webAppUrl) : undefined;
+	const referrals = mode === "referral" ? referralLinks(serverSettings.webAppUrl) : undefined;
 
 	return Service.of({
 		admit: ({ email, referralCode }) =>
@@ -55,69 +60,68 @@ export const make = Effect.gen(function* () {
 				return yield* new SignUpClosed();
 			}).pipe(Effect.provideService(Database, database)),
 		requireEmailVerification,
-		referralLink: referrals
-			? Effect.flatMap(CurrentActor.Service, ({ userId }) => referrals.linkFor(userId)).pipe(
-					Effect.provideService(Database, database),
-				)
-			: Effect.undefined,
-		resetReferralLink: referrals
-			? Effect.flatMap(CurrentActor.Service, ({ userId }) => referrals.reset(userId)).pipe(
-					Effect.provideService(Database, database),
-				)
-			: Effect.fail(new ReferralsOff()),
+		referralLink: (isMember) =>
+			referrals
+				? referrals.linkFor(isMember.member).pipe(Effect.provideService(Database, database))
+				: Effect.undefined,
+		resetReferralLink: (isMember) =>
+			referrals
+				? referrals.reset(isMember.member).pipe(Effect.provideService(Database, database))
+				: Effect.fail(new ReferralsOff()),
 	});
 });
 
-export const layer = Layer.effect(Service, make);
+export const layer = processLayer(Layer.effect(Service, make));
 
 /**
- * `closed`: nobody signs themselves up. People arrive by invitation to a workspace, except
- * the installation's first account.
+ * `closed`: nobody signs themselves up. Members arrive by invitation to a workspace, except
+ * the server's first account.
  * `referral`: those, and anybody holding a member's referral link.
  * `open`: anybody.
  */
-export const SIGNUP_MODES = ["closed", "referral", "open"] as const;
+const SIGNUP_MODES = ["closed", "referral", "open"] as const;
 
 export type SignUpMode = (typeof SIGNUP_MODES)[number];
 
-export interface Applicant {
+interface Applicant {
 	email: string;
 	/** The code from a referral link, when the applicant arrived with one. */
 	referralCode?: string;
 }
 
-export interface Admission {
+interface Admission {
 	/** The member whose referral link let the applicant in. */
 	referredBy?: string;
 }
 
-export class SignUpClosed extends Data.TaggedError("SignUpClosed") implements UserFacing {
+export class SignUpClosed
+	extends Schema.TaggedError<SignUpClosed>()("SignUpClosed", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
 	get userMessage() {
-		return userText`Signups are invite only. Ask a member to invite you.`;
+		return userText`Sign-up is by invitation only. Ask someone in a workspace to invite you.`;
 	}
 }
 
 export class ReferralLinkInvalid
-	extends Data.TaggedError("ReferralLinkInvalid")
-	implements UserFacing
+	extends Schema.TaggedError<ReferralLinkInvalid>()("ReferralLinkInvalid", {})
+	implements DomainError
 {
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
 	get userMessage() {
-		return userText`This invite link isn't valid. Check you have all of it, or ask whoever sent it for a new one.`;
-	}
-}
-
-export class ReferralsOff extends Data.TaggedError("ReferralsOff") implements UserFacing {
-	get userMessage() {
-		return userText`This installation does not sign people up by referral.`;
+		return userText`This referral link isn't valid. Check you have all of it, or ask whoever sent it for a new one.`;
 	}
 }
 
 /**
- * An empty installation admits its first account, or it could never be opened.
+ * An empty server admits its first account, or it could never be opened.
  * Unlocked: two simultaneous first sign-ups would both get in, which is harmless.
  */
 const isEmpty = Effect.map(
-	query((db) => db.select({ id: user.id }).from(user).limit(1)),
+	query((db) => db.select({ id: member.id }).from(member).limit(1)),
 	([existing]) => existing === undefined,
 );
 
@@ -125,21 +129,18 @@ const hasPendingInvitation = (email: string) =>
 	Effect.flatMap(DateTime.nowAsDate, (now) =>
 		query((db) =>
 			db
-				.select({ id: workspaceInvite.id })
-				.from(workspaceInvite)
+				.select({ id: invitation.id })
+				.from(invitation)
 				.where(
 					and(
-						eq(workspaceInvite.email, email),
-						eq(workspaceInvite.status, "pending"),
-						gt(workspaceInvite.expiresAt, now),
+						eq(invitation.email, email),
+						eq(invitation.status, "pending"),
+						gt(invitation.expiresAt, now),
 					),
 				)
 				.limit(1),
 		).pipe(Effect.map(([pending]) => pending !== undefined)),
 	);
-
-/** Where a referral link opens the web app. */
-const REFERRAL_LINK_PATH = "/join";
 
 /** Crockford's base32, lowercased: no i, l, o or u, so a code read aloud or retyped survives. */
 const REFERRAL_CODE_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
@@ -152,31 +153,31 @@ const REFERRAL_CODE_LENGTH = 13;
  * they ask for their link. Resetting replaces it, so the old one finds nobody.
  */
 function referralLinks(webAppUrl: string) {
-	const linkTo = (code: string) => `${webAppUrl}${REFERRAL_LINK_PATH}/${code}`;
+	const linkTo = (code: string) => `${webAppUrl}${referralPath(code)}`;
 
-	const replaceCode = (userId: string) =>
+	const replaceCode = (memberId: string) =>
 		query((db) =>
 			db
-				.update(user)
+				.update(member)
 				.set({ referralCode: newReferralCode() })
-				.where(eq(user.id, userId))
-				.returning({ code: user.referralCode }),
+				.where(eq(member.id, memberId))
+				.returning({ code: member.referralCode }),
 		).pipe(
-			Effect.flatMap(([member]) =>
-				// Links are asked for by signed-in people, so a missing row is a defect rather than a refusal.
-				member?.code
-					? Effect.succeed(linkTo(member.code))
-					: Effect.die(new Error(`No user ${userId}`)),
+			Effect.flatMap(([referrer]) =>
+				// Links are asked for by signed-in members, so a missing row is a defect rather than a refusal.
+				referrer?.code
+					? Effect.succeed(linkTo(referrer.code))
+					: Effect.die(new Error(`No member ${memberId}`)),
 			),
 		);
 
 	return {
-		linkFor: (userId: string) =>
+		linkFor: (memberId: string) =>
 			query((db) =>
-				db.select({ code: user.referralCode }).from(user).where(eq(user.id, userId)),
+				db.select({ code: member.referralCode }).from(member).where(eq(member.id, memberId)),
 			).pipe(
-				Effect.flatMap(([member]) =>
-					member?.code ? Effect.succeed(linkTo(member.code)) : replaceCode(userId),
+				Effect.flatMap(([referrer]) =>
+					referrer?.code ? Effect.succeed(linkTo(referrer.code)) : replaceCode(memberId),
 				),
 			),
 
@@ -188,7 +189,10 @@ function referralLinks(webAppUrl: string) {
 			code.length > REFERRAL_CODE_LENGTH
 				? Effect.fail(new ReferralLinkInvalid())
 				: query((db) =>
-						db.select({ id: user.id }).from(user).where(eq(user.referralCode, code.toLowerCase())),
+						db
+							.select({ id: member.id })
+							.from(member)
+							.where(eq(member.referralCode, code.toLowerCase())),
 					).pipe(
 						Effect.flatMap(([referrer]) =>
 							referrer ? Effect.succeed(referrer.id) : Effect.fail(new ReferralLinkInvalid()),

@@ -1,30 +1,14 @@
 import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area";
 import { cn } from "cn";
-import type { Ref, UIEventHandler } from "react";
-
-type ScrollAreaProps = ScrollAreaPrimitive.Root.Props & {
-	viewportRef?: Ref<HTMLDivElement>;
-	onViewportScroll?: UIEventHandler<HTMLDivElement>;
-};
 
 /**
  * A scrolling region with a thin overlay scrollbar, so the sidebar and the
  * panels do not gain and lose a gutter as their content changes.
  */
-export function ScrollArea({
-	className,
-	children,
-	viewportRef,
-	onViewportScroll,
-	...props
-}: ScrollAreaProps) {
+export function ScrollArea({ className, children, ...props }: ScrollAreaPrimitive.Root.Props) {
 	return (
 		<ScrollAreaPrimitive.Root className={cn("relative overflow-hidden", className)} {...props}>
-			<ScrollAreaPrimitive.Viewport
-				ref={viewportRef}
-				onScroll={onViewportScroll}
-				className="focus-ring size-full"
-			>
+			<ScrollAreaPrimitive.Viewport className="focus-ring size-full">
 				{children}
 			</ScrollAreaPrimitive.Viewport>
 			<Scrollbar />
@@ -33,20 +17,12 @@ export function ScrollArea({
 	);
 }
 
-function Scrollbar({
-	orientation = "vertical",
-	className,
-	...props
-}: ScrollAreaPrimitive.Scrollbar.Props) {
+/** The vertical scrollbar, the only one a `ScrollArea` has. */
+function Scrollbar() {
 	return (
 		<ScrollAreaPrimitive.Scrollbar
-			orientation={orientation}
-			className={cn(
-				"flex touch-none select-none p-px transition-colors",
-				orientation === "vertical" ? "h-full w-2" : "h-2 flex-col",
-				className,
-			)}
-			{...props}
+			orientation="vertical"
+			className="flex h-full w-2 touch-none select-none p-px transition-colors"
 		>
 			<ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-border-strong" />
 		</ScrollAreaPrimitive.Scrollbar>

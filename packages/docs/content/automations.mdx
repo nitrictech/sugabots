@@ -1,0 +1,231 @@
+---
+title: Automations
+description: Work a project's lead bot does on its own, on its routines or whenever something calls it.
+---
+
+An automation is work a project's [lead bot](/docs/projects) does on its own:
+"every weekday at 8, sort the inbox" or "when the shop gets an order, draft a
+thank-you". The lead bot does it without being asked, in a chat of the
+project, on the project's computer and with the project's
+[connectors](/docs/connectors) as well as its own. It posts what it found in
+the **automation feed**, the automation's own chat in the project,
+where its runs are listed too.
+
+A bot's own automations are those of its hidden default project, which it
+leads, so they run on its own computer with its own connectors. They're in the
+bot's **Automations**.
+
+Whoever may change the project makes and changes its automations, and switches
+them on or off: for the own automations of a bot members made, its creator, the
+owner and admins; for a project members made, the owner and admins. Anyone in the
+project, or who can talk to the bot, can see them and, except viewers, choose
+**Start a run**.
+
+A [personal bot](/docs/bots#public-and-personal)'s automations, a
+[Personal Assistant](/docs/bots#personal-assistants)'s included, are its
+creator's: only they see them and answer the approvals their runs ask for. The
+owner and admins can only switch them off. A viewer manages and runs their own
+Personal Assistants' automations, but not those of another personal bot they made. A run on a routine, or one started by
+hand, works with the creator's permissions, as the bot does, and asks before it
+changes anything. A run a webhook or GitHub event started works only in the
+bot's own chats and files and with its own connectors, and asks before every
+tool call.
+
+## Who runs it
+
+Each run is done by the project's lead bot when it starts. Choose another lead,
+and the next run is that bot's. Whoever made the bot doing a run answers the
+approvals it asks for, if they're in the project and not a viewer, as do the
+owner and admins; see [who can answer](/docs/tools-and-approvals#who-can-answer).
+
+## Make an automation
+
+Choose **New automation**, then fill in:
+
+- **Instructions**: what to do each time, written like you'd ask in a chat.
+- **Routines**: when it runs on a timetable. Choose **Add routine** for each
+  one.
+- **Triggers**: events that start it. Choose **Add trigger** for each one: a
+  **Webhook**, or **GitHub** when the project has a
+  [GitHub app](/docs/connectors).
+
+An automation can have several of each, such as two routines and a webhook, and
+one with none runs only when someone chooses **Start a run**.
+
+## Where the result goes
+
+When a run finishes, the bot's last reply is posted in the automation feed,
+where anyone in the project can answer it and carry on. There the lead bot
+answers every message, unless it mentions only members; mentioning another bot
+doesn't bring it in. Any file it wrote during the run is shown under that reply, at the version the run
+left it at. The bot is told its last reply goes there, so it writes that reply
+for you: a morning check-in, the week's sales, a reminder.
+
+When something needs a member to act or decide, the bot mentions them, which
+notifies them. Unless the instructions say who, that's whoever made the
+automation and whoever started the run.
+
+When there's nothing worth telling anyone, such as an order that needed no
+thank-you, the bot posts nothing, and the run shows it had nothing to report.
+
+A run you open from the sidebar's **Automation runs**, a notification or
+**Approvals** opens the automation feed at that run.
+
+## Routines
+
+A routine repeats **Daily**, **Weekly** or **Monthly**, every day, week or month or
+every few: weekly on the days you pick, such as Monday to Friday, and monthly on
+one day of the month or its last day. On each of those days it runs at one time
+of your choosing, or at several. Have a go:
+
+<RoutineBuilder />
+
+A routine uses the timezone of whoever created the automation, or the
+workspace's when a bot set it up. If Sugabots was down when a run was due, it
+does one catch-up run rather than all the missed ones, and an automation never
+runs twice at the same time.
+
+## Ask the bot
+
+Whoever manages a project's automations can also ask a bot in one of its
+chats: "check in with me every morning at 9" or "move the inbox sweep to 10".
+In its own chats, that's the bot's own automations; in a project's chat, the
+project's, which the project's lead bot runs. It sets up, changes or pauses
+their routines, in the workspace's timezone, and links to the automation in its
+reply. Once an automation has more than one routine or trigger, its routine is
+changed in settings. Anyone in the project can ask what automations it has.
+Webhooks, and deleting an automation, stay in **Automations**.
+
+Turn **Manage its automations** off in a bot's **Tools** to stop it.
+
+## When something calls it
+
+A **Webhook** trigger runs its automation whenever its address is called, so other apps can set
+the project's lead bot to work. Each webhook has an address and a secret of its own; open it from the
+automation's **Triggers** to see them. The secret stays hidden until **Show**.
+
+<Careful title="Changing the secret">
+
+The old secret stops working as soon as a new one is saved, so update the app
+that calls the address straight away.
+
+</Careful>
+
+Call the address with a JSON body and a `Content-Type` of `application/json`, up to
+64 KiB. The bot gets the body along with its instructions, marked as data from outside
+so it isn't taken as orders. The caller proves it holds the secret the way the
+webhook's **Source** and **Auth** say:
+
+- **GitHub**, **Stripe**, **Slack** or **Linear**: paste the signing secret the
+  source made, and add the address in the source, which signs each call itself.
+  Slack's address check is answered for you. Linear's signed timestamp must be
+  within one minute of the server clock. Slack and Stripe allow five minutes.
+- **Generic**, for any other caller, with one **Auth**:
+  - **HMAC**: the caller signs the raw body with the secret and sends the digest in
+    the **Header** you name. Pick SHA-1, SHA-256 or SHA-512, and hex or base64. A
+    leading `sha256=` is fine.
+  - **Bearer**: `Authorization: Bearer <secret>`.
+  - **API key**: the secret in the **Header** you name.
+  - **Basic**: HTTP Basic auth with the **Username** you set and the secret as the
+    password.
+
+The secret goes in a header, never in the address. A secret you make up needs at
+least 16 characters. A webhook with no secret is run by anyone who has its address.
+
+For example, with **Bearer** auth:
+
+```sh
+curl -X POST "https://sugabots.example.com/api/webhooks/triggers/<trigger id>" \
+  -H "Authorization: Bearer <secret>" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-1042" \
+  -d '{"order": 1042, "customer": "Sam"}'
+```
+
+A caller that signs, such as Sentry, needs no custom headers. Choose **Generic**,
+**HMAC**, SHA-256 and hex, set the **Header** to `Sentry-Hook-Signature`, and
+paste the integration's client secret as the secret.
+
+Some callers call about everything, such as every change to every issue. In the
+webhook trigger's **Filter** group, choose **Add test** to run the automation
+only for calls you want. Without tests, every authenticated call can run it.
+
+Each test has a **JSON path**, with keys joined by dots, and one or more
+**Accepted value** fields. Choose **Add value** for another alternative, then
+**Save test**. Every test must pass, but any accepted value within a
+test is enough. **Cancel test** discards that edit. If a save fails,
+the draft stays available to retry. When adding a webhook trigger, save or cancel
+its test before choosing **Add trigger**.
+
+Values match exactly: commas, spaces and line breaks belong to the value rather
+than separating alternatives. An empty value matches an empty string. Numbers
+and booleans are compared as text, such as `2` and `false`. A missing path, an
+object or `null` doesn't match a value.
+
+Where a path crosses a list, any matching item counts. For example,
+`data.labels.name` with the accepted value `10x` matches an issue that has that
+label among others. Each test searches the list independently.
+
+For example, to run only when Linear creates an issue labelled `10x`, save these
+three tests:
+
+- **JSON path** `type`, **Accepted value** `Issue`
+- **JSON path** `action`, **Accepted value** `create`
+- **JSON path** `data.labels.name`, **Accepted value** `10x`
+
+Linear sends `update` when a label is added to an existing issue, so these
+tests don't pass it. Accepting `update` would also match other changes to
+an issue that already has the label; these tests don't check what changed.
+
+A filter allows at most 10 tests, each with at most 20 accepted values.
+Paths and values can each be at most 200 characters. Remove every test to
+stop filtering calls. Changing authentication or the delivery ID header keeps
+the filter, and a copied automation keeps its filter too.
+
+A call is answered with `202` and the run's `runId` as soon as the run is queued,
+without waiting for the bot. Otherwise:
+
+- `401` if the secret or signature is wrong, or the webhook is off or gone.
+- `200` with `{"ignored": true}` if the call is genuine but its filter turns it away. No run
+  starts, and the call isn't recorded.
+- `400` if the body isn't JSON or the delivery id is over 200 characters.
+- `413` if the body is over 64 KiB.
+
+A delivery id makes a retry land on the run the first call started, which the
+reply marks `"duplicate": true`. The same id sent with a different body is refused
+with `409`. Where the id comes from depends on the **Source**:
+
+- **GitHub** and **Linear**: their own delivery header, `X-GitHub-Delivery` or
+  `Linear-Delivery`.
+- **Slack** and **Stripe**: the `event_id` of a Slack event, or the `id` of a Stripe
+  event, in the body.
+- **Generic**: the header you name in **Delivery ID header**, `Idempotency-Key`
+  until you change it. Clear it, and every call starts a run.
+
+GitHub and generic HMAC sign the body without a timestamp. Their delivery ID
+headers help deduplicate retries. A captured signed request can still be
+replayed, so keep signed requests and signatures out of shared logs.
+
+With no id, or when the header is missing, every call starts a run. A generic
+webhook with an explicit header reads nothing else, so a caller that names its
+deliveries another way, such as `Svix-Id` or `X-Shopify-Webhook-Id`, needs its
+header named here. Authentication headers cannot be used as delivery IDs.
+
+<Careful title="Sentry retries aren't deduplicated">
+
+Sentry's `Request-ID` changes with every attempt, so a retry of a Sentry delivery
+starts a second run, whatever **Delivery ID header** says. Leave the field blank
+and let the bot spot the repeat from the alert itself.
+
+</Careful>
+
+## Runs
+
+Each run has a chat of its own with everything the bot did, and shows in the
+automation feed as a line like "Morning inbox sweep ran". A posted
+result links back to its run, under the message. A run that fails or is
+stopped posts nothing; its line says what happened. If a run needs an
+[approval](/docs/tools-and-approvals), only whoever manages the bot doing the
+run, and can see its chat, can answer it: the bot's creator, if they're in the
+project and not a viewer, the owner or an admin; for a personal bot, its
+creator alone, even a viewer. See [who can answer](/docs/tools-and-approvals#who-can-answer).

@@ -1,36 +1,19 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-	durableEventTypeSchema,
+	chatUpdateEventSchema,
 	EVENT_VERSION,
-	ephemeralEventTypeSchema,
-	eventPayloadSchemas,
 	isDurableEventType,
 	streamEvent,
 	streamEventSchema,
-	threadUpdateEventSchema,
 	workspaceUpdateEventSchema,
 } from "./events.ts";
-import { testPerson } from "./testing.ts";
+import { testMember } from "./testing.ts";
 
 describe("durability", () => {
 	it("persists state changes and not progress", () => {
 		expect(isDurableEventType("message.created")).toBe(true);
 		expect(isDurableEventType("message.delta")).toBe(false);
-	});
-
-	it("classifies every declared type, and nothing twice", () => {
-		const durable = durableEventTypeSchema.literals;
-		const ephemeral = ephemeralEventTypeSchema.literals;
-
-		expect(durable.every(isDurableEventType)).toBe(true);
-		expect(ephemeral.some(isDurableEventType)).toBe(false);
-		expect(new Set([...durable, ...ephemeral]).size).toBe(durable.length + ephemeral.length);
-	});
-
-	it("does not declare message-routed events", () => {
-		expect(isDurableEventType("chat.message_routed")).toBe(false);
-		expect("chat.message_routed" in eventPayloadSchemas).toBe(false);
 	});
 
 	it("treats a type it has never heard of as ephemeral", () => {
@@ -42,12 +25,12 @@ describe("durability", () => {
 
 describe("envelope", () => {
 	it("stamps the version and keeps the payload", () => {
-		const event = streamEvent("thread.created", { threadId: "c1" });
+		const event = streamEvent("chat.changed", { chatId: "c1" });
 
 		expect(event).toEqual({
 			v: EVENT_VERSION,
-			type: "thread.created",
-			threadId: "c1",
+			type: "chat.changed",
+			chatId: "c1",
 		});
 	});
 
@@ -55,20 +38,10 @@ describe("envelope", () => {
 		expect(streamEvent("unknown.event", { v: 99 }).v).toBe(EVENT_VERSION);
 	});
 
-	it("parses an event carrying fields this version has never seen", () => {
-		const parsed = Schema.decodeSync(streamEventSchema)({
-			v: 1,
-			type: "thread.changed",
-			surprise: true,
-		});
-
-		expect(parsed.surprise).toBe(true);
-	});
-
 	it("rejects an event from a version this client cannot read", () => {
-		expect(
-			Schema.decodeUnknownResult(streamEventSchema)({ v: 2, type: "thread.changed" })._tag,
-		).toBe("Failure");
+		expect(Schema.decodeUnknownResult(streamEventSchema)({ v: 2, type: "chat.changed" })._tag).toBe(
+			"Failure",
+		);
 	});
 
 	it("rejects an event with no type", () => {
@@ -77,6 +50,7 @@ describe("envelope", () => {
 
 	it.each([
 		"message.created",
+		"message.execution_started",
 		"message.delta",
 		"message.completed",
 		"message.failed",
@@ -84,53 +58,38 @@ describe("envelope", () => {
 		"tool_call.completed",
 		"turn.started",
 		"turn.completed",
-		"thread.changed",
-		"thread.notice",
-		"collaboration.updated",
-	])("recognizes the known thread update %s", (type) => {
+		"chat.changed",
+		"chat.notice",
+	])("recognizes the known chat update %s", (type) => {
 		const ids = {
-			threadId: "00000000-0000-4000-8000-000000000001",
+			chatId: "00000000-0000-4000-8000-000000000001",
 			turnId: "00000000-0000-4000-8000-000000000002",
-			agentId: "00000000-0000-4000-8000-000000000003",
+			botId: "00000000-0000-4000-8000-000000000003",
 		};
 		const payloads: Record<string, Record<string, unknown>> = {
 			"message.created": { ...ids, message: message() },
-			"message.delta": { ...ids, messageId: "m1", offset: 0, text: "hi" },
+			"message.execution_started": { ...ids, messageId: "m1", content: "hi", execution: 2 },
+			"message.delta": { ...ids, messageId: "m1", offset: 0, text: "hi", execution: 1 },
 			"message.completed": {
 				...ids,
 				messageId: "m1",
 				content: "hi",
 				status: "complete",
+				finishedAt: "2026-11-23T10:00:00.000Z",
 			},
 			"message.failed": {
 				...ids,
 				messageId: "m1",
-				willRetry: false,
 				error: "Provider returned 403",
 			},
 			"tool_call.started": { ...ids, messageId: "m1", toolCall: toolCall("running") },
 			"tool_call.completed": { ...ids, messageId: "m1", toolCall: toolCall("completed") },
-			"turn.completed": { ...ids, status: "done" },
-			"thread.notice": { ...ids, notice: "Ada has no model chosen, so it cannot reply." },
-			"collaboration.updated": {
-				...ids,
-				messageId: "00000000-0000-4000-8000-000000000004",
-				collaboration: {
-					type: "collaboration",
-					id: "00000000-0000-4000-8000-000000000006",
-					agentId: ids.agentId,
-					agentName: "Helper",
-					threadId: "00000000-0000-4000-8000-000000000007",
-					brief: "Look into it",
-					status: "waiting",
-					answer: null,
-					atOffset: 0,
-				},
-			},
+			"turn.completed": ids,
+			"chat.notice": { ...ids, notice: "Ada has no model chosen, so it cannot reply." },
 		};
 
 		expect(
-			Schema.decodeUnknownResult(threadUpdateEventSchema)({
+			Schema.decodeUnknownResult(chatUpdateEventSchema)({
 				v: EVENT_VERSION,
 				type,
 				...ids,
@@ -146,46 +105,46 @@ describe("envelope", () => {
 		expect(Schema.encodeSync(streamEventSchema)(parsed)).toEqual(event);
 	});
 
-	it("preserves extras while validating known channel payloads", () => {
+	it("preserves extras while validating known project payloads", () => {
 		const event = {
 			v: 1,
 			type: "message.delta",
-			threadId: "00000000-0000-4000-8000-000000000001",
+			chatId: "00000000-0000-4000-8000-000000000001",
 			messageId: "m1",
 			offset: 0,
 			text: "hi",
+			execution: 1,
 			extra: { future: true },
 		};
-		const parsed = Schema.decodeUnknownSync(threadUpdateEventSchema)(event);
+		const parsed = Schema.decodeUnknownSync(chatUpdateEventSchema)(event);
 		expect(parsed).toEqual(event);
-		expect(Schema.encodeSync(threadUpdateEventSchema)(parsed)).toEqual(event);
-		expect(Schema.decodeUnknownResult(threadUpdateEventSchema)({ ...event, offset: -1 })._tag).toBe(
+		expect(Schema.encodeSync(chatUpdateEventSchema)(parsed)).toEqual(event);
+		expect(Schema.decodeUnknownResult(chatUpdateEventSchema)({ ...event, offset: -1 })._tag).toBe(
 			"Failure",
 		);
 	});
 
 	it("keeps open empty payloads and workspace envelopes", () => {
 		const extras = { future: { value: 1 } };
-		expect(Schema.decodeSync(eventPayloadSchemas["agent.updated"])(extras)).toEqual(extras);
 		for (const payload of [
 			{ type: "reset" },
-			{ type: "thread.changed", threadId: "00000000-0000-4000-8000-000000000001" },
+			{ type: "chat.changed", chatId: "00000000-0000-4000-8000-000000000001" },
 		]) {
 			const event = { v: 1, ...payload, ...extras };
 			expect(Schema.decodeUnknownSync(workspaceUpdateEventSchema)(event)).toEqual(event);
-			expect(Schema.decodeUnknownSync(threadUpdateEventSchema)(event)).toEqual(event);
+			expect(Schema.decodeUnknownSync(chatUpdateEventSchema)(event)).toEqual(event);
 		}
 	});
 
-	it("accepts conversation thread changes", () => {
+	it("accepts changes to a chat's nested chats", () => {
 		const event = {
 			v: EVENT_VERSION,
-			type: "conversation.thread_changed",
-			conversationId: "00000000-0000-4000-8000-000000000001",
-			threadId: "00000000-0000-4000-8000-000000000002",
+			type: "chat.nested_chat_changed",
+			rootChatId: "00000000-0000-4000-8000-000000000001",
+			chatId: "00000000-0000-4000-8000-000000000002",
 		};
 		expect(Schema.decodeUnknownResult(workspaceUpdateEventSchema)(event)._tag).toBe("Success");
-		expect(Schema.decodeUnknownResult(threadUpdateEventSchema)(event)._tag).toBe("Success");
+		expect(Schema.decodeUnknownResult(chatUpdateEventSchema)(event)._tag).toBe("Success");
 	});
 });
 
@@ -198,7 +157,7 @@ function toolCall(status: "running" | "completed") {
 		output: status === "completed" ? { title: "Example" } : null,
 		status,
 		error: null,
-		mutating: false,
+		approval: null,
 		atOffset: 0,
 		startedAt: "2026-09-14T00:00:00.000Z",
 		finishedAt: status === "completed" ? "2026-09-14T00:00:01.000Z" : null,
@@ -208,9 +167,8 @@ function toolCall(status: "running" | "completed") {
 function message() {
 	return {
 		id: "00000000-0000-4000-8000-000000000004",
-		threadId: "00000000-0000-4000-8000-000000000001",
-		author: testPerson({ id: "00000000-0000-4000-8000-000000000005", name: "Sam" }),
-		kind: "text" as const,
+		chatId: "00000000-0000-4000-8000-000000000001",
+		author: testMember({ id: "00000000-0000-4000-8000-000000000005", name: "Sam" }),
 		status: "complete" as const,
 		parts: [{ type: "text" as const, text: "hi" }],
 		content: "hi",

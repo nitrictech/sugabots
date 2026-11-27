@@ -1,0 +1,448 @@
+#!/bin/bash
+# Desktops in this computer, each on its own display, so bots working at the
+# same time never click on each other's windows.
+#
+#   sugabots-desktop start [display]               start a bare desktop, print its DISPLAY
+#   sugabots-desktop stop display                  stop it, and its browser
+#   sugabots-desktop desktop name profile output [--accent #RRGGBB] [--folder dir]
+#                                                  the desktop for `name`, without a browser
+#   sugabots-desktop session name profile output [--accent #RRGGBB] [--folder dir]
+#                                                  the desktop for `name`, with its browser
+#   sugabots-desktop open browser|terminal|files   what the dock opens, on $DISPLAY
+#
+# `desktop` is what Sugabots runs when a member opens a bot's desktop, and
+# `session` when the bot uses its browser. Both start the named desktop, or
+# find it running: an Xfce session with a dock, served to VNC viewers.
+# `session` also starts the browser on it, or finds it running, and prints
+# `display=N viewer=PORT watch=PORT browser=PORT started=yes|no password=P
+# watch-password=P`, where `started` says whether the browser had to start;
+# `desktop` prints the same without `browser`.
+#
+# `--accent` is the bot's colour, which the desktop is drawn in: its
+# wallpaper, window frames, dock and browser. A running desktop given another
+# takes it at once, apart from a browser already open, which takes it when it
+# next starts. Without one, a desktop keeps the colour it has, or starts in
+# Sugabots' own.
+#
+# `--folder` is the folder of the chat the desktop is for, where the dock's
+# Files opens, beside the bot's home and the workspace. `start` takes the
+# folder it runs in.
+#
+# The browser is Chromium driven by Playwright MCP, shown on the desktop so
+# members watching see what the bot does, with its profile under `profile`
+# and its downloads and screenshots in `output`. Programs that stopped, as
+# they do when a paused computer comes back, start again on the same display.
+#
+# Display N is served to VNC viewers over a WebSocket on port 5900+N, which
+# `watch` reports too. It takes two passwords, made when the desktop starts:
+# one to use the desktop, and one to only watch it, which logs in a viewer
+# whose mouse and keys are ignored. Nothing else in the computer can use them,
+# such as a page in the browser, which can't read the files they're kept in.
+# Sugabots reads them from what `desktop` and `session` print. Its
+# browser's MCP server is on port 8930+N, and the browser's DevTools on port
+# 9230+N.
+set -euo pipefail
+
+# Set here rather than relied on from the image: E2B runs commands without
+# the image's ENV.
+export LANG="${LANG:-C.UTF-8}"
+
+state="${TMPDIR:-/tmp}/sugabots-desktop"
+mkdir -p "$state/sessions"
+
+free_display() {
+	local n=1
+	while [ -e "/tmp/.X11-unix/X$n" ] || [ -e "/tmp/.X$n-lock" ] || [ -n "$(grep -lx "$n" "$state"/sessions/* 2>/dev/null)" ]; do
+		n=$((n + 1))
+	done
+	echo "$n"
+}
+
+# Whether every program of display N's `part`, desktop or browser, is running.
+running() {
+	local pids="$state/$1.$2.pids"
+	[ -f "$pids" ] || return 1
+	while read -r pid; do kill -0 "$pid" 2>/dev/null || return 1; done <"$pids"
+}
+
+desktop() {
+	local n="$1" log="$state/$1.log" pids="$state/$1.desktop.pids"
+	export DISPLAY=":$n"
+	rm -f "/tmp/.X$n-lock" "/tmp/.X11-unix/X$n" "$state/$n.vnc"
+	local password watch_password
+	password="$(new_password)"
+	watch_password="$(new_password)"
+	(
+		umask 077
+		printf '%s\n%s\n' "$password" "$watch_password" >"$state/$n.passwords"
+		# The second password logs in a viewer whose mouse and keys are ignored.
+		vncpasswd -f <"$state/$n.passwords" >"$state/$n.passwd"
+	)
+	# The display and its VNC server in one, which sends viewers changes as
+	# they happen rather than waiting for each to ask for the next, so a slow
+	# connection delays frames rather than dropping most of them. It takes
+	# viewers only on a socket nothing else in the computer can open, which
+	# websockify serves. -ac: any program in this computer may draw on it. -s 0:
+	# no screensaver, which would blank the screen after ten minutes without
+	# keyboard or mouse input, and bots drive the browser through
+	# Playwright, not the X server. -SendPrimary=0: viewers get what's
+	# copied, not every selection, which would replace the member's clipboard.
+	# -FrameRate 30: half the default's frames, which over a long link settle
+	# sooner than more frames would; it costs a keystroke about 8 ms.
+	# -CompareFB 1: never sends a region redrawn with the pixels it had.
+	Xvnc "$DISPLAY" -geometry 1280x960 -depth 24 -ac -s 0 -nolisten tcp \
+		-rfbport -1 -rfbunixpath "$state/$n.vnc" -rfbunixmode 0600 \
+		-SecurityTypes VncAuth -PasswordFile "$state/$n.passwd" -AlwaysShared -SendPrimary=0 \
+		-FrameRate 30 -CompareFB 1 >>"$log" 2>&1 &
+	echo $! >"$pids"
+	for _ in $(seq 50); do [ -S "$state/$n.vnc" ] && break; sleep 0.1; done
+	websockify $((5900 + n)) --unix-target="$state/$n.vnc" >>"$log" 2>&1 &
+	echo $! >>"$pids"
+	# Xfce keeps its settings on the session bus, which `open` and `restyle`
+	# reach it by.
+	eval "$(dbus-launch --sh-syntax)"
+	echo "$DBUS_SESSION_BUS_PID" >>"$pids"
+	echo "$DBUS_SESSION_BUS_ADDRESS" >"$state/$n.bus"
+	draw_look "$n" >>"$log" 2>&1
+	# The dock's plugin reads its settings only from the home.
+	mkdir -p "$HOME/.config/xfce4/panel"
+	cp /usr/share/sugabots-desktop/docklike.rc "$HOME/.config/xfce4/panel/docklike-1.rc"
+	# The session starts the window manager, settings daemon, dock and
+	# wallpaper, and starts any of them again that stops.
+	xfce4-session >>"$log" 2>&1 &
+	echo $! >>"$pids"
+	# Bots drive the browser through Playwright, which never moves the X
+	# pointer, so it would sit wherever it was left, drawn into the picture
+	# viewers see. Hidden until a member's mouse moves it, and again once
+	# it's been still for a few seconds.
+	unclutter --start-hidden >>"$log" 2>&1 &
+	echo $! >>"$pids"
+}
+
+# Draws display N's look in its colour, and points its desktop, on whichever
+# monitor Xvnc names, at the wallpaper. With DISPLAY and the display's
+# session bus set.
+draw_look() {
+	local accent monitor backdrop
+	accent="$(display_accent "$1")"
+	sugabots-desktop-look "$accent"
+	monitor="$(xrandr --listactivemonitors | awk 'NR == 2 { print $4 }')"
+	backdrop="/backdrop/screen0/monitor$monitor/workspace0"
+	xfconf-query -c xfce4-desktop -p "$backdrop/last-image" -n -t string \
+		-s "$HOME/.local/share/sugabots-desktop/wallpaper-${accent#\#}.png"
+	# Zoomed: filling the screen without stretching.
+	xfconf-query -c xfce4-desktop -p "$backdrop/image-style" -n -t int -s 5
+}
+
+# The folder of the chat display N's desktop is for, as `desktop`,
+# `session` or `start` recorded it; none for a desktop started without one.
+display_folder() {
+	cat "$state/$1.folder" 2>/dev/null || true
+}
+
+# Where display N's browser saves what members download: in the chat's
+# folder, beside the bots' work, or the bot's home without one.
+display_downloads() {
+	local chat
+	chat="$(display_folder "$1")"
+	echo "${chat:-$HOME}/Downloads"
+}
+
+# Sugabots' own accent, for a desktop no bot's colour was given.
+DEFAULT_ACCENT="#405ec9"
+
+# Display N's colour, as `record_accent` last recorded it.
+display_accent() {
+	cat "$state/$1.accent" 2>/dev/null || echo "$DEFAULT_ACCENT"
+}
+
+# Reads `desktop` and `session`'s options into `accent` and `folder`, each
+# empty without one.
+desktop_options() {
+	accent=""
+	folder=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--accent) accent="${2:?accent colour}" ;;
+		--folder) folder="${2:?chat folder}" ;;
+		*)
+			echo "unknown option: $1" >&2
+			exit 2
+			;;
+		esac
+		shift 2
+	done
+	# It goes into the look's SVG, CSS and the browser's settings, so nothing
+	# but a colour may.
+	if [ -n "$accent" ] && ! [[ "$accent" =~ ^#[0-9a-fA-F]{6}$ ]]; then
+		echo "accent must be #RRGGBB: $accent" >&2
+		exit 2
+	fi
+}
+
+# Records `accent` for display N. Sets `accent_changed`.
+record_accent() {
+	local n="$1"
+	accent_changed=no
+	[ -n "$accent" ] || return 0
+	[ "$accent" = "$(display_accent "$n")" ] && return 0
+	echo "$accent" >"$state/$n.accent"
+	accent_changed=yes
+}
+
+# Draws display N, running from before, in its recorded colour. Apps already
+# open keep the colour they started with.
+restyle() {
+	local n="$1" log="$state/$1.log"
+	(
+		export DISPLAY=":$n" DBUS_SESSION_BUS_ADDRESS
+		DBUS_SESSION_BUS_ADDRESS="$(cat "$state/$n.bus")"
+		draw_look "$n"
+		# xfwm4 reads its theme again only when its name changes, so it moves
+		# to another and back. The dock reads its colours when it starts.
+		xfconf-query -c xfwm4 -p /general/theme -s Default
+		xfconf-query -c xfwm4 -p /general/theme -s Sugabots
+		xfce4-panel --restart
+	) >>"$log" 2>&1
+}
+
+# Eight characters, all VNC authentication reads of a password: 48 random bits.
+new_password() {
+	head -c 6 /dev/urandom | base64 | tr '+/' '-_'
+}
+
+# The passwords of display N's VNC servers, as `desktop` and `session` print them.
+passwords() {
+	local password watch_password
+	{ read -r password; read -r watch_password; } <"$state/$1.passwords"
+	echo "password=$password watch-password=$watch_password"
+}
+
+# Chromium's flags for its own sandbox. It needs user namespaces, which some
+# computers refuse (Docker's default seccomp profile does), and refuses to
+# start as root with one; either way it runs without. --test-type leaves out
+# the bar warning that --no-sandbox is on.
+chromium_sandbox_flags() {
+	if [ "$(id -u)" = 0 ] || ! unshare --user --map-root-user --pid --net --fork true 2>/dev/null; then
+		echo "--no-sandbox --test-type"
+	fi
+}
+
+# Chromium trusts the certificate authority the computer provider intercepts
+# HTTPS with. OpenSandbox's credential proxy signs every site's certificate
+# with its own, named in NODE_EXTRA_CA_CERTS, and Chromium trusts an added
+# authority only from its store in the home, $HOME/.pki/nssdb. Without it,
+# every site fails with ERR_CERT_AUTHORITY_INVALID.
+#
+# The home outlives the computer, so the authority of an earlier computer is
+# removed first, and with no proxy none is left trusted: adding a certificate
+# under a name already in the store keeps the old one beside it. Only the
+# file's first certificate is added; OpenSandbox's holds one. Desktops for
+# the same bot share the store, so they take turns.
+trust_provider_authority() {
+	local store="$HOME/.pki/nssdb" authority="${NODE_EXTRA_CA_CERTS:-}"
+	mkdir -p "$store"
+	(
+		flock 9
+		if [ -f "$store/cert9.db" ]; then
+			while certutil -d "sql:$store" -D -n "$PROVIDER_AUTHORITY" 2>/dev/null; do :; done
+		fi
+		[ -r "$authority" ] || exit 0
+		[ -f "$store/cert9.db" ] || certutil -d "sql:$store" -N --empty-password
+		certutil -d "sql:$store" -A -t "C,," -n "$PROVIDER_AUTHORITY" -i "$authority"
+	) 9>"$store/.sugabots-desktop.lock"
+}
+# The name keeps what computers were once called: homes made then hold the
+# authority under it, and it is the name an earlier one is removed by.
+PROVIDER_AUTHORITY=sandbox-provider
+
+# Chromium locks its profile with a link naming the machine and process using
+# it. The profile is kept with the work, and a computer made again with the
+# same work, as an upgrade makes, is another machine to Chromium, so it asks
+# whether that machine still uses the profile instead of starting. Only this
+# computer's own browser uses the profile, so a lock naming another machine is
+# left over; one naming this machine is Chromium's to sort out.
+unlock_profile() {
+	local dir="$1/chromium" lock
+	lock="$(readlink "$dir/SingletonLock" 2>/dev/null)" || return 0
+	[ "${lock%-*}" = "$(hostname)" ] && return 0
+	rm -f "$dir/SingletonLock" "$dir/SingletonSocket" "$dir/SingletonCookie"
+}
+
+# Chromium draws its own frame around its tabs, in the colours of the theme
+# sugabots-desktop-look writes, which it loads when it starts, and saves
+# downloads to `downloads` without asking. Set before it starts: it writes
+# its preferences back over any change while running.
+set_browser_preferences() {
+	local preferences="$1/chromium/Default/Preferences" downloads="$2"
+	mkdir -p "$(dirname "$preferences")" "$downloads"
+	[ -s "$preferences" ] || echo '{}' >"$preferences"
+	jq --arg downloads "$downloads" '
+		.browser.custom_chrome_frame = true
+		| .download.default_directory = $downloads
+		| .download.prompt_for_download = false
+		| .savefile.default_directory = $downloads
+	' "$preferences" >"$preferences.new"
+	mv "$preferences.new" "$preferences"
+}
+
+browser() {
+	local n="$1" profile="$2" output="$3" log="$state/$1.log" pids="$state/$1.browser.pids"
+	local devtools=$((9230 + n))
+	mkdir -p "$profile" "$output"
+	unlock_profile "$profile"
+	set_browser_preferences "$profile" "$(display_downloads "$n")" >>"$log" 2>&1 ||
+		echo "The browser's frame and downloads folder couldn't be set." >>"$log"
+	# A browser that warns about every site is better than none.
+	trust_provider_authority >>"$log" 2>&1 ||
+		echo "The browser couldn't be made to trust the computer provider's certificate authority." >>"$log"
+	# Started here rather than by Playwright MCP, which closes a browser it
+	# launched when its last client disconnects: at the end of every turn.
+	# Maximized, so it stops at the dock. The profile is
+	# found through XDG_CONFIG_HOME rather than --user-data-dir, which would
+	# put its path in the windows' names, and the dock would no longer know
+	# them as the Browser's. Without smooth scrolling, a scroll is one jump
+	# rather than an animation whose every frame goes to viewers.
+	DISPLAY=":$n" XDG_CONFIG_HOME="$profile" chromium $(chromium_sandbox_flags) --start-maximized \
+		--class=sugabots-browser --load-extension="$HOME/.local/share/sugabots-desktop/chromium-theme" \
+		--remote-debugging-address=127.0.0.1 --remote-debugging-port="$devtools" \
+		--disable-smooth-scrolling --no-first-run --no-default-browser-check about:blank >>"$log" 2>&1 &
+	echo $! >"$pids"
+	for _ in $(seq 100); do
+		curl -sf -o /dev/null "http://127.0.0.1:$devtools/json/version" && break
+		sleep 0.1
+	done
+	playwright-mcp --host 0.0.0.0 --port $((8930 + n)) --allowed-hosts '*' \
+		--cdp-endpoint "http://127.0.0.1:$devtools" \
+		--output-dir "$output" --file-paths absolute >>"$log" 2>&1 &
+	echo $! >>"$pids"
+	for _ in $(seq 100); do
+		curl -s -o /dev/null "http://localhost:$((8930 + n))/mcp" && break
+		sleep 0.1
+	done
+}
+
+stop_part() {
+	local pids="$state/$1.$2.pids"
+	[ -f "$pids" ] || return 0
+	xargs -r kill <"$pids" 2>/dev/null || true
+	rm -f "$pids"
+}
+
+stop() {
+	local n="${1:?which display}"
+	stop_part "$n" browser
+	stop_part "$n" desktop
+}
+
+# The display of the desktop named `name`, running in the colour `accent`
+# gives, with where its browser keeps its profile and output recorded for the
+# dock. Sets `n` and `desktop_started`.
+named_desktop() {
+	local name="$1" profile="$2" output="$3"
+	local file="$state/sessions/$name"
+	if [ -f "$file" ]; then n="$(cat "$file")"; else n="$(free_display)"; echo "$n" >"$file"; fi
+	printf '%s\n%s\n' "$profile" "$output" >"$state/$n.browser-dirs"
+	[ -z "$folder" ] || echo "$folder" >"$state/$n.folder"
+	record_accent "$n"
+	desktop_started=no
+	if ! running "$n" desktop; then
+		# The browser can't outlive the display it was on.
+		stop "$n"
+		desktop "$n"
+		desktop_started=yes
+	elif [ "$accent_changed" = yes ]; then
+		restyle "$n"
+	fi
+}
+
+desktop_only() {
+	desktop_options "${@:4}"
+	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
+	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) started=$desktop_started $(passwords "$n")"
+}
+
+session() {
+	desktop_options "${@:4}"
+	named_desktop "${1:?name}" "${2:?profile directory}" "${3:?output directory}"
+	local started=no
+	if ! running "$n" browser; then
+		stop_part "$n" browser
+		browser "$n" "$2" "$3"
+		started=yes
+	fi
+	echo "display=$n viewer=$((5900 + n)) watch=$((5900 + n)) browser=$((8930 + n)) started=$started $(passwords "$n")"
+}
+
+# Thunar on display N, at its chat's folder, with the places beside it: This
+# Chat, Downloads, This Bot, Workspace, and its own File System. They are
+# bookmarks, which GTK reads from the home, and the bot's home is shared by
+# its desktops in every chat, so Thunar runs with a home of its own for the
+# display. Its Home entry, that home, is hidden; it can't hide its File
+# System instead of a bookmark to `/`, as it hides entries by their folder.
+# A shell Thunar opens goes back to the bot's home.
+open_files() {
+	local n="$1" bot_home="$HOME" chat downloads
+	local files_home="$state/$n.files"
+	chat="$(display_folder "$n")"
+	downloads="$(display_downloads "$n")"
+	# A chat's folder is made by the first thing to use it, which may not
+	# have happened yet.
+	mkdir -p "$files_home/.config/gtk-3.0" ${chat:+"$chat"} "$downloads"
+	# The bot's colours, and the image the dock's CSS names beside them.
+	ln -sf "$bot_home/.config/gtk-3.0/gtk.css" "$bot_home/.config/gtk-3.0/sugabots-dock-dot.svg" \
+		"$files_home/.config/gtk-3.0/"
+	{
+		[ -z "$chat" ] || echo "file://$chat This Chat"
+		echo "file://$downloads Downloads"
+		echo "file://$bot_home This Bot"
+		echo "file:///workspace Workspace"
+	} >"$files_home/.config/gtk-3.0/bookmarks"
+	cat >"$files_home/.bashrc" <<-EOF
+		export HOME=$(printf '%q' "$bot_home")
+		[ -f "\$HOME/.bashrc" ] && . "\$HOME/.bashrc"
+	EOF
+	xfconf-query -c thunar -p /hidden-bookmarks -n -a -t string -s "file://$files_home"
+	HOME="$files_home" exec thunar "${chat:-/workspace}"
+}
+
+# What the dock opens on the desktop it runs on.
+open() {
+	local n="${DISPLAY#:}"
+	case "${1:-}" in
+	browser)
+		local profile output
+		{ read -r profile; read -r output; } <"$state/$n.browser-dirs"
+		if running "$n" browser; then
+			# The same profile reaches the running browser, which opens the window.
+			XDG_CONFIG_HOME="$profile" exec chromium $(chromium_sandbox_flags) --new-window
+		fi
+		stop_part "$n" browser
+		browser "$n" "$profile" "$output"
+		;;
+	terminal) exec xfce4-terminal --working-directory=/workspace ;;
+	files) open_files "$n" ;;
+	*)
+		echo "usage: sugabots-desktop open browser|terminal|files" >&2
+		exit 2
+		;;
+	esac
+}
+
+case "${1:-}" in
+start)
+	n="${2:-$(free_display)}"
+	# Bots start desktops from their chat's folder.
+	echo "$PWD" >"$state/$n.folder"
+	desktop "$n"
+	echo "DISPLAY=:$n"
+	;;
+stop) stop "${2:-}" ;;
+desktop) desktop_only "${@:2}" ;;
+session) session "${@:2}" ;;
+open) open "${2:-}" ;;
+*)
+	echo "usage: sugabots-desktop start [display] | stop display | desktop name profile output [--accent #RRGGBB] [--folder dir] | session name profile output [--accent #RRGGBB] [--folder dir] | open browser|terminal|files" >&2
+	exit 2
+	;;
+esac

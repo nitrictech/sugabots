@@ -1,6 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
-import type { Channel, StreamEvent } from "@sugabots/contracts";
-import { Data, Deferred, Duration, Effect, Fiber, Queue } from "effect";
+import type { EventStream, StreamEvent } from "@sugabots/contracts";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Deferred, Duration, Effect, ErrorReporter, Fiber, Queue, Schema } from "effect";
 import { Ids } from "../../ids/ids.ts";
 import type { EventBus } from "./bus.ts";
 import type { EventStore } from "./store.ts";
@@ -16,13 +17,13 @@ import type { EventStore } from "./store.ts";
  */
 export interface EventRelay {
 	/** Tells every other process about a delivery this one has already made locally. */
-	broadcast(channel: Channel, delivery: EventBus.Delivery): Promise<void>;
+	broadcast(stream: EventStream, delivery: EventBus.Delivery): Promise<void>;
 	/**
 	 * Hands over what other processes broadcast, until the returned function is
 	 * called. Resolves once listening, so nothing published after that is missed.
 	 */
 	listen(
-		receive: (channel: Channel, delivery: EventBus.Delivery) => void,
+		receive: (stream: EventStream, delivery: EventBus.Delivery) => void,
 	): Promise<() => Promise<void>>;
 }
 
@@ -44,7 +45,7 @@ const PROBE_TIMEOUT = Duration.seconds(5);
 /** What travels in a notification. `event` is absent when it did not fit. */
 interface Notice {
 	from: string;
-	channel: Channel;
+	stream: EventStream;
 	seq?: number;
 	event?: StreamEvent;
 }
@@ -60,9 +61,17 @@ interface Probe {
  * a transaction pooler such as PgBouncer, `LISTEN` succeeds on a backend that
  * then goes back to the pool, and nothing it hears reaches this process.
  */
-export class NoticesNotHeard extends Data.TaggedError("NoticesNotHeard") {
+export class NoticesNotHeard
+	extends Schema.TaggedError<NoticesNotHeard>()("NoticesNotHeard", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
 	override get message() {
 		return "The event relay's LISTEN hears nothing, as happens through a transaction pooler such as PgBouncer. Set DATABASE_DIRECT_URL to a direct connection to Postgres.";
+	}
+	get userMessage() {
+		return userText`Live updates are unavailable. Refresh to see the latest changes.`;
 	}
 }
 
@@ -87,8 +96,8 @@ export const postgresEventRelay = (
 		const origin = yield* ids.random;
 
 		return {
-			async broadcast(channel, delivery) {
-				const whole: Notice = { from: origin, channel, seq: delivery.seq, event: delivery.event };
+			async broadcast(stream, delivery) {
+				const whole: Notice = { from: origin, stream, seq: delivery.seq, event: delivery.event };
 				let notice = JSON.stringify(whole);
 				if (Buffer.byteLength(notice) > MAX_NOTICE_BYTES) {
 					if (delivery.seq === undefined) {
@@ -96,7 +105,7 @@ export const postgresEventRelay = (
 						// it carries the whole text anyway.
 						return;
 					}
-					notice = JSON.stringify({ from: origin, channel, seq: delivery.seq } satisfies Notice);
+					notice = JSON.stringify({ from: origin, stream, seq: delivery.seq } satisfies Notice);
 				}
 				await runPromise(client.notify(NOTIFY_CHANNEL, notice));
 			},
@@ -115,15 +124,12 @@ export const postgresEventRelay = (
 					if (notice.from === origin) return;
 					const event = notice.event ?? (await storedEvent(notice));
 					if (!event) return;
-					receive(
-						notice.channel,
-						notice.seq === undefined ? { event } : { seq: notice.seq, event },
-					);
+					receive(notice.stream, notice.seq === undefined ? { event } : { seq: notice.seq, event });
 				}
 
-				async function storedEvent({ channel, seq }: Notice): Promise<StreamEvent | undefined> {
+				async function storedEvent({ stream, seq }: Notice): Promise<StreamEvent | undefined> {
 					if (seq === undefined) return undefined;
-					const [stored] = await store.replay(channel, seq - 1, 1);
+					const [stored] = await store.replay(stream, seq - 1, 1);
 					return stored?.seq === seq ? stored.event : undefined;
 				}
 

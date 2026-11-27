@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"@effect/platform-node": "catalog:",
+		"@sugabots/bot-loop": "workspace:*",
 		"@sugabots/contracts": "workspace:*",
 		"@sugabots/core": "workspace:*",
 		"@sugabots/errors": "workspace:*",

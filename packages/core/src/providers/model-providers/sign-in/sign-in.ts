@@ -1,19 +1,19 @@
 import {
-	type ProviderPresetId,
-	presetSignInService,
+	type BuiltInProviderId,
+	builtInSignInService,
 	type SignInServiceId,
 	signInServiceNames,
 } from "@sugabots/contracts";
-import { type UserText, userText } from "@sugabots/errors";
-import { Clock, Data, Effect, Schema } from "effect";
-import type { UserFacing } from "../../../user-message.ts";
+import { ProviderSignInFailed } from "@sugabots/contracts/errors/providers";
+import { type DomainError, userText } from "@sugabots/errors";
+import { Clock, Effect, ErrorReporter, Schema } from "effect";
 import type { EgressHttpClient, EgressHttpClients } from "../../network/egress.ts";
-import type { ModelProviderRepository } from "../model-provider-repository.ts";
+import type { ModelProviderStore } from "../model-provider-store.ts";
 import { chatgpt } from "./chatgpt.ts";
 import { xai } from "./xai.ts";
 
 /**
- * Signing a model provider in with a person's subscription, such as ChatGPT
+ * Signing a model provider in with a member's subscription, such as ChatGPT
  * Plus or SuperGrok, so its requests draw on their plan rather than API
  * credit. Each service is signed in to with a device code, the only OAuth
  * flow a server can use with the command-line clients these borrow: those
@@ -31,8 +31,8 @@ export const OAuthTokens = Schema.Struct({
 });
 export type OAuthTokens = typeof OAuthTokens.Type;
 
-/** A device code waiting for the person to enter it at `verificationUrl`. */
-export interface DeviceCode {
+/** A device code waiting for the member to enter it at `verificationUrl`. */
+interface DeviceCode {
 	/** The service's secret for this sign-in, which it asks for back when the code is redeemed. */
 	deviceCode: string;
 	userCode: string;
@@ -44,11 +44,11 @@ export interface DeviceCode {
 /** One service's sign-in. Every request goes through an egress client for `issuer`. */
 export interface SubscriptionSignIn {
 	readonly issuer: string;
-	/** Asks the service for a code the person enters to sign in. */
+	/** Asks the service for a code the member enters to sign in. */
 	readonly requestDeviceCode: (
 		http: EgressHttpClient,
 	) => Effect.Effect<DeviceCode, ProviderSignInFailed>;
-	/** `undefined` while the person has not entered the code; the tokens once they have. */
+	/** `undefined` while the member has not entered the code; the tokens once they have. */
 	readonly redeemDeviceCode: (
 		http: EgressHttpClient,
 		code: Pick<DeviceCode, "deviceCode" | "userCode">,
@@ -66,9 +66,33 @@ export interface SubscriptionSignIn {
 	readonly requestHeaders: (tokens: OAuthTokens) => Record<string, string>;
 }
 
-/** The sign-in of a provider made from `preset`, if it is signed in to rather than given a key. */
-export function signInFor(preset: ProviderPresetId | null): SubscriptionSignIn | undefined {
-	const service = presetSignInService(preset);
+/** The cause of a sign-in service's refusal to issue tokens: the status it answered with. */
+export class TokenRefused
+	extends Schema.TaggedError<TokenRefused>()("TokenRefused", { status: Schema.Int })
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The sign-in service refused to issue tokens (${this.status})`;
+	}
+	get userMessage() {
+		return userText`The sign-in service refused to issue tokens (${this.status}); sign in again`;
+	}
+}
+
+/**
+ * Whether `failure`, a refresh's, is the service answering that the refresh
+ * token no longer refreshes, so the sign-in must be made again. Any other
+ * failure, unanswered or unreadable, may have spent the token or not.
+ */
+export const refreshRefused = (failure: ProviderSignInFailed) =>
+	failure.cause instanceof TokenRefused &&
+	(failure.cause.status === 400 || failure.cause.status === 401);
+
+/** The sign-in of a provider made from `builtIn`, if it is signed in to rather than given a key. */
+export function signInFor(builtIn: BuiltInProviderId | null): SubscriptionSignIn | undefined {
+	const service = builtInSignInService(builtIn);
 	return service ? signInTo(service) : undefined;
 }
 
@@ -79,18 +103,6 @@ function signInTo(service: SignInServiceId): SubscriptionSignIn {
 			return chatgpt;
 		case "xai":
 			return xai;
-	}
-}
-
-export class ProviderSignInFailed
-	extends Data.TaggedError("ProviderSignInFailed")<{
-		readonly userMessage: UserText;
-		readonly cause?: unknown;
-	}>
-	implements UserFacing
-{
-	override get message() {
-		return this.userMessage;
 	}
 }
 
@@ -105,37 +117,36 @@ const needsRefresh = (tokens: OAuthTokens) =>
 	Clock.currentTimeMillis.pipe(Effect.map((now) => tokens.expiresAt - now < REFRESH_MARGIN_MS));
 
 /**
- * The connection ready to send: for a signed-in provider, a live access token
+ * The provider access ready to send: for a signed-in provider, a live access token
  * as its key and its service's headers, refreshing the token first if it is
- * close to expiring. Any other connection is returned as it is.
+ * close to expiring. Any other provider access is returned as it is.
  */
 export function withSignInAccess(
-	store: Pick<ModelProviderRepository.Interface, "renewOAuthTokens">,
+	store: Pick<ModelProviderStore.Interface, "renewOAuthTokens">,
 	httpClients: EgressHttpClients,
 	workspaceId: string,
-	connection: ModelProviderRepository.ProviderEndpoint,
-): Effect.Effect<ModelProviderRepository.ProviderEndpoint, ProviderSignInFailed> {
-	const service = presetSignInService(connection.preset);
-	if (!service || !connection.oauthTokens) return Effect.succeed(connection);
+	access: ModelProviderStore.ProviderAccess,
+): Effect.Effect<ModelProviderStore.ProviderAccess, ProviderSignInFailed> {
+	const service = builtInSignInService(access.builtIn);
+	if (!service || !access.oauthTokens) return Effect.succeed(access);
 	const signIn = signInTo(service);
 	const http = httpClients.for({ baseUrl: signIn.issuer });
 	return Effect.gen(function* () {
-		const tokens = yield* store.renewOAuthTokens(workspaceId, connection.providerId, (current) =>
-			needsRefresh(current).pipe(
-				Effect.flatMap((stale) =>
-					stale ? signIn.refresh(http, current) : Effect.succeed(current),
-				),
-			),
-		);
+		const tokens = yield* store.renewOAuthTokens(workspaceId, access.providerId, {
+			configurationRevision: access.configurationRevision,
+			isStale: needsRefresh,
+			refresh: (current) => signIn.refresh(http, current),
+			lapsedBecause: (failure) => (refreshRefused(failure) ? failure.userMessage : undefined),
+		});
 		if (!tokens) {
 			return yield* new ProviderSignInFailed({
 				userMessage: userText`Sign in to ${signInServiceNames[service]} again`,
 			});
 		}
 		return {
-			...connection,
+			...access,
 			apiKey: tokens.access,
-			headers: { ...connection.headers, ...signIn.requestHeaders(tokens) },
+			headers: { ...access.headers, ...signIn.requestHeaders(tokens) },
 		};
 	});
 }

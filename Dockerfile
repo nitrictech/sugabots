@@ -13,6 +13,7 @@
 
 FROM --platform=$BUILDPLATFORM scratch AS manifests
 COPY package.json bun.lock /
+COPY patches /patches
 COPY --parents packages/*/package.json /
 
 # Bun installs, Node runs, as in CI.
@@ -34,8 +35,7 @@ COPY tsconfig.json tsconfig.base.json ./
 COPY packages packages
 RUN bun run --cwd packages/web build
 
-# Only the server's dependency tree. Bun 1.3 keeps the root devDependencies
-# under --production, so the toolchain is present regardless.
+# Only the server's dependency tree.
 FROM base AS server
 RUN bun install --frozen-lockfile --production --ignore-scripts --filter @sugabots/server
 

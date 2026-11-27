@@ -1,13 +1,6 @@
 import { Result, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-	healthResponseSchema,
-	isoTimestampSchema,
-	sessionUserSchema,
-	trialAccuracySchema,
-	trialCaseResultSchema,
-	trialSpeedSchema,
-} from "./index.ts";
+import { currentUserSchema, healthResponseSchema, isoTimestampSchema } from "./index.ts";
 
 describe("healthResponseSchema", () => {
 	it("accepts a healthy response", () => {
@@ -38,7 +31,7 @@ describe("healthResponseSchema", () => {
 	});
 });
 
-describe("sessionUserSchema", () => {
+describe("currentUserSchema", () => {
 	const sam = {
 		id: "0199a3a0-0000-7000-8000-000000000009",
 		email: "sam@example.com",
@@ -47,17 +40,17 @@ describe("sessionUserSchema", () => {
 	};
 
 	it("accepts a user with no avatar", () => {
-		expect(Schema.decodeSync(sessionUserSchema)(sam)).toEqual(sam);
+		expect(Schema.decodeSync(currentUserSchema)(sam)).toEqual(sam);
 	});
 
 	it("rejects a user without a usable id", () => {
-		expect(Result.isSuccess(Schema.decodeResult(sessionUserSchema)({ ...sam, id: "1" }))).toBe(
+		expect(Result.isSuccess(Schema.decodeResult(currentUserSchema)({ ...sam, id: "1" }))).toBe(
 			false,
 		);
 	});
 
 	it.each(["sam+tag@example.com", "sam@sub.example.com"])("accepts email %s", (email) => {
-		expect(Result.isSuccess(Schema.decodeResult(sessionUserSchema)({ ...sam, email }))).toBe(true);
+		expect(Result.isSuccess(Schema.decodeResult(currentUserSchema)({ ...sam, email }))).toBe(true);
 	});
 
 	it.each([
@@ -68,7 +61,7 @@ describe("sessionUserSchema", () => {
 		"sam@example.c",
 		" sam@example.com",
 	])("rejects email %s", (email) => {
-		expect(Result.isFailure(Schema.decodeResult(sessionUserSchema)({ ...sam, email }))).toBe(true);
+		expect(Result.isFailure(Schema.decodeResult(currentUserSchema)({ ...sam, email }))).toBe(true);
 	});
 });
 
@@ -98,51 +91,5 @@ describe("timestamp format", () => {
 		"2026-01-01t00:00:00z",
 	])("rejects timestamp %s", (timestamp) => {
 		expect(Result.isFailure(Schema.decodeResult(isoTimestampSchema)(timestamp))).toBe(true);
-	});
-});
-
-describe("model trial numbers", () => {
-	const speed = { typicalMs: 0, slowestMs: 1.5, budgetMs: 2, rating: "good" };
-	const accuracy = { passed: 0, attempts: 1, share: 0, needed: 1, rating: "good" };
-	it("accepts finite boundaries and optional examples, stripping unknown fields", () => {
-		expect(Schema.decodeUnknownSync(trialSpeedSchema)({ ...speed, extra: true })).toEqual(speed);
-		expect(Schema.decodeUnknownSync(trialAccuracySchema)(accuracy)).toEqual(accuracy);
-		expect(
-			Schema.decodeSync(trialCaseResultSchema)({
-				name: "case",
-				passed: 0,
-				attempts: Number.MAX_SAFE_INTEGER,
-				example: undefined,
-			}),
-		).toEqual({ name: "case", passed: 0, attempts: Number.MAX_SAFE_INTEGER, example: undefined });
-	});
-	it.each([NaN, Infinity, -Infinity, -1, "1"])("rejects invalid duration %s", (value) => {
-		for (const field of ["typicalMs", "slowestMs", "budgetMs"]) {
-			expect(
-				Result.isFailure(
-					Schema.decodeUnknownResult(trialSpeedSchema)({ ...speed, [field]: value }),
-				),
-			).toBe(true);
-		}
-	});
-	it("rejects zero budgets, unsafe or fractional counts, and out-of-range shares", () => {
-		expect(
-			Result.isFailure(Schema.decodeUnknownResult(trialSpeedSchema)({ ...speed, budgetMs: 0 })),
-		).toBe(true);
-		for (const fields of [
-			{ passed: Number.MAX_SAFE_INTEGER + 1 },
-			{ passed: 0.5 },
-			{ attempts: 0 },
-			{ share: 1.01 },
-			{ needed: -0.01 },
-			{ share: NaN },
-			{ needed: Infinity },
-		]) {
-			expect(
-				Result.isFailure(
-					Schema.decodeUnknownResult(trialAccuracySchema)({ ...accuracy, ...fields }),
-				),
-			).toBe(true);
-		}
 	});
 });

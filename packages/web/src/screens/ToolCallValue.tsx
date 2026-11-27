@@ -1,5 +1,9 @@
 import { cn } from "cn";
+import { ChevronDown } from "lucide-react";
+import { type CSSProperties, useId, useLayoutEffect, useRef, useState } from "react";
+import { countOf } from "@/lib/name-list.ts";
 import { wordsFromKey } from "@/lib/tool-names.ts";
+import { Button } from "@/ui/button.tsx";
 
 /** Text longer than this, or on more than one line, is a block of its own rather than inline. */
 const INLINE_TEXT_CHARACTERS = 120;
@@ -10,12 +14,20 @@ const SHOWN_ITEMS = 25;
 /** How deep fields nest before what is inside is written as compact JSON. */
 const NESTED_FIELDS_DEPTH = 4;
 
+/** How tall a long value stands until it is opened: about ten of its rows. */
+const PREVIEW_HEIGHT_PX = 192;
+
+/** The preview's cap, as the height it is measured against. */
+const PREVIEW_HEIGHT_VARIABLE = { "--preview-height": `${PREVIEW_HEIGHT_PX}px` } as CSSProperties;
+
 /**
  * A tool call's input or output laid out to read, on one panel: text as it
  * was, in mono; an object as its fields, named in words with the key on hover;
  * a list as its items. An object that only wraps a piece of text, such as
  * `{ text }`, is that text. Images a tool was shown are counted, not printed.
- * `otherArguments`, when the value is an input's main text, go under it.
+ * `otherArguments`, when the value is an input's main text, go under it. A
+ * long one is a preview that scrolls within itself, with See more under it to
+ * show the whole of it.
  */
 export function ToolCallValue({
 	value,
@@ -27,24 +39,66 @@ export function ToolCallValue({
 	otherArguments?: unknown;
 }) {
 	const text = soleText(value);
+	const bodyId = useId();
+	const content = useRef<HTMLDivElement>(null);
+	const [long, setLong] = useState(false);
+	const [open, setOpen] = useState(false);
+	useLayoutEffect(() => {
+		const element = content.current;
+		if (!element) return;
+		const measure = () => setLong(element.scrollHeight > PREVIEW_HEIGHT_PX);
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(element);
+		return () => observer.disconnect();
+	}, []);
+	const previewing = long && !open;
 	return (
-		<div
-			className={cn(
-				"min-w-0 overflow-hidden rounded-md bg-chip text-xs",
-				failed ? "text-destructive-text" : "text-soft-foreground",
-			)}
-		>
-			{text === undefined ? (
-				<div className="px-3 py-2">
-					<Value value={value} depth={0} />
+		<div className="flex min-w-0 flex-col items-start gap-1">
+			<div
+				id={bodyId}
+				// Previewing, it scrolls, so a keyboard needs to reach it.
+				tabIndex={previewing ? 0 : undefined}
+				style={PREVIEW_HEIGHT_VARIABLE}
+				className={cn(
+					"focus-ring w-full min-w-0 rounded-md bg-chip text-xs",
+					failed ? "text-destructive-text" : "text-soft-foreground",
+					previewing
+						? "max-h-(--preview-height) overflow-y-auto overscroll-contain scrollbar-thin"
+						: "overflow-hidden",
+				)}
+			>
+				<div ref={content}>
+					{text === undefined ? (
+						<div className="px-3 py-2">
+							<Value value={value} depth={0} />
+						</div>
+					) : (
+						<TextBlock text={text} scrolls={false} className="px-3 py-2" />
+					)}
+					{otherArguments !== undefined && (
+						<div className="border-border-strong border-t px-3 py-2">
+							<Value value={otherArguments} depth={0} />
+						</div>
+					)}
 				</div>
-			) : (
-				<TextBlock text={text} className="max-h-60 px-3 py-2" />
-			)}
-			{otherArguments !== undefined && (
-				<div className="border-border-strong border-t px-3 py-2">
-					<Value value={otherArguments} depth={0} />
-				</div>
+			</div>
+			{long && (
+				<Button
+					variant="link"
+					size="text"
+					aria-expanded={open}
+					aria-controls={bodyId}
+					onClick={() => setOpen(!open)}
+					className="gap-1.25 py-1"
+				>
+					{open ? "See less" : "See more"}
+					<ChevronDown
+						aria-hidden
+						className={cn("size-3 transition-transform", open && "rotate-180")}
+						strokeWidth={3}
+					/>
+				</Button>
 			)}
 		</div>
 	);
@@ -82,7 +136,7 @@ function Fields({ fields, depth }: { fields: Record<string, unknown>; depth: num
 					</dt>
 					<dd className="m-0 min-w-0">
 						{key === "images" && Array.isArray(value) ? (
-							<span>{counted(value.length, "image")}</span>
+							<span>{countOf(value.length, "image", "images")}</span>
 						) : (
 							<Value value={value} depth={depth + 1} />
 						)}
@@ -126,14 +180,27 @@ function Text({ text }: { text: string }) {
 	return <span className="break-words">{text}</span>;
 }
 
-/** Text as it was, in mono, scrolling within itself past the height `className` gives it. */
-function TextBlock({ text, className }: { text: string; className: string }) {
+/**
+ * Text as it was, in mono, scrolling within itself past the height
+ * `className` gives it, unless it `scrolls={false}`, as the whole of a value
+ * does inside a preview that scrolls itself.
+ */
+function TextBlock({
+	text,
+	scrolls = true,
+	className,
+}: {
+	text: string;
+	scrolls?: boolean;
+	className: string;
+}) {
 	return (
 		<pre
-			// biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region must be reachable by keyboard.
-			tabIndex={0}
+			// A scrolling region must be reachable by keyboard.
+			tabIndex={scrolls ? 0 : undefined}
 			className={cn(
-				"focus-ring m-0 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed",
+				"m-0 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed",
+				scrolls && "focus-ring overflow-auto",
 				className,
 			)}
 		>
@@ -149,8 +216,4 @@ function Empty() {
 function isShortScalar(value: unknown): boolean {
 	if (typeof value === "string") return value.length <= 40 && !value.includes("\n");
 	return typeof value === "number" || typeof value === "boolean";
-}
-
-function counted(count: number, noun: string): string {
-	return `${count} ${count === 1 ? noun : `${noun}s`}`;
 }

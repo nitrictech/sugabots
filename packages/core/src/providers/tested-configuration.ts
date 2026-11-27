@@ -1,12 +1,13 @@
 import type { ProviderStatus } from "@sugabots/contracts";
+import { UrlNotAllowed } from "@sugabots/contracts/errors/providers";
+import type { UserText } from "@sugabots/errors";
 import { type SQL, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
-import { Data, Effect } from "effect";
-import type { UserFacing } from "../user-message.ts";
-import type { Egress, EgressRefused } from "./network/egress.ts";
+import { Clock, Effect } from "effect";
+import { type Egress, workspaceUrlRefusal } from "./network/egress.ts";
 
 /**
- * What model providers, search providers and connections share: each is
+ * What model providers, search providers and connectors share: each is
  * configured with an address and perhaps a key, tried by a test, and shown by
  * how that test went. A test's result belongs to the configuration it tried,
  * so it is recorded only while the row still holds that configuration.
@@ -44,19 +45,30 @@ export function configurationStatus(row: {
 	return row.lastTestError === null ? "connected" : "error";
 }
 
-/** Fails with {@link UrlNotAllowed} unless the egress policy lets a provider or connection use `url`. */
+/**
+ * Fails with {@link UrlNotAllowed} unless the egress policy lets a model
+ * provider, search provider, computer provider or connector use `url`.
+ */
 export const requireAllowedUrl = (egress: Egress.Interface, url: string) =>
-	Effect.mapError(egress.validateProviderUrl(url), (refusal) => new UrlNotAllowed({ refusal }));
+	Effect.mapError(
+		egress.validateProviderUrl(url),
+		(refusal) => new UrlNotAllowed({ refusal: workspaceUrlRefusal(refusal) }),
+	);
 
-/** The egress policy refuses the address a provider or connection was given. */
-export class UrlNotAllowed
-	extends Data.TaggedError("UrlNotAllowed")<{ readonly refusal: EgressRefused }>
-	implements UserFacing
-{
-	override get message() {
-		return `The address is not allowed: ${this.refusal.message}`;
-	}
-	get userMessage() {
-		return this.refusal.userMessage;
-	}
-}
+/** How a test went, with what else it found: `error` is why it failed, if it did. */
+type Tested<Found extends { error?: UserText }> = Omit<Found, "error"> & {
+	reachable: boolean;
+	latencyMs: number;
+	error?: UserText;
+};
+
+/** Runs `test`, which answers with why it failed, if it did, timing how long it took. */
+export const timedTest = <Found extends { error?: UserText }, E, R>(
+	test: Effect.Effect<Found, E, R>,
+): Effect.Effect<Tested<Found>, E, R> =>
+	Effect.gen(function* () {
+		const started = yield* Clock.currentTimeMillis;
+		const found = yield* test;
+		const latencyMs = (yield* Clock.currentTimeMillis) - started;
+		return { ...found, reachable: found.error === undefined, latencyMs };
+	});

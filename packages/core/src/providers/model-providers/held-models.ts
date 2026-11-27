@@ -1,25 +1,25 @@
-import { UserText, userText } from "@sugabots/errors";
+import { ModelInUse } from "@sugabots/contracts/errors/providers";
+import { DisplayName } from "@sugabots/errors";
 import { and, eq, isNotNull } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import { query, transaction } from "../../database/database.ts";
-import { agent, providerModel, workspace } from "../../database/schema.ts";
-import type { UserFacing } from "../../user-message.ts";
+import { bot, providerModel, workspace } from "../../database/schema.ts";
 import { offeredModels } from "./model-provider-reads.ts";
-import { defaultModelOf, ModelNotEnabled } from "./model-provider-repository.ts";
+import { defaultModelOf, ModelNotEnabled } from "./model-provider-store.ts";
 
 /**
- * A workspace's models are held by its default, which new agents start on, and
- * by its system agents, since a system agent always runs. A held model stays
+ * A workspace's models are held by its default, which new bots start on, and
+ * by its system bots, since a system bot always runs. A held model stays
  * offered: every change that could stop offering one runs through
  * {@link keepingHeldModelsOffered}, and every change that makes one held runs
  * through {@link holdingModel} or {@link withHeldModelsLocked}. All three take
  * the same lock, so neither can slip between the other's check and its write.
  */
 
-/** What holds one model: the workspace default, and the system agents by name. */
-export interface Holders {
+/** What holds one model: the workspace default, and the system bots by name. */
+interface Holders {
 	readonly workspaceDefault: boolean;
-	readonly systemAgents: readonly string[];
+	readonly systemBots: readonly DisplayName[];
 }
 
 /**
@@ -71,7 +71,7 @@ export const keepingHeldModelsOffered = <A, E, R>(
 			const result = yield* change;
 			const after = yield* modelStates(workspaceId);
 			// What holds a model once the change has run, so a change may move the
-			// default or a system agent off a model as it stops offering it.
+			// default or a system bot off a model as it stops offering it.
 			const held = yield* heldModels(workspaceId);
 			const lost = [...held].find(
 				([modelId]) =>
@@ -80,7 +80,7 @@ export const keepingHeldModelsOffered = <A, E, R>(
 			);
 			if (lost) {
 				const [modelId, holders] = lost;
-				return yield* new ModelInUse({ modelId, holders });
+				return yield* new ModelInUse({ modelId: DisplayName.fromRecord(modelId), holders });
 			}
 			return result;
 		}),
@@ -98,37 +98,40 @@ const lockHeldModels = (workspaceId: string) =>
 /** Each held model, and what holds it. */
 const heldModels = (workspaceId: string) =>
 	Effect.gen(function* () {
-		const [workspaceDefault, systemAgents] = yield* Effect.all([
+		const [workspaceDefault, systemBots] = yield* Effect.all([
 			defaultModelOf(workspaceId),
 			query((db) =>
 				db
-					.select({ name: agent.name, model: agent.model })
-					.from(agent)
+					.select({ name: bot.name, model: bot.model })
+					.from(bot)
 					.where(
 						and(
-							eq(agent.workspaceId, workspaceId),
-							isNotNull(agent.systemAgentKey),
-							isNotNull(agent.model),
+							eq(bot.workspaceId, workspaceId),
+							isNotNull(bot.systemBotKey),
+							isNotNull(bot.model),
 						),
 					)
-					.orderBy(agent.name),
+					.orderBy(bot.name),
 			),
 		]);
 		const held = new Map<string, Holders>();
 		const holdersOf = (modelId: string) =>
-			held.get(modelId) ?? { workspaceDefault: false, systemAgents: [] };
+			held.get(modelId) ?? { workspaceDefault: false, systemBots: [] };
 		if (workspaceDefault !== undefined) {
 			held.set(workspaceDefault, { ...holdersOf(workspaceDefault), workspaceDefault: true });
 		}
-		for (const { name, model } of systemAgents) {
+		for (const { name, model } of systemBots) {
 			if (model === null) continue;
 			const holders = holdersOf(model);
-			held.set(model, { ...holders, systemAgents: [...holders.systemAgents, name] });
+			held.set(model, {
+				...holders,
+				systemBots: [...holders.systemBots, DisplayName.fromRecord(name)],
+			});
 		}
 		return held;
 	});
 
-/** Which models the workspace offers agents, and which it lists at all. */
+/** Which models the workspace offers bots, and which it lists at all. */
 const modelStates = (workspaceId: string) =>
 	Effect.all({
 		offered: Effect.map(
@@ -145,24 +148,3 @@ const modelStates = (workspaceId: string) =>
 			(rows) => new Set(rows.map(({ modelId }) => modelId)),
 		),
 	});
-
-const LIST = new Intl.ListFormat("en", { type: "conjunction" });
-
-/** A change would stop the workspace offering a model its default or a system agent runs on. */
-export class ModelInUse
-	extends Data.TaggedError("ModelInUse")<{
-		readonly modelId: string;
-		readonly holders: Holders;
-	}>
-	implements UserFacing
-{
-	get userMessage() {
-		const { workspaceDefault, systemAgents } = this.holders;
-		const names = [...(workspaceDefault ? ["New bots"] : []), ...systemAgents];
-		const one = names.length === 1 && !workspaceDefault;
-		// System agents' names are ours; a model id is the provider's name for a
-		// model an administrator switched on.
-		const subject = UserText.unchecked(LIST.format(names));
-		return userText`${subject} ${one ? "uses" : "use"} ${UserText.unchecked(this.modelId)}. Choose another model for ${one ? "it" : "them"} under Models → Default first.`;
-	}
-}

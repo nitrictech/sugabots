@@ -1,47 +1,105 @@
 export * as Audience from "./audience.ts";
 
-import type { StreamEvent } from "@sugabots/contracts";
+import type { ReachChange, StreamEvent } from "@sugabots/contracts";
 
 /**
- * Who may hear an event on a workspace channel. Every member of the
- * workspace listens there, but an event about a thread is only for the people
- * who reach it: those who reach its pod, or, for a direct message between
- * people, those in it. Which rides along in the stored event, under one of
- * the fields below, and the stream reads it and takes it off before delivering.
+ * Who may hear an event on a workspace's stream. Everyone in the workspace
+ * follows it, but each event names who it is for, and a stream sends it only
+ * to a member its last proof says is among them:
+ *
+ * - `chat`: those who reach the chat, which is reaching its project (a
+ *   system chat, in no project, is reached by nobody);
+ * - `project`: for an event about no chat, those who reach its project;
+ * - `bot`: for an event about a bot, those who reach the bot;
+ * - `workspace`: for an event about anything everyone in the workspace sees,
+ *   such as a membership or a setting.
+ *
+ * An event on a workspace's stream that names nobody is sent to nobody. The
+ * audience rides along in the stored event, under the field below; the stream
+ * reads it and takes it off before sending.
  */
 export type Group =
-	| { readonly kind: "pod"; readonly podId: string }
-	| { readonly kind: "direct"; readonly threadId: string };
+	| { readonly kind: "chat"; readonly chat: string }
+	| { readonly kind: "project"; readonly project: string }
+	| { readonly kind: "bot"; readonly bot: string }
+	| { readonly kind: "workspace" };
 
-const POD_FIELD = "audiencePodId";
-const DIRECT_FIELD = "audienceDirectId";
+const FIELD = "audience";
 
-/** `event`, to be heard only by people who reach the pod `podId`. */
-export const forPod = <Event extends StreamEvent>(podId: string, event: Event): Event => ({
+/** Where events stored before audiences had kinds name their chat. */
+const CHAT_FIELD = "audienceChatId";
+
+/** `event`, to be heard only by `audience`. */
+export const addressedTo = <Event extends StreamEvent>(audience: Group, event: Event): Event => ({
 	...event,
-	[POD_FIELD]: podId,
+	[FIELD]: audience,
 });
 
-/** `event`, to be heard only by the people in the direct message `threadId`. */
-export const forDirectMessage = <Event extends StreamEvent>(
-	threadId: string,
-	event: Event,
-): Event => ({
-	...event,
-	[DIRECT_FIELD]: threadId,
-});
+/** `event`, to be heard only by members who reach the chat `chatId`. */
+export const forChat = <Event extends StreamEvent>(chatId: string, event: Event): Event =>
+	addressedTo({ kind: "chat", chat: chatId }, event);
 
-/** Who alone may hear `event`, if it names anybody, and the event as clients see it. */
+/** `event`, to be heard only by members who reach the project `projectId`. */
+export const forProject = <Event extends StreamEvent>(projectId: string, event: Event): Event =>
+	addressedTo({ kind: "project", project: projectId }, event);
+
+/** `event`, to be heard only by members who reach the bot `botId`. */
+export const forBot = <Event extends StreamEvent>(botId: string, event: Event): Event =>
+	addressedTo({ kind: "bot", bot: botId }, event);
+
+/** `event`, to be heard by everyone in the workspace. */
+export const forWorkspace = <Event extends StreamEvent>(event: Event): Event =>
+	addressedTo({ kind: "workspace" }, event);
+
+/**
+ * Who hears a change of who reaches what: a membership is seen by everyone in
+ * the workspace, a project's members and bots by those who reach it, a bot by
+ * those who reach it, or did until its deletion began. Others who stopped
+ * reaching it are not told, but their streams prove again on it all the same.
+ */
+export function ofReachChange(about: ReachChange): Group {
+	switch (about.kind) {
+		case "membership":
+		case "workspace":
+			return { kind: "workspace" };
+		case "project":
+			return { kind: "project", project: about.projectId };
+		case "bot":
+			return { kind: "bot", bot: about.botId };
+	}
+}
+
+/**
+ * Who alone may hear `event`, if it names anybody, and the event as clients
+ * see it, without the fields that say so.
+ */
 export function read(event: StreamEvent): {
 	readonly audience: Group | undefined;
 	readonly event: StreamEvent;
 } {
-	const { [POD_FIELD]: podId, [DIRECT_FIELD]: threadId, ...delivered } = event;
-	const audience: Group | undefined =
-		typeof podId === "string"
-			? { kind: "pod", podId }
-			: typeof threadId === "string"
-				? { kind: "direct", threadId }
-				: undefined;
+	const { [FIELD]: named, [CHAT_FIELD]: chatId, ...delivered }: StreamEvent = event;
+	const audience =
+		parse(named) ??
+		(typeof chatId === "string" ? { kind: "chat" as const, chat: chatId } : undefined);
 	return { audience, event: delivered as StreamEvent };
+}
+
+/** `stored` as an audience, or `undefined` when it isn't one. */
+function parse(stored: unknown): Group | undefined {
+	if (typeof stored !== "object" || stored === null || !("kind" in stored)) return undefined;
+	const fields: { readonly [field: string]: unknown } = stored;
+	switch (fields.kind) {
+		case "workspace":
+			return { kind: "workspace" };
+		case "chat":
+			return typeof fields.chat === "string" ? { kind: "chat", chat: fields.chat } : undefined;
+		case "project":
+			return typeof fields.project === "string"
+				? { kind: "project", project: fields.project }
+				: undefined;
+		case "bot":
+			return typeof fields.bot === "string" ? { kind: "bot", bot: fields.bot } : undefined;
+		default:
+			return undefined;
+	}
 }

@@ -1,0 +1,10 @@
+{
+	"extends": "../../../tsconfig.base.json",
+	"compilerOptions": {
+		"types": ["node"],
+		"paths": {
+			"effect": ["../../../packages/core/node_modules/effect/dist/index"]
+		}
+	},
+	"include": ["."]
+}

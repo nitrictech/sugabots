@@ -3,7 +3,7 @@ import { DevelopmentDatabaseRefused, testDatabaseUrl } from "./test-database.ts"
 
 /**
  * Which database the tests write to, which is the one thing here that must not
- * be got wrong: the run empties it, and the repository tests fill it with rows
+ * be got wrong: the run empties it, and the store tests fill it with rows
  * and workflow executions a running dev server would resume.
  */
 
@@ -25,21 +25,25 @@ describe("choosing the tests' database", () => {
 		);
 	});
 
-	it("refuses the development database, however it was named", () => {
-		// The failure this exists for: the tests filled the database a dev server
-		// was using, and nothing said so until somebody opened the sidebar.
-		expect(() =>
-			testDatabaseUrl({ DATABASE_URL: development, TEST_DATABASE_URL: development }),
-		).toThrow(DevelopmentDatabaseRefused);
+	it("refuses to run on the development database and redacts its password", () => {
+		const useDevelopmentDatabase = () =>
+			testDatabaseUrl({ DATABASE_URL: development, TEST_DATABASE_URL: development });
+
+		expect(useDevelopmentDatabase).toThrow(DevelopmentDatabaseRefused);
+		expect(useDevelopmentDatabase).toThrow(
+			expect.objectContaining({
+				message: expect.not.stringContaining("secret"),
+			}),
+		);
 	});
 
-	it("keeps the password out of what it says when it refuses", () => {
+	it("refuses the development database named another way, with other credentials or options", () => {
 		expect(() =>
-			testDatabaseUrl({ DATABASE_URL: development, TEST_DATABASE_URL: development }),
-		).toThrow(/\*\*\*/);
-		expect(() =>
-			testDatabaseUrl({ DATABASE_URL: development, TEST_DATABASE_URL: development }),
-		).not.toThrow(/secret/);
+			testDatabaseUrl({
+				DATABASE_URL: development,
+				TEST_DATABASE_URL: "postgres://tester:other@localhost:5436/sugabots?sslmode=disable",
+			}),
+		).toThrow(DevelopmentDatabaseRefused);
 	});
 
 	it("has nothing to offer when no database is configured at all", () => {

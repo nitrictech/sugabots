@@ -11,11 +11,12 @@
 			"!**/dist",
 			"!**/node_modules",
 			"!**/*.svg",
-			"!docker/sandbox/theme",
+			"!docker/computer/theme",
 			"!packages/core/drizzle",
 			"!packages/web/.storybook/public/mockServiceWorker.js",
 			"!packages/website/src/routeTree.gen.ts",
-			"!packages/emoji/src/emoji.json"
+			"!packages/emoji/src/emoji.json",
+			"!packages/contracts/src/http/http-api.json"
 		]
 	},
 	"formatter": {
@@ -48,30 +49,87 @@
 	},
 	"overrides": [
 		{
-			"includes": ["packages/web/src/**/*.{ts,tsx}", "packages/website/src/**/*.{ts,tsx}"],
-			"plugins": ["./lint/no-fixed-tailwind-values.grit"]
+			"includes": ["packages/core/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
 		},
 		{
 			"includes": [
-				"packages/core/src/providers/connections/github/**/*.ts",
+				"packages/core/src/providers/connectors/github/**/*.ts",
 				"packages/core/src/providers/models/**/*.ts",
 				"packages/core/src/providers/model-providers/remote.ts",
+				"packages/core/src/providers/model-providers/model-providers.ts",
+				"packages/core/src/providers/model-providers/held-models.ts",
+				"packages/core/src/providers/model-providers/sign-in/*.ts",
+				"!packages/core/src/providers/model-providers/sign-in/*.test.ts",
+				"packages/core/src/providers/search-providers/search-providers.ts",
+				"packages/core/src/providers/search-providers/search-provider-store.ts",
+				"packages/core/src/providers/web/web.ts",
+				"packages/core/src/operations/**/*.ts",
+				"packages/core/src/files/files.ts",
+				"packages/core/src/authentication/**/*.ts",
+				"packages/core/src/proofs/**/*.ts",
+				"packages/core/src/workspaces/projects/**/*.ts",
+				"!packages/core/src/workspaces/projects/**/*.test.ts",
+				"packages/core/src/workspaces/bots/**/*.ts",
+				"!packages/core/src/workspaces/bots/**/*.test.ts",
+				"packages/core/src/chats/automations/automation.ts",
+				"packages/core/src/chats/automations/automation-view.ts",
+				"packages/core/src/chats/automations/automation-webhooks.ts",
+				"packages/core/src/chats/automations/automation-writes.ts",
+				"packages/core/src/chats/automations/automations.ts",
+				"packages/core/src/chats/automations/project-automations.ts",
+				"packages/core/src/chats/automations/schedule.ts",
+				"packages/core/src/workspaces/membership/**/*.ts",
+				"!packages/core/src/workspaces/membership/**/*.test.ts",
+				"packages/core/src/workspaces/time-zone/**/*.ts",
+				"!packages/core/src/workspaces/time-zone/**/*.test.ts",
+				"packages/core/src/workspaces/workspace-setup/**/*.ts",
+				"!packages/core/src/workspaces/workspace-setup/**/*.test.ts",
+				"packages/core/src/accounting/usage.ts",
+				"packages/core/src/workspaces/workspace-reference.ts",
+				"packages/core/src/computers/computer-provider-setup.ts",
+				"packages/core/src/computers/computer-network.ts",
+				"packages/core/src/computers/project-computer-setup.ts",
+				"packages/core/src/chats/chats/chats.ts",
+				"packages/core/src/chats/chats/chat-files.ts",
+				"packages/core/src/chats/chats/chat-view.ts",
+				"packages/core/src/chats/chats/reached-chat.ts",
+				"packages/core/src/chats/chat-details-view.ts",
+				"packages/core/src/chats/reactions/reactions.ts",
+				"packages/core/src/chats/turns/controls.ts",
+				"!packages/core/src/proofs/proof.ts",
+				"packages/contracts/src/errors/**/*.ts",
 				"packages/server/src/http/errors.ts"
 			],
-			"plugins": [
-				"./lint/errors-implement-domain-error.grit",
-				"./lint/no-effect-promise.grit",
-				"./lint/no-unchecked-user-text.grit"
-			]
+			"plugins": ["./lint/no-effect-promise.grit", "./lint/no-unchecked-user-text.grit"]
 		},
 		{
 			"includes": [
 				"packages/**/src/**",
-				"!packages/core/src/conversations/turns/**",
+				"!packages/core/src/chats/turns/**",
+				"!packages/bot-loop/src/**",
 				"!**/*.test.ts",
 				"!**/*.test.tsx",
 				"!**/testing.ts",
-				"!**/*.test-support.ts"
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx",
+				"!packages/core/src/**"
 			],
 			"linter": {
 				"rules": {
@@ -82,7 +140,116 @@
 								"patterns": [
 									{
 										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
-										"message": "Outside `conversations/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/core/src/**",
+				"!packages/core/src/chats/turns/**",
+				"!packages/bot-loop/src/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/server/src/scheduler/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/core/src/authentication/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
 									}
 								]
 							}
@@ -97,7 +264,9 @@
 				"packages/**/src/**/*.test.tsx",
 				"packages/**/src/**/testing.ts",
 				"packages/**/src/**/*.test-support.ts",
-				"!packages/core/src/conversations/turns/**"
+				"packages/**/src/**/*.test-support.tsx",
+				"!packages/core/src/chats/turns/**",
+				"!packages/core/src/**"
 			],
 			"linter": {
 				"rules": {
@@ -114,7 +283,7 @@
 											"!**/turns/testing",
 											"!**/turns/testing.ts"
 										],
-										"message": "Outside `conversations/turns/`, a test imports the Turns module only through `turns/turns.ts` or `turns/testing.ts`."
+										"message": "Outside `chats/turns/`, a test imports the Turns module only through `turns/turns.ts` or `turns/testing.ts`."
 									}
 								]
 							}
@@ -124,7 +293,257 @@
 			}
 		},
 		{
-			"includes": ["packages/**/src/**/*.workflow.ts"],
+			"includes": [
+				"packages/core/src/**/*.test.ts",
+				"packages/core/src/**/*.test.tsx",
+				"packages/core/src/**/testing.ts",
+				"packages/core/src/**/*.test-support.ts",
+				"packages/core/src/**/*.test-support.tsx",
+				"!packages/core/src/chats/turns/**"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
+									{
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!**/turns/testing",
+											"!**/turns/testing.ts"
+										],
+										"message": "Outside `chats/turns/`, a test imports the Turns module only through `turns/turns.ts` or `turns/testing.ts`."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/core/src/**/*.ts",
+				"!**/*.test.ts",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx",
+				"!**/testing.ts",
+				"!packages/core/src/database/test-*.ts"
+			],
+			"plugins": ["./lint/no-module-state.grit"]
+		},
+		{
+			"includes": [
+				"packages/contracts/src/**",
+				"packages/sdk/src/**",
+				"packages/web/src/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"**/database/database",
+											"**/database/database.ts",
+											"**/database/schema",
+											"**/database/schema.ts",
+											"**/sql",
+											"**/sql.ts",
+											"drizzle-orm",
+											"drizzle-orm/*"
+										],
+										"message": "Only services reach the database. Call a service, which takes the proofs it needs."
+									},
+									{
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!./turns/index.ts"
+										],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal. (`./turns/index.ts` in `operations/` is the turns domain's operations.)"
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/core/src/operations/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
+									{
+										"group": [
+											"**/database/database",
+											"**/database/database.ts",
+											"**/database/schema",
+											"**/database/schema.ts",
+											"**/sql",
+											"**/sql.ts",
+											"drizzle-orm",
+											"drizzle-orm/*"
+										],
+										"message": "Only services reach the database. Call a service, which takes the proofs it needs."
+									},
+									{
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!./turns/index.ts"
+										],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal. (`./turns/index.ts` in `operations/` is the turns domain's operations.)"
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/bot-loop/src/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/testing.ts",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": [
+											"**/database/database",
+											"**/database/database.ts",
+											"**/database/schema",
+											"**/database/schema.ts",
+											"**/sql",
+											"**/sql.ts",
+											"drizzle-orm",
+											"drizzle-orm/*"
+										],
+										"message": "Only services reach the database. Call a service, which takes the proofs it needs."
+									},
+									{
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!./turns/index.ts"
+										],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal. (`./turns/index.ts` in `operations/` is the turns domain's operations.)"
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/**/src/**/*.workflow.ts", "!packages/bot-loop/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@sugabots/bot-loop", "@sugabots/bot-loop/*"],
+										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
+									},
+									{
+										"group": [
+											"node:*",
+											"pg",
+											"@effect/sql-pg",
+											"@effect/platform-node",
+											"**/database/**"
+										],
+										"message": "Workflow modules hold only definitions, which the engine replays: import only schemas and step-service tags, and reach the database, the network or Node through a step service."
+									},
+									{
+										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+									},
+									{
+										"group": [
+											"**/authentication/turn",
+											"**/authentication/turn.ts",
+											"**/authentication/system-work",
+											"**/authentication/system-work.ts"
+										],
+										"message": "Only the bot loop and the scheduler authenticate from stored ids: a turn's, or system work's. Anywhere else, take the principal an entrypoint passed in."
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/bot-loop/src/**/*.workflow.ts"],
 			"linter": {
 				"rules": {
 					"style": {
@@ -144,7 +563,7 @@
 									},
 									{
 										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
-										"message": "Outside `conversations/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
 									}
 								]
 							}
@@ -155,28 +574,26 @@
 		},
 		{
 			"includes": [
-				"packages/web/src/lib/artifact-kind-catalog.ts",
-				"packages/web/src/lib/model-makers.ts",
-				"packages/web/src/lib/notification-choices.ts",
-				"packages/web/src/lib/page-frame.ts",
-				"packages/web/src/lib/provider-hues.ts",
-				"packages/web/src/lib/routine-trigger-words.ts",
-				"packages/web/src/lib/screen-limits.ts",
-				"packages/web/src/lib/tool-access-labels.ts"
-			],
-			"plugins": ["./lint/plain-data-imports-only-types.grit"]
-		},
-		{
-			"includes": [
 				"packages/web/src/ui/dialog.tsx",
 				"packages/web/src/ui/dropdown-menu.tsx",
-				"packages/web/src/ui/select.tsx",
-				"packages/web/src/ui/textarea.tsx",
-				"packages/website/src/components/ui/item.tsx"
+				"packages/web/src/ui/textarea.tsx"
 			],
 			"linter": {
 				"enabled": false
 			}
+		},
+		{
+			"includes": [
+				"packages/**/src/**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx",
+				"!**/*.test-support.ts",
+				"!**/*.test-support.tsx",
+				"!**/testing.ts",
+				"!packages/core/src/computers/computers.ts",
+				"!packages/core/src/computers/computer-disk.ts"
+			],
+			"plugins": ["./lint/errors-implement-domain-error.grit"]
 		}
 	]
 }

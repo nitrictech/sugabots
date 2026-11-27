@@ -1,0 +1,131 @@
+---
+title: Chats
+description: Chats in projects and with bots, who answers, and how bots ask each other for help.
+---
+
+There are two places to chat:
+
+- A [project](/docs/projects)'s **chats** are shared by all its members and
+  bots. Each is about one piece of work.
+- A **bot's chats** are chats with that one bot. Open a bot and write
+  in the box that says "Message Trip Planner" to start one. Every bot has its
+  own hidden project for them, which it leads alone, so they work just as a
+  project's chats do. Whoever can talk to the bot can read and join its
+  chats.
+
+Members talk to each other in a project's chats: there are no chats
+between members alone.
+
+Anyone in a chat can mark it resolved once its work is finished: it moves
+to the Resolved list at the foot of the sidebar, and opens again when
+someone posts in it or it is reopened.
+
+## Who answers?
+
+Every project has a **lead bot**, and the same rule picks who answers in every
+chat:
+
+- **Mention bots** in the project, and every bot you mention answers, all at once.
+- **Reply to a bot's message**, and that bot answers.
+- **Mention only members**, and the lead bot reads it if it has a model. The
+  message is most likely for them, so it answers only if it can help, and
+  otherwise reacts 👀 to show it read it. If the lead bot has no model, the
+  message is posted without a bot reply.
+- **Otherwise** the lead bot answers.
+
+Mentions of bots outside the project are ignored, so in a bot's own chats,
+where it's the only bot, only that bot can answer, by the same rule. Mentioning someone with `@` changes
+who the message is for, not who's in charge. Try it:
+
+<WhoReplies />
+
+Mentions use a member's or bot's handle at the start of a word, like
+`@budget-keeper`. Email addresses don't count as mentions.
+
+`@here` and `@channel` mention everyone who can see the chat, and
+notify each of them as a mention does. They are for members: a message with
+`@here` or `@channel` is read by the lead bot as one that mentions only members,
+unless it names a bot too.
+A bot can't use them to notify anyone, and no bot can take `here` or `channel`
+as its handle.
+
+## Bots asking bots
+
+When a bot needs help, it can ask **another of the project's bots** by
+mentioning it, as you would. The bot it asks answers right there in the chat,
+and once every bot it asked has answered, the first bot picks up again with
+what they said.
+
+<Chat title="Lisbon trip">
+  <Say from="tripPlanner">Four seats at €176. @budget-keeper, does that fit the Lisbon budget?</Say>
+  <Say from="budgetKeeper">Pot has €924. That leaves €220 after flights. Fine by me, but the hotel needs to stay under €150 a night.</Say>
+  <Say from="tripPlanner">It fits. I'll look for hotels under €150 a night.</Say>
+</Chat>
+
+A bot asks for whoever it's answering: the bot it asks works with that
+member's access, and its tool calls are approved as any bot's in the chat
+are. In an automation's run, it works for the run, and the run ends once the
+bots it asked have answered.
+
+A few rules keep this from getting out of hand:
+
+- A bot can ask only the project's other bots, never itself. In a bot's own
+  chats there's nobody else to ask, and in an automation feed a bot's
+  mentions bring in no other bot.
+- A bot that was asked can't pass the question on: its mentions bring in
+  nobody.
+- When the first bot picks up again, it can ask bots it hasn't asked yet, but
+  not the same ones again.
+
+## Notifications
+
+Sugabots can notify you in your browser, the way Slack does. Turn them on from
+the bar across the top of the app, or in **Settings → Notifications**. Each browser and
+device is turned on by itself, and notifies you while Sugabots is open in it,
+even in a tab you aren't looking at.
+
+You choose what you hear about:
+
+- **Mentions and replies**, to begin with: messages that mention you, a bot's
+  answers to you, replies in chats you're part of, and approvals that
+  wait on you.
+- **Everything**: every new message in the chats you can see.
+- **Nothing**.
+
+Unless you chose Nothing, you also hear when a bot can't finish its reply to
+you, and when a run of an automation you made or started fails. In **Settings →
+Notifications** you can turn the first off, and hear of every run or none.
+
+Right-click a project in the sidebar to give it a level of its own, or to mute
+it, for good or, under **More options**, for a while, and right-click a bot to
+do the same for its chats. Each follows your own level until you choose
+otherwise. You can also pause all notifications for a while, or set quiet hours
+each day. You aren't notified about a chat you're looking at.
+
+## Long chats
+
+A bot rereads the chat every time it replies, and it can only hold so much in
+mind at once. Think of it as the bot's **short-term memory**. When a chat gets
+long, Sugabots makes room by compacting what the bot rereads. You don't have to
+do anything, and nothing is deleted: everyone still sees the whole chat.
+
+<CompactionDemo />
+
+How it works:
+
+- **It starts early.** Once a chat fills most of the bot's short-term memory,
+  Sugabots starts compacting it, while there's still plenty of room to keep
+  chatting.
+- **It happens in the background.** Nobody waits for it, and nothing shows in
+  the chat.
+- **Recent messages stay whole.** The bot keeps rereading the latest messages
+  word for word. The ones before them become a condensed account of what was
+  decided, asked for and promised, what's still open, and key details like
+  dates and prices, along with who said each thing.
+- **The condensed account carries forward.** When the chat fills up again, the
+  new one builds on the last.
+- **The bot can look further back.** The condensed account can't hold everything. When the
+  bot needs a detail it doesn't have, it searches the earlier messages.
+
+To see how full a bot's short-term memory is, and when it was last compacted,
+open the chat's details panel.

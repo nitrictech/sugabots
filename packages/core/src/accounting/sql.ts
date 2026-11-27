@@ -1,6 +1,7 @@
-import type { ProviderPresetId } from "@sugabots/contracts";
+import type { BuiltInProviderId } from "@sugabots/contracts";
 import { sql } from "drizzle-orm";
 import {
+	boolean,
 	check,
 	index,
 	integer,
@@ -17,7 +18,7 @@ import type { ModelRequests } from "./model-requests.ts";
  * One request sent to a model provider: what it was for, what it used, and
  * what it cost.
  *
- * The ledger outlives what it describes. The pod, agent, thread, turn and
+ * The ledger outlives what it describes. The bot, chat, turn and
  * provider are copied here without foreign keys, so deleting any of them
  * neither erases what was spent nor is blocked by it: they say who a request
  * was made for, not whether that still exists.
@@ -27,17 +28,20 @@ export const modelRequest = pgTable(
 	{
 		id: primaryKey(),
 		workspaceId: uuid("workspace_id").notNull(),
-		purpose: text("purpose").$type<ModelRequests.Purpose>().notNull(),
-		/** The pod the request served, as it was then; system work names the one it worked in. */
-		podId: uuid("pod_id"),
-		agentId: uuid("agent_id"),
-		/** The conversation the request served, never a system agent's own child thread. */
-		threadId: uuid("thread_id"),
+		purpose: text("purpose").$type<ModelRequests.PurposeName>().notNull(),
+		botId: uuid("bot_id"),
+		/**
+		 * Whether `botId` was a Personal Assistant when the request was made, so
+		 * usage keeps counting it as one after its member has left and it has gone.
+		 */
+		byPersonalAssistant: boolean("by_personal_assistant").notNull().default(false),
+		/** The chat the request served, never a system bot's own chat. */
+		chatId: uuid("chat_id"),
 		turnId: uuid("turn_id"),
 		/** Which of its stream's requests this was, from zero: a turn that calls tools makes several. */
 		step: integer("step").notNull(),
 		providerId: uuid("provider_id").notNull(),
-		preset: text("preset").$type<ProviderPresetId>(),
+		builtIn: text("built_in").$type<BuiltInProviderId>(),
 		model: text("model").notNull(),
 		outcome: text("outcome").$type<ModelRequests.Outcome>().notNull(),
 		/** Every input token, cached or not. Null wherever the provider did not say. */
@@ -56,10 +60,15 @@ export const modelRequest = pgTable(
 	},
 	(table) => [
 		index("model_request_workspace_started_at_idx").on(table.workspaceId, table.startedAt),
-		index("model_request_thread_idx").on(table.threadId).where(sql`${table.threadId} is not null`),
+		index("model_request_chat_idx").on(table.chatId).where(sql`${table.chatId} is not null`),
 		check(
 			"model_request_purpose_valid",
-			sql`${table.purpose} in ('agent-turn', 'facilitation', 'summary', 'compaction', 'trial', 'provider-check')`,
+			sql`${table.purpose} in ('bot-turn', 'compaction', 'model-test')`,
+		),
+		// A bot's turn is charged to that bot; background work never is.
+		check(
+			"model_request_bot_valid",
+			sql`(${table.purpose} = 'bot-turn') = (${table.botId} is not null)`,
 		),
 		check(
 			"model_request_outcome_valid",
@@ -75,5 +84,3 @@ export const modelRequest = pgTable(
 		),
 	],
 );
-
-export type ModelRequestRow = typeof modelRequest.$inferSelect;
