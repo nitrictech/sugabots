@@ -10,6 +10,9 @@ import { createEventsApi } from "./events.ts";
 
 const BASE = "https://api.test";
 
+/** The longest event data the client accepts. */
+const MAX_EVENT_CHARS = 1024 * 1024;
+
 /** An SSE frame, as the server writes it. */
 function frame({
 	event,
@@ -38,9 +41,10 @@ interface Call {
 
 /**
  * A `fetch` that plays one scripted response per call. A string is a body that
- * ends, which is a server hanging up; a number is that status.
+ * ends, which is a server hanging up; a list of strings is such a body arriving
+ * in those chunks; a number is that status.
  */
-function scripted(...responses: (string | number)[]) {
+function scripted(...responses: (string | readonly string[] | number)[]) {
 	const calls: Call[] = [];
 
 	const fetch = (async (url: string | URL, init?: RequestInit) => {
@@ -66,7 +70,14 @@ function scripted(...responses: (string | number)[]) {
 			});
 		}
 
-		return new Response(new TextEncoder().encode(scene), {
+		const chunks = typeof scene === "string" ? [scene] : scene;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+				controller.close();
+			},
+		});
+		return new Response(body, {
 			status: 200,
 			headers: { "content-type": "text/event-stream; charset=utf-8" },
 		});
@@ -199,11 +210,55 @@ describe("parsing", () => {
 	});
 
 	it("bounds an unfinished frame", async () => {
-		const { fetch } = scripted(`data: ${"x".repeat(1024 * 1024 + 1)}\n`);
+		const { fetch } = scripted(`data: ${"x".repeat(2 * MAX_EVENT_CHARS + 1)}\n`);
 
 		await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({
 			_tag: "InternalServerError",
 		});
+	});
+
+	describe("holds every event to the size limit, however its chunks split", () => {
+		/** A frame whose data is exactly `characters` long. */
+		const frameOfSize = (characters: number) => {
+			const delta = (text: string) =>
+				streamEvent("message.delta", {
+					chatId: "c1",
+					messageId: "m1",
+					offset: 0,
+					text,
+					execution: 1,
+				});
+			const padding = characters - JSON.stringify(delta("")).length;
+			return frame({ event: "message.delta", id: 1, data: delta("x".repeat(padding)) });
+		};
+		/** The frame whole, and split one character before its data ends. */
+		const deliveries = (whole: string) => {
+			const splitAt = whole.length - "x}\n\n".length + 1;
+			return [
+				["whole", [whole]],
+				["split", [whole.slice(0, splitAt), whole.slice(splitAt)]],
+			] as const;
+		};
+
+		it.each(deliveries(frameOfSize(MAX_EVENT_CHARS)))(
+			"delivers one at the limit, %s",
+			async (_, chunks) => {
+				const { fetch } = scripted(chunks);
+
+				expect(await take(events(fetch).chat("c1"), 1)).toHaveLength(1);
+			},
+		);
+
+		it.each(deliveries(frameOfSize(MAX_EVENT_CHARS + 1)))(
+			"refuses one past the limit, %s",
+			async (_, chunks) => {
+				const { fetch } = scripted(chunks);
+
+				await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({
+					_tag: "InternalServerError",
+				});
+			},
+		);
 	});
 
 	it("ignores the server's keep-alive comments", async () => {

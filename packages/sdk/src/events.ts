@@ -199,8 +199,16 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 	const ready: Message[] = [];
 	let tooLarge = false;
 	const parser = createParser({
-		maxBufferSize: MAX_EVENT_CHARS,
-		onEvent: ({ id, data }) => ready.push({ id, data }),
+		// The parser's cap counts what it holds of a line still arriving, field
+		// name and all, so whether an event near the limit passed would depend on
+		// where the chunks split. The limit is held on each whole event instead,
+		// and the cap, well above it, only stops a broken stream from buffering
+		// without end.
+		maxBufferSize: 2 * MAX_EVENT_CHARS,
+		onEvent: ({ id, data }) => {
+			if (data.length > MAX_EVENT_CHARS) tooLarge = true;
+			else ready.push({ id, data });
+		},
 		onError: (error) => {
 			if (error.type === "max-buffer-size-exceeded") tooLarge = true;
 		},
