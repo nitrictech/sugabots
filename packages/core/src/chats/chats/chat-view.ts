@@ -824,11 +824,12 @@ function unreadMentionCandidates(db: Executor, input: AttentionScope) {
 		.offset(0)
 		.as("mention_chat_cutoffs");
 	const candidates = db
-		.select({ id: message.id, chatId: message.chatId, createdAt: message.createdAt })
+		.select({ id: message.id, createdAt: message.createdAt })
 		.from(message)
 		.where(
 			and(
-				gt(message.createdAt, input.since),
+				eq(message.chatId, chats.id),
+				sql`${message.createdAt} > greatest(${input.since.toISOString()}::timestamptz, ${chats.cutoff})`,
 				finishedWordsFromOthers(input.memberId),
 				mentions(input.handle),
 			),
@@ -837,9 +838,8 @@ function unreadMentionCandidates(db: Executor, input: AttentionScope) {
 		.as("mention_candidates");
 	return db
 		.select({ id: candidates.id, projectId: chats.projectId, createdAt: candidates.createdAt })
-		.from(candidates)
-		.innerJoin(chats, eq(chats.id, candidates.chatId))
-		.where(sql`coalesce(${candidates.createdAt} > ${chats.cutoff}, true)`);
+		.from(chats)
+		.crossJoinLateral(candidates);
 }
 
 /** A message that mentions the member and that they have not read. */
