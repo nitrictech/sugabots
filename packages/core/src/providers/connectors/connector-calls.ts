@@ -12,7 +12,8 @@ import { searchOfferedTools } from "../../chats/tools/tool-search/tool.ts";
 import type { Database } from "../../database/database.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import type { Approved } from "../../proofs/approved.ts";
-import type { CanUseConnector } from "../../proofs/can-use-connector.ts";
+import { type CanUseConnector, proveCanUseConnector } from "../../proofs/can-use-connector.ts";
+import { named } from "../../proofs/proof.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { type ConnectorSessions, connectorSessions } from "./connector-sessions.ts";
@@ -42,7 +43,7 @@ export interface Interface {
 	readonly searchTools: <P, T, X>(
 		turn: RunsTurn<P, T>,
 		approved: Approved<NoInfer<P>, X, [T], "connectors.searchTools">,
-	) => Effect.Effect<unknown, ResourceHidden>;
+	) => Effect.Effect<unknown, ResourceHidden, Database>;
 	readonly callTool: <P, T, K, X>(
 		turn: RunsTurn<P, T>,
 		use: CanUseConnector<NoInfer<P>, K>,
@@ -155,13 +156,24 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					: { invalid: checked.error.message };
 			}),
 		searchTools: (running, approved) =>
-			Effect.suspend(() => {
+			Effect.gen(function* () {
 				const turn = turns.get(running.turn.value);
 				if (!turn || turn.executionNumber !== running.execution) {
-					return Effect.fail(new ResourceHidden({ resource: "connector" }));
+					return yield* new ResourceHidden({ resource: "connector" });
 				}
-				return Effect.succeed(
-					searchOfferedTools(buildCatalog(turn.tools, {}), approved.input.query),
+				const available = yield* Effect.filter(
+					Object.entries(turn.tools).filter(([, offered]) => offered.access !== "off"),
+					([, offered]) =>
+						named(offered.connectorId, (connector) =>
+							proveCanUseConnector(running.principal, connector, offered.remoteToolName, {
+								revision: offered.connectorRevision,
+								described: offered.described,
+							}).pipe(Effect.map((use) => use.access !== "off")),
+						).pipe(Effect.orElseSucceed(() => false)),
+				);
+				return searchOfferedTools(
+					buildCatalog(Object.fromEntries(available), {}),
+					approved.input.query,
 				);
 			}),
 		callTool: (turn, use, approved) =>

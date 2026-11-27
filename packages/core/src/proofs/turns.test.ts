@@ -1,7 +1,8 @@
 import type { JsonValue, ToolApprovalStatus } from "@sugabots/contracts";
 import { connectorToolKey, HOST_REQUEST_TOOL } from "@sugabots/contracts";
 import type { InputOf } from "@sugabots/contracts/operations";
-import { and, eq } from "drizzle-orm";
+import { jsonSchema, tool } from "ai";
+import { and, eq, inArray } from "drizzle-orm";
 import { Effect, Redacted } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -11,6 +12,7 @@ import {
 	seedMember,
 	seedMessage,
 	seedProject,
+	seedProjectBotConnector,
 	seedProjectChat,
 	seedTurnAnswering,
 	seedWorkspace,
@@ -18,6 +20,7 @@ import {
 } from "../authentication/seed.test-support.ts";
 import { turnFacts } from "../authentication/turn-facts.ts";
 import { offerAugmentationTools } from "../chats/tools/augmentations.ts";
+import { offeredTool } from "../chats/tools/connector-catalog.ts";
 import { Turns } from "../chats/turns/turns.ts";
 import { Computers } from "../computers/computers.ts";
 import { inMemoryComputers } from "../computers/testing.ts";
@@ -26,12 +29,14 @@ import {
 	computer,
 	computerProvider,
 	connector,
+	projectBotConnector,
 	projectMember,
 	toolCall,
 	turn,
 } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { callTool } from "../operations/connectors/call-tool.ts";
+import { searchTools } from "../operations/connectors/search-tools.ts";
 import { ApprovalCheckReached, type Call } from "../operations/operation.ts";
 import type { Principal } from "../principal.ts";
 import { ConnectorCalls } from "../providers/connectors/connector-calls.ts";
@@ -609,6 +614,106 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await starts("allow")).toBe("ok");
 			expect(await starts("ask")).toBe("ApprovalNeeded");
 			expect(await starts("off")).toBe("ApprovalRefused");
+		});
+
+		it("searches only connector tools that are still available in the project", async () => {
+			const { a } = world;
+			const acting = await as.botFor(a.ed, a.pub.id, a.chat);
+			const described = {
+				name: "list_routes",
+				readOnly: true,
+				destructive: null,
+				description: null,
+			};
+			const own = await seedConnector(a.workspace, a.pub.defaultProject, { tools: [described] });
+			const local = await seedConnector(a.workspace, a.project, { tools: [described] });
+			await seedProjectBotConnector(a.workspace, a.project, a.pub.id, own);
+			const installed = await onDatabase((db) =>
+				db
+					.select()
+					.from(connector)
+					.where(inArray(connector.id, [own, local])),
+			);
+			const tools = Object.fromEntries(
+				installed.map((row) =>
+					offeredTool(
+						{ ...row, connectorId: row.id },
+						described,
+						tool({
+							description: "List delivery routes",
+							inputSchema: jsonSchema({ type: "object" }),
+						}),
+					),
+				),
+			);
+			const calls = ConnectorCalls.from({
+				forTurn: () =>
+					Effect.succeed({
+						tools,
+						unavailable: [],
+						signInExpired: [],
+						instructions: {},
+						addable: [],
+						fromProjectAndBot: true,
+						close: async () => {},
+					}),
+			});
+			await runOnPostgres(
+				calls.offer(
+					acting,
+					{ projectId: a.project, ownProjectId: a.pub.defaultProject },
+					{
+						files: { read: () => Effect.die("Search does not read files") },
+						computer: undefined,
+						computerSignsIn: false,
+					},
+				),
+			);
+			const search = (query: string) =>
+				runOnPostgres(
+					searchTools
+						.run(acting, { query }, { kind: "request" })
+						.pipe(Effect.provideService(ConnectorCalls.Service, calls)),
+				);
+			const keyFor = (id: string) => {
+				const row = installed.find((row) => row.id === id);
+				if (!row) throw new Error("Expected an installed connector");
+				return connectorToolKey(row.handle, described.name);
+			};
+			const ownTool = keyFor(own);
+			const localTool = keyFor(local);
+			expect(await search("list_routes")).toMatchObject({
+				tools: expect.arrayContaining([
+					expect.objectContaining({ tool: ownTool, inputSchema: { type: "object" } }),
+					expect.objectContaining({ tool: localTool, inputSchema: { type: "object" } }),
+				]),
+			});
+
+			await onDatabase((db) =>
+				db.delete(projectBotConnector).where(eq(projectBotConnector.connectorId, own)),
+			);
+			expect(await search("list_routes")).toMatchObject({
+				tools: [expect.objectContaining({ tool: localTool })],
+			});
+			expect(await search("zxqwvv")).toMatchObject({ catalog: expect.stringContaining(localTool) });
+			expect(await search("zxqwvv")).toMatchObject({
+				catalog: expect.not.stringContaining(ownTool),
+			});
+
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ toolAccess: { list_routes: "off" } })
+					.where(eq(connector.id, local)),
+			);
+			expect(await search("list_routes")).toMatchObject({ tools: [] });
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ toolAccess: {}, configurationRevision: 99 })
+					.where(eq(connector.id, local)),
+			);
+			expect(await search("list_routes")).toMatchObject({ tools: [] });
 		});
 
 		it("keeps a decision made before its approver was demoted", async () => {
