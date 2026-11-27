@@ -160,6 +160,7 @@ export function ChatComposer({
 	submitLabel,
 	sending = false,
 	error,
+	status,
 	mentionable,
 	replyingTo,
 	addressed,
@@ -183,6 +184,8 @@ export function ChatComposer({
 	/** A message is on its way, so another cannot be sent yet. */
 	sending?: boolean;
 	error?: ReactNode;
+	/** Said under the draft, level with the model at the other end: who is typing, or who will reply. An error takes its place. */
+	status?: ReactNode;
 	/** Who the draft can mention, offered in this order. */
 	mentionable: readonly MentionTarget[];
 	/** The message the draft answers, quoted when it is sent. */
@@ -473,6 +476,7 @@ export function ChatComposer({
 				<div aria-live="polite" className="min-w-0 flex-1 text-destructive-text empty:hidden">
 					{error}
 				</div>
+				{!error && status && <div className="min-w-0 flex-1 text-muted-foreground">{status}</div>}
 				{held ? (
 					<HeldNote>{held}</HeldNote>
 				) : (

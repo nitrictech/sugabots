@@ -74,7 +74,7 @@ export function ChatFooter({
 		interrupt.isPending ||
 		(interrupt.isSuccess && interruptible.every((turnId) => interrupt.variables?.includes(turnId)));
 	return (
-		<div className="mx-auto w-full max-w-200 shrink-0 px-4 max-md:pb-tab-bar md:px-5">
+		<div className="mx-auto w-full max-w-200 shrink-0 px-4 max-md:pb-tab-bar md:px-5 md:pb-4">
 			<ChatComposer
 				label={composerLabel({ audience, automation: !!details.automation, chatName })}
 				model={model && <ModelName modelId={model} />}
@@ -83,6 +83,10 @@ export function ChatFooter({
 				onSubmit={sending.submit}
 				submitLabel="Send message"
 				sending={sending.pending}
+				// A line high, as the model beside it is, so nothing moves as somebody starts or stops typing.
+				status={
+					anyoneTyping(typers) ? <TypingIndicator typers={typers} className="h-4 px-0" /> : hint
+				}
 				held={held && <BotsWithoutModelNotice bots={withoutModel} />}
 				error={
 					sending.error ??
@@ -111,18 +115,6 @@ export function ChatFooter({
 				attachments={attachments}
 				notice={<ConnectorsNotice owner={chatLocation} />}
 			/>
-			{/*
-			 * Always its height, so nothing moves as somebody starts or stops typing.
-			 * On a phone, with the tabs straight under it, it takes room only while
-			 * there is something to say, and is a small gap above the tabs otherwise.
-			 */}
-			<div className="flex h-6.5 items-center max-md:h-auto max-md:min-h-2 max-md:[&>*]:py-1">
-				{anyoneTyping(typers) ? (
-					<TypingIndicator typers={typers} className="px-1" />
-				) : (
-					hint && <p className="m-0 px-1 text-xs text-muted-foreground">{hint}</p>
-				)}
-			</div>
 		</div>
 	);
 }
