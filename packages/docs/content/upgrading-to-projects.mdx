@@ -21,9 +21,20 @@ update so far, so plan for it.
 
 - **Shared pods become private projects** with the same members. Each bot of
   a shared pod becomes a private bot whose members are exactly the pod's
-  members, and stays in the project, still leading it if it led the pod. A
-  bot's creator who had left the pod isn't one of its members. Nobody gains
-  access to anything they couldn't reach before.
+  members, and stays in the project. A bot's creator who had left the pod
+  isn't one of its members. Nobody gains access to anything they couldn't
+  reach before.
+- **Each project has a lead bot that answers its chats.** In a pod's chats,
+  bots only answered when someone mentioned them or replied to them. Now a
+  message that mentions no bot and replies to none goes to the project's lead
+  bot. A shared
+  pod's lead is the first of its bots added to it. A pod with no bots gets a
+  lead with no model, which answers nobody until someone gives it a model or
+  chooses another lead.
+- **Pod members can run its bots' automations by hand.** A shared pod's
+  members become members of its bots, and anyone who reaches a bot, but a
+  viewer, may start its enabled automations by hand. Before, only owners and
+  admins could.
 - **Admins see which personal bots there are.** Each member's personal bots,
   such as their Personal Assistant and the bots of their personal pod, show in
   owners' and admins' lists of bots. Admins still can't talk to them or read
@@ -31,13 +42,19 @@ update so far, so plan for it.
 - **Each bot gets its own connectors.** A pod's connectors are copied to each
   of its bots. A shared pod with no bots keeps its connectors in the project it
   becomes. Sign-ins can't be shared between copies, so **every OAuth
-  connector has to sign in again, once for each bot it was copied to**.
-  Connectors that use an API key or no sign-in keep working.
+  connector has to sign in again**: once for each bot it was copied to, and
+  once in each project that kept one. Connectors that use an API key or no
+  sign-in keep working.
 - **A pod's GitHub app goes to one bot**: the oldest bot with automations
-  started by it, or otherwise the pod's oldest bot. A GitHub app can't be
-  copied, so the pod's other bots' automations that GitHub started are
-  **paused**. To start them again, set up a GitHub app for each of those bots,
-  point the trigger at it, and resume the automation.
+  started by it, or otherwise the pod's oldest bot, but never a Personal
+  Assistant. A GitHub app can't be copied, so the pod's other bots'
+  automations that GitHub started are **paused**. To start them again, set up
+  a GitHub app for each of those bots, point the trigger at it, and resume
+  the automation. A personal pod whose only bot is its Personal Assistant
+  **loses its GitHub app**.
+- **A personal pod with no bots loses its computer and connectors.** Its
+  computer is destroyed at its provider, with everything on it, and its
+  connectors are deleted. Its files are kept (see below).
 - **Webhook triggers that only kept a digest of their secret are paused.**
   Older versions stored only a digest of some webhook secrets, which can't be
   used to check calls any more. Each such trigger refuses every call, and its
@@ -66,9 +83,10 @@ update so far, so plan for it.
   So do the setup addresses each GitHub app was made with. You don't need to
   change them where they're configured.
 - **Files and computers.** Every file keeps its contents, and every computer
-  keeps its machine and its work. A personal pod with no bots left gives its
-  files to a new Personal Assistant for its owner, with no model until they
-  choose one, so only they reach them. Files kept on disk move to their new
-  folders when the server starts.
+  keeps its machine and its work, but a personal pod's with no bots (see
+  above). A personal pod with no bots left gives its files to a new Personal
+  Assistant for its owner, with no model until they choose one, so only they
+  reach them. Files kept on disk move to their new folders when the server
+  starts.
 - **Old docs links.** Links to renamed docs pages, such as `/docs/pods`,
   redirect to the page that replaced them.
