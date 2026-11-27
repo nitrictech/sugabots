@@ -2840,41 +2840,55 @@ it.skipIf(!process.env.DATABASE_URL)(
 	UPGRADE_TIMEOUT_MS,
 );
 
-interface JoinPlan {
+interface ExecutionPlan {
+	readonly "Node Type": string;
 	readonly "Actual Loops": number;
 	readonly "Rows Removed by Join Filter"?: number;
-	readonly Plans?: readonly JoinPlan[];
+	readonly Plans?: readonly ExecutionPlan[];
 }
 
-function countJoinFilterRows(plan: JoinPlan): number {
+function countJoinFilterRows(plan: ExecutionPlan): number {
 	const removed = (plan["Rows Removed by Join Filter"] ?? 0) * plan["Actual Loops"];
 	return (
 		removed + (plan.Plans ?? []).reduce((total, child) => total + countJoinFilterRows(child), 0)
 	);
 }
 
-async function countDiscardedPairs(client: pg.Client, statement: string) {
+function collectAggregateLoops(plan: ExecutionPlan): number[] {
+	const loops = (plan.Plans ?? []).flatMap(collectAggregateLoops);
+	return plan["Node Type"] === "Aggregate" ? [plan["Actual Loops"], ...loops] : loops;
+}
+
+async function explainAnalyze(client: pg.Client, statement: string): Promise<ExecutionPlan> {
 	const {
 		rows: [result],
-	} = await client.query<{ "QUERY PLAN": [{ Plan: JoinPlan }] }>(
+	} = await client.query<{ "QUERY PLAN": [{ Plan: ExecutionPlan }] }>(
 		`explain (analyze, timing off, format json) ${statement}`,
 	);
 	if (!result) throw new Error("EXPLAIN returned no plan");
-	return countJoinFilterRows(result["QUERY PLAN"][0].Plan);
+	return result["QUERY PLAN"][0].Plan;
+}
+
+async function countDiscardedPairs(client: pg.Client, statement: string) {
+	return countJoinFilterRows(await explainAnalyze(client, statement));
 }
 
 it("counts rows discarded by a join filter across every loop of its plan node", () => {
 	expect(
 		countJoinFilterRows({
+			"Node Type": "Nested Loop",
 			"Actual Loops": 1,
 			"Rows Removed by Join Filter": 1,
-			Plans: [{ "Actual Loops": 12, "Rows Removed by Join Filter": 3 }, { "Actual Loops": 0 }],
+			Plans: [
+				{ "Node Type": "Nested Loop", "Actual Loops": 12, "Rows Removed by Join Filter": 3 },
+				{ "Node Type": "Seq Scan", "Actual Loops": 0 },
+			],
 		}),
 	).toBe(37);
 });
 
 it.skipIf(!process.env.DATABASE_URL)(
-	"keeps replies referenced by queued work without comparing every reply to every payload",
+	"keeps replies referenced by queued work and rewrites surviving collaboration replies as a batch",
 	async () => {
 		const migration = await readFile(
 			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
@@ -2888,6 +2902,7 @@ it.skipIf(!process.env.DATABASE_URL)(
 			.slice(migration.indexOf("-- The other asking replies"))
 			.split("--> statement-breakpoint")[0];
 		if (!rewrite) throw new Error("The migration has no collaboration reply rewrite");
+		const mixedReplies = 3_000;
 		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
 			await client.query("begin");
 			try {
@@ -2904,11 +2919,11 @@ it.skipIf(!process.env.DATABASE_URL)(
 					insert into message (id, parts, status)
 					select md5('reply' || ordinal)::uuid, '[{"type":"collaboration"}]', 'complete'
 					from generate_series(1, 3000) ordinal;
-					insert into message (id, parts, status) values (
-						md5('reply3001')::uuid,
+					insert into message (id, parts, status)
+					select md5('mixed reply' || ordinal)::uuid,
 						'[{"type":"text","text":"Before "},{"type":"collaboration"},{"type":"text","text":"after"}]',
 						'complete'
-					);
+					from generate_series(1, ${mixedReplies}) ordinal;
 					insert into lane (payload)
 					values (jsonb_build_object('triggerMessageId', md5('reply1')::uuid)),
 						(jsonb_build_object('sourceMessageId', md5('reply2')::uuid)), (null);
@@ -2931,17 +2946,18 @@ it.skipIf(!process.env.DATABASE_URL)(
 				);
 				expect(kept).toEqual([{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }, { ordinal: 4 }]);
 				expect(discardedPairs).toBeLessThan(10_000);
-				await client.query(rewrite);
+				const plan = await explainAnalyze(client, rewrite);
+				expect(new Set(collectAggregateLoops(plan))).toEqual(new Set([1]));
 				const { rows: rewritten } = await client.query(`
-				select ordinal, parts from (values (1), (2), (3), (4), (3001)) as replies(ordinal)
-				join message on id = md5('reply' || ordinal)::uuid order by ordinal
-			`);
+					select count(*) filter (where parts = '[]')::int as "clearedReplies",
+						count(*) filter (
+							where parts = '[{"type":"text","text":"Before after"}]'
+						)::int as "joinedReplies",
+						count(*)::int as total
+					from message
+				`);
 				expect(rewritten).toEqual([
-					{ ordinal: 1, parts: [] },
-					{ ordinal: 2, parts: [] },
-					{ ordinal: 3, parts: [] },
-					{ ordinal: 4, parts: [] },
-					{ ordinal: 3001, parts: [{ type: "text", text: "Before after" }] },
+					{ clearedReplies: 4, joinedReplies: mixedReplies, total: mixedReplies + 4 },
 				]);
 			} finally {
 				await client.query("rollback");
