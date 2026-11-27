@@ -168,4 +168,3 @@ export function reachesChatFor(row: ChatReachColumns, memberId: string | SQLWrap
 
 /** Roles that reach a project once they have been added to it. */
 const ROLES_READING_PROJECTS = rolesGrantedInProject("project.read");
-
