@@ -1,7 +1,7 @@
 import type { WrittenFile, WrittenFileKind } from "@sugabots/contracts";
 import { cn } from "cn";
 import { ChevronDown, ChevronUp, FileText, type LucideIcon, PanelsTopLeft } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { FILE_KIND_DOWNLOADS, FILE_KIND_LABELS } from "@/lib/file-kind-catalog.ts";
 import type { PageAt } from "@/lib/files.ts";
 import { FIT_HEIGHT_PX } from "@/lib/page-frame.ts";
@@ -119,9 +119,10 @@ export const FILE_KINDS: Record<WrittenFileKind, WrittenFileKindView> = {
 };
 
 /**
- * The start of a document, faded out, opening it in full when clicked. The
- * card's own line opens it for the keyboard, so this is for a pointer alone,
- * and a screen reader reads the start as it is.
+ * The start of a document, at one height whatever its length so every card
+ * keeps its shape, faded out only where it is cut off. Clicked, it opens in
+ * full. The card's own line opens it for the keyboard, so this is for a
+ * pointer alone, and a screen reader reads the start as it is.
  */
 function DocumentPreview({
 	content,
@@ -132,13 +133,36 @@ function DocumentPreview({
 	onOpen: () => void;
 }) {
 	if (content === undefined) return <InlineLoading />;
+	return <DocumentStart content={content} onOpen={onOpen} />;
+}
+
+function DocumentStart({ content, onOpen }: { content: string; onOpen: () => void }) {
+	const frame = useRef<HTMLDivElement>(null);
+	const words = useRef<HTMLDivElement>(null);
+	const [cutOff, setCutOff] = useState(false);
+	useLayoutEffect(() => {
+		const shown = frame.current;
+		const written = words.current;
+		if (!shown || !written) return;
+		const measure = () => setCutOff(written.offsetHeight > shown.clientHeight);
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(written);
+		return () => observer.disconnect();
+	}, []);
 	return (
 		// biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: a wider place for a pointer to open the file, which the card's line opens for the keyboard.
 		<div
+			ref={frame}
 			onClick={onOpen}
-			className="relative max-h-42 w-full cursor-zoom-in overflow-hidden px-4 pt-3 text-xs mask-b-from-60%"
+			className={cn(
+				"h-42 w-full cursor-zoom-in overflow-hidden text-xs",
+				cutOff && "mask-b-from-60%",
+			)}
 		>
-			<MessageMarkdown text={content} mentionable={[]} writer="bot" />
+			<div ref={words} className="px-4 py-3">
+				<MessageMarkdown text={content} mentionable={[]} writer="bot" />
+			</div>
 		</div>
 	);
 }
@@ -205,6 +229,6 @@ function LivePage({
 
 function InlineLoading() {
 	return (
-		<div className="grid h-30 place-content-center text-muted-foreground text-xs">Loading…</div>
+		<div className="grid h-42 place-content-center text-muted-foreground text-xs">Loading…</div>
 	);
 }
