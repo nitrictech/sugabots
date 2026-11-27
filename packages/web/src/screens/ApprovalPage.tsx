@@ -108,6 +108,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 					gitHub={call.approval?.gitHub}
 					connectorUrl={connector?.url}
 					connectorChanged={connector?.changed}
+					waiting={call.approval?.status === "pending"}
 				/>
 				<ExactRequest input={call.input} />
 				<div className="flex flex-wrap items-center gap-3 pt-1 max-md:flex-col max-md:items-stretch max-md:gap-4">

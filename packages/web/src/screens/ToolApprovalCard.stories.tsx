@@ -255,18 +255,19 @@ export const BrowserPage = meta.story({
 		);
 		await expect(
 			canvas.getByText(
-				"This approval covers the page, which can change while approval is pending.",
+				"Allowing this lets the bot act anywhere on this page, which may change before you decide.",
 			),
 		).toBeVisible();
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog");
 		await expect(request).toHaveTextContent("On the page https://travel.example.com/checkout");
 		await expect(request).toHaveTextContent(
-			"This approval covers the page, which can change while approval is pending.",
+			"Allowing this lets the bot act anywhere on this page, which may change before you decide.",
 		);
 	},
 });
 
+/** GitHubDefaultBase is a pull request the bot didn't name a base for: the card shows the branch it will use. */
 export const GitHubDefaultBase = meta.story({
 	globals: PHONE,
 	args: {
@@ -293,7 +294,6 @@ export const GitHubDefaultBase = meta.story({
 		await waitFor(() => expect(canvas.getByText("Base branch release")).toBeVisible());
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog");
-		await expect(request).toHaveTextContent("GitHub repository ID 101");
 		await expect(request).toHaveTextContent("Base branch release");
 	},
 });

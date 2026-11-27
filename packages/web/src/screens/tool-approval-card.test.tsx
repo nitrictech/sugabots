@@ -89,13 +89,44 @@ describe("an approval request", () => {
 	});
 
 	it.each([
-		{ canApprove: true, addressVisible: true, revision: 2, showsDestination: true },
-		{ canApprove: false, addressVisible: true, revision: 2, showsDestination: false },
-		{ canApprove: true, addressVisible: false, revision: 2, showsDestination: false },
-		{ canApprove: true, addressVisible: true, revision: 3, showsDestination: false },
-	])(
-		"shows the recorded connector and respects destination access ($canApprove, $addressVisible, revision $revision)",
-		async ({ canApprove, addressVisible, revision, showsDestination }) => {
+		{
+			canApprove: true,
+			addressVisible: true,
+			revision: 2,
+			status: "pending",
+			showsDestination: true,
+		},
+		{
+			canApprove: false,
+			addressVisible: true,
+			revision: 2,
+			status: "pending",
+			showsDestination: false,
+		},
+		{
+			canApprove: true,
+			addressVisible: false,
+			revision: 2,
+			status: "pending",
+			showsDestination: false,
+		},
+		{
+			canApprove: true,
+			addressVisible: true,
+			revision: 3,
+			status: "pending",
+			showsDestination: false,
+		},
+		{
+			canApprove: true,
+			addressVisible: true,
+			revision: 3,
+			status: "allowed",
+			showsDestination: false,
+		},
+	] as const)(
+		"shows the recorded connector and respects destination access ($canApprove, $addressVisible, revision $revision, $status)",
+		async ({ canApprove, addressVisible, revision, status, showsDestination }) => {
 			const projectId = "0199a3a0-0000-7000-8000-000000000002";
 			const connectorId = "0199a3a0-0000-7000-8000-000000000003";
 			const url = "https://issues.example.com/mcp";
@@ -129,7 +160,7 @@ describe("an approval request", () => {
 					{ title: "Move the release" },
 					{
 						id: "approval-1",
-						status: "pending",
+						status,
 						approvers: "chat",
 						decidedByName: null,
 						decidedAt: null,
@@ -146,7 +177,7 @@ describe("an approval request", () => {
 				screen.queryByText(
 					"This connector was changed after the request, so allowing it won't run it.",
 				) !== null,
-			).toBe(revision !== 2);
+			).toBe(status === "pending" && revision !== 2);
 		},
 	);
 

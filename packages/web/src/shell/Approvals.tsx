@@ -181,6 +181,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 					gitHub={call.approval?.gitHub}
 					connectorUrl={connector?.url}
 					connectorChanged={connector?.changed}
+					waiting={call.approval?.status === "pending"}
 				/>
 				<FoldedRequest input={call.input} />
 			</div>

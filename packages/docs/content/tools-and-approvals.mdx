@@ -66,8 +66,12 @@ If you can answer a waiting call, you'll see **Allow** and **Deny**. Allow
 applies to that call and the details shown. A request shows the page's
 address for a browser action and, to whoever can answer it, the address a
 connector sends to; its expanded view shows the exact input. If the input is
-too large to show in full, Sugabots refuses the call. Browser approval covers
-the page shown. Its contents can change while approval is pending.
+too large to show in full, Sugabots refuses the call. Allowing a browser
+action lets the bot act anywhere on that page, which may change before you
+decide. For GitHub, a request also shows what the bot didn't name but the
+call will use, such as the repository's default branch for a new pull
+request, or the commit a review is for. If a connector is changed while a
+request waits, allowing it no longer runs the call; the request says so.
 
 The first rule that applies decides who can answer:
 

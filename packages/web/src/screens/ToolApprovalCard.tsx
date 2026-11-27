@@ -110,6 +110,7 @@ export function ToolApprovalCard({
 						gitHub={call.approval?.gitHub}
 						connectorUrl={boundConnector?.url}
 						connectorChanged={boundConnector?.changed}
+						waiting={call.approval?.status === "pending"}
 					/>
 					<FoldedRequest input={call.input} />
 				</div>
@@ -307,11 +308,14 @@ export function ApprovalDestination({
 	gitHub,
 	connectorUrl,
 	connectorChanged,
+	waiting,
 }: {
 	browserUrl?: string | undefined;
 	gitHub?: ApprovalGitHub | undefined;
 	connectorUrl?: string | null | undefined;
 	connectorChanged?: boolean | undefined;
+	/** Whether the request still waits for an answer, which the browser note is about. */
+	waiting?: boolean | undefined;
 }) {
 	if (connectorChanged) {
 		return (
@@ -321,7 +325,8 @@ export function ApprovalDestination({
 		);
 	}
 	const address = browserUrl ?? connectorUrl;
-	if (!address && !gitHub) return null;
+	const gitHubLines = gitHub && (gitHub.baseBranch || gitHub.reviewCommit);
+	if (!address && !gitHubLines) return null;
 	return (
 		<div className="space-y-1 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
 			{address && (
@@ -329,20 +334,14 @@ export function ApprovalDestination({
 					{browserUrl ? "On the page" : "Sends to"} {address}
 				</p>
 			)}
-			{browserUrl && (
+			{browserUrl && waiting && (
 				<p className="m-0">
-					This approval covers the page, which can change while approval is pending.
+					Allowing this lets the bot act anywhere on this page, which may change before you decide.
 				</p>
 			)}
-			{gitHub && (
-				<>
-					<p className="m-0">GitHub repository ID {gitHub.repositoryId}</p>
-					{gitHub.baseBranch && <p className="m-0">Base branch {gitHub.baseBranch}</p>}
-					{gitHub.reviewCommit && <p className="m-0">Review commit {gitHub.reviewCommit}</p>}
-					{gitHub.replyCommentId && (
-						<p className="m-0">Reply to review starting at comment {gitHub.replyCommentId}</p>
-					)}
-				</>
+			{gitHub?.baseBranch && <p className="m-0">Base branch {gitHub.baseBranch}</p>}
+			{gitHub?.reviewCommit && (
+				<p className="m-0">Reviews commit {gitHub.reviewCommit.slice(0, 7)}</p>
 			)}
 		</div>
 	);
@@ -419,6 +418,7 @@ function ReviewSheet({
 							gitHub={gitHub}
 							connectorUrl={connectorUrl}
 							connectorChanged={connectorChanged}
+							waiting
 						/>
 						<ExactRequest input={input} />
 					</div>
