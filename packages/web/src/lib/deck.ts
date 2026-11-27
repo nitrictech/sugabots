@@ -6,7 +6,6 @@ import {
 	holdsSuggestion,
 	SUGGESTED_DELETION,
 	SUGGESTED_INSERTION,
-	SUGGESTED_MODIFICATION,
 } from "@sugabots/contracts/live-document";
 import {
 	bodyOf,
@@ -30,17 +29,20 @@ import {
 	SLIDE_WIDTH,
 } from "@sugabots/contracts/slide-geometry";
 import type { SlideLayout } from "@sugabots/contracts/slide-layouts";
-import { changedPath, type SvgPath } from "@sugabots/contracts/svg-path";
-import type { Node, NodeType, Schema } from "@tiptap/pm/model";
+import type { Node } from "@tiptap/pm/model";
 import { EditorState, TextSelection, type Transaction } from "@tiptap/pm/state";
 import { sameFrame } from "./box-frames.ts";
 import { type FollowedNode, whereFollowedNodeIs } from "./followed-node.ts";
+import { nodeOf } from "./schema-nodes.ts";
 import { madeAsItIs } from "./suggesting.ts";
+import { suggestedAttributesOf } from "./suggestions.ts";
 
 /*
  * A `slides` deck being edited: its slides, and the changes made to them
  * whole, from the strip of slides and the stage. Each change is one
- * transaction, which suggesting mode turns into one suggestion.
+ * transaction. Suggesting mode turns a change to what a deck says into one
+ * suggestion; a change to where its boxes sit, or adding or deleting a box,
+ * is made at once, for everybody, never as a suggestion (`madeAsItIs`).
  *
  * A slide is known by where it starts in the deck (`SlidePos`) or by its
  * place among the slides (`SlideIndex`), and a box by its place among its
@@ -190,12 +192,6 @@ export function proposedChangeOf(slide: Node): "adding" | "removing" | undefined
 	return undefined;
 }
 
-function nodeType(schema: Schema, name: string): NodeType {
-	const type = schema.nodes[name];
-	if (!type) throw new Error(`The schema has no ${name} node`);
-	return type;
-}
-
 /** Where the first box of the slide starting at `slidePos` starts. */
 const firstBoxPos = (slidePos: number) => slidePos + FIRST_BOX_IN_SLIDE;
 
@@ -243,25 +239,43 @@ export function changeLayout(
 }
 
 /**
- * Whether `slide`'s boxes of the roles its layout places have moved from
- * where its template places them, or are drawn otherwise, which resetting its
- * layout (`resetLayout`) puts back.
+ * Whether resetting `slide`'s layout (`resetLayout`) would change anything:
+ * whether its boxes of the roles its layout places have moved from where its
+ * template places them, or are drawn otherwise, and none of what it would
+ * change of them waits on a suggestion.
  */
-export const canResetLayout = (slide: Node): boolean => resetToTemplate(slide) !== slide;
+export const canResetLayout = (slide: Node): boolean => slideReset(slide) !== undefined;
 
 /**
  * Puts each box of the slide at `index` of a role its layout places back
  * where its template places it (`resetToTemplate`), every other box, and what
  * each holds, as it is. Where a box sits is never a suggestion, so it is made
- * at once, even while the person is suggesting. `undefined` when every such
- * box is there already (`canResetLayout`).
+ * at once, even while the person is suggesting. `undefined` when resetting
+ * would change nothing (`canResetLayout`).
  */
 export function resetLayout(state: EditorState, index: SlideIndex): Transaction | undefined {
 	const slide = slidesOf(state.doc)[index];
-	if (!slide) return undefined;
-	const reset = resetToTemplate(slide.node);
-	if (reset === slide.node) return undefined;
+	const reset = slide && slideReset(slide.node);
+	if (!slide || !reset) return undefined;
 	return madeAsItIs(rearrangeBoxes(state.tr, slide.pos, bodyOf(reset).children));
+}
+
+/**
+ * `slide` with its layout reset (`resetToTemplate`): `undefined` when that
+ * changes nothing, or would change an attribute of one of its boxes that a
+ * suggestion waits to change, which rejecting it would put back.
+ */
+function slideReset(slide: Node): Node | undefined {
+	const reset = resetToTemplate(slide);
+	if (reset === slide) return undefined;
+	const boxes = bodyOf(slide).children;
+	const overwritesSuggestion = bodyOf(reset).children.some((after, index) => {
+		const before = boxes[index];
+		if (!before) return false;
+		const suggested = suggestedAttributesOf(before);
+		return Object.keys(changedAttributes(before, after)).some((name) => suggested.has(name));
+	});
+	return overwritesSuggestion ? undefined : reset;
 }
 
 /**
@@ -404,92 +418,130 @@ export function addImage(
 ): Transaction | undefined {
 	const box = state.doc.nodeAt(boxPos);
 	if (box?.type.name !== SLIDE_BOX) return undefined;
-	const image = nodeType(state.schema, "image").create({ src, alt });
+	const image = nodeOf(state.schema, "image", undefined, { src, alt });
 	const first = box.firstChild;
 	if (first?.type.name === "paragraph" && first.content.size === 0) {
 		return state.tr.insert(inside(boxPos), image);
 	}
 	const end = boxPos + box.nodeSize - 1;
-	return state.tr.insert(end, nodeType(state.schema, "paragraph").create(null, image));
+	return state.tr.insert(end, nodeOf(state.schema, "paragraph", image));
 }
 
 /** Where what the first child of a node starting at `pos` holds starts: past the node's own start and that child's. */
 const inside = (pos: number) => pos + 2;
 
-/**
- * Whether the slide's boxes wait on a suggestion: a new layout for it, or a
- * box somebody proposes adding or removing, as a new layout does. Until it is
- * settled, a box moved by hand could be moved again by settling it.
- */
-export function boxesWaitOnSuggestion(slide: Node): boolean {
-	const newLayout = slide.marks.some(
-		(mark) => mark.type.name === SUGGESTED_MODIFICATION && mark.attrs.attrName === "layout",
-	);
-	return (
-		newLayout ||
-		bodyOf(slide).children.some((box) =>
-			box.marks.some(
-				(mark) => mark.type.name === SUGGESTED_INSERTION || mark.type.name === SUGGESTED_DELETION,
-			),
-		)
-	);
-}
+/** The attributes of a box that setting its frame writes: its frame, and a shape's outline, stretched with it. */
+const FRAMING_WRITES: readonly (keyof BoxAttributes)[] = ["frame", "path"];
 
 /**
- * Places the box at `box`, on the slide starting at `slidePos`, at `frame`,
- * its shape, if it is one, stretched with it. `undefined` when no slide
- * starts there, when its boxes wait on a suggestion (see
- * `boxesWaitOnSuggestion`), when it has no such box, or when the box is at
- * `frame` already.
+ * Whether a suggestion waiting on `box` would move, resize or reshape it,
+ * which keeps it where it is until somebody accepts or rejects it: rejecting
+ * the suggestion puts back the frame and outline it replaced, which would
+ * undo a move made in the meantime. A suggestion of anything else, on it or
+ * on another box, holds nothing up.
+ */
+export function frameWaitsOnSuggestion(box: Node): boolean {
+	const suggested = suggestedAttributesOf(box);
+	return FRAMING_WRITES.some((name) => suggested.has(name));
+}
+
+/** Why a box can't be moved or resized now (see `frameWaitsOnSuggestion`), as the person is told it. */
+export const BOX_FRAME_BLOCKED_WORDS =
+	"Accept or undo the suggestion on this box to move or resize it.";
+
+/**
+ * Sets the frame of the box at `box`, on the slide starting at `slidePos`, to
+ * `frame`, its shape, if it is one, stretched with it, and the columns of a
+ * table in it made as much wider or narrower as it is. `undefined` when no
+ * slide starts there, when it has no such box, when a suggestion waits to
+ * move, resize or reshape the box (`frameWaitsOnSuggestion`), or when the box
+ * is at `frame` already.
  *
- * Where a box sits is never a suggestion, so it is placed at once, even while
+ * Where a box sits is never a suggestion, so it is set at once, even while
  * the person is suggesting.
  */
-export function placeBox(
+export function setBoxFrame(
 	state: EditorState,
 	slidePos: SlidePos,
 	box: BoxIndex,
 	frame: Frame,
 ): Transaction | undefined {
 	const slide = state.doc.nodeAt(slidePos);
-	if (slide?.type.name !== SLIDE || boxesWaitOnSuggestion(slide)) return undefined;
+	if (slide?.type.name !== SLIDE) return undefined;
 	const placed = boxesOf(slide)[box];
-	if (!placed || sameFrame(placed.attributes.frame, frame)) return undefined;
-	const { path, frame: was } = placed.attributes;
-	const stretched = path ? { path: pathStretched(path, was, frame) } : {};
+	if (!placed || frameWaitsOnSuggestion(placed.node)) return undefined;
+	const was = placed.attributes.frame;
+	if (sameFrame(was, frame)) return undefined;
+	const boxPos = slidePos + placed.startInSlide;
+	// Its shape's path is stretched with it (`withFrame`).
+	const framing = setBoxAttributes(state.tr, boxPos, { frame });
 	return madeAsItIs(
-		setBoxAttributes(state.tr, slidePos + placed.startInSlide, { frame, ...stretched }),
+		columnsStretched(framing, boxPos, placed.node, scaleOf(was.width, frame.width)),
 	);
 }
 
+/** How much a side `before` long is stretched to be `after` long: not at all from a length of nothing. */
+const scaleOf = (before: number, after: number) => (before === 0 ? 1 : after / before);
+
 /**
- * `path`, a shape's in a box framed at `was`, stretched to fill the box
- * framed at `becomes` as it filled it before. Across a size of nothing, as
- * a line's height may be, it is left as it is: it has no size to stretch.
+ * `transaction` with the columns of each table in `box`, which starts at
+ * `boxPos`, made `scale` times as wide, as its box is. A table whose columns
+ * are given widths, as one from a PowerPoint file, is drawn that wide
+ * whatever its box's width, so it follows its box only so.
  */
-function pathStretched(path: SvgPath, was: Frame, becomes: Frame): SvgPath {
-	const scale = (before: number, after: number) => (before === 0 ? 1 : after / before);
-	const scaleX = scale(was.width, becomes.width);
-	const scaleY = scale(was.height, becomes.height);
-	if (scaleX === 1 && scaleY === 1) return path;
-	return changedPath(path, { scaleX, scaleY, moveX: 0, moveY: 0 });
+function columnsStretched(
+	transaction: Transaction,
+	boxPos: number,
+	box: Node,
+	scale: number,
+): Transaction {
+	if (scale === 1) return transaction;
+	box.descendants((node, offset) => {
+		const widths: unknown = node.attrs.colwidth;
+		if (!Array.isArray(widths)) return true;
+		const stretched = widths.map((width) =>
+			typeof width === "number" ? Math.max(1, Math.round(width * scale)) : width,
+		);
+		transaction.setNodeAttribute(boxPos + 1 + offset, "colwidth", stretched);
+		return false;
+	});
+	return transaction;
 }
 
 /**
  * Why a box can't be deleted now: the person is suggesting, and a deletion
- * is made at once, never as a suggestion, as where a box sits is; or a
- * suggestion waits in the box, which deleting what it holds would lose.
+ * is made at once, never as a suggestion, as where a box sits is, so a box
+ * showing anything can't be deleted then; or a suggestion waits in the box,
+ * which deleting what it holds would lose.
  */
-export type BoxRemovalBlocked = "suggesting" | "suggestionPending";
+export type BoxDeletionBlocked = "suggesting" | "suggestionPending";
 
-export function boxRemovalBlocked(state: EditorState, box: Node): BoxRemovalBlocked | undefined {
-	if (isSuggestChangesEnabled(state)) return "suggesting";
+export function boxDeletionBlocked(state: EditorState, box: Node): BoxDeletionBlocked | undefined {
 	if (holdsSuggestion(box)) return "suggestionPending";
+	if (isSuggestChangesEnabled(state) && !showsNothing(box)) return "suggesting";
 	return undefined;
 }
 
+/**
+ * Whether `box` shows nothing: an empty line alone, and no fill, outline or
+ * shape, as a text box added and left empty, which is added at once even
+ * while the person is suggesting (`addTextBox`), and so can be deleted then.
+ */
+function showsNothing(box: Node): boolean {
+	const { fill, stroke, path } = boxAttributesOf(box);
+	const [line] = box.children;
+	return (
+		!fill &&
+		!stroke &&
+		!path &&
+		box.childCount === 1 &&
+		line?.type.name === "paragraph" &&
+		line.content.size === 0
+	);
+}
+
 /** Why a box can't be deleted now, as the person is told it. */
-export const BOX_REMOVAL_BLOCKED_WORDS: Record<BoxRemovalBlocked, string> = {
+export const BOX_DELETION_BLOCKED_WORDS: Record<BoxDeletionBlocked, string> = {
 	suggesting: "Turn off Suggesting to delete a box.",
 	suggestionPending: "Accept or undo the suggestions in this box to delete it.",
 };
@@ -500,61 +552,96 @@ export const BOX_REMOVAL_BLOCKED_WORDS: Record<BoxRemovalBlocked, string> = {
  * whole. The caret goes to the start of the nearest box left on the slide,
  * the next or else the one before, or else to its notes.
  *
- * Like placing a box, it is never a suggestion. `undefined` when no slide
- * starts there, when its boxes wait on a suggestion (`boxesWaitOnSuggestion`),
- * when it has no such box, or when `boxRemovalBlocked` says why the box can't
- * be deleted.
+ * Like setting a box's frame, it is never a suggestion. `undefined` when no
+ * slide starts there, when it has no such box, or when `boxDeletionBlocked`
+ * says why the box can't be deleted.
  */
-export function removeBox(
+export function deleteBox(
 	state: EditorState,
 	slidePos: SlidePos,
 	box: BoxIndex,
 ): Transaction | undefined {
 	const slide = state.doc.nodeAt(slidePos);
-	if (slide?.type.name !== SLIDE || boxesWaitOnSuggestion(slide)) return undefined;
-	const removed = boxesOf(slide)[box];
-	if (!removed || boxRemovalBlocked(state, removed.node)) return undefined;
-	const boxPos = slidePos + removed.startInSlide;
-	const removing = state.tr.delete(boxPos, boxPos + removed.node.nodeSize);
-	const left = removing.doc.nodeAt(slidePos);
-	if (!left) return madeAsItIs(removing);
+	if (slide?.type.name !== SLIDE) return undefined;
+	const deleted = boxesOf(slide)[box];
+	if (!deleted || boxDeletionBlocked(state, deleted.node)) return undefined;
+	const boxPos = slidePos + deleted.startInSlide;
+	const deleting = state.tr.delete(boxPos, boxPos + deleted.node.nodeSize);
+	const left = deleting.doc.nodeAt(slidePos);
+	if (!left) return madeAsItIs(deleting);
 	const boxesLeft = boxesOf(left);
 	const nearest = boxesLeft[box] ?? boxesLeft[box - 1];
 	const caretFrom = slidePos + (nearest?.startInSlide ?? notesStartInSlide(left));
-	return madeAsItIs(removing.setSelection(TextSelection.near(removing.doc.resolve(caretFrom + 1))));
+	return madeAsItIs(deleting.setSelection(TextSelection.near(deleting.doc.resolve(caretFrom + 1))));
 }
+
+declare const slidePointBrand: unique symbol;
+
+/** A point on a slide, in its pixels from its top left corner, as against a point in the window. */
+export type SlidePoint = { readonly x: number; readonly y: number } & {
+	readonly [slidePointBrand]: true;
+};
+
+/** The point `x` across and `y` down a slide, in its pixels. */
+export const slidePoint = (x: number, y: number): SlidePoint => ({ x, y }) as SlidePoint;
 
 /** How big a text box added by hand is: room for a line of a few words. */
 const NEW_TEXT_BOX = { width: 20 * SLIDE_UNIT, height: 3 * SLIDE_UNIT } as const;
 
+/** How far down from one another text boxes added with no place said go: a box's height and a unit, so one doesn't cover the last. */
+const NEW_TEXT_BOX_STEP = NEW_TEXT_BOX.height + SLIDE_UNIT;
+
 /**
  * Adds an empty text box, for nothing in particular, to the slide starting
  * at `slidePos`, over its other boxes, with the caret in it: its top left
- * corner at `at`, a point on the slide in its pixels, kept on the slide, or
- * in the slide's middle without one. Like placing a box, it is made at once,
- * even while the person is suggesting: it holds no words until they type
- * them. `undefined` when no slide starts there.
+ * corner at `at`, kept on the slide, or, without one, in the slide's middle,
+ * or a step down from a box there already. Like setting a box's
+ * frame, it is made at once, even while the person is suggesting: it holds
+ * no words until they type them, and so can be deleted while it holds none
+ * (`boxDeletionBlocked`). `undefined` when no slide starts there.
  */
 export function addTextBox(
 	state: EditorState,
 	slidePos: SlidePos,
-	at: { x: number; y: number } | undefined,
+	at: SlidePoint | undefined,
 ): Transaction | undefined {
 	const slide = state.doc.nodeAt(slidePos);
 	if (slide?.type.name !== SLIDE) return undefined;
 	const { width, height } = NEW_TEXT_BOX;
-	const corner = at ?? { x: (SLIDE_WIDTH - width) / 2, y: (SLIDE_HEIGHT - height) / 2 };
-	const frame = {
-		x: Math.round(Math.min(Math.max(corner.x, 0), SLIDE_WIDTH - width)),
-		y: Math.round(Math.min(Math.max(corner.y, 0), SLIDE_HEIGHT - height)),
+	const onSlide = ({ x, y }: { x: number; y: number }): Frame => ({
+		x: Math.round(Math.min(Math.max(x, 0), SLIDE_WIDTH - width)),
+		y: Math.round(Math.min(Math.max(y, 0), SLIDE_HEIGHT - height)),
 		width,
 		height,
-	};
+	});
+	const frame = at ? onSlide(at) : freeMiddleFrame(slide, onSlide);
 	const box = newBox(state.schema, { frame }, []);
 	// The end of the slide's body, past the slide's own start and the boxes it holds.
 	const end = slidePos + 1 + bodyOf(slide).nodeSize - 1;
 	const adding = state.tr.insert(end, box);
 	return madeAsItIs(adding.setSelection(TextSelection.create(adding.doc, inside(end))));
+}
+
+/**
+ * Where a text box added to `slide` with no place said goes: the slide's
+ * middle, or the first place a step down from it, and from each box added so
+ * before, where no box of `slide` has its top left corner, as far down as
+ * the slide goes, and its middle again past that. `onSlide` frames a new box
+ * with its corner at a point, kept on the slide.
+ */
+function freeMiddleFrame(slide: Node, onSlide: (corner: { x: number; y: number }) => Frame): Frame {
+	const taken = new Set(boxesOf(slide).map(({ attributes: { frame } }) => `${frame.x} ${frame.y}`));
+	const middle = onSlide({
+		x: (SLIDE_WIDTH - NEW_TEXT_BOX.width) / 2,
+		y: (SLIDE_HEIGHT - NEW_TEXT_BOX.height) / 2,
+	});
+	let frame = middle;
+	while (taken.has(`${frame.x} ${frame.y}`)) {
+		const next = onSlide({ x: frame.x, y: frame.y + NEW_TEXT_BOX_STEP });
+		if (sameFrame(next, frame)) return middle;
+		frame = next;
+	}
+	return frame;
 }
 
 /**

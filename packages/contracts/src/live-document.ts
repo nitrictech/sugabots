@@ -38,6 +38,7 @@ import {
 	SPEAKER_NOTES,
 	SpeakerNotes,
 } from "./live-slides.ts";
+import type { PageElement } from "./page-element.ts";
 import { slideTextStyles } from "./slide-text-style.ts";
 
 /*
@@ -56,9 +57,10 @@ export const SUGGESTED_INSERTION = "insertion";
 export const SUGGESTED_DELETION = "deletion";
 
 /**
- * Marks a block whose kind or formatting somebody proposes changing, or a
- * slide whose layout they do: what is proposed is what the block holds, and
- * the mark keeps what it would replace.
+ * Marks a node an attribute of which somebody proposes changing, as a
+ * block's kind or formatting, a slide's layout or background, a box's frame
+ * or fill, or a line's alignment: what is proposed is what the node holds,
+ * and the mark keeps what it would replace, one mark for each attribute.
  */
 export const SUGGESTED_MODIFICATION = "modification";
 
@@ -448,13 +450,8 @@ export const linkMayGoTo = (href: string) =>
 		defaultProtocol: LINK_OPTIONS.defaultProtocol,
 	});
 
-/** An element of a page being read, as far as finding what holds it goes. */
-interface ElementInPage {
-	closest(selector: string): { getAttribute(name: string): string | null } | null;
-}
-
 /** The link around `image` in a page, when it goes somewhere a text link may. */
-function linkAround(image: ElementInPage) {
+function linkAround(image: PageElement) {
 	const anchor = image.closest("a[href]");
 	const href = anchor?.getAttribute("href");
 	return anchor && href && linkMayGoTo(href) ? anchor : undefined;
@@ -768,6 +765,6 @@ export interface EditRequest {
 	instruction: string;
 	/** The bot they asked, by name. */
 	agent: string;
-	/** Whether the bot has suggested a change for it yet. */
+	/** Whether the bot has answered it with a change yet: a suggestion, or a box moved among a slide's others, which is moved at once. */
 	answered: boolean;
 }

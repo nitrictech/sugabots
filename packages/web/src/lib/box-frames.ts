@@ -123,6 +123,18 @@ const startsWithin = (start: number, size: number, room: number) => ({
 });
 
 /**
+ * Where an edge or corner moved to `at` goes, kept between `least` and
+ * `most`: to a line it snapped to exactly, which may be between pixels, as an
+ * imported box's edge may be, and to a whole pixel otherwise. Each is kept to
+ * a hundredth of a pixel, so adding and taking away lengths leaves no
+ * difference too small to see.
+ */
+const placedAt = (at: number, snapped: boolean, least: number, most: number) =>
+	hundredths(clamp(snapped ? at : Math.round(at), least, most));
+
+const hundredths = (value: number) => Math.round(value * 100) / 100;
+
+/**
  * `start` moved by `shift`, with its left edge, centre or right edge snapped
  * to the nearest line down the slide, and its top, middle or bottom to the
  * nearest across it, then kept on the slide, or no further off it than it
@@ -136,8 +148,8 @@ export function movedFrame(start: Frame, { dx, dy }: Shift, lines: SnapLines): A
 	const down = nearestSnap([top, top + height / 2, top + height], lines.across);
 	const xRange = startsWithin(start.x, width, SLIDE_WIDTH);
 	const yRange = startsWithin(start.y, height, SLIDE_HEIGHT);
-	const x = Math.round(clamp(left + across.shift, xRange.least, xRange.most));
-	const y = Math.round(clamp(top + down.shift, yRange.least, yRange.most));
+	const x = placedAt(left + across.shift, across.at !== undefined, xRange.least, xRange.most);
+	const y = placedAt(top + down.shift, down.at !== undefined, yRange.least, yRange.most);
 	const guides: Guide[] = [];
 	if (across.at !== undefined && touches([x, x + width / 2, x + width], across.at)) {
 		guides.push({ direction: "down", at: across.at });
@@ -160,7 +172,8 @@ const touches = (points: readonly number[], at: number) =>
  * moves snapped to the nearest line it comes close to, and kept on the slide,
  * or no further off it than it was, and at least the smallest box from the
  * edge facing it. A box smaller than that already, as a deck can hold, is
- * kept at least as big as it is.
+ * kept at least as big as it is. Along a side the handle doesn't move, the
+ * box keeps its place and size exactly.
  */
 export function resizedFrame(
 	start: Frame,
@@ -183,7 +196,7 @@ export function resizedFrame(
 		direction: Guide["direction"],
 	) => {
 		const snap = nearestSnap([edge + by], snapTo);
-		const moved = Math.round(clamp(edge + by + snap.shift, least, most));
+		const moved = placedAt(edge + by + snap.shift, snap.at !== undefined, least, most);
 		if (snap.at !== undefined && touches([moved], snap.at)) guides.push({ direction, at: snap.at });
 		return moved;
 	};
@@ -201,7 +214,15 @@ export function resizedFrame(
 		const most = Math.max(SLIDE_HEIGHT, bottom);
 		bottom = moveEdge(bottom, dy, lines.across, top + leastHeight, most, "across");
 	}
-	return { frame: { x: left, y: top, width: right - left, height: bottom - top }, guides };
+	const across = movesEdge(handle, "left") || movesEdge(handle, "right");
+	const down = movesEdge(handle, "top") || movesEdge(handle, "bottom");
+	const frame = {
+		x: across ? left : start.x,
+		y: down ? top : start.y,
+		width: across ? hundredths(right - left) : start.width,
+		height: down ? hundredths(bottom - top) : start.height,
+	};
+	return { frame, guides };
 }
 
 export const sameFrame = (one: Frame, other: Frame) =>

@@ -42,7 +42,7 @@ export function followNode(state: EditorState, pos: number): FollowedNode | unde
 		if (!(child instanceof XmlElement)) return undefined;
 		holder = child;
 	}
-	return holder instanceof XmlElement && binding.mapping.get(holder) === node
+	return holder instanceof XmlElement && standsFor(binding.mapping.get(holder), node)
 		? { element: holder, binding }
 		: undefined;
 }
@@ -68,7 +68,37 @@ export function whereFollowedNodeIs(doc: Node, followed: FollowedNode): number |
 		holder = holder.child(place);
 		contentStart = start + 1;
 	}
-	return holder === node ? start : undefined;
+	return standsFor(node, holder) ? start : undefined;
+}
+
+/**
+ * Whether `known`, the node the sync layer knows an element of the shared
+ * document by, is `node`. It is too when the two differ only by the marks on
+ * nodes in them, which the sync layer leaves out of the shared document: the
+ * suggestion marks restored on a node after a change from elsewhere (see
+ * `lib/suggesting.ts`) make it a new node, which the sync layer never learns
+ * of, and goes on knowing its element by the node as it was before.
+ */
+function standsFor(known: Node | readonly Node[] | undefined, node: Node): boolean {
+	if (known === node) return true;
+	return known !== undefined && !isNodeList(known) && sameButForNodeMarks(known, node);
+}
+
+/** Whether what the sync layer knows an element by is a list of nodes, as it knows a run of text. */
+const isNodeList = (known: Node | readonly Node[]): known is readonly Node[] =>
+	Array.isArray(known);
+
+/** Whether `one` and `other` hold the same, and are the same kind with the same attributes, whatever marks are on either, or on any node, not text, in them. */
+function sameButForNodeMarks(one: Node, other: Node): boolean {
+	if (one === other) return true;
+	if (one.isText || other.isText) return one.eq(other);
+	if (!one.hasMarkup(other.type, other.attrs, one.marks) || one.childCount !== other.childCount) {
+		return false;
+	}
+	for (let index = 0; index < one.childCount; index++) {
+		if (!sameButForNodeMarks(one.child(index), other.child(index))) return false;
+	}
+	return true;
 }
 
 /** A key for the node `followed` alone, the same each time it is followed, for React to know it by. */

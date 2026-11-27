@@ -1109,12 +1109,15 @@
 }
 
 :is(.live-deck, .slide-drawing) [data-slide-body] {
+	/* How large a slide is in its own pixels, in which every length a deck stores is. */
+	--slide-width: 960px;
+	--slide-height: 540px;
 	/*
 	 * How many of the window's pixels one of the slide's is, at the width
 	 * holding it, as a number: CSS divides no length by another, but the
 	 * tangent of the angle two lengths make is the one over the other.
 	 */
-	--slide-scale: tan(atan2(100cqw, 960px));
+	--slide-scale: tan(atan2(100cqw, var(--slide-width)));
 	--slide-unit: 16px;
 	--slide-text: calc(var(--slide-unit) * var(--slide-fit, 1));
 	--slide-text-size: 1.5;
@@ -1125,10 +1128,8 @@
 	--slide-heading-tracking: -0.01em;
 	/* Between the blocks a box holds. */
 	--slide-gap: 2em;
-	position: relative;
-	box-sizing: border-box;
-	width: 960px;
-	height: 540px;
+	width: var(--slide-width);
+	height: var(--slide-height);
 	/* What runs past the slide's edges is cut there, on the stage too. */
 	overflow: clip;
 	transform: scale(var(--slide-scale));
@@ -1139,6 +1140,21 @@
 	font-family: var(--font-sans);
 	font-size: var(--slide-text);
 	line-height: 1.4;
+}
+
+/*
+ * A slide of a colour of its own (`--slide-paint`) takes every colour it
+ * doesn't state, as its text's, its lists' markers' and its tables' rules,
+ * from the light scheme on a light colour and from the dark one on a dark
+ * colour, whatever the app's theme, as whatever draws it says
+ * (`slidePaintOf` in `screens/slide-drawing.tsx`).
+ */
+[data-slide-scheme="light"] > [data-slide-body] {
+	color-scheme: light;
+}
+
+[data-slide-scheme="dark"] > [data-slide-body] {
+	color-scheme: dark;
 }
 
 /* A drawing is as tall as the slide is at its width, its corners cutting the slide's. */
@@ -1276,7 +1292,6 @@
 :is(.live-deck, .slide-drawing) [data-slide-box] {
 	position: absolute;
 	box-sizing: border-box;
-	min-width: 0;
 }
 
 :is(.live-deck, .slide-drawing) [data-box-content] {
@@ -1295,11 +1310,18 @@
 	justify-content: flex-end;
 }
 
+/*
+ * A shape's drawing, at least a pixel each way: a straight line's box is of
+ * no height, or no width, and a drawing of no size draws nothing, its line
+ * past its edge included.
+ */
 :is(.live-deck, .slide-drawing) [data-slide-box] > svg {
 	position: absolute;
 	inset: 0;
 	width: 100%;
+	min-width: 1px;
 	height: 100%;
+	min-height: 1px;
 	overflow: visible;
 	pointer-events: none;
 }
@@ -1308,7 +1330,9 @@
  * A box for nothing in particular, as a text box added by hand, and any box
  * on a slide of no layout, as one from a PowerPoint file: its blocks nearer
  * each other, as a presentation app spaces a text box's paragraphs, and a
- * table's cells in the first as tight as it sets them.
+ * table's cells in the first as tight as it sets them: PowerPoint's own
+ * cell margins, a twentieth of an inch above and below and a tenth either
+ * side, in a slide's pixels, which are a file's points.
  */
 :is(.live-deck, .slide-drawing) [data-slide-box]:not([data-role]),
 [data-slide]:not([data-layout]) [data-slide-box] {
@@ -1316,15 +1340,20 @@
 }
 
 :is(.live-deck, .slide-drawing) [data-slide-box]:not([data-role]) :is(th, td) {
-	padding: 4px 7px;
+	padding: 3.6px 7.2px;
 }
 
 /*
- * A box holding an image alone: the image filling it, whole, in its middle.
- * On a slide of no layout, as one from a PowerPoint file, the image fills the
- * box to its edges, cut where it must be, as a cropped picture is there.
+ * A box holding a picture alone, on a line of its own: the picture filling
+ * it, whole, in its middle. On a slide of no layout, as one from a
+ * PowerPoint file, the picture fills the box to its edges, cut where it must
+ * be, as a cropped picture is there. A line of words in the box, as one
+ * typed there, or moved there by a new layout, is a line like any other.
  */
-:is(.live-deck, .slide-drawing) [data-role="image"] > [data-box-content] > p:only-child {
+:is(.live-deck, .slide-drawing)
+	[data-role="image"]
+	> [data-box-content]
+	> p:only-child:has(img:not(.ProseMirror-separator)) {
 	min-height: 0;
 	flex: 1;
 	/* Only the image takes room: the editor draws a caret's place after it as a line of its own. */
@@ -1332,14 +1361,18 @@
 }
 
 /* The editor's marks of the caret's places either side of the image, out of the image's way. */
-.live-deck [data-role="image"] > [data-box-content] > p:only-child > .ProseMirror-separator {
+.live-deck
+	[data-role="image"]
+	> [data-box-content]
+	> p:only-child:has(img:not(.ProseMirror-separator))
+	> .ProseMirror-separator {
 	position: absolute;
 }
 
 :is(.live-deck, .slide-drawing)
 	[data-role="image"]
 	> [data-box-content]
-	> p:only-child
+	> p:only-child:has(img:not(.ProseMirror-separator))
 	> img:not(.ProseMirror-separator) {
 	display: block;
 	width: 100%;
@@ -1350,7 +1383,7 @@
 [data-slide]:not([data-layout])
 	[data-role="image"]
 	> [data-box-content]
-	> p:only-child
+	> p:only-child:has(img:not(.ProseMirror-separator))
 	> img:not(.ProseMirror-separator) {
 	border-radius: 0;
 	object-fit: cover;
@@ -1373,15 +1406,32 @@
 }
 
 /*
- * Boxes somebody proposes adding or removing, as while a new layout is
- * suggested, sit in their slide as any box does, each marked as the
- * suggestion's words are: the element saying so is no box of its own.
+ * Boxes somebody proposes adding, removing or changing, as while a new layout
+ * is suggested, sit in their slide as any box does, each marked as the
+ * suggestion's words are: the elements saying so, one in another when a box
+ * has several of its attributes changed, are no boxes of their own.
  */
 :is(.live-deck, .slide-drawing)
 	[data-slide-body]
-	> :is(ins, del, [data-type="modification"]):has(> [data-slide-box]) {
+	:is(ins, del, [data-type="modification"]):has([data-slide-box]) {
 	/* biome-ignore lint/complexity/noImportantStyles: the suggesting library draws the element with its own inline `display: block`. */
 	display: contents !important;
+}
+
+/*
+ * A box on the stage that a suggestion would move, resize or restyle, or
+ * whose text it would set or format anew, drawn as the suggestion has it,
+ * ringed by a dashed line in the suggestion's colour, as thin at any scale,
+ * until somebody accepts or rejects it.
+ */
+.live-deck
+	[data-slide-body]
+	:is(
+		[data-type="modification"] > [data-slide-box],
+		[data-slide-box]:has([data-type="modification"])
+	) {
+	outline: calc(1.5px / var(--slide-scale)) dashed var(--suggestion);
+	outline-offset: calc(3px / var(--slide-scale));
 }
 
 :is(.live-deck, .slide-drawing) [data-slide-body] ins[data-id] > [data-slide-box] {
@@ -1395,23 +1445,28 @@
 	text-decoration: line-through;
 }
 
+/*
+ * Each layout's boxes, by what each is for: the boxes its template places,
+ * and no other, so a text box added by hand, or one of another role, looks
+ * the same on a slide of any layout.
+ */
+
 /* Title: a large title, and a subtitle under it. */
-[data-slide][data-layout="title"] > [data-slide-body] {
+[data-slide][data-layout="title"] :is([data-role="title"], [data-role="subtitle"]) {
 	--slide-heading-size: 3.75;
 	--slide-heading-weight: 700;
 	--slide-heading-leading: 1.1;
 	--slide-heading-tracking: -0.02em;
 	--slide-text-color: var(--slide-sub);
-	--slide-gap: 1.25em;
 }
 
-[data-slide][data-layout="title"] > [data-slide-body] :is(h1, h2, h3),
-[data-slide][data-layout="image"] > [data-slide-body] :is(h1, h2, h3) {
+[data-slide][data-layout="title"] [data-role="title"] :is(h1, h2, h3),
+[data-slide][data-layout="image"] [data-role="title"] :is(h1, h2, h3) {
 	text-wrap: balance;
 }
 
 /* Section break: a short accent, a label, and a very large title. */
-[data-slide][data-layout="section"] > [data-slide-body] {
+[data-slide][data-layout="section"] :is([data-role="label"], [data-role="title"]) {
 	--slide-heading-size: 4;
 	--slide-heading-weight: 700;
 	--slide-heading-leading: 1.05;
@@ -1422,7 +1477,7 @@
 	--section-accent-height: 0.3em;
 }
 
-/* The accent, over the label wherever the label is, a slide's gap above it, and gone with it. */
+/* The accent, over the label wherever the label is, a gap of the label's above it, and gone with it. */
 [data-slide][data-layout="section"] [data-role="label"]::before {
 	content: "";
 	position: absolute;
@@ -1434,18 +1489,17 @@
 	background: var(--slide-accent);
 }
 
-[data-slide][data-layout="section"] > [data-slide-body] p {
+[data-slide][data-layout="section"] :is([data-role="label"], [data-role="title"]) p {
 	font-weight: 500;
 }
 
 /* Quote: the quote large, and who said it under it. */
-[data-slide][data-layout="quote"] > [data-slide-body] {
+[data-slide][data-layout="quote"] :is([data-role="quote"], [data-role="attribution"]) {
 	--slide-text-size: 1.25;
 	--slide-text-color: var(--slide-sub);
-	--slide-gap: 1.75em;
 }
 
-[data-slide][data-layout="quote"] > [data-slide-body] blockquote {
+[data-slide][data-layout="quote"] :is([data-role="quote"], [data-role="attribution"]) blockquote {
 	--slide-text-size: 2.5;
 	--slide-text-color: var(--slide-foreground);
 	padding: 0;
@@ -1476,7 +1530,7 @@
 }
 
 /* Table: a title, and the table under it. */
-[data-slide][data-layout="table"] > [data-slide-body] {
+[data-slide][data-layout="table"] :is([data-role="title"], [data-role="table"]) {
 	--slide-text-size: 1.25;
 }
 
@@ -1506,9 +1560,11 @@
  */
 .live-deck [data-slide-body] {
 	--stage-radius: 10px;
+	/* What its boxes are placed in; a drawing's body is placed itself, and so is that already. */
+	position: relative;
 	align-self: flex-start;
-	margin-right: calc(960px * (var(--slide-scale) - 1));
-	margin-bottom: calc(540px * (var(--slide-scale) - 1));
+	margin-right: calc(var(--slide-width) * (var(--slide-scale) - 1));
+	margin-bottom: calc(var(--slide-height) * (var(--slide-scale) - 1));
 	border-radius: calc(var(--stage-radius) / var(--slide-scale));
 	box-shadow: var(--slide-shadow);
 }
@@ -1584,12 +1640,15 @@
 	}
 }
 
-/* A slide somebody proposes adding, ringed in the suggestion's colour, or removing, faded. */
+/*
+ * A slide somebody proposes adding, or giving a new layout or colour, ringed
+ * in the suggestion's colour, or removing, faded.
+ */
 .live-deck ins[data-id]:has(> section[data-slide]) {
 	background: none;
 }
 
-.live-deck ins[data-id] > section[data-slide] > [data-slide-body] {
+.live-deck :is(ins[data-id], [data-type="modification"]) > section[data-slide] > [data-slide-body] {
 	outline: calc(2px / var(--slide-scale)) dashed var(--suggestion);
 	outline-offset: calc(4px / var(--slide-scale));
 }
@@ -1733,6 +1792,11 @@
 
 .box-outlines .box-handle:focus-visible > span {
 	box-shadow: var(--ring-shadow);
+}
+
+/* A box that a suggestion keeps where it is, whose band says why it doesn't move. */
+.box-outlines .box-outline[data-fixed] .box-move {
+	cursor: not-allowed;
 }
 
 /* Hidden, not gone, while the box is dragged: a handle being dragged keeps the pointer. */

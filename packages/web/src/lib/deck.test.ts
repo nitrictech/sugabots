@@ -24,19 +24,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { applyUpdate, Doc, encodeStateAsUpdate, encodeStateVector } from "yjs";
 import {
 	addSlide,
-	BOX_REMOVAL_BLOCKED_WORDS,
+	BOX_DELETION_BLOCKED_WORDS,
 	type BoxIndex,
-	boxRemovalBlocked,
+	boxDeletionBlocked,
 	changeLayout,
+	deleteBox,
 	moveSlideTo,
-	placeBox,
 	placeOfMovedSlide,
 	proposedChangeOf,
-	removeBox,
 	removeSlide,
 	resetLayout,
 	type SlideIndex,
 	type SlidePos,
+	setBoxFrame,
 	slideIndexAt,
 	slidesOf,
 } from "./deck.ts";
@@ -307,7 +307,7 @@ describe("a slide's boxes, moved by hand", () => {
 	it("moves only the box moved", () => {
 		const { kim, sam } = twoPeople();
 
-		make(kim, (state) => placeBox(state, slideStart(state.doc, 0), boxIndex(1), MOVED_LIST));
+		make(kim, (state) => setBoxFrame(state, slideStart(state.doc, 0), boxIndex(1), MOVED_LIST));
 
 		expect(framesOn(sam.state.doc, 0)).toEqual([bulletsFrame("title"), MOVED_LIST]);
 	});
@@ -321,7 +321,7 @@ describe("a slide's boxes, moved by hand", () => {
 			const { kim, sam } = twoPeople();
 			enableSuggestChanges(kim.state, kim.view.dispatch);
 
-			make(kim, (state) => placeBox(state, slideStart(state.doc, 0), boxIndex(box), frame));
+			make(kim, (state) => setBoxFrame(state, slideStart(state.doc, 0), boxIndex(box), frame));
 
 			expect(framesOn(sam.state.doc, 0)[box]).toEqual(frame);
 			expect(pendingSuggestions(sam.state.doc)).toEqual([]);
@@ -336,7 +336,7 @@ describe("a slide's boxes, moved by hand", () => {
 		const { kim, sam } = twoPeople({ deck: arrow });
 
 		make(kim, (state) =>
-			placeBox(state, slideStart(state.doc, 0), boxIndex(0), {
+			setBoxFrame(state, slideStart(state.doc, 0), boxIndex(0), {
 				x: 100,
 				y: 100,
 				width: 400,
@@ -355,8 +355,10 @@ describe("a slide's boxes, moved by hand", () => {
 		"are put back where the slide's layout places them by resetting it while %s, each holding what it held",
 		(_, suggests) => {
 			const { kim, sam } = twoPeople();
-			make(kim, (state) => placeBox(state, slideStart(state.doc, 0), boxIndex(1), MOVED_LIST));
-			make(kim, (state) => placeBox(state, slideStart(state.doc, 0), boxIndex(0), RESIZED_TITLE));
+			make(kim, (state) => setBoxFrame(state, slideStart(state.doc, 0), boxIndex(1), MOVED_LIST));
+			make(kim, (state) =>
+				setBoxFrame(state, slideStart(state.doc, 0), boxIndex(0), RESIZED_TITLE),
+			);
 			if (suggests) enableSuggestChanges(kim.state, kim.view.dispatch);
 
 			make(kim, (state) => resetLayout(state, slideIndex(0)));
@@ -379,9 +381,9 @@ describe("a box deleted from its slide", () => {
 		const { kim } = twoPeople();
 		enableSuggestChanges(kim.state, kim.view.dispatch);
 
-		expect(removeBox(kim.state, slideStart(kim.state.doc, 0), boxIndex(1))).toBeUndefined();
-		const blocked = boxRemovalBlocked(kim.state, nthBox(kim.state.doc, 0, 1).node);
-		expect(blocked && BOX_REMOVAL_BLOCKED_WORDS[blocked]).toBe(
+		expect(deleteBox(kim.state, slideStart(kim.state.doc, 0), boxIndex(1))).toBeUndefined();
+		const blocked = boxDeletionBlocked(kim.state, nthBox(kim.state.doc, 0, 1).node);
+		expect(blocked && BOX_DELETION_BLOCKED_WORDS[blocked]).toBe(
 			"Turn off Suggesting to delete a box.",
 		);
 		expect(bodyOf(kim.state.doc.child(0)).childCount).toBe(2);
@@ -393,12 +395,12 @@ describe("a box deleted from its slide", () => {
 		// At the start of the list's first line: past the box's, the list's and the item's starts.
 		sam.view.dispatch(sam.state.tr.insertText("Soon: ", nthBox(sam.state.doc, 0, 1).at + 4));
 
-		expect(removeBox(kim.state, slideStart(kim.state.doc, 0), boxIndex(1))).toBeUndefined();
-		const blocked = boxRemovalBlocked(kim.state, nthBox(kim.state.doc, 0, 1).node);
-		expect(blocked && BOX_REMOVAL_BLOCKED_WORDS[blocked]).toBe(
+		expect(deleteBox(kim.state, slideStart(kim.state.doc, 0), boxIndex(1))).toBeUndefined();
+		const blocked = boxDeletionBlocked(kim.state, nthBox(kim.state.doc, 0, 1).node);
+		expect(blocked && BOX_DELETION_BLOCKED_WORDS[blocked]).toBe(
 			"Accept or undo the suggestions in this box to delete it.",
 		);
-		expect(removeBox(kim.state, slideStart(kim.state.doc, 0), boxIndex(0))).toBeDefined();
+		expect(deleteBox(kim.state, slideStart(kim.state.doc, 0), boxIndex(0))).toBeDefined();
 	});
 
 	it("is back, holding what it held, after one undo, which leaves the edit made before it", () => {
@@ -407,7 +409,7 @@ describe("a box deleted from its slide", () => {
 		kim.view.dispatch(kim.state.tr.insertText("Our ", titleStart(kim.state.doc, 3)));
 		pause(kim);
 		const edited = sam.state.doc.toJSON();
-		make(kim, (state) => removeBox(state, slideStart(state.doc, 0), boxIndex(1)));
+		make(kim, (state) => deleteBox(state, slideStart(state.doc, 0), boxIndex(1)));
 		pause(kim);
 		expect(boxContentsOf(sam.state.doc)[0]).toEqual(["heading: Goals"]);
 
@@ -441,7 +443,7 @@ describe("the caret, when the box it is in is deleted", () => {
 		const { kim } = twoPeople();
 		caretIn(kim, 1, 0);
 
-		make(kim, (state) => removeBox(state, slideStart(state.doc, 1), boxIndex(0)));
+		make(kim, (state) => deleteBox(state, slideStart(state.doc, 1), boxIndex(0)));
 
 		expect(titlesOf(kim.state.doc)[1]).toBe("People type");
 		expect(whereCaretIs(kim)).toEqual({ slide: 1, box: 0 });
@@ -451,17 +453,17 @@ describe("the caret, when the box it is in is deleted", () => {
 		const { kim } = twoPeople();
 		caretIn(kim, 1, 2);
 
-		make(kim, (state) => removeBox(state, slideStart(state.doc, 1), boxIndex(2)));
+		make(kim, (state) => deleteBox(state, slideStart(state.doc, 1), boxIndex(2)));
 
 		expect(whereCaretIs(kim)).toEqual({ slide: 1, box: 1 });
 	});
 
 	it("moves to the slide's notes when it was the last box on its slide", () => {
 		const { kim } = twoPeople();
-		make(kim, (state) => removeBox(state, slideStart(state.doc, 0), boxIndex(0)));
+		make(kim, (state) => deleteBox(state, slideStart(state.doc, 0), boxIndex(0)));
 		caretIn(kim, 0, 0);
 
-		make(kim, (state) => removeBox(state, slideStart(state.doc, 0), boxIndex(0)));
+		make(kim, (state) => deleteBox(state, slideStart(state.doc, 0), boxIndex(0)));
 
 		expect(bodyOf(kim.state.doc.child(0)).childCount).toBe(0);
 		expect(whereCaretIs(kim)).toEqual({ slide: 0, box: undefined });
@@ -475,7 +477,9 @@ describe("a box moved by one person while another types in it", () => {
 	] as const)("keeps both the move and the typing, %s", (_, atOnce) => {
 		const { kim, sam, apart } = twoPeople();
 		const moveAndType = () => {
-			make(kim, (state) => placeBox(state, slideStart(state.doc, 0), boxIndex(0), RESIZED_TITLE));
+			make(kim, (state) =>
+				setBoxFrame(state, slideStart(state.doc, 0), boxIndex(0), RESIZED_TITLE),
+			);
 			sam.view.dispatch(sam.state.tr.insertText(" for launch", titleEnd(sam.state.doc, 0)));
 		};
 

@@ -1,3 +1,4 @@
+import { MAX_ARTIFACT_IMAGE_BYTES } from "@sugabots/contracts";
 import { type CssColor, cssColorIn } from "@sugabots/contracts/css-values";
 import { linkMayGoTo } from "@sugabots/contracts/live-document";
 import {
@@ -17,6 +18,7 @@ import {
 	type VerticalAlign,
 } from "@sugabots/contracts/slide-box";
 import { type Frame, frameIn, SLIDE_HEIGHT, SLIDE_WIDTH } from "@sugabots/contracts/slide-geometry";
+import { defaultFrameOf } from "@sugabots/contracts/slide-layouts";
 import { TEXT_STYLE } from "@sugabots/contracts/slide-text-style";
 import { changedPath, type SvgPath, svgPathIn } from "@sugabots/contracts/svg-path";
 import type { Editor } from "@tiptap/core";
@@ -30,10 +32,13 @@ import type {
 	Table as TableInFile,
 } from "pptxtojson";
 import { ImageNotKept, type KeepImage, keepableImage } from "./file-import.ts";
+import { nodeOf } from "./schema-nodes.ts";
 import { dispatchAsOneChange } from "./suggesting.ts";
 
 /** What an import of a PowerPoint file left out. */
 export interface PowerPointImported {
+	/** How many slides past the most a deck takes from a file (`MAX_IMPORTED_SLIDES`) were left out. */
+	slidesLeftOut: number;
 	/**
 	 * How many images on the file's slides the deck didn't keep: of a kind it
 	 * can't show, larger than it keeps, or linked from outside the file.
@@ -41,11 +46,19 @@ export interface PowerPointImported {
 	imagesLeftOut: number;
 	/**
 	 * How many other things on its slides the deck has no place for, such as
-	 * a chart, a video or SmartArt, or a shape it can't paint, as one filled
-	 * with a gradient, unless the file marks that shape as decorative.
+	 * a chart, a video or SmartArt, a shape it can't paint, as one filled with
+	 * a gradient, unless the file marks that shape as decorative, something
+	 * parked off the slide, or a slide's things past the most a deck takes
+	 * (`MAX_IMPORTED_BOXES`).
 	 */
 	othersLeftOut: number;
 }
+
+/** The most slides a deck takes from a file, as every slide is drawn in the strip at once. */
+export const MAX_IMPORTED_SLIDES = 200;
+
+/** The most boxes a deck takes from one of a file's slides, the topmost. */
+export const MAX_IMPORTED_BOXES = 200;
 
 /**
  * Replaces the editor's deck, for everyone in it, with a PowerPoint file's
@@ -72,21 +85,26 @@ export async function importPowerPointFile(
 /**
  * A PowerPoint file's slides as a deck of `schema`, a slide for each of the
  * file's, in order, each looking as it does in the file: a slide of no
- * layout (`blank`), on the file's colour for it, holding a box for each
- * thing on it, where the file puts it, in the order the file draws them,
- * its master's and layout's graphics first. A file of a shape other than
- * 16:9 is scaled to fit the deck's slides and set in their middle.
+ * layout (`blank`), on the file's colour for it (see `slideColorOf`),
+ * holding a box for each thing on it, where the file puts it, in the order
+ * the file draws them, its master's and layout's graphics first. A file of a
+ * shape other than 16:9 is scaled to fit the deck's slides and set in their
+ * middle. Words the file places nowhere, as a placeholder the file gives no
+ * size, go where a box for what they are goes on a slide of no layout.
  *
  * - Words, in a text box or a shape, keep their paragraphs and lists, the
  *   marks the deck has, their links, colour (black where the file gives
- *   none), size, font, alignment and line spacing, and the box its fill,
- *   outline, inner margins, where its words sit in it and its turn. A title,
- *   subtitle or body placeholder's box is for that, and any other is for
- *   nothing in particular.
- * - A shape keeps its outline, as a path, and its fill and outline, and a
+ *   none, and a gradient's first colour for text filled with one), size,
+ *   font, alignment and line spacing, and the box its fill, outline, inner
+ *   margins, where its words sit in it and its turn. A title, subtitle or
+ *   body placeholder's box is for that, and any other is for nothing in
+ *   particular.
+ * - A shape keeps its outline, as a path, and its fill, unless the file draws
+ *   it as an outline alone, as an arc or a bracket, and its outline, and a
  *   line its run, which way the file flips it.
- * - A picture is kept, with its words, filling its box, a cropped one by
- *   being cut to the box's shape about its middle.
+ * - A picture is kept, with the words the file gives for what it shows,
+ *   filling its box, a cropped one by being cut to the box's shape about its
+ *   middle.
  * - A table keeps its cells' words and its columns' widths, its first row
  *   its header, drawn as the deck draws one. A merged cell's words are in
  *   the first of the cells it spans, and the rest are empty, so no words are
@@ -97,13 +115,16 @@ export async function importPowerPointFile(
  * Left out, and counted: charts, videos, sound, SmartArt and equations; a
  * shape without words or an outline that the deck can't paint, as one filled
  * with a gradient, a pattern or a picture, unless the file marks it as
- * decorative; and the images the deck doesn't keep. Left out without being
- * counted, as the deck draws none: a slide's footer, number and date, an
- * empty text box or placeholder, and a shape that draws nothing.
+ * decorative; anything parked wholly off the slide, or that the file places
+ * nowhere a box can be; the slides and boxes past the most a deck takes
+ * (`MAX_IMPORTED_SLIDES`, `MAX_IMPORTED_BOXES`); and the images the deck
+ * doesn't keep. Left out without being counted, as the deck draws none: a
+ * slide's footer, number and date, an empty text box or placeholder, and a
+ * shape that draws nothing.
  *
  * Not kept: a cell's fill and borders, a picture cropped unevenly (it is cut
- * about its middle), shadows, gradients and pictures filling a shape or a
- * slide, an outline's dashes and arrowheads, a box's words flipped or set
+ * about its middle), shadows, gradients and pictures filling a shape, text or
+ * a slide, an outline's dashes and arrowheads, a box's words flipped or set
  * upright, a paragraph's indents and the space around it.
  *
  * Fails when the file can't be read as a PowerPoint file, or with
@@ -123,10 +144,11 @@ export async function deckFromPowerPoint(
 	const shapes = await shapesOnSlides(file);
 	const placing = placingOf(size);
 	const keep = imageKeeper(keepImage);
+	const kept = slides.slice(0, MAX_IMPORTED_SLIDES);
 	let imagesLeftOut = 0;
 	let othersLeftOut = 0;
 	const deckSlides: Node[] = [];
-	for (const [index, slide] of slides.entries()) {
+	for (const [index, slide] of kept.entries()) {
 		const read = readSlide(slide, shapes[index] ?? new Map(), placing, schema);
 		othersLeftOut += read.othersLeftOut;
 		const boxes: Node[] = [];
@@ -137,12 +159,12 @@ export async function deckFromPowerPoint(
 			}
 			const address = await keep(piece.image);
 			if (address === undefined) imagesLeftOut++;
-			else boxes.push(pictureBox(piece.attributes, address, piece.image.words, schema));
+			else boxes.push(pictureBox(piece.attributes, address, piece.image.altText, schema));
 		}
 		deckSlides.push(
 			nodeOf(schema, SLIDE, [nodeOf(schema, SLIDE_BODY, boxes), notesOf(slide.note, schema)], {
 				layout: "blank",
-				background: colorOfFill(slide.fill),
+				background: slideColorOf(slide.fill),
 			}),
 		);
 	}
@@ -152,7 +174,7 @@ export async function deckFromPowerPoint(
 		deckSlides.length > 0 ? deckSlides : [newSlide(schema, "title")],
 	);
 	deck.check();
-	return { deck, imagesLeftOut, othersLeftOut };
+	return { deck, slidesLeftOut: slides.length - kept.length, imagesLeftOut, othersLeftOut };
 }
 
 /**
@@ -164,39 +186,45 @@ const SINGLE_LINE_SPACING = 1.2;
 
 /**
  * Where the file's slides go on the deck's: scaled by `scale`, and moved
- * `left` across and `top` down, in a slide's pixels. The file measures in
- * points, which on a 16:9 slide 960 points across are a slide's pixels.
+ * `left` across and `top` down, in a slide's pixels, and how large the
+ * file's slides are, `width` across and `height` down, in its points. The
+ * file measures in points, which on a 16:9 slide 960 points across are a
+ * slide's pixels.
  */
 interface Placing {
 	scale: number;
-	left: number;
-	top: number;
-}
-
-/** How a file's slides of `size`, in points, fit the deck's: as large as fits, in the middle. */
-function placingOf(size: { width: number; height: number }): Placing {
-	const { width, height } = size;
-	if (!(width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height))) {
-		return { scale: 1, left: 0, top: 0 };
-	}
-	const scale = Math.min(SLIDE_WIDTH / width, SLIDE_HEIGHT / height);
-	return {
-		scale,
-		left: (SLIDE_WIDTH - width * scale) / 2,
-		top: (SLIDE_HEIGHT - height * scale) / 2,
-	};
-}
-
-/** Where something sits on a slide of the file, in points from its top left corner. */
-interface Box {
 	left: number;
 	top: number;
 	width: number;
 	height: number;
 }
 
-/** `box`, on a slide of the file, as a frame on the deck's: `undefined` for one of no size there is. */
-const frameOf = ({ left, top, width, height }: Box, placing: Placing): Frame | undefined =>
+/** How a file's slides of `size`, in points, fit the deck's: as large as fits, in the middle. */
+function placingOf(size: { width: number; height: number }): Placing {
+	const { width, height } = size;
+	if (!(width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height))) {
+		return { scale: 1, left: 0, top: 0, width: SLIDE_WIDTH, height: SLIDE_HEIGHT };
+	}
+	const scale = Math.min(SLIDE_WIDTH / width, SLIDE_HEIGHT / height);
+	return {
+		scale,
+		left: (SLIDE_WIDTH - width * scale) / 2,
+		top: (SLIDE_HEIGHT - height * scale) / 2,
+		width,
+		height,
+	};
+}
+
+/** Where something sits on a slide of the file, in points from its top left corner. */
+interface RectInFile {
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+}
+
+/** `rect`, on a slide of the file, as a frame on the deck's: `undefined` for one of no size there is. */
+const frameOf = ({ left, top, width, height }: RectInFile, placing: Placing): Frame | undefined =>
 	frameIn({
 		x: hundredths(placing.left + left * placing.scale),
 		y: hundredths(placing.top + top * placing.scale),
@@ -204,13 +232,26 @@ const frameOf = ({ left, top, width, height }: Box, placing: Placing): Frame | u
 		height: hundredths(height * placing.scale),
 	});
 
+/**
+ * Whether `rect` is wholly off the file's slide, as PowerPoint lets a thing
+ * be parked beside it, out of the show: it touches no part of the slide.
+ * Something the file places nowhere it can be, as at a position of no
+ * number, is no more off the slide than on it, and isn't.
+ */
+const isOffSlide = ({ left, top, width, height }: RectInFile, placing: Placing) =>
+	left > placing.width || top > placing.height || left + width < 0 || top + height < 0;
+
+/** Whether `frame` covers some of a slide, as words need a box to be set in. */
+const hasArea = (frame: Frame | undefined): frame is Frame =>
+	frame !== undefined && frame.width > 0 && frame.height > 0;
+
 /** `value` to a hundredth, as precise as a slide's pixels need be. */
 const hundredths = (value: number) => Math.round(value * 100) / 100;
 
-/** An image in the file: its bytes as a data URL, empty for one linked from outside the file, and its words. */
+/** An image in the file: its bytes as a data URL, empty for one linked from outside the file, and the words the file gives for what it shows. */
 interface ImageInFile {
 	dataUrl: string;
-	words: string;
+	altText: string;
 }
 
 /** Something on a slide the deck keeps: a box made already, or a picture, to be kept before its box is made. */
@@ -218,10 +259,10 @@ type Piece =
 	| { kind: "box"; box: Node }
 	| { kind: "image"; attributes: NewBoxAttributes; image: ImageInFile };
 
-/** What the file says of a shape that the library doesn't: the placeholder it is, if one, an image's words, and whether it only decorates the slide. */
+/** What the file says of a shape that the library doesn't: the placeholder it is, if one, the words it gives for what an image shows, and whether it only decorates the slide. */
 interface ShapeInFile {
 	placeholder: string | undefined;
-	words: string | undefined;
+	altText: string | undefined;
 	decorative: boolean;
 }
 
@@ -240,8 +281,10 @@ const PLACEHOLDER_ROLES: Readonly<Record<string, BoxRole>> = {
 /**
  * What of a slide the deck keeps, in the order the file draws it, with its
  * pictures as they are in the file, and how many other things on it the
- * deck has no place for. `shapes` says what the file says of the slide's own
- * shapes; its master's and layout's graphics are none of them.
+ * deck has no place for, those wholly off the slide among them. Of more than
+ * a deck takes from a slide (`MAX_IMPORTED_BOXES`), the topmost are kept.
+ * `shapes` says what the file says of the slide's own shapes; its master's
+ * and layout's graphics are none of them.
  */
 function readSlide(
 	slide: SlideInFile,
@@ -255,12 +298,17 @@ function readSlide(
 		...elementsOn(slide.layoutElements ?? []).map((each) => ({ ...each, shape: undefined })),
 		...elementsOn(slide.elements).map((each) => ({ ...each, shape: shapes.get(each.element.id) })),
 	];
-	for (const { element, box, shape } of drawn) {
-		const read = readElement(element, box, shape, placing, schema);
+	for (const { element, rect, shape } of drawn) {
+		if (isOffSlide(rect, placing)) {
+			othersLeftOut++;
+			continue;
+		}
+		const read = readElement(element, rect, shape, placing, schema);
 		if (typeof read === "object") pieces.push(read);
 		else if (read === "left out") othersLeftOut++;
 	}
-	return { pieces, othersLeftOut };
+	const beyondMost = Math.max(0, pieces.length - MAX_IMPORTED_BOXES);
+	return { pieces: pieces.slice(beyondMost), othersLeftOut: othersLeftOut + beyondMost };
 }
 
 /**
@@ -271,73 +319,49 @@ function readSlide(
 function elementsOn(
 	elements: readonly ElementOnSlide[],
 	offset = { left: 0, top: 0 },
-): { element: Exclude<ElementOnSlide, { type: "group" }>; box: Box }[] {
+): { element: Exclude<ElementOnSlide, { type: "group" }>; rect: RectInFile }[] {
 	return [...elements]
 		.sort((one, other) => one.order - other.order)
 		.flatMap((element) => {
-			const box = {
+			const rect = {
 				left: element.left + offset.left,
 				top: element.top + offset.top,
 				width: element.width,
 				height: element.height,
 			};
-			return element.type === "group" ? elementsOn(element.elements, box) : [{ element, box }];
+			return element.type === "group" ? elementsOn(element.elements, rect) : [{ element, rect }];
 		});
 }
 
 /**
- * What the deck keeps of `element`, sitting at `box`: a box of its words or
+ * What the deck keeps of `element`, sitting at `rect`: a box of its words or
  * its shape, its table's box, or its picture. Otherwise what is left out:
  * `"left out"`, counted, for a chart, a video, sound, SmartArt or an
- * equation, or a shape the deck can't paint (see `deckFromPowerPoint`), and
+ * equation, a shape the deck can't paint (see `deckFromPowerPoint`), or
+ * anything but words that the file places nowhere a box can be, and
  * `"nothing"`, not counted, for what the deck draws none of.
  */
 function readElement(
 	element: Exclude<ElementOnSlide, { type: "group" }>,
-	box: Box,
+	rect: RectInFile,
 	shape: ShapeInFile | undefined,
 	placing: Placing,
 	schema: Schema,
 ): Piece | "left out" | "nothing" {
-	const frame = frameOf(box, placing);
-	if (!frame) return "nothing";
+	const frame = frameOf(rect, placing);
 	switch (element.type) {
 		case "text":
-		case "shape": {
-			if (DECORATIVE_PLACEHOLDERS.has(shape?.placeholder ?? "")) return "nothing";
-			const reading: TextReading = {
-				schema,
-				sizeScale: placing.scale * ((element.autoFit?.fontScale ?? 100) / 100),
-				colored: true,
-			};
-			const blocks = blocksOf(element.content, reading);
-			const worded = blocks.some((block) => block.textContent.trim() !== "");
-			const fill = colorOfFill(element.fill);
-			const stroke = strokeOf(element.borderWidth, element.borderColor, placing);
-			const path = element.type === "shape" ? pathOf(element, frame) : null;
-			if (!worded && !fill && !stroke) {
-				const unpainted = element.type === "shape" && element.fill && !shape?.decorative;
-				return unpainted ? "left out" : "nothing";
-			}
-			const attributes: NewBoxAttributes = {
-				role: PLACEHOLDER_ROLES[shape?.placeholder ?? ""] ?? null,
-				frame,
-				fill,
-				stroke,
-				path,
-				verticalAlign: VERTICAL_ALIGNMENTS[element.vAlign] ?? "top",
-				padding: paddingOf(element.textInset, placing),
-				rotation: element.rotate || 0,
-			};
-			return { kind: "box", box: newBox(schema, attributes, worded ? blocks : []) };
-		}
+		case "shape":
+			return readWordsOrShape(element, frame, shape, placing, schema);
 		case "table":
 			if (element.data.length === 0) return "nothing";
+			if (!frame) return "left out";
 			return {
 				kind: "box",
 				box: newBox(schema, { frame }, [tableOf(element, placing, schema)]),
 			};
 		case "image":
+			if (!frame) return "left out";
 			return {
 				kind: "image",
 				attributes: {
@@ -346,11 +370,56 @@ function readElement(
 					stroke: strokeOf(element.borderWidth, element.borderColor, placing),
 					rotation: element.rotate || 0,
 				},
-				image: { dataUrl: element.base64, words: shape?.words ?? "" },
+				image: { dataUrl: element.base64, altText: shape?.altText ?? "" },
 			};
 		default:
 			return "left out";
 	}
+}
+
+/**
+ * What the deck keeps of a text box or a shape, framed at `frame`, if the file
+ * places it anywhere a box can be (see `readElement`). Words of no size, as a
+ * placeholder the file gives no size anywhere, go where a box for what they
+ * are goes on a slide of no layout (`defaultFrameOf`), rather than one letter
+ * a line.
+ */
+function readWordsOrShape(
+	element: Extract<ElementOnSlide, { type: "text" | "shape" }>,
+	frame: Frame | undefined,
+	shape: ShapeInFile | undefined,
+	placing: Placing,
+	schema: Schema,
+): Piece | "left out" | "nothing" {
+	if (DECORATIVE_PLACEHOLDERS.has(shape?.placeholder ?? "")) return "nothing";
+	const reading: TextReading = {
+		schema,
+		sizeScale: placing.scale * ((element.autoFit?.fontScale ?? 100) / 100),
+		colored: true,
+	};
+	const blocks = blocksOf(element.content, reading);
+	const worded = blocks.some((block) => block.textContent.trim() !== "");
+	const outlineOnly = element.type === "shape" && element.strokeOnly === true;
+	const fill = outlineOnly ? null : colorOfFill(element.fill);
+	const stroke = strokeOf(element.borderWidth, element.borderColor, placing);
+	if (!worded && !fill && !stroke) {
+		const unpainted = element.type === "shape" && !outlineOnly && element.fill;
+		return unpainted && !shape?.decorative ? "left out" : "nothing";
+	}
+	const role = PLACEHOLDER_ROLES[shape?.placeholder ?? ""] ?? null;
+	const placed = worded && !hasArea(frame) ? defaultFrameOf(role, "blank") : frame;
+	if (!placed) return "left out";
+	const attributes: NewBoxAttributes = {
+		role,
+		frame: placed,
+		fill,
+		stroke,
+		path: element.type === "shape" ? pathOf(element, placed) : null,
+		verticalAlign: VERTICAL_ALIGNMENTS[element.vAlign] ?? "top",
+		padding: paddingOf(element.textInset, placing),
+		rotation: element.rotate || 0,
+	};
+	return { kind: "box", box: newBox(schema, attributes, worded ? blocks : []) };
 }
 
 /** Where a box's words sit in it, by the file's word for it. */
@@ -363,6 +432,37 @@ const VERTICAL_ALIGNMENTS: Readonly<Record<string, VerticalAlign>> = {
 /** The colour `fill` paints, when it is a colour alone. */
 const colorOfFill = (fill: Fill | null | undefined): CssColor | null =>
 	fill?.type === "color" ? cssColorIn(fill.value) : null;
+
+/** What a slide of the file is drawn on where nothing else can be: what PowerPoint draws a slide on by default. */
+const WHITE = cssColorIn("#ffffff");
+
+/**
+ * The colour a slide filled with `fill` is drawn on: its own colour, or, for
+ * a fill the deck can't paint, the colour nearest what its text is coloured
+ * to be read on: a gradient's middle colour, a pattern's background, and
+ * white behind a picture, as for a fill of no colour the deck can read. Never
+ * none, which would draw the slide on the theme's colour, though its text
+ * keeps the file's.
+ */
+function slideColorOf(fill: Fill | null | undefined): CssColor | null {
+	switch (fill?.type) {
+		case "color":
+			return cssColorIn(fill.value) ?? WHITE;
+		case "gradient":
+			return middleColorOf(fill.value.colors) ?? WHITE;
+		case "pattern":
+			return cssColorIn(fill.value.backgroundColor) ?? WHITE;
+		default:
+			return WHITE;
+	}
+}
+
+/** The colour of the stop of a gradient's `stops` nearest its middle, each at a percentage of the way along. */
+function middleColorOf(stops: readonly { pos: string; color: string }[]): CssColor | null {
+	const fromMiddle = ({ pos }: { pos: string }) => Math.abs((Number.parseFloat(pos) || 0) - 50);
+	const [nearest] = stops.toSorted((one, other) => fromMiddle(one) - fromMiddle(other));
+	return cssColorIn(nearest?.color);
+}
 
 /** An outline `width` points wide, of `color`: none when it is no width, as the file says no outline. */
 function strokeOf(width: number, color: string, placing: Placing): Stroke | null {
@@ -407,13 +507,18 @@ function pathOf(shape: Extract<ElementOnSlide, { type: "shape" }>, frame: Frame)
 	});
 }
 
-/** A picture's box, holding the picture kept at `address`, its words `words`, alone, filling the box. */
-const pictureBox = (attributes: NewBoxAttributes, address: string, words: string, schema: Schema) =>
+/** A picture's box, holding the picture kept at `address`, described by `altText`, alone, filling the box. */
+const pictureBox = (
+	attributes: NewBoxAttributes,
+	address: string,
+	altText: string,
+	schema: Schema,
+) =>
 	newBox(schema, attributes, [
 		nodeOf(
 			schema,
 			"paragraph",
-			nodeOf(schema, "image", undefined, { src: address, alt: words || null }),
+			nodeOf(schema, "image", undefined, { src: address, alt: altText || null }),
 		),
 	]);
 
@@ -462,25 +567,26 @@ const isList = (element: Element) => element.tagName === "UL" || element.tagName
 function blocksIn(parent: Element, reading: TextReading, look: Look): Node[] {
 	const { schema } = reading;
 	const blocks: Node[] = [];
-	let words: ChildNode[] = [];
-	const endWords = () => {
-		const inline = words.flatMap((word) => inlineOf(word, look, reading));
+	// What of `parent` sits in a line of text since the last block in it.
+	let inLine: ChildNode[] = [];
+	const endLine = () => {
+		const inline = inLine.flatMap((child) => inlineOf(child, look, reading));
 		if (inline.some((node) => node.isText)) {
 			blocks.push(nodeOf(schema, "paragraph", inline, lineAttributesOf(parent, inline, reading)));
 		}
-		words = [];
+		inLine = [];
 	};
 	for (const child of parent.childNodes) {
 		if (!isElement(child) || !BLOCK_ELEMENTS.has(child.tagName)) {
-			words.push(child);
+			inLine.push(child);
 			continue;
 		}
-		endWords();
+		endLine();
 		const within = lookOf(child, look, reading);
 		if (isList(child)) blocks.push(...listOf(child, reading, within));
 		else blocks.push(...blocksIn(child, reading, within));
 	}
-	endWords();
+	endLine();
 	return blocks;
 }
 
@@ -513,12 +619,14 @@ function listOf(list: Element, reading: TextReading, look: Look): Node[] {
 		),
 	);
 	return list.tagName === "OL"
-		? [
-				nodeOf(schema, "orderedList", listItems, {
-					start: Number(list.getAttribute("start")) || 1,
-				}),
-			]
+		? [nodeOf(schema, "orderedList", listItems, { start: listStartIn(list.getAttribute("start")) })]
 		: [nodeOf(schema, "bulletList", listItems)];
+}
+
+/** The number a numbered list starts at, as `start` says: a whole number of 1 or more, and 1 otherwise. */
+function listStartIn(start: string | null): number {
+	const number = Number(start);
+	return Number.isSafeInteger(number) && number >= 1 ? number : 1;
 }
 
 /** How a run of text looks, as the file sets it and the deck keeps it: the deck's marks, and its colour, size and font. */
@@ -608,10 +716,48 @@ function lookOf(element: Element, look: Look, reading: TextReading): Look {
 			(set, mark) => (mark ? mark.addToSet(set) : set),
 			look.marks,
 		),
-		color: cssColorIn(style.color) ?? look.color,
+		color: textColorIn(style) ?? look.color,
 		fontSize: fontSize === undefined ? look.fontSize : hundredths(fontSize * reading.sizeScale),
 		fontFamily: fontFamilyIn(style["font-family"]) ?? look.fontFamily,
 	};
+}
+
+/**
+ * The colour `style`, a run's, gives its text, if it gives one. Text the file
+ * fills with a gradient, which the library draws as a transparent colour over
+ * the gradient clipped to the text, takes the gradient's first colour, or
+ * black, as the deck colours text with one colour.
+ */
+function textColorIn(style: Readonly<Record<string, string>>): CssColor | undefined {
+	const clip = style["background-clip"] ?? style["-webkit-background-clip"];
+	if (clip === "text") {
+		return firstColorIn(style.background ?? style["background-image"]) ?? BLACK ?? undefined;
+	}
+	return cssColorIn(style.color) ?? undefined;
+}
+
+/** The colour of the first stop of `gradient`, a CSS gradient, as `linear-gradient(90deg, #f00 0%, #00f 100%)`. */
+function firstColorIn(gradient: string | undefined): CssColor | undefined {
+	const [, stops] = /gradient\((.*)\)\s*$/i.exec(gradient ?? "") ?? [];
+	for (const stop of splitOutsideBrackets(stops ?? "")) {
+		// A stop is its colour and where it is; the gradient's direction, before them, is no colour.
+		const color = cssColorIn(stop.trim().replace(/\s+[-+\d.]+%?$/, ""));
+		if (color) return color;
+	}
+	return undefined;
+}
+
+/** `list` split at each comma that isn't within brackets, as between a colour function's numbers. */
+function splitOutsideBrackets(list: string): string[] {
+	const parts = [""];
+	let depth = 0;
+	for (const character of list) {
+		if (character === "(") depth++;
+		if (character === ")") depth--;
+		if (character === "," && depth === 0) parts.push("");
+		else parts[parts.length - 1] += character;
+	}
+	return parts;
 }
 
 /** An element's inline style, by property. */
@@ -804,15 +950,31 @@ function imageKeeper(keepImage: KeepImage): (image: ImageInFile) => Promise<stri
 	};
 }
 
-/** The bytes in a data URL, or `undefined` for none, or for one that isn't base64. */
+/**
+ * The longest a data URL of an image a deck keeps can be: its bytes, at most
+ * `MAX_ARTIFACT_IMAGE_BYTES`, written 3 to every 4 characters, and room for
+ * what it says before them, as `data:image/jpeg;base64,`.
+ */
+const LONGEST_KEPT_DATA_URL = Math.ceil(MAX_ARTIFACT_IMAGE_BYTES / 3) * 4 + 256;
+
+/**
+ * The bytes in a data URL, or `undefined` for none, for one that isn't
+ * base64, or for one longer than an image a deck keeps, which is never read.
+ */
 function bytesOf(dataUrl: string): Uint8Array | undefined {
 	const comma = dataUrl.indexOf(",");
-	if (!dataUrl.startsWith("data:") || comma < 0) return undefined;
+	if (!dataUrl.startsWith("data:") || comma < 0 || dataUrl.length > LONGEST_KEPT_DATA_URL) {
+		return undefined;
+	}
+	let decoded: string;
 	try {
-		return Uint8Array.from(atob(dataUrl.slice(comma + 1)), (character) => character.charCodeAt(0));
+		decoded = atob(dataUrl.slice(comma + 1));
 	} catch {
 		return undefined;
 	}
+	const bytes = new Uint8Array(decoded.length);
+	for (let index = 0; index < decoded.length; index++) bytes[index] = decoded.charCodeAt(index);
+	return bytes;
 }
 
 /*
@@ -876,7 +1038,7 @@ function shapesIn(slide: Document): Map<string, ShapeInFile> {
 				{
 					// A placeholder of no type is one for content of any kind.
 					placeholder: placeholder && (placeholder.getAttribute("type") ?? "obj"),
-					words: properties.getAttribute("descr") ?? undefined,
+					altText: properties.getAttribute("descr") ?? undefined,
 					decorative: isMarkedDecorative(properties),
 				},
 			];
@@ -889,14 +1051,3 @@ const isMarkedDecorative = (properties: Element) =>
 	[...properties.getElementsByTagNameNS(DECORATIVE_NAMESPACE, "decorative")].some((mark) =>
 		["1", "true"].includes(mark.getAttribute("val") ?? ""),
 	);
-
-function nodeOf(
-	schema: Schema,
-	name: string,
-	content?: Node | readonly Node[],
-	attributes?: Record<string, unknown>,
-): Node {
-	const type = schema.nodes[name];
-	if (!type) throw new Error(`The schema has no ${name} node`);
-	return type.create(attributes ?? null, content);
-}

@@ -13,6 +13,8 @@ import {
 	liveDocumentSchema,
 	markdownOfDocument,
 } from "@sugabots/contracts/live-document-text";
+import type { BoxRole } from "@sugabots/contracts/slide-box";
+import { defaultFrameOf, type SlideLayout } from "@sugabots/contracts/slide-layouts";
 import type { Node } from "@tiptap/pm/model";
 import {
 	prosemirrorToYXmlFragment,
@@ -51,8 +53,12 @@ const DECK_IDS = new Set([
 const kindOf = (artifactId: string): LiveArtifactKind =>
 	DECK_IDS.has(artifactId) ? "slides" : "document";
 
-/** A slide of `layout` holding a box for each of `boxes`' roles, holding its block, and empty notes. */
-const slideHolding = (layout: string, boxes: { role: string; block: object }[]) => ({
+/**
+ * A slide of `layout` holding a box for each of `boxes`' roles, where the
+ * layout places a box of that role, holding its block, and empty notes, as a
+ * new slide of the layout holds them once typed in.
+ */
+const slideHolding = (layout: SlideLayout, boxes: { role: BoxRole; block: object }[]) => ({
 	type: "slide",
 	attrs: { layout },
 	content: [
@@ -60,7 +66,7 @@ const slideHolding = (layout: string, boxes: { role: string; block: object }[]) 
 			type: "slideBody",
 			content: boxes.map(({ role, block }) => ({
 				type: "slideBox",
-				attrs: { role },
+				attrs: { role, frame: defaultFrameOf(role, layout) },
 				content: [block],
 			})),
 		},

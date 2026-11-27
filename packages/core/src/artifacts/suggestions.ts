@@ -9,6 +9,8 @@ import type { DeckUnreadable } from "@sugabots/contracts/deck-html";
 import {
 	NODE_SUGGESTION,
 	SUGGESTED_INSERTION,
+	type SuggestionBy,
+	suggestionBy,
 	suggestionsAsAttributes,
 } from "@sugabots/contracts/live-document";
 import {
@@ -17,7 +19,8 @@ import {
 	readLiveDocumentText,
 	textOfLiveDocument,
 } from "@sugabots/contracts/live-document-text";
-import { boxAttributesOf, SLIDE, SLIDE_BOX } from "@sugabots/contracts/live-slides";
+import { bodyOf, boxAttributesOf, SLIDE, SLIDE_BOX } from "@sugabots/contracts/live-slides";
+import type { BoxAttributes } from "@sugabots/contracts/slide-box";
 import { TEXT_STYLE } from "@sugabots/contracts/slide-text-style";
 import { Fragment, Mark, type Node, Slice } from "@tiptap/pm/model";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
@@ -26,30 +29,27 @@ import { readHtml } from "./html-reader.ts";
 
 /*
  * An agent's change to a live document. The agent reads the document as its
- * text (`textForAgents`), a document's markdown or a deck's HTML, and writes
- * the text it should read as instead. `changedTo` applies only what the agent
- * changed in that text: everything else stays as the document holds it,
- * which may be more than its text says. The difference is found block by
- * block, then word by word, and only that much is changed, so what people are
- * typing elsewhere, and the suggestions waiting there, are left alone.
+ * text without its pending suggestions (`textWithoutSuggestions`), a
+ * document's markdown or a deck's HTML, and writes the text it should read
+ * as instead. `changedTo` applies only what the agent changed in that text:
+ * everything else stays as the document holds it, which may be more than its
+ * text says. The difference is found block by block, then word by word, and
+ * only that much is changed, so what people are typing elsewhere, and the
+ * suggestions waiting there, are left alone.
  *
- * What it changes in the words, and the blocks, boxes and slides it adds or
- * removes, is either made, or handed to the suggesting library to write into
- * the document as a suggestion, exactly as it writes a person's. What it
- * changes in how a deck looks is made at once either way: where its boxes
- * are and how they and its slides are drawn (`isDesignAttribute`), and how
- * its text is styled (`TEXT_STYLE`).
+ * The change is made at once, or handed to the suggesting library to write
+ * into the document as one suggestion, exactly as it writes a person's: its
+ * words, the blocks, boxes and slides it adds or removes, and how a deck
+ * looks alike. The library keeps a node's attribute changed in a
+ * modification mark holding what it was, as a box's frame or a slide's
+ * background (`isDesignAttribute`), and a text style changed as its words
+ * replaced by themselves restyled. It keeps no node's place among its
+ * siblings, so a box moved in front of or behind another is moved at once
+ * (`withBoxesMoved`).
  */
 
 /** How a change is made: at once, or as the suggestion with this id. */
 export type ChangeAs = "edit" | { suggestionId: string };
-
-/**
- * Why a change can't be made as asked, in which case none of it is made:
- * `unmarkable` when it was to be a suggestion, and it changes text that can't
- * carry a suggestion's marks, as a code block's can't.
- */
-export type Blocked = "unmarkable";
 
 /**
  * Why the text an agent wrote can't be what the document reads as, in which
@@ -60,11 +60,25 @@ export type Blocked = "unmarkable";
  */
 export type TextRefused = "saysNothing" | DeckUnreadable;
 
-/** An agent's change as made: the document after it, and whether any of it waits in it as a suggestion. */
-export interface Changed {
-	readonly document: Node;
-	readonly suggested: boolean;
-}
+/**
+ * Why an agent's change is refused, none of it made: it was to be a
+ * suggestion, and it changes text that can't carry a suggestion's marks, as
+ * a code block's can't (`unmarkable`); or the text it wrote can't be what the
+ * document reads as (see `TextRefused`).
+ */
+export type Refused = "unmarkable" | TextRefused;
+
+/**
+ * What an agent's change did to a live document: `made`, the document after
+ * it with all of it made; `suggested`, the document after it with what it
+ * changes waiting as one suggestion, but for the boxes it moved among their
+ * slide's others (see `withBoxesMoved`); `unchanged`, as it asked for nothing
+ * the document doesn't hold already; or `refused`, and why.
+ */
+export type Change =
+	| { readonly outcome: "made" | "suggested"; readonly document: Node }
+	| { readonly outcome: "unchanged" }
+	| { readonly outcome: "refused"; readonly reason: Refused };
 
 /** The document as people see it until somebody accepts a suggestion pending in it: every pending suggestion left out. */
 export function withoutSuggestions(document: Node): Node {
@@ -75,82 +89,208 @@ export function withoutSuggestions(document: Node): Node {
  * The document as an agent reads it, and changes it with `changedTo`: as its
  * text (see `textOfLiveDocument`), without its pending suggestions.
  */
-export const textForAgents = (document: Node): string =>
+export const textWithoutSuggestions = (document: Node): string =>
 	textOfLiveDocument(withoutSuggestions(document));
 
 /**
  * `live` changed as an agent asks, by writing `wanted` in place of the text
- * it read, `textForAgents(live)`. What it left as it read it stays as `live`
- * holds it; what it changed is made to read, pending suggestions aside, as
- * `wanted` says, made `as` asked, but for how a deck looks, which is made at
- * once. `unchanged` when that is nothing. A `Blocked` reason when the change
- * can't be made as asked, and a `TextRefused` one when `wanted` can't be what
- * the document reads as.
+ * it read, `textWithoutSuggestions(live)`. What it left as it read it stays
+ * as `live` holds it; what it changed is made to read, pending suggestions
+ * aside, as `wanted` says, made `as` asked (see `Change`).
  */
-export function changedTo(
-	live: Node,
-	wanted: string,
-	as: ChangeAs,
-): Changed | "unchanged" | Blocked | TextRefused {
+export function changedTo(live: Node, wanted: string, as: ChangeAs): Change {
 	const kind = liveDocumentKind(live);
 	const reading = readLiveDocumentText(kind, wanted, readHtml);
-	if (reading.outcome === "nothing") return "saysNothing";
-	if (reading.outcome === "unreadable") return reading.reason;
-	const revert = reverted(live);
-	const before = plain(revert);
+	if (reading.outcome === "nothing") return { outcome: "refused", reason: "saysNothing" };
+	if (reading.outcome === "unreadable") return { outcome: "refused", reason: reading.reason };
+	const unsettled = reverted(live);
+	const read = plain(unsettled);
 	// The document's own text always reads back as a document of its kind.
-	const shown = liveDocumentFromText(kind, textOfLiveDocument(before), readHtml);
-	const target = withChangesOf(before, shown, reading.document);
-	const found: Found = { replacements: [], attributes: [], restyles: [], unmarkable: false };
-	findDifferences(before, target, 0, found);
-	const { replacements, attributes, restyles } = found;
-	if (replacements.length === 0 && attributes.length === 0 && restyles.length === 0) {
-		return "unchanged";
-	}
-	if (as !== "edit" && found.unmarkable) return "unmarkable";
+	const shown = liveDocumentFromText(kind, textOfLiveDocument(read), readHtml);
+	const target = withChangesOf(read, shown, reading.document);
+	const moved = withBoxesMoved(live, read, target, unsettled.mapping.invert());
+	const base = moved ?? live;
+	const revert = moved ? reverted(moved) : unsettled;
+	const before = plain(revert);
 	// The differences are places in the document without its suggestions, so each is found in the live one.
 	const inLive = revert.mapping.invert();
-	// How a deck looks changes at once, however its words do. That moves nothing, so every place found stays where it is.
-	const change = new Transform(live);
+	const found: Found = { replacements: [], attributes: [], restyles: [], unmarkable: false };
+	findDifferences(before, target, 0, found, as === "edit" ? "apart" : "withWords");
+	// An attribute the live node has already, as one an earlier suggestion of the same change gave it, is left as it is.
+	const attributes = found.attributes.filter(
+		({ at, name, value }) => !isDeepStrictEqual(base.nodeAt(inLive.map(at, 1))?.attrs[name], value),
+	);
+	const { replacements, restyles } = found;
+	if (replacements.length === 0 && attributes.length === 0 && restyles.length === 0) {
+		return moved ? { outcome: "made", document: moved } : { outcome: "unchanged" };
+	}
+	if (as !== "edit" && found.unmarkable) return { outcome: "refused", reason: "unmarkable" };
+	if (as === "edit") {
+		const change = new Transform(base);
+		for (const { at, name, value } of attributes) {
+			change.setNodeAttribute(inLive.map(at, 1), name, value);
+		}
+		for (const restyle of restyles) setTextStyle(change, restyle, inLive);
+		replaceEach(change, replacements, inLive, undefined);
+		return { outcome: "made", document: change.doc };
+	}
+	const off = EditorState.create({ doc: base, plugins: [suggestChanges()] });
+	const state = off.apply(off.tr.setMeta(suggestChangesKey, { enabled: true }));
+	const change = state.tr;
+	// First, as changing an attribute moves nothing still to be changed.
 	for (const { at, name, value } of attributes) {
 		change.setNodeAttribute(inLive.map(at, 1), name, value);
 	}
-	for (const restyle of restyles) setTextStyle(change, restyle, inLive);
-	if (as === "edit" || replacements.length === 0) {
-		return { document: replaced(change, replacements, inLive).doc, suggested: false };
-	}
-	const designed = EditorState.create({ doc: change.doc, plugins: [suggestChanges()] });
-	const state = designed.apply(designed.tr.setMeta(suggestChangesKey, { enabled: true }));
-	const words = replaced(state.tr, replacements, inLive);
-	const suggestion = transformToSuggestionTransaction(words, state, () => as.suggestionId);
-	return { document: suggestion.doc, suggested: true };
+	replaceEach(change, replacements, inLive, suggestionBy(as.suggestionId));
+	const suggestion = transformToSuggestionTransaction(change, state, () => as.suggestionId);
+	return { outcome: "suggested", document: suggestion.doc };
 }
 
 /**
- * `change` with each replacement made, found in the live document by
- * `inLive`: from the end, so a replacement never moves the places still to
- * be replaced.
+ * Makes each replacement in `change`, found in the live document by
+ * `inLive`, from the end, so that a replacement never moves the places still
+ * to be replaced. A replacement stops short of what somebody proposes adding
+ * at either edge, which is theirs to settle; but when it is a suggestion of
+ * `author`'s, it takes in what they propose adding there already, so a
+ * suggestion of theirs made again replaces the one waiting rather than
+ * adding beside it.
  */
-function replaced<T extends Transform>(
-	change: T,
+function replaceEach(
+	change: Transform,
 	replacements: readonly Replacement[],
 	inLive: Mappable,
-): T {
+	author: SuggestionBy | undefined,
+): void {
 	for (const { from, to, slice } of replacements.toReversed()) {
-		// Stopping short of what somebody proposes adding at either edge, which is theirs to settle.
 		const start = inLive.map(from, 1);
-		change.replace(start, Math.max(start, inLive.map(to, -1)), slice);
+		const end = Math.max(start, inLive.map(to, -1));
+		const [reachFrom, reachTo] = author
+			? overInsertionsBy(change.doc, start, end, author)
+			: [start, end];
+		change.replace(reachFrom, reachTo, slice);
 	}
-	return change;
 }
 
-/** Gives the stretch of text `restyle` says, found in the live document by `inLive`, the text style it says. */
+/** `start` and `end`, in `document`, moved out over what `author` proposes adding at either side of them. */
+function overInsertionsBy(
+	document: Node,
+	start: number,
+	end: number,
+	author: SuggestionBy,
+): [number, number] {
+	let from = start;
+	for (let node = document.resolve(from).nodeBefore; node && isInsertionBy(node, author); ) {
+		from -= node.nodeSize;
+		node = document.resolve(from).nodeBefore;
+	}
+	let to = end;
+	for (let node = document.resolve(to).nodeAfter; node && isInsertionBy(node, author); ) {
+		to += node.nodeSize;
+		node = document.resolve(to).nodeAfter;
+	}
+	return [from, to];
+}
+
+/** Whether `node` is proposed for adding, in a suggestion of `author`'s. */
+const isInsertionBy = (node: Node, author: SuggestionBy) =>
+	node.marks.some((mark) => {
+		if (mark.type.name !== SUGGESTED_INSERTION) return false;
+		const by = suggestionBy(mark.attrs.id);
+		return by.kind === author.kind && by.name === author.name;
+	});
+
+/**
+ * Gives the stretch of text `restyle` says, found in the live document by
+ * `inLive`, the text style it says, and what somebody proposes adding at
+ * either edge of it too, so that the line reads in one style however that is
+ * settled.
+ */
 function setTextStyle(change: Transform, { from, to, style }: Restyle, inLive: Mappable): void {
-	const [start, end] = [inLive.map(from, 1), inLive.map(to, -1)];
+	const [start, end] = [inLive.map(from, -1), inLive.map(to, 1)];
 	const textStyle = change.doc.type.schema.marks[TEXT_STYLE];
 	if (!textStyle || end <= start) return;
 	change.removeMark(start, end, textStyle);
 	if (style) change.addMark(start, end, style);
+}
+
+/**
+ * `live` with the boxes on each slide in the order `target` puts them in,
+ * where that differs from `before`'s, moved whole, with whatever waits in
+ * them, at once; `undefined` when no box moves. The order is the one boxes
+ * are drawn in, each over those before it, which a suggestion can't hold:
+ * the suggesting library keeps what a node's attributes were, and what was
+ * added or removed, but not where a node stood among its siblings. `before`
+ * is `live` without its suggestions, whose places `inLive` finds in it.
+ */
+function withBoxesMoved(
+	live: Node,
+	before: Node,
+	target: Node,
+	inLive: Mappable,
+): Node | undefined {
+	const change = new Transform(live);
+	let slideAt = 0;
+	for (const { was, becomes } of aligned(before.children, target.children)) {
+		if (was && becomes && isSlide(was) && isSlide(becomes)) {
+			const boxes = bodyOf(was).children;
+			const targetIndexOf = new Map(boxPairs(boxes, bodyOf(becomes).children));
+			// The slide's body starts just inside the slide, and its boxes just inside that.
+			const boxStarts = boxes.map((_, index) =>
+				inLive.map(slideAt + 2 + offsetOf(bodyOf(was), index), 1),
+			);
+			const targetIndexAt = new Map(
+				boxStarts.flatMap((start, index) => {
+					const targetIndex = targetIndexOf.get(index);
+					return targetIndex === undefined ? [] : [[start, targetIndex] as const];
+				}),
+			);
+			moveBoxes(change, inLive.map(slideAt, 1) + 1, targetIndexAt);
+		}
+		if (was) slideAt += was.nodeSize;
+	}
+	return change.docChanged ? change.doc : undefined;
+}
+
+/** Where the child `index` of `parent` starts, counted from where `parent`'s content starts. */
+function offsetOf(parent: Node, index: number): number {
+	let offset = 0;
+	for (let child = 0; child < index; child++) offset += parent.child(child).nodeSize;
+	return offset;
+}
+
+/**
+ * Puts the boxes of the slide's body starting at `bodyAt` in `change` in the
+ * order of their indexes in the slide the agent wrote, `targetIndexAt`, by
+ * where each starts. A box the agent didn't write, as one it removes or one
+ * somebody proposes adding, keeps its place after the box before it.
+ */
+function moveBoxes(
+	change: Transform,
+	bodyAt: number,
+	targetIndexAt: ReadonlyMap<number, number>,
+): void {
+	const body = () => change.doc.nodeAt(bodyAt) as Node;
+	const startOf = (index: number) => bodyAt + 1 + offsetOf(body(), index);
+	// Runs of boxes, each led by one the agent wrote, with those that follow it.
+	const runs: { targetIndex: number; boxes: number[] }[] = [{ targetIndex: -1, boxes: [] }];
+	body().forEach((_, _offset, index) => {
+		const targetIndex = targetIndexAt.get(startOf(index));
+		if (targetIndex !== undefined) runs.push({ targetIndex, boxes: [index] });
+		else runs.at(-1)?.boxes.push(index);
+	});
+	const wanted = runs.toSorted((one, other) => one.targetIndex - other.targetIndex);
+	const order = wanted.flatMap((run) => run.boxes);
+	const current = order.toSorted((one, other) => one - other);
+	order.forEach((box, place) => {
+		const at = current.indexOf(box);
+		if (at === place) return;
+		const node = body().child(at);
+		const from = startOf(at);
+		change.delete(from, from + node.nodeSize);
+		change.insert(startOf(place), node);
+		current.splice(at, 1);
+		current.splice(place, 0, box);
+	});
 }
 
 /**
@@ -324,29 +464,58 @@ interface Restyle {
 
 interface Found {
 	replacements: Replacement[];
-	/** Changes to how a deck looks, made at once (see `isDesignAttribute`). */
+	/** Changes to how a deck looks, of a node's attributes (see `isDesignAttribute`). */
 	attributes: AttributeChange[];
-	/** Changes to how a deck's text is styled, made at once. */
+	/** Changes to how a deck's text is styled, apart from its words. */
 	restyles: Restyle[];
 	/** Whether a replacement is inside text that can't carry a suggestion's marks. */
 	unmarkable: boolean;
 }
 
+/**
+ * How a change of a deck's text style is found: as a restyle, made apart
+ * from the words (`apart`), as an edit makes it; or as a change of the words
+ * it styles, which are replaced by themselves restyled (`withWords`), as the
+ * suggesting library holds a change to a mark on text.
+ */
+type TextStyleChanges = "apart" | "withWords";
+
 const isSlide = (node: Node) => node.type.name === SLIDE;
 
 const isBox = (node: Node) => node.type.name === SLIDE_BOX;
 
+/** The attributes of a box that say how it looks: all of them, listed so that one added later is decided on here. */
+const BOX_DESIGN: Readonly<Record<keyof BoxAttributes, true>> = {
+	role: true,
+	frame: true,
+	fill: true,
+	stroke: true,
+	path: true,
+	verticalAlign: true,
+	padding: true,
+	rotation: true,
+};
+
 /** The attributes of a paragraph or heading that say how a deck's text looks (see `slide-text-style.ts`). */
-const LINE_DESIGN_ATTRIBUTES: ReadonlySet<string> = new Set(["textAlign", "lineHeight"]);
+const LINE_DESIGN: ReadonlySet<string> = new Set(["textAlign", "lineHeight"]);
+
+/** The attributes of each kind of node that say how a deck looks, by the node's name. */
+const DESIGN_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
+	[SLIDE]: new Set(["layout", "background"]),
+	[SLIDE_BOX]: new Set(Object.keys(BOX_DESIGN)),
+	paragraph: LINE_DESIGN,
+	heading: LINE_DESIGN,
+};
 
 /**
- * Whether `name` is an attribute of `node` that says how a deck looks, which
- * an agent's change sets at once rather than suggesting: any of a slide's and
- * a box's, which say where a box is and how it and its slide are drawn, and a
- * line's alignment and line height.
+ * Whether `name` is an attribute of `node` that says how a deck looks: a
+ * slide's layout and background, any of a box's (see `BoxAttributes`), and a
+ * line's alignment and line height. A change to one is a change of the node
+ * where it is; a change to any other attribute, as a heading's level, or one
+ * this list doesn't know, replaces the node.
  */
 const isDesignAttribute = (node: Node, name: string) =>
-	isSlide(node) || isBox(node) || LINE_DESIGN_ATTRIBUTES.has(name);
+	DESIGN_ATTRIBUTES[node.type.name]?.has(name) ?? false;
 
 /** The attributes `becomes` has that `was` doesn't, compared by value, but for what is suggested for it. */
 const differingAttributes = (was: Node, becomes: Node): string[] =>
@@ -379,7 +548,13 @@ const attributeChanges = (was: Node, becomes: Node, at: number): AttributeChange
  * removed or added, a run at a time. `start` is where `before`'s content
  * begins in the document.
  */
-function findDifferences(before: Node, after: Node, start: number, found: Found): void {
+function findDifferences(
+	before: Node,
+	after: Node,
+	start: number,
+	found: Found,
+	styles: TextStyleChanges,
+): void {
 	let position = start;
 	// Blocks removed and added side by side are one replacement, not a removal beside an addition.
 	let run: { from: number; to: number; added: Node[] } | undefined;
@@ -399,8 +574,8 @@ function findDifferences(before: Node, after: Node, start: number, found: Found)
 			endRun();
 			if (!was.eq(becomes)) {
 				found.attributes.push(...attributeChanges(was, becomes, position));
-				if (was.isTextblock) findTextDifference(was, becomes, position + 1, found);
-				else findDifferences(was, becomes, position + 1, found);
+				if (was.isTextblock) findTextDifference(was, becomes, position + 1, found, styles);
+				else findDifferences(was, becomes, position + 1, found, styles);
 			}
 		} else {
 			run ??= { from: position, to: position, added: [] };
@@ -414,15 +589,22 @@ function findDifferences(before: Node, after: Node, start: number, found: Found)
 
 /**
  * Adds to `found` the words of a line that differ and the words that replace
- * them, and the text styles that differ around them. Whole words, so a
- * suggestion reads as "~~Friday~~ Monday" and not "~~Fri~~Mon". A word
- * differs when its text, its marks or an image in it does, so a change that
- * only marks a word, or swaps an image, is found too; but a change of its
- * text style alone is a restyle, made at once. `start` is where the line's
- * text begins in the document.
+ * them. Whole words, so a suggestion reads as "~~Friday~~ Monday" and not
+ * "~~Fri~~Mon". A word differs when its text, its marks or an image in it
+ * does, so a change that only marks a word, or swaps an image, is found too.
+ * A change of its text style alone is a word that differs too, or, with
+ * `styles` `apart`, a restyle of the words that stay. `start` is where the
+ * line's text begins in the document.
  */
-function findTextDifference(before: Node, after: Node, start: number, found: Found): void {
+function findTextDifference(
+	before: Node,
+	after: Node,
+	start: number,
+	found: Found,
+	styles: TextStyleChanges,
+): void {
 	const [was, becomes] = [lineOf(before), lineOf(after)];
+	const samePlace = styles === "apart" ? samePlaceButStyle : samePlaceAndStyle;
 	const shorter = Math.min(was.length, becomes.length);
 	let same = 0;
 	while (same < shorter && samePlace(was[same], becomes[same])) same++;
@@ -483,15 +665,23 @@ const isTextStyle = (mark: Mark) => mark.type.name === TEXT_STYLE;
 
 const withoutTextStyle = (marks: readonly Mark[]) => marks.filter((mark) => !isTextStyle(mark));
 
+/** Whether two places hold the same, their marks as they are compared by `marksOf`. */
+const samePlaceBy =
+	(marksOf: (marks: readonly Mark[]) => readonly Mark[]) =>
+	(one: Place | undefined, other: Place | undefined) =>
+		one !== undefined &&
+		other !== undefined &&
+		one.character === other.character &&
+		Mark.sameSet(marksOf(one.marks), marksOf(other.marks)) &&
+		(one.node && other.node
+			? one.node.mark(Mark.none).eq(other.node.mark(Mark.none))
+			: one.node === other.node);
+
+/** Whether two places hold the same, text style and all. */
+const samePlaceAndStyle = samePlaceBy((marks) => marks);
+
 /** Whether two places hold the same, their text styles aside, which a restyle changes. */
-const samePlace = (one: Place | undefined, other: Place | undefined) =>
-	one !== undefined &&
-	other !== undefined &&
-	one.character === other.character &&
-	Mark.sameSet(withoutTextStyle(one.marks), withoutTextStyle(other.marks)) &&
-	(one.node && other.node
-		? one.node.mark(Mark.none).eq(other.node.mark(Mark.none))
-		: one.node === other.node);
+const samePlaceButStyle = samePlaceBy(withoutTextStyle);
 
 const isSpace = (place: Place | undefined) => place !== undefined && /\s/.test(place.character);
 
@@ -559,85 +749,215 @@ interface Step {
 	becomes?: Node;
 }
 
-/** Whether two blocks are taken for the same one, one way of matching them. */
-type Matching = (was: Node, becomes: Node) => boolean;
+/** Whether two things are taken for the same one, one way of matching them. */
+type Matching<T> = (was: T, becomes: T) => boolean;
+
+/**
+ * `before`, sibling blocks, matched up with `after`, in steps in their order.
+ * Slides and other blocks keep their order: those matched the strictest way
+ * are matched first, and between them the next way, and so on, what is left
+ * being removed and added. A slide's boxes are matched as a set instead (see
+ * `boxPairs`), so a box drawn in front of another rather than behind it is
+ * still the box it was.
+ */
+function aligned(before: readonly Node[], after: readonly Node[]): Step[] {
+	const first = before[0] ?? after[0];
+	if (!first) return [];
+	if (isBox(first)) return stepsOf(before, after, boxPairs(before, after));
+	if (isSlide(first)) {
+		return alignedInOrder(before.map(slideKeys), after.map(slideKeys), SLIDE_MATCHINGS).map(
+			({ was, becomes }) => ({ was: was?.slide, becomes: becomes?.slide }),
+		);
+	}
+	return alignedInOrder(before, after, BLOCK_MATCHINGS);
+}
+
+/**
+ * How blocks other than slides and boxes are matched, strictest first: those
+ * that read the same, then blocks of one kind, so a paragraph is compared
+ * with a paragraph and never with the list beside it.
+ */
+const BLOCK_MATCHINGS: readonly Matching<Node>[] = [
+	(was, becomes) => was.eq(becomes),
+	(was, becomes) => was.sameMarkup(becomes) || comparedInside(was, becomes),
+];
+
+/** A slide, with what it is known by: its title (`titleOf`), and what each of its boxes says that says something. */
+interface SlideKeys {
+	readonly slide: Node;
+	readonly title: string;
+	readonly sayings: ReadonlySet<string>;
+}
+
+const slideKeys = (slide: Node): SlideKeys => ({
+	slide,
+	title: titleOf(slide),
+	sayings: new Set(
+		bodyOf(slide)
+			.children.map(sayingOf)
+			.filter((saying) => saying !== ""),
+	),
+});
+
+/**
+ * How slides are matched, strictest first: those that read the same; then
+ * slides with the same title, so a slide added beside one that changed isn't
+ * taken for it; then slides sharing a box that says the same; then any.
+ */
+const SLIDE_MATCHINGS: readonly Matching<SlideKeys>[] = [
+	(was, becomes) => was.slide.eq(becomes.slide),
+	(was, becomes) => was.title !== "" && was.title === becomes.title,
+	(was, becomes) => [...was.sayings].some((saying) => becomes.sayings.has(saying)),
+	() => true,
+];
+
+/**
+ * A slide's title: the words of its title box, or, when it has none or that
+ * is empty, of the first line with words in it, in the order its boxes are
+ * drawn.
+ */
+function titleOf(slide: Node): string {
+	const titleBox = bodyOf(slide).children.find((box) => boxAttributesOf(box).role === "title");
+	const title = titleBox?.textContent.trim() ?? "";
+	if (title !== "") return title;
+	let line = "";
+	slide.descendants((node) => {
+		if (line === "" && node.isTextblock) line = node.textContent.trim();
+		return line === "";
+	});
+	return line;
+}
+
+/** The node an image in a line is. */
+const IMAGE = "image";
 
 /** What a box says: its words, and each image in it as its address. */
 const sayingOf = (box: Node) =>
 	box.textBetween(0, box.content.size, "\n", (leaf) =>
-		leaf.type.name === "image" ? `[${String(leaf.attrs.src)}]` : "",
+		leaf.type.name === IMAGE ? `[${String(leaf.attrs.src)}]` : "",
 	);
+
+/** A box, with what it is known by. */
+interface BoxKeys {
+	readonly box: Node;
+	readonly attributes: BoxAttributes;
+	readonly saying: string;
+}
+
+const boxKeys = (box: Node): BoxKeys => ({
+	box,
+	attributes: boxAttributesOf(box),
+	saying: sayingOf(box),
+});
 
 /**
  * The ways two of a slide's boxes are taken for the same box, strictest
  * first, as an agent may move, restyle and reword a box, and add and remove
- * others beside it. Boxes matched no way are removed and added.
+ * others beside it: the same box; one saying the same, as a box moved or
+ * restyled; one where it was, as a box reworded; one for the same thing, as
+ * a title moved and reworded; and one shape for another. A box saying
+ * nothing is never taken for another by that alone, as an empty subtitle
+ * removed beside a shape added.
  */
-const BOX_MATCHINGS: readonly Matching[] = [
-	// Saying the same, as a box moved or restyled.
-	(was, becomes) => sayingOf(was) !== "" && sayingOf(was) === sayingOf(becomes),
-	// Where it was, as a box reworded.
-	(was, becomes) => isDeepStrictEqual(boxAttributesOf(was).frame, boxAttributesOf(becomes).frame),
-	// For the same thing, as a title moved and reworded.
-	(was, becomes) => {
-		const { role } = boxAttributesOf(was);
-		return role !== null && role === boxAttributesOf(becomes).role;
-	},
-	// Saying nothing, as a shape moved or restyled.
-	(was, becomes) => sayingOf(was) === "" && sayingOf(becomes) === "",
+const BOX_MATCHINGS: readonly Matching<BoxKeys>[] = [
+	(was, becomes) => was.box.eq(becomes.box),
+	(was, becomes) => was.saying !== "" && was.saying === becomes.saying,
+	(was, becomes) => isDeepStrictEqual(was.attributes.frame, becomes.attributes.frame),
+	(was, becomes) => was.attributes.role !== null && was.attributes.role === becomes.attributes.role,
+	(was, becomes) => was.attributes.path !== null && becomes.attributes.path !== null,
 ];
 
 /**
- * The ways blocks are matched, strictest first. Those that read the same;
- * then slides with the same title, so a slide added beside one that changed
- * isn't taken for it; then boxes, as `BOX_MATCHINGS` matches them; then any
- * other blocks of one kind, so a paragraph is compared with a paragraph and
- * never with the list beside it.
+ * The boxes of `before` taken for boxes of `after`, as pairs of an index in
+ * each, matched as a set rather than in order: each way of `BOX_MATCHINGS`
+ * in turn, each box of `before` taking the first of `after` left that it
+ * matches. A single box left on each side, both saying something, is one box
+ * moved and reworded.
  */
-const MATCHINGS: readonly Matching[] = [
-	(was, becomes) => was.eq(becomes),
-	(was, becomes) => isSlide(was) && isSlide(becomes) && titleOf(was) === titleOf(becomes),
-	...BOX_MATCHINGS.map(
-		(matching): Matching =>
-			(was, becomes) =>
-				isBox(was) && isBox(becomes) && matching(was, becomes),
-	),
-	(was, becomes) => !isBox(was) && (was.sameMarkup(becomes) || comparedInside(was, becomes)),
-];
-
-/** A slide's title: the words of the first line in it. */
-function titleOf(slide: Node): string {
-	let title: string | undefined;
-	slide.descendants((node) => {
-		if (title === undefined && node.isTextblock) title = node.textContent;
-		return title === undefined;
-	});
-	return title ?? "";
+function boxPairs(before: readonly Node[], after: readonly Node[]): [number, number][] {
+	const [was, becomes] = [before.map(boxKeys), after.map(boxKeys)];
+	const pairs = new Map<number, number>();
+	const taken = new Set<number>();
+	for (const matching of BOX_MATCHINGS) {
+		was.forEach((box, index) => {
+			if (pairs.has(index)) return;
+			const match = becomes.findIndex(
+				(other, otherIndex) => !taken.has(otherIndex) && matching(box, other),
+			);
+			if (match === -1) return;
+			pairs.set(index, match);
+			taken.add(match);
+		});
+	}
+	const leftWas = was.flatMap((box, index) => (pairs.has(index) ? [] : [{ box, index }]));
+	const leftBecomes = becomes.flatMap((box, index) => (taken.has(index) ? [] : [{ box, index }]));
+	const [onlyWas] = leftWas;
+	const [onlyBecomes] = leftBecomes;
+	if (
+		leftWas.length === 1 &&
+		leftBecomes.length === 1 &&
+		onlyWas &&
+		onlyBecomes &&
+		onlyWas.box.saying !== "" &&
+		onlyBecomes.box.saying !== ""
+	) {
+		pairs.set(onlyWas.index, onlyBecomes.index);
+	}
+	return [...pairs].toSorted(([one], [other]) => one - other);
 }
 
 /**
- * `before` matched up with `after`, in order. Blocks matched the strictest
- * way are matched first; between those, the next way, and so on. What is left
- * is removed and added.
+ * `before` and `after` in steps, matched by `pairs`: those of the pairs that
+ * keep their order, the most of them that do, each a step, and every other
+ * block removed or added where it stands.
  */
-function aligned(
+function stepsOf(
 	before: readonly Node[],
 	after: readonly Node[],
-	[matching, ...looser]: readonly Matching[] = MATCHINGS,
+	pairs: readonly (readonly [number, number])[],
 ): Step[] {
+	const inOrder = longestCommon(
+		pairs,
+		pairs.toSorted(([, one], [, other]) => one - other),
+		(one, other) => one === other,
+	).map(([index]) => pairs[index] as readonly [number, number]);
+	const steps: Step[] = [];
+	let [from, fromAfter] = [0, 0];
+	for (const [index, indexAfter] of [...inOrder, [before.length, after.length] as const]) {
+		steps.push(...before.slice(from, index).map((was) => ({ was })));
+		steps.push(...after.slice(fromAfter, indexAfter).map((becomes) => ({ becomes })));
+		const [was, becomes] = [before[index], after[indexAfter]];
+		if (was && becomes) steps.push({ was, becomes });
+		[from, fromAfter] = [index + 1, indexAfter + 1];
+	}
+	return steps;
+}
+
+/**
+ * `before` matched up with `after`, in order. Those matched the strictest
+ * way are matched first; between those, the next way, and so on. What is
+ * left is removed and added.
+ */
+function alignedInOrder<T>(
+	before: readonly T[],
+	after: readonly T[],
+	[matching, ...looser]: readonly Matching<T>[],
+): { was?: T; becomes?: T }[] {
 	if (!matching) {
 		return [...before.map((was) => ({ was })), ...after.map((becomes) => ({ becomes }))];
 	}
-	const steps: Step[] = [];
+	const steps: { was?: T; becomes?: T }[] = [];
 	let from = 0;
 	let fromAfter = 0;
 	for (const [index, indexAfter] of [
 		...longestCommon(before, after, matching),
 		[before.length, after.length] as const,
 	]) {
-		steps.push(...aligned(before.slice(from, index), after.slice(fromAfter, indexAfter), looser));
+		steps.push(
+			...alignedInOrder(before.slice(from, index), after.slice(fromAfter, indexAfter), looser),
+		);
 		const [was, becomes] = [before[index], after[indexAfter]];
-		if (was && becomes) steps.push({ was, becomes });
+		if (was !== undefined && becomes !== undefined) steps.push({ was, becomes });
 		from = index + 1;
 		fromAfter = indexAfter + 1;
 	}

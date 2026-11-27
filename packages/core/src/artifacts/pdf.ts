@@ -7,7 +7,14 @@ import { Clock, Effect } from "effect";
 import { imageSize } from "image-size";
 import PDFDocument from "pdfkit";
 import { piecesIn, type Typesetter, typesetterOn, widthOfSpaces } from "./pdf-fonts.ts";
-import { BACKGROUND, type DeckImage, ownImagesIn, paintOf } from "./slide-design.ts";
+import {
+	BACKGROUND,
+	type DeckImage,
+	isTurned,
+	outlineInsetOf,
+	ownImagesIn,
+	paintOf,
+} from "./slide-design.ts";
 import { arrangedSlide, type Box, type Measure, type Pen, type Size } from "./slide-layout.ts";
 
 /** The media type of a PDF. */
@@ -30,8 +37,9 @@ export const PDF_CONTENT_TYPE = "application/pdf";
  * when it is alone in a box of the image role (`imageFitOf`), when it is a PNG
  * or a JPEG PDFKit can read and hold, within the pixels a deck may have
  * unpacked to draw it (`drawnImagesIn`); any other image is its words in a
- * dashed box, as the app shows an image it doesn't load. Speaker notes are
- * left out.
+ * dashed box, as the app shows an image it doesn't load. Either is on a line
+ * of its own, between the words around it, where the app sets it in the line
+ * beside them (`piecesOfTextblock`). Speaker notes are left out.
  *
  * A character no font holds is drawn as the font's mark for a missing
  * character, marked with the character it stands for, which a reader that
@@ -281,7 +289,8 @@ function penOn(document: PDFKit.PDFDocument, typesetter: Typesetter, images: Dra
 				.stroke(hex(color));
 			document.restore();
 		},
-		shape({ x, y, width, height }, { path, fill, stroke }) {
+		shape({ x, y, width, height }, look) {
+			const { path, fill, stroke } = look;
 			document.save();
 			document.translate(x, y);
 			if (fill) {
@@ -289,15 +298,15 @@ function penOn(document: PDFKit.PDFDocument, typesetter: Typesetter, images: Dra
 				(path ? document.path(path) : document.rect(0, 0, width, height)).fill();
 			}
 			if (stroke) {
-				// The app draws a box's outline within its frame, and a shape's on its path.
-				const inset = path ? 0 : stroke.width / 2;
+				// A line is drawn either side of where it runs, so one within the frame runs half its width in.
+				const inset = outlineInsetOf(look);
 				const outline = path
 					? document.path(path)
 					: document.rect(
-							inset,
-							inset,
-							Math.max(0, width - stroke.width),
-							Math.max(0, height - stroke.width),
+							inset / 2,
+							inset / 2,
+							Math.max(0, width - inset),
+							Math.max(0, height - inset),
 						);
 				outline
 					.lineWidth(stroke.width)
@@ -309,14 +318,15 @@ function penOn(document: PDFKit.PDFDocument, typesetter: Typesetter, images: Dra
 		// PDFKit turns and mirrors an image upright as its EXIF orientation says, as a browser does.
 		image(address, { x, y, width, height }, clip, radius) {
 			const image = images.at(address);
-			if (!image) return;
+			// PDFKit draws an image of no width or height at its own size, where the app draws nothing.
+			if (!image || !(width > 0 && height > 0)) return;
 			document.save();
 			document.roundedRect(clip.x, clip.y, clip.width, clip.height, radius).clip();
 			reading.image(image, x, y, { width, height });
 			document.restore();
 		},
 		rotated({ x, y, width, height }, degrees, draw) {
-			if (degrees === 0) return draw();
+			if (!isTurned(degrees)) return draw();
 			document.save();
 			document.rotate(degrees, { origin: [x + width / 2, y + height / 2] });
 			turns += 1;

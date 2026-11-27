@@ -1,11 +1,5 @@
 import { pixels } from "@sugabots/contracts/css-values";
-import {
-	backgroundOf,
-	bodyOf,
-	notesOf,
-	SLIDE_BOX,
-	SPEAKER_NOTES,
-} from "@sugabots/contracts/live-slides";
+import { bodyOf, notesOf, SLIDE_BOX, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
 import type { BoxAttributes, BoxRole } from "@sugabots/contracts/slide-box";
 import type { Frame } from "@sugabots/contracts/slide-geometry";
 import { Extension } from "@tiptap/core";
@@ -13,6 +7,7 @@ import type { Node } from "@tiptap/pm/model";
 import { type EditorState, Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import {
+	type BoxPos,
 	boxesOf,
 	notesStartInSlide,
 	type SlideAt,
@@ -22,18 +17,19 @@ import {
 	slidesOf,
 } from "@/lib/deck.ts";
 import { type FollowedNode, whereFollowedNodeIs } from "@/lib/followed-node.ts";
-import { ownTextSizeOf, SLIDE_PAINT_PROPERTY } from "./slide-drawing.tsx";
+import { drawnTextSizeOf } from "@/lib/slide-text.ts";
+import { SLIDE_PAINT_PROPERTY, SLIDE_SCHEME_ATTRIBUTE, slidePaintOf } from "./slide-drawing.tsx";
 
 /*
  * The stage a deck is edited on. One editor holds the whole deck, and the
  * stage shows the slide the selection is in: the others stay in the editor,
  * hidden, so nothing anyone types in them is lost or redrawn. The slide in
- * view is painted its own colour behind its body alone, not its notes; its
- * lines of text of a size of their own are drawn at it, as a drawing of the
- * slide draws them; what goes in each empty part of its boxes is said there;
- * and it holds a place under its body for what the stage puts there. While
- * one of its boxes is dragged, that box is drawn where the drag has it,
- * until the drag ends.
+ * view is painted its own colour behind its body alone, not its notes, its
+ * body's colours resolved for that colour; its lines and lists of text of a
+ * size of their own are drawn at it, as a drawing of the slide draws them;
+ * what goes in each empty part of its boxes is said there; and it holds a
+ * place under its body for what the stage puts there. While one of its boxes
+ * is dragged, that box is drawn where the drag has it, until the drag ends.
  */
 
 interface Stage {
@@ -61,7 +57,7 @@ export function deckStage({
 	onAddImage,
 }: {
 	onUnderSlide: (change: (element: HTMLElement | undefined) => HTMLElement | undefined) => void;
-	onAddImage: (boxPos: number, file: File | undefined) => void;
+	onAddImage: (boxPos: BoxPos, file: File | undefined) => void;
 }) {
 	const underSlide: UnderSlide = {
 		// A new element each time the editor draws one: one it drew before may still be in its old place.
@@ -120,10 +116,10 @@ export function deckStage({
 function decorationsInView(
 	{ node: slide, pos }: SlideAt,
 	underSlide: UnderSlide,
-	onAddImage: (boxPos: number, file: File | undefined) => void,
+	onAddImage: (boxPos: BoxPos, file: File | undefined) => void,
 ): Decoration[] {
 	const notesStart = pos + notesStartInSlide(slide);
-	const background = backgroundOf(slide);
+	const paint = slidePaintOf(slide);
 	const boxes = boxesOf(slide).flatMap((box) =>
 		emptyPartsOf(box.node, pos + box.startInSlide, box.attributes).map(
 			({ node, at: partStart, words }) =>
@@ -141,15 +137,16 @@ function decorationsInView(
 		),
 	);
 	return [
-		// The slide's own element holds its notes too: its colour goes to its body (see `app.css`).
-		...(background
+		// The slide's own element holds its notes too: its colour, and the colours for it, go to its body (see `app.css`).
+		...(paint
 			? [
 					Decoration.node(pos, pos + slide.nodeSize, {
-						style: `background: none; ${SLIDE_PAINT_PROPERTY}: ${background}`,
+						style: `background: none; ${SLIDE_PAINT_PROPERTY}: ${paint.color}`,
+						...(paint.scheme ? { [SLIDE_SCHEME_ATTRIBUTE]: paint.scheme } : {}),
 					}),
 				]
 			: []),
-		...linesAtTheirTextSize(slide, pos),
+		...drawnAtTheirTextSize(slide, pos),
 		...boxes,
 		...notesHint(notesOf(slide), notesStart),
 		Decoration.widget(notesStart, underSlide.draw, {
@@ -162,21 +159,24 @@ function decorationsInView(
 	];
 }
 
-/** Each line of the boxes of `slide`, which starts at `slidePos`, whose text has a size of its own, drawn at that size (`ownTextSizeOf`). */
-function linesAtTheirTextSize(slide: Node, slidePos: number): Decoration[] {
+/**
+ * Each line, list and list's item of the boxes of `slide`, which starts at
+ * `slidePos`, whose text has a size of its own, drawn at that size
+ * (`drawnTextSizeOf`).
+ */
+function drawnAtTheirTextSize(slide: Node, slidePos: number): Decoration[] {
 	const decorations: Decoration[] = [];
 	// Past the slide's own start, where its body starts.
 	const bodyPos = slidePos + 1;
 	bodyOf(slide).descendants((node, offset) => {
-		if (!node.isTextblock) return true;
-		const size = ownTextSizeOf(node);
+		const size = drawnTextSizeOf(node);
 		if (size !== undefined) {
 			const at = bodyPos + 1 + offset;
 			decorations.push(
 				Decoration.node(at, at + node.nodeSize, { style: `font-size: ${pixels(size)}` }),
 			);
 		}
-		return false;
+		return !node.isTextblock;
 	});
 	return decorations;
 }
@@ -379,7 +379,7 @@ function notesHint(notes: Node, start: number): Decoration[] {
  * on it.
  */
 const imageArea =
-	(onAddImage: (boxPos: number, file: File | undefined) => void) =>
+	(onAddImage: (boxPos: BoxPos, file: File | undefined) => void) =>
 	(_view: unknown, getPos: () => number | undefined) => {
 		const area = document.createElement("button");
 		area.type = "button";
@@ -392,7 +392,7 @@ const imageArea =
 		/** Where the box starts: the area is drawn at the start of what it holds. */
 		const boxPos = () => {
 			const at = getPos();
-			return at === undefined ? undefined : at - 1;
+			return at === undefined ? undefined : ((at - 1) as BoxPos);
 		};
 		area.addEventListener("click", () => {
 			const at = boxPos();

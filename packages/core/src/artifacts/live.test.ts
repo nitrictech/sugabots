@@ -578,7 +578,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		person.destroy();
 	});
 
-	it("colours a slide an agent was asked to from inside the deck at once, and suggests the words it changes there", async () => {
+	it("suggests colouring a slide an agent was asked to from inside the deck, with the words it changes there, as one suggestion every editor sees", async () => {
 		const live = await liveDocuments();
 		const made = await aDeck(SIX_SLIDES);
 		const author = planner();
@@ -602,11 +602,17 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 
 		expect(rewritten?.outcome).toBe("suggested");
 		const goals = person.document.getXmlFragment("default").get(2) as XmlElement;
+		// The new background shows at once, and the slide says, to every editor, what it was.
 		await until(() => goals.getAttribute("background") === "#0f172a");
-		expect(goals.getAttribute("suggestion")).toBeUndefined();
+		expect(JSON.parse(goals.getAttribute("suggestion") as string)).toMatchObject([
+			{
+				type: "modification",
+				attrs: { type: "attr", attrName: "background", previousValue: null, newValue: "#0f172a" },
+			},
+		]);
 		expect(slideTexts(person.document)).toContain("Monday");
-		// The words read as they did until somebody accepts them.
-		expect(await Effect.runPromise(live.textForAgents(made.id))).toBe(coloured);
+		// The deck reads as it did until somebody accepts the suggestion.
+		expect(await Effect.runPromise(live.textForAgents(made.id))).toBe(SIX_SLIDES);
 		person.destroy();
 	});
 

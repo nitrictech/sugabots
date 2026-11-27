@@ -1,3 +1,6 @@
+import { NUMBER_PATTERN, within } from "./css-values.ts";
+import { SLIDE_REACH } from "./slide-geometry.ts";
+
 /*
  * The outline of a shape on a slide that isn't a plain rectangle, such as an
  * arrow, a chevron or a line: an SVG path in its box's own pixels, from
@@ -71,7 +74,7 @@ export const pathCommandsOf = (path: SvgPath): readonly PathCommand[] =>
 	// Each command holds as many numbers as `ARGUMENT_COUNTS` says, which its numbers' type holds it to.
 	(commandsOf(path) ?? []) as unknown as readonly PathCommand[];
 
-const NUMBER = /[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/iy;
+const NUMBER = new RegExp(NUMBER_PATTERN, "iy");
 
 /**
  * The commands `data` says, as SVG reads a path: `undefined` when it says
@@ -126,11 +129,52 @@ function commandsOf(data: string): ReadCommand[] | undefined {
 	return commands[0]?.letter.toLowerCase() === "m" ? commands : undefined;
 }
 
-/** `value` as an SVG path, trimmed, or `null` when it is no path's data. */
+/**
+ * `value` as an SVG path, trimmed, or `null` when it is no path's data. Its
+ * numbers are kept within `SLIDE_REACH` and an arc's tilt within a turn: a
+ * path saying more is written again with those cut there, and its other
+ * numbers as they were, so a path within them is the string it was.
+ */
 export function svgPathIn(value: unknown): SvgPath | null {
 	if (typeof value !== "string") return null;
 	const trimmed = value.trim();
-	return commandsOf(trimmed) ? (trimmed as SvgPath) : null;
+	const commands = commandsOf(trimmed);
+	if (!commands) return null;
+	const bounded = commands.map(withinReach);
+	const changed = bounded.some((command, index) =>
+		command.values.some((number, at) => number !== commands[index]?.values[at]),
+	);
+	return changed ? exactPath(bounded) : (trimmed as SvgPath);
+}
+
+/** Where an arc's tilt is among its numbers, and its two flags. */
+const ARC_TILT = 2;
+const ARC_FLAGS = [3, 4];
+
+/** `command` with each of its numbers within `SLIDE_REACH`, but an arc's flags, and its tilt within a turn. */
+function withinReach(command: ReadCommand): ReadCommand {
+	const arc = command.letter.toLowerCase() === "a";
+	const values = command.values.map((value, at) => {
+		if (arc && ARC_FLAGS.includes(at)) return value;
+		if (arc && at === ARC_TILT) return Math.abs(value) <= 360 ? value : value % 360;
+		return within(value, -SLIDE_REACH, SLIDE_REACH);
+	});
+	return { letter: command.letter, values };
+}
+
+/**
+ * The paths `paths` say, one after another, as one path, as a drawing of
+ * several shapes draws them: `null` for none. Each starts with its own move,
+ * on the box, even one written from the point before, `m`, which moves from
+ * the box's corner on its own but from the end of the shape before when
+ * joined after it.
+ */
+export function joinedPaths(paths: readonly SvgPath[]): SvgPath | null {
+	const joined = paths.map((path) => {
+		const [first, ...rest] = commandsOf(path) ?? [];
+		return first?.letter === "m" ? exactPath([{ ...first, letter: "M" }, ...rest]) : path;
+	});
+	return svgPathIn(joined.join(" "));
 }
 
 /** A change of where a path's points are: each point (x, y) goes to (x × scaleX + moveX, y × scaleY + moveY). */
@@ -186,14 +230,21 @@ export function changedPath(path: SvgPath, { scaleX, scaleY, moveX, moveY }: Pat
 				};
 		}
 	});
-	return writtenPath(changed);
+	return writtenPath(changed.map(withinReach));
 }
 
+/** `commands` as a path, each number to a hundredth of a pixel, as a path changed by scaling is written. */
 const writtenPath = (commands: readonly ReadCommand[]): SvgPath =>
 	commands
 		.map(({ letter, values }) =>
 			[letter, ...values.map((value) => String(Number(value.toFixed(2))))].join(" "),
 		)
+		.join(" ") as SvgPath;
+
+/** `commands` as a path, each number as it was read. */
+const exactPath = (commands: readonly ReadCommand[]): SvgPath =>
+	commands
+		.map(({ letter, values }) => [letter, ...values.map(String)].join(" "))
 		.join(" ") as SvgPath;
 
 /** An element of an SVG drawing, as far as reading the shape it draws goes. */

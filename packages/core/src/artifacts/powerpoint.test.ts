@@ -9,6 +9,7 @@ import type { Node } from "@tiptap/pm/model";
 import { Effect } from "effect";
 import { imageSize } from "image-size";
 import JSZip from "jszip";
+import { SaxesParser } from "saxes";
 import { getDocumentProxy } from "unpdf";
 import { describe, expect, it } from "vitest";
 import { pdfFileOf } from "./pdf.ts";
@@ -429,7 +430,7 @@ describe("a deck's PowerPoint file", () => {
 		expect(rows[1]).not.toContain("F4F4F5");
 	});
 
-	it("holds the deck's own image with its words, and gives any other image, or one PowerPoint may not draw, as its words", async () => {
+	it("holds the deck's own image with its words, and gives any other image, or one PowerPoint may not draw, as its words on a line of their own, as the PDF does", async () => {
 		const { file, asked } = await powerPointFile(
 			slideHtml(
 				[
@@ -455,7 +456,7 @@ describe("a deck's PowerPoint file", () => {
 		expect(xml.match(/<p:pic>/g)).toHaveLength(1);
 		expect(xml).toMatch(/<p:cNvPr id="\d+" name="[^"]*" descr="The launch chart">/);
 		expect(filledPlaceholders(xml)).toEqual([["title", ["Charts"]]]);
-		expect(filledShapes(xml)).toEqual([["Theirs and A WebP chart"]]);
+		expect(filledShapes(xml)).toEqual([["Theirs"], [" and "], ["A WebP chart"]]);
 	});
 
 	it("fills an image box with the picture it holds alone, whole on a template's slide and cropped about its middle on a blank one, turned upright as its EXIF says", async () => {
@@ -558,7 +559,8 @@ describe("a deck's PowerPoint file", () => {
 					boxHtml("<h2>Goals</h2>", {
 						role: "title",
 						frame: { x: 80, y: 64, width: 400, height: 60 },
-						style: "background: rgb(30 58 138 / 50%); border: 2px solid #93c5fd; padding: 8px",
+						style:
+							"background: rgb(30 58 138 / 50%); border: 2px solid #93c5fd; padding: 4px 8px 12px 16px",
 					}),
 					boxHtml(
 						'<p><span style="color: #fbbf24; font-family: &quot;Elephant Pro&quot;, serif; font-size: 40px">Next</span></p>',
@@ -581,7 +583,8 @@ describe("a deck's PowerPoint file", () => {
 		expect(boxOf(title)).toEqual({ x: 81, y: 65, w: 398, h: 58 });
 		expect(title).toContain('<a:solidFill><a:srgbClr val="1E3A8A"><a:alpha val="50000"/>');
 		expect(title).toContain('<a:ln w="25400"><a:solidFill><a:srgbClr val="93C5FD"/>');
-		expect(title).toMatch(/<a:bodyPr [^>]*lIns="114300" tIns="114300" rIns="114300" bIns="114300"/);
+		// Its padding and outline, less the half of the outline the shape's edge is inset by: 17, 5, 9 and 13 points.
+		expect(title).toMatch(/<a:bodyPr [^>]*lIns="215900" tIns="63500" rIns="114300" bIns="165100"/);
 		const shape = shapeHolding(xml, "Next");
 		expect(shape).toContain('<a:xfrm rot="20700000">');
 		expect(shape).toMatch(/<a:custGeom>[\s\S]*<a:moveTo><a:pt x="0" y="0" \/><\/a:moveTo>/);
@@ -666,4 +669,105 @@ describe("a deck's PowerPoint file", () => {
 			expect(new Set(ids).size).toBe(ids.length);
 		}
 	});
+
+	it("writes a file every part of which is XML, as does the PDF a file, from a deck holding what no slide shows", async () => {
+		const unwritable = [0x1, 0x7, 0xb, 0xc, 0x1b, 0xd800, 0xfffe]
+			.map((code) => String.fromCharCode(code))
+			.join("");
+		const linkedPicture = `<a href="https://example.com/?a=1&amp;b=2">${imageHtml(`Chart${unwritable}`, keptImage("image/png"))}</a>`;
+		const ownStyles = new Map<string, Record<string, unknown>>([
+			["tiny", { fontSize: 0.004 }],
+			["huge", { fontSize: 5000 }],
+			["vast", { fontSize: 1e22 }],
+			["named", { fontFamily: `"Odd${unwritable} & <Font>", serif` }],
+		]);
+		const lineHeights = new Map([
+			["Tall", 500],
+			["Taller", 1e22],
+		]);
+		const html = slideHtml(
+			[
+				boxHtml(
+					`<p>Bell${unwritable} ${linkedPicture}</p><p>${[...ownStyles.keys()].map((words, index) => `<span style="color: #00000${index}">${words}</span>`).join(" ")}</p><p>Tall</p><p>Taller</p>`,
+					{ role: "body" },
+				),
+				boxHtml(
+					'<table><tr><th colspan="2"><p>Wide</p></th><th><p>Third</p></th></tr><tr><td><p>1</p></td><td><p>2</p></td><td><p>3</p></td></tr></table><table><tr><td><p>a</p></td><td><p>b</p></td></tr><tr><td><p>Short</p></td></tr></table>',
+					{ frame: { x: 8000, y: 8000, width: 300, height: 200 } },
+				),
+				boxHtml(
+					'<ol start="0"><li><p>Zero</p></li></ol><ol start="-3"><li><p>Minus</p></li></ol><ol start="40000"><li><p>Many</p></li></ol>',
+				),
+				boxHtml("<p>Far</p>"),
+				boxHtml(`<p>${imageHtml("Flat", keptImage("image/png"))}</p>`, {
+					role: "image",
+					frame: { x: 100, y: 100, width: 200, height: 0 },
+				}),
+			],
+			{ notes: `<p>Notes${unwritable}</p>` },
+		);
+		const deck = deckChanged(deckOf(html), (node) => {
+			const words = textIn(node);
+			const style = node.type === "text" ? ownStyles.get(words) : undefined;
+			if (style) return { ...node, marks: [{ type: "textStyle", attrs: style }] };
+			const lineHeight = node.type === "paragraph" ? lineHeights.get(words) : undefined;
+			if (lineHeight) return { ...node, attrs: { ...node.attrs, lineHeight } };
+			if (node.type !== "slideBox" || words !== "Far") return node;
+			return {
+				...node,
+				attrs: {
+					...node.attrs,
+					frame: { x: -1e22, y: 1e22, width: 1e22, height: 1e22 },
+					padding: { top: 1e22, right: 1e22, bottom: 1e22, left: 1e22 },
+					stroke: { width: 1e22, color: "#112233" },
+					rotation: 1e22,
+					path: "M 0 0 L 1e22 0 L 0 1e22 Z",
+				},
+			};
+		});
+		const artifact = { ...ARTIFACT, title: `Launch${unwritable}` };
+		const imageOf = (image: ArtifactImageIds) => Effect.succeed(keptImages.get(image.imageId));
+
+		const file = await JSZip.loadAsync(
+			await Effect.runPromise(powerPointFileOf(artifact, deck, imageOf)),
+		);
+		const parts = partsMatching(file, /\.(xml|rels)$/);
+		expect(parts.length).toBeGreaterThan(0);
+		for (const part of parts) {
+			const xml = await partOf(file, part);
+			expect(() => new SaxesParser({ xmlns: true }).write(xml).close(), part).not.toThrow();
+		}
+		expect(await partOf(file, "ppt/slides/_rels/slide1.xml.rels")).toContain(
+			'Target="https://example.com/?a=1&amp;b=2"',
+		);
+		const xml = await slideXml(file, 1);
+		expect(xml.match(/<p:pic>/g)).toHaveLength(1);
+		expect(xml.match(/<a:gridCol /g)).toHaveLength(3 + 2);
+		expect(xml).toContain('gridSpan="2"');
+		expect([...xml.matchAll(/startAt="(\d+)"/g)].map(([, start]) => start)).toEqual([
+			"1",
+			"1",
+			"32767",
+		]);
+		const pdf = await Effect.runPromise(pdfFileOf(artifact, deck, imageOf));
+		expect(Buffer.from(pdf.subarray(0, 5)).toString()).toBe("%PDF-");
+	});
 });
+
+/** A node of a deck as ProseMirror writes it as JSON. */
+interface NodeJson {
+	type: string;
+	attrs?: Record<string, unknown>;
+	content?: NodeJson[];
+	text?: string;
+	marks?: { type: string; attrs?: Record<string, unknown> }[];
+}
+
+const textIn = (node: NodeJson): string => node.text ?? (node.content ?? []).map(textIn).join("");
+
+/** `deck` with each of its nodes as `change` makes it, as bots and imported files may write a deck that no HTML reads as. */
+function deckChanged(deck: Node, change: (node: NodeJson) => NodeJson): Node {
+	const changed = (node: NodeJson): NodeJson =>
+		change(node.content ? { ...node, content: node.content.map(changed) } : node);
+	return deck.type.schema.nodeFromJSON(changed(deck.toJSON()));
+}

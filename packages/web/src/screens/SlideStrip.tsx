@@ -11,7 +11,7 @@ import type { DOMSerializer, Node } from "@tiptap/pm/model";
 import { cn } from "cn";
 import { ArrowDown, ArrowUp, Ellipsis, PenLine, Plus, Sparkles, Trash2 } from "lucide-react";
 import { type Ref, useEffect, useMemo, useRef } from "react";
-import { proposedChangeOf } from "@/lib/deck.ts";
+import { boxesOf, proposedChangeOf } from "@/lib/deck.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
 import { pendingSuggestions } from "@/lib/suggestions.ts";
 import {
@@ -214,7 +214,7 @@ function Thumbnail({
 					proposed === "removing" && "opacity-50",
 				)}
 			>
-				<SlideDrawing slide={slide} serializer={serializer} hidden className="rounded-md" />
+				<SlideDrawing slide={slide} serializer={serializer} inert className="rounded-md" />
 				{/* biome-ignore lint/a11y/useSemanticElements: Firefox starts a drag on a <button> only from its text, and this one, with none, covers the whole thumbnail. */}
 				<div
 					ref={cover}
@@ -292,14 +292,31 @@ const PROPOSED_WORDS = { adding: ", proposed", removing: ", proposed for removal
 
 const THUMBNAIL_FACE_PX = 14;
 
-/** What a slide is called in the strip: the words of its first line, or "Untitled" while it has none. */
+/**
+ * What a slide is called in the strip: the first words of its title's box,
+ * else of any box, as on a slide from a file whose title is no placeholder,
+ * or "Untitled" while it has none. A slide's boxes are held in the order they
+ * are drawn, which on a slide from a file may put a footer or a master's
+ * graphic first.
+ */
 function titleOf(slide: Node): string {
-	let title = "";
-	slide.child(0).descendants((node) => {
-		if (title === "" && node.isTextblock) title = node.textContent.trim();
-		return title === "";
+	const boxes = boxesOf(slide);
+	const titles = boxes.filter(({ attributes }) => attributes.role === "title");
+	for (const { node } of [...titles, ...boxes]) {
+		const words = firstWordsIn(node);
+		if (words) return words;
+	}
+	return "Untitled";
+}
+
+/** The words of the first line of `node` that has any. */
+function firstWordsIn(node: Node): string {
+	let words = "";
+	node.descendants((child) => {
+		if (words === "" && child.isTextblock) words = child.textContent.trim();
+		return words === "";
 	});
-	return title || "Untitled";
+	return words;
 }
 
 /** Moving a slide in the deck, or deleting it, from a ⋯ on its thumbnail. */

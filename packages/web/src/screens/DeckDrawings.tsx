@@ -63,7 +63,7 @@ export function DeckPreview({
 				<SlideDrawing
 					slide={first}
 					serializer={serializer}
-					hidden
+					inert
 					className="w-full overflow-hidden rounded-md ring-1 ring-border-strong"
 				/>
 			)}

@@ -127,8 +127,9 @@ describe("importing a PowerPoint file", () => {
 		expect(boxAttributesOf(picture)).toMatchObject({
 			role: "image",
 			frame: { x: 496.8, y: 108, width: 417.6, height: 374.4 },
-			padding: null,
 		});
+		// A picture's box has no inner margins, which a box stores as none.
+		expect(picture.attrs.padding).toBeNull();
 		expect(markdownOf(picture)).toBe("![The sales chart](/images/1)");
 		expect(boxesOn(deck.deck, 5).map(markdownOf)).toEqual(["![](/images/1)"]);
 		expect(deck.kept).toEqual([{ type: "image/png", bytes: TEST_PICTURE }]);

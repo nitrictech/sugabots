@@ -19,7 +19,12 @@ import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from "@t
 import { describe, expect, it } from "vitest";
 import { Doc } from "yjs";
 import { readHtml } from "./html-reader.ts";
-import { type ChangeAs, changedTo, textForAgents, withoutSuggestions } from "./suggestions.ts";
+import {
+	type ChangeAs,
+	changedTo,
+	textWithoutSuggestions,
+	withoutSuggestions,
+} from "./suggestions.ts";
 
 const document = (text: string) => documentFromMarkdown(text);
 
@@ -79,7 +84,7 @@ function suggested(live: Node, wanted: string, suggestionId = "s1:agent:Planner"
 /** `live` after an agent asks for it to read as the text `wanted`, which must be possible. */
 function changed(live: Node, wanted: string, as: ChangeAs): Node {
 	const after = changedTo(live, wanted, as);
-	if (typeof after === "string") throw new Error(`Expected a change, got ${after}`);
+	if (!("document" in after)) throw new Error(`Expected a change, got ${JSON.stringify(after)}`);
 	return after.document;
 }
 
@@ -214,9 +219,10 @@ describe("an agent's suggestion in a live document", () => {
 	it("is blocked inside a code block, which can't be marked", () => {
 		const code = document("```\nship()\n```");
 
-		expect(changedTo(code, "```\nship(now)\n```", { suggestionId: "s1:agent:Planner" })).toBe(
-			"unmarkable",
-		);
+		expect(changedTo(code, "```\nship(now)\n```", { suggestionId: "s1:agent:Planner" })).toEqual({
+			outcome: "refused",
+			reason: "unmarkable",
+		});
 	});
 });
 
@@ -248,7 +254,7 @@ describe("an agent's edit to a live document holding suggestions", () => {
 	});
 
 	it("is unchanged when the document already reads as wanted", () => {
-		expect(changedTo(plan, asMarkdown(plan), "edit")).toBe("unchanged");
+		expect(changedTo(plan, asMarkdown(plan), "edit")).toEqual({ outcome: "unchanged" });
 	});
 
 	it("marks a word in the middle of a line, its text otherwise the same", () => {
@@ -280,13 +286,13 @@ describe("an agent's change to a live document holding what its markdown can't s
 
 	it.each(MADE_OR_SUGGESTED)("is unchanged when the agent changes nothing, %s", (_, as) => {
 		// The markdown the agent reads doesn't read back as the document.
-		expect(document(textForAgents(plan)).eq(plan)).toBe(false);
+		expect(document(textWithoutSuggestions(plan)).eq(plan)).toBe(false);
 
-		expect(changedTo(plan, textForAgents(plan), as)).toBe("unchanged");
+		expect(changedTo(plan, textWithoutSuggestions(plan), as)).toEqual({ outcome: "unchanged" });
 	});
 
 	it.each(MADE_OR_SUGGESTED)("changes only the paragraph the agent changes, %s", (_, as) => {
-		const after = changed(plan, textForAgents(plan).replace("Friday", "Monday"), as);
+		const after = changed(plan, textWithoutSuggestions(plan).replace("Friday", "Monday"), as);
 
 		expect(after.childCount).toBe(plan.childCount);
 		expect(changedChildren(plan, after)).toEqual([4]);
@@ -294,63 +300,289 @@ describe("an agent's change to a live document holding what its markdown can't s
 	});
 });
 
-describe("an agent's change to a live deck", () => {
-	/** A slide of a title, a list beside a badge, and notes. */
-	const live = deckFromHtml(
-		`<section data-slide data-layout="bullets">
-			<div data-slide-body>
-				<div data-slide-box data-role="title" style="left: 80px; top: 64px; width: 800px; height: 48px"><h2>Goals</h2></div>
-				<div data-slide-box data-role="body" style="left: 80px; top: 144px; width: 560px; height: 332px"><ul><li><p>Ship on Friday</p></li></ul></div>
-				<div data-slide-box style="left: 680px; top: 144px; width: 200px; height: 96px; background: #0f766e"><p>On track</p></div>
-			</div>
-			<aside data-speaker-notes><p>Start with the date.</p></aside>
-		</section>`,
-		readHtml,
-	);
-	const suggestion = { suggestionId: "s1:agent:Planner" };
-	/** How each box on the deck's one slide is drawn. */
-	const boxesOf = (deck: Node) => bodyOf(deck.child(0)).children.map(boxAttributesOf);
+describe("an agent's change to a live document, suggested again", () => {
+	const plan = document("Ship on Friday. Tell support first.");
+	const onMonday = "Ship on Monday. Tell support first.";
 
-	it("suggests a word it rewrites in a box, leaving every box where it is", () => {
-		const after = suggested(live, textForAgents(live).replace("Ship on Friday", "Ship on Monday"));
+	it("replaces its own suggestion waiting there rather than add the same words beside it", () => {
+		const first = suggested(plan, onMonday, "s1:agent:Planner");
 
-		expect(shown(after)).toContain("Ship on [-Friday-][+Monday+]");
-		expect(boxesOf(after)).toEqual(boxesOf(live));
-		expect(shown(accepted(after))).toContain("Ship on Monday");
+		const again = suggested(first, onMonday, "s2:agent:Planner");
+
+		expect(shown(again)).toEqual(["Ship on [-Friday.-][+Monday.+] Tell support first."]);
+		expect(asMarkdown(accepted(again))).toBe(onMonday);
+		expect(asMarkdown(undone(again))).toBe(asMarkdown(plan));
 	});
 
-	it.each(MADE_OR_SUGGESTED)(
-		"moves and refills a box at once, suggesting nothing, when the change is %s",
-		(_, as) => {
-			const wanted = textForAgents(live)
-				.replace("left: 680px; top: 144px", "left: 680px; top: 380px")
-				.replace("background: #0f766e", "background: #b91c1c");
+	it("replaces its own suggestion waiting there with a second wording", () => {
+		const first = suggested(plan, onMonday, "s1:agent:Planner");
 
-			const after = changedTo(live, wanted, as);
+		const again = suggested(first, "Ship on Tuesday. Tell support first.", "s2:agent:Planner");
 
-			if (typeof after === "string") throw new Error(`Expected a change, got ${after}`);
-			expect(after.suggested).toBe(false);
-			expect(holdsSuggestion(after.document)).toBe(false);
-			expect(boxesOf(after.document)[2]).toMatchObject({
-				frame: { x: 680, y: 380, width: 200, height: 96 },
-				fill: "#b91c1c",
-			});
-			expect(textForAgents(after.document)).toBe(wanted);
-		},
-	);
+		expect(shown(again)).toEqual(["Ship on [-Friday.-][+Tuesday.+] Tell support first."]);
+	});
 
-	it("moves a box at once and suggests the words it rewrites in the same change", () => {
-		const wanted = textForAgents(live)
-			.replace("left: 680px; top: 144px", "left: 680px; top: 380px")
-			.replace("Ship on Friday", "Ship on Monday");
+	it("leaves a person's suggestion waiting there as theirs", () => {
+		const kims = suggested(plan, onMonday, "s1:person:Kim");
 
-		const after = changedTo(live, wanted, suggestion);
+		const again = suggested(kims, "Ship on Tuesday. Tell support first.", "s2:agent:Planner");
 
-		if (typeof after === "string") throw new Error(`Expected a change, got ${after}`);
-		expect(after.suggested).toBe(true);
-		expect(boxesOf(after.document)[2]?.frame.y).toBe(380);
+		expect(shown(again)[0]).toContain("Monday.");
+		expect(shown(again)[0]).toContain("Tuesday.");
+	});
+});
+
+/*
+ * Decks as a bot writes them, by hand: frames where it put them, some boxes
+ * left where the layout puts them, list items without paragraphs.
+ */
+
+const GOALS = `<section data-slide data-layout="bullets">
+  <div data-slide-body>
+    <div data-slide-box data-role="title" style="left:80px;top:64px;width:800px;height:48px"><h2>Goals</h2></div>
+    <div data-slide-box data-role="body" style="left:80px;top:144px;width:560px;height:332px"><ul><li>Ship on Friday</li><li>Tell support first</li></ul></div>
+    <div data-slide-box style="left:680px;top:144px;width:200px;height:96px;background:#0f766e"><p>On track</p></div>
+  </div>
+  <aside data-speaker-notes><p>Start with the date.</p></aside>
+</section>`;
+
+const RISKS = `<section data-slide data-layout="bullets">
+  <div data-slide-body>
+    <div data-slide-box data-role="title" style="left:80px;top:64px;width:800px;height:48px"><h2>Risks</h2></div>
+    <div data-slide-box data-role="body" style="left:80px;top:144px;width:800px;height:332px"><ul><li>None yet</li></ul></div>
+  </div>
+</section>`;
+
+const deck = (html: string) => deckFromHtml(html, readHtml);
+
+const SUGGESTION: ChangeAs = { suggestionId: "s1:agent:Planner" };
+
+/** The outcome of an agent's change, with the document it gives, which there must be. */
+function changeOf(live: Node, wanted: string, as: ChangeAs): { outcome: string; document: Node } {
+	const after = changedTo(live, wanted, as);
+	if (!("document" in after)) throw new Error(`Expected a change, got ${JSON.stringify(after)}`);
+	return after;
+}
+
+/** The ids of the suggestions waiting in `node`, on its nodes and its text. */
+function suggestionIdsIn(node: Node): Set<string> {
+	const ids = new Set<string>();
+	node.descendants((child) => {
+		for (const mark of child.marks) {
+			if (["insertion", "deletion", "modification"].includes(mark.type.name)) {
+				ids.add(String(mark.attrs.id));
+			}
+		}
+	});
+	return ids;
+}
+
+/** The names of the suggestion marks on each box of slide `index`. */
+const boxMarks = (node: Node, index: number) =>
+	bodyOf(node.child(index)).children.map((box) => box.marks.map((mark) => mark.type.name));
+
+/** Settling `after` gives the deck `wanted` reads as once accepted, and the deck `live` was once rejected, compared as documents. */
+function expectSettled(after: Node, wanted: string, live: Node) {
+	expect(accepted(after).toJSON()).toEqual(deck(wanted).toJSON());
+	expect(undone(after).toJSON()).toEqual(live.toJSON());
+}
+
+describe("an agent's suggestion in a live deck", () => {
+	const live = deck(GOALS + RISKS);
+
+	it("rewords a box as a suggestion, leaving every box where it is", () => {
+		const after = suggested(live, (GOALS + RISKS).replace("Ship on Friday", "Ship on Monday"));
+
+		expect(shown(after)).toContain("Ship on [-Friday-][+Monday+]");
+		expect(bodyOf(after.child(0)).children.map(boxAttributesOf)).toEqual(
+			bodyOf(live.child(0)).children.map(boxAttributesOf),
+		);
+	});
+
+	it("lays a slide out in columns as one suggestion, which rejected leaves the slide as it was", () => {
+		const inColumns = GOALS.replace('data-layout="bullets"', 'data-layout="columns"')
+			.replace(
+				'data-role="body" style="left:80px;top:144px;width:560px;height:332px"',
+				'data-role="leftColumn"',
+			)
+			.replace(
+				"</ul></div>\n",
+				'</ul></div>\n    <div data-slide-box data-role="rightColumn"><ul><li>Brief sales</li></ul></div>\n',
+			);
+
+		const after = changeOf(live, inColumns + RISKS, SUGGESTION);
+
+		expect(after.outcome).toBe("suggested");
+		expect(suggestionIdsIn(after.document)).toEqual(new Set(["s1:agent:Planner"]));
+		expectSettled(after.document, inColumns + RISKS, live);
+	});
+
+	it("recolours a line while rewording a word in it as one suggestion, which rejected leaves the line as it was", () => {
+		const wanted = GOALS.replace(
+			"<li>Ship on Friday</li>",
+			'<li><span style="color: #b91c1c">Ship on Monday</span></li>',
+		);
+
+		const after = changeOf(live, wanted + RISKS, SUGGESTION);
+
+		expect(after.outcome).toBe("suggested");
+		expectSettled(after.document, wanted + RISKS, live);
+	});
+
+	it("suggests moving and refilling a box and colouring its slide, with no word changed", () => {
+		const wanted = GOALS.replace(
+			'data-layout="bullets">',
+			'data-layout="bullets" style="background: #0f172a">',
+		).replace(
+			"left:680px;top:144px;width:200px;height:96px;background:#0f766e",
+			"left:680px;top:380px;width:200px;height:96px;background:#b91c1c",
+		);
+
+		const after = changeOf(live, wanted + RISKS, SUGGESTION);
+
+		expect(after.outcome).toBe("suggested");
+		// The new design shows at once, each attribute's mark keeping what it was.
+		const slide = after.document.child(0);
+		expect(slide.attrs.background).toBe("#0f172a");
+		expect(slide.marks.map((mark) => mark.attrs)).toEqual([
+			{
+				id: "s1:agent:Planner",
+				type: "attr",
+				attrName: "background",
+				previousValue: null,
+				newValue: "#0f172a",
+			},
+		]);
+		const badge = bodyOf(slide).child(2);
+		expect(badge.marks.map((mark) => mark.attrs.attrName).toSorted()).toEqual(["fill", "frame"]);
+		expectSettled(after.document, wanted + RISKS, live);
+	});
+
+	it("removes an empty subtitle and adds a shape as two boxes, not one turned into the other", () => {
+		const titled = (box: string) =>
+			`<section data-slide data-layout="title"><div data-slide-body><div data-slide-box data-role="title"><h1>Launch review</h1></div>${box}</div></section>`;
+		const subtitle = titled('<div data-slide-box data-role="subtitle"><p></p></div>');
+		const shape = titled(
+			'<div data-slide-box style="left:40px;top:40px;width:100px;height:100px"><svg viewBox="0 0 100 100"><path d="M 0 0 L 100 0 L 100 100 Z" fill="#ff0000"/></svg></div>',
+		);
+		const titleSlide = deck(subtitle);
+
+		const after = changeOf(titleSlide, shape, SUGGESTION);
+
+		expect(boxMarks(after.document, 0)).toEqual([[], ["deletion"], ["insertion"]]);
+		expectSettled(after.document, shape, titleSlide);
+	});
+
+	it("adds a box it suggested already once, however often it is asked", () => {
+		const noted = GOALS.replace(
+			"<p>On track</p></div>\n",
+			'<p>On track</p></div>\n    <div data-slide-box style="left:80px;top:420px;width:300px;height:40px"><p>Owner: Kim</p></div>\n',
+		);
+		const first = suggested(live, noted + RISKS, "s1:agent:Planner");
+
+		const again = suggested(first, noted + RISKS, "s2:agent:Planner");
+
+		expect(bodyOf(accepted(again).child(0)).childCount).toBe(4);
+		expect(undone(again).toJSON()).toEqual(live.toJSON());
+	});
+
+	it("takes a slide by its title box, not by a bar drawn above it, removing one slide and rewording the next", () => {
+		const barred = (title: string, point: string) =>
+			`<section data-slide data-layout="bullets"><div data-slide-body><div data-slide-box style="left:0px;top:0px;width:960px;height:16px;background:#0f766e"><p></p></div><div data-slide-box data-role="title"><h2>${title}</h2></div><div data-slide-box data-role="body"><ul><li>${point}</li></ul></div></div></section>`;
+		const three = deck(
+			barred("Goals", "Ship on Friday") + barred("Risks", "None yet") + barred("Next", "Retro"),
+		);
+		const wanted = barred("Risks", "Supplier delay") + barred("Next", "Retro");
+
+		const after = changeOf(three, wanted, SUGGESTION).document;
+
+		expect(after.children.map((slide) => slide.marks.map((mark) => mark.type.name))).toEqual([
+			["deletion"],
+			[],
+			[],
+		]);
+		expect(shown(after)).toContain("[-None yet-][+Supplier delay+]");
+		expectSettled(after, wanted, three);
+	});
+
+	it("moves a box behind another at once, keeping a person's suggestion waiting in each", () => {
+		const kims = changeOf(live, (GOALS + RISKS).replace("Ship on Friday", "Ship on Monday"), {
+			suggestionId: "s0:person:Kim",
+		}).document;
+		const [title = "", body = "", badge = ""] =
+			/(\s*<div data-slide-box data-role="title".*?<\/div>)(\s*<div data-slide-box data-role="body".*?<\/ul><\/div>)(\s*<div data-slide-box style="left:680px.*?<\/div>)/s
+				.exec(GOALS)
+				?.slice(1) ?? [];
+		const badgeInFront = GOALS.replace(title + body + badge, title + badge + body);
+
+		const after = changeOf(kims, badgeInFront + RISKS, SUGGESTION);
+
+		expect(after.outcome).toBe("made");
+		expect(bodyOf(after.document.child(0)).children.map((box) => box.textContent)).toEqual([
+			"Goals",
+			"On track",
+			"Ship on FridayMondayTell support first",
+		]);
+		expect(boxMarks(after.document, 0)).toEqual([[], [], []]);
 		expect(shown(after.document)).toContain("Ship on [-Friday-][+Monday+]");
-		expect(boxesOf(undone(after.document))[2]?.frame.y).toBe(380);
+	});
+
+	it("keeps a person's suggestion waiting in a box it moves and rewords", () => {
+		const box = (left: number, words: string) =>
+			`<section data-slide><div data-slide-body><div data-slide-box style="left:${left}px;top:10px;width:200px;height:50px"><p>${words}</p></div></div></section>`;
+		const kims = changeOf(deck(box(10, "On track")), box(10, "On schedule"), {
+			suggestionId: "s0:person:Kim",
+		}).document;
+
+		const after = changeOf(kims, box(300, "Ahead"), "edit").document;
+
+		expect(boxAttributesOf(bodyOf(after.child(0)).child(0)).frame.x).toBe(300);
+		expect(shown(after)[0]).toContain("[+schedule+]");
+	});
+});
+
+describe("an agent's edit to a live deck", () => {
+	const live = deck(GOALS + RISKS);
+
+	it.each([
+		["made", "edit"],
+		["suggested", SUGGESTION],
+	] as const)("moves and refills a box, its outcome %s", (outcome, as) => {
+		const wanted = GOALS.replace(
+			"left:680px;top:144px;width:200px;height:96px;background:#0f766e",
+			"left:680px;top:380px;width:200px;height:96px;background:#b91c1c",
+		);
+
+		const after = changeOf(live, wanted + RISKS, as);
+
+		expect(after.outcome).toBe(outcome);
+		expect(holdsSuggestion(after.document)).toBe(outcome === "suggested");
+		expect(boxAttributesOf(bodyOf(after.document.child(0)).child(2))).toMatchObject({
+			frame: { x: 680, y: 380, width: 200, height: 96 },
+			fill: "#b91c1c",
+		});
+	});
+
+	it("recolours a line with what a person proposes adding at its end, so it reads in one colour however that is settled", () => {
+		const kims = changeOf(live, (GOALS + RISKS).replace("Ship on Friday", "Ship on Monday"), {
+			suggestionId: "s0:person:Kim",
+		}).document;
+		const recoloured = GOALS.replace(
+			"<li>Ship on Friday</li>",
+			'<li><span style="color: #b91c1c">Ship on Friday</span></li>',
+		);
+
+		const after = changeOf(kims, recoloured + RISKS, "edit").document;
+
+		const colours: unknown[] = [];
+		after.child(0).descendants((node) => {
+			if (node.isText && /Ship|Friday|Monday/.test(node.text ?? "")) {
+				colours.push(node.marks.find((mark) => mark.type.name === "textStyle")?.attrs.color);
+			}
+		});
+		expect(colours.length).toBeGreaterThan(1);
+		expect(new Set(colours)).toEqual(new Set(["#b91c1c"]));
+		expect(shown(after)).toContain("Ship on [-Friday-][+Monday+]");
 	});
 });
 
@@ -379,7 +611,8 @@ describe("an agent's rewrite of a live deck in HTML that can't be the deck", () 
 			"nestedTooDeeply",
 		],
 	])("is refused, saying why, when it is %s, rather than empty the deck", (_, wanted, why) => {
-		for (const [, as] of MADE_OR_SUGGESTED) expect(changedTo(live, wanted, as)).toBe(why);
+		for (const [, as] of MADE_OR_SUGGESTED)
+			expect(changedTo(live, wanted, as)).toEqual({ outcome: "refused", reason: why });
 	});
 
 	it("reads the deck written inside a whole page as the deck, which is unchanged", () => {
@@ -391,6 +624,7 @@ ${BOT_DECK}
 </body>
 </html>`;
 
-		for (const [, as] of MADE_OR_SUGGESTED) expect(changedTo(live, page, as)).toBe("unchanged");
+		for (const [, as] of MADE_OR_SUGGESTED)
+			expect(changedTo(live, page, as)).toEqual({ outcome: "unchanged" });
 	});
 });

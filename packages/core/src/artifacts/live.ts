@@ -34,10 +34,9 @@ import { artifact } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
 import { readHtml } from "./html-reader.ts";
 import {
-	type Blocked,
 	changedTo,
-	type TextRefused,
-	textForAgents,
+	type Refused,
+	textWithoutSuggestions,
 	withoutSuggestions,
 } from "./suggestions.ts";
 
@@ -104,10 +103,10 @@ export interface Interface {
 	 * has no live document, as for `textForAgents`.
 	 *
 	 * A change the agent makes in a thread somebody started by asking for an
-	 * edit from inside the document is shown to the people in it as a
-	 * suggestion, the document reading as before until one of them accepts
-	 * it; but what it changes in how a deck looks is made at once, as in any
-	 * agent's change (see `changedTo`).
+	 * edit from inside the document is shown to the people in it as one
+	 * suggestion, words and how a deck looks alike, which they accept or
+	 * reject; only a box moved in front of or behind another is moved at once
+	 * (see `changedTo`). Any other change is made.
 	 */
 	readonly rewrite: (
 		artifactId: string,
@@ -273,7 +272,7 @@ export const make = Effect.gen(function* () {
 				if (kind === undefined) return undefined;
 				const live = yield* withDocument(artifactId, (document) => read(document, kind));
 				if (live.outcome === "notADeck") return yield* new Unreadable({ reason: "notADeck" });
-				return textForAgents(live.content);
+				return textWithoutSuggestions(live.content);
 			}),
 
 		documentAsShown: ({ id: artifactId, content: lastVersion }) =>
@@ -293,7 +292,7 @@ export const make = Effect.gen(function* () {
 				const rewritten = yield* withDocument(artifactId, (document): Rewritten => {
 					const live = read(document, kind);
 					if (live.outcome === "notADeck") return { outcome: "blocked", blocked: "unreadable" };
-					const text = textForAgents(live.content);
+					const text = textWithoutSuggestions(live.content);
 					const wanted = change(text);
 					if (wanted === undefined) return { text, outcome: "unchanged" };
 					// Writing what could be read back would write over what could not.
@@ -308,8 +307,8 @@ export const make = Effect.gen(function* () {
 							? { suggestionId: suggestionId(unique, { kind: "agent", name: author.name }) }
 							: "edit",
 					);
-					if (after === "unchanged") return { text, outcome: "unchanged" };
-					if (typeof after === "string") return { outcome: "blocked", blocked: after };
+					if (after.outcome === "unchanged") return { text, outcome: "unchanged" };
+					if (after.outcome === "refused") return { outcome: "blocked", blocked: after.reason };
 					document.awareness.setLocalState({
 						user: { name: author.name, color: AGENT_COLOR, agent: author.look },
 					});
@@ -323,8 +322,8 @@ export const make = Effect.gen(function* () {
 						throw new Error(`A rewrite left the live deck ${artifactId} holding what no deck can`);
 					}
 					return {
-						text: textForAgents(written.content),
-						outcome: after.suggested ? "suggested" : "written",
+						text: textWithoutSuggestions(written.content),
+						outcome: after.outcome === "suggested" ? "suggested" : "written",
 					};
 				});
 				if (rewritten.outcome === "written" || rewritten.outcome === "suggested") {
@@ -370,16 +369,15 @@ export interface Author {
 /**
  * What `rewrite` did, with the live document's text after it, but when it was
  * `blocked`: `written` into the document; `suggested` to the people in it,
- * what it changed in how a deck looks written all the same; `unchanged`
- * because the change asked for nothing, or asked for only what the document
- * can't hold; or `blocked`, none of it made: it couldn't be made as asked for
- * a suggestion's sake (see `Blocked`), the text it wrote can't be what the
- * document reads as (see `TextRefused`), or the document holds content this
- * version of the app cannot read (`unreadable`), which a write would lose.
+ * but for any box moved in front of or behind another, which is moved at
+ * once; `unchanged` because the change asked for nothing, or asked for only
+ * what the document can't hold; or `blocked`, none of it made: the change was
+ * refused (see `Refused`), or the document holds content this version of the
+ * app cannot read (`unreadable`), which a write would lose.
  */
 export type Rewritten =
 	| { readonly text: string; readonly outcome: "written" | "suggested" | "unchanged" }
-	| { readonly outcome: "blocked"; readonly blocked: Blocked | TextRefused | "unreadable" };
+	| { readonly outcome: "blocked"; readonly blocked: Refused | "unreadable" };
 
 /**
  * A deck that can't be read as one, so it can be neither opened nor written

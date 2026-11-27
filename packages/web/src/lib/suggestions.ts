@@ -6,7 +6,8 @@ import {
 	type SuggestionBy,
 	suggestionBy,
 } from "@sugabots/contracts/live-document";
-import { SLIDE } from "@sugabots/contracts/live-slides";
+import { SLIDE, SLIDE_BOX } from "@sugabots/contracts/live-slides";
+import { frameIn } from "@sugabots/contracts/slide-geometry";
 import { isSlideLayout, type SlideLayout } from "@sugabots/contracts/slide-layouts";
 import type { Mark, Node } from "@tiptap/pm/model";
 import type { Command } from "@tiptap/pm/state";
@@ -14,9 +15,11 @@ import type { Command } from "@tiptap/pm/state";
 /*
  * The suggestions in a live document, for the person deciding on them. A
  * suggestion is content marked in the document: what it would remove, still
- * there, and what it would add, not yet part of it. People make them by
- * editing in suggesting mode, and the API writes a bot's the same way
- * (`artifacts/suggestions.ts` in core).
+ * there, and what it would add, not yet part of it, and, for a node whose
+ * attributes it changes, as a deck's box moved, what each was, the node
+ * holding what it would be. People make them by editing in suggesting mode,
+ * and the API writes a bot's the same way (`artifacts/suggestions.ts` in
+ * core).
  */
 
 /** A suggestion waiting in the document: who made it, what it would remove and add, and where it is. */
@@ -30,6 +33,29 @@ export interface PendingSuggestion {
 	to: number;
 	/** What it would do to a deck's slides themselves, when it does anything to them. */
 	slides?: SlideChanges;
+	/** What it would change of how a deck looks, when it changes anything. */
+	design?: DesignChanges;
+}
+
+/** What a suggestion would change of how a deck looks, apart from its words. */
+export interface DesignChanges {
+	/** The boxes it would change, each by where it starts. */
+	boxes: BoxDesignChange[];
+	/** Whether it would change a slide's own colour. */
+	background: boolean;
+	/** Whether it would change how a line of text is set, its alignment or its line height. */
+	lines: boolean;
+}
+
+/** What a suggestion would change of one box. */
+export interface BoxDesignChange {
+	/** Where the box starts in the document. */
+	at: number;
+	/** Whether it would put the box somewhere else on its slide. */
+	moved: boolean;
+	resized: boolean;
+	/** Whether it would change anything else of how the box is drawn, as its fill or its shape. */
+	restyled: boolean;
 }
 
 /** What a suggestion would do to whole slides of a deck: add one, remove one, or lay one out anew. */
@@ -68,10 +94,60 @@ export function pendingSuggestions(document: Node): PendingSuggestion[] {
 				from: Math.min(suggestion.from, position),
 				to: Math.max(suggestion.to, position + node.nodeSize),
 				...(node.type.name === SLIDE ? { slides: slideChanges(suggestion.slides, mark) } : {}),
+				...(isAttributeChange(mark)
+					? { design: designChanges(suggestion.design, node, position, mark) }
+					: {}),
 			});
 		}
 	});
 	return [...pending.values()];
+}
+
+/** Whether `mark` proposes a new value of one of its node's attributes. */
+const isAttributeChange = (mark: Mark) =>
+	mark.type.name === SUGGESTED_MODIFICATION && typeof mark.attrs.attrName === "string";
+
+/**
+ * The attributes of `node` that a suggestion waiting on it proposes new
+ * values of. Rejecting the suggestion puts back the value each had before it,
+ * so a change made to one of them in the meantime would be lost.
+ */
+export const suggestedAttributesOf = (node: Node): ReadonlySet<string> =>
+	new Set(node.marks.filter(isAttributeChange).map((mark) => String(mark.attrs.attrName)));
+
+/** The lines of text whose alignment and line height a suggestion may change. */
+const LINES = new Set(["paragraph", "heading"]);
+
+/** `changes` with what `mark`, proposing a new value of an attribute of `node`, at `position`, adds to them. */
+function designChanges(
+	changes: DesignChanges | undefined,
+	node: Node,
+	position: number,
+	mark: Mark,
+): DesignChanges {
+	const { boxes, background, lines } = changes ?? { boxes: [], background: false, lines: false };
+	const name: unknown = mark.attrs.attrName;
+	if (node.type.name === SLIDE) {
+		return { boxes, background: background || name === "background", lines };
+	}
+	if (LINES.has(node.type.name)) return { boxes, background, lines: true };
+	if (node.type.name !== SLIDE_BOX) return { boxes, background, lines };
+	const box = boxes.find(({ at }) => at === position) ?? {
+		at: position,
+		moved: false,
+		resized: false,
+		restyled: false,
+	};
+	const [was, becomes] = [frameIn(mark.attrs.previousValue), frameIn(mark.attrs.newValue)];
+	const changed: BoxDesignChange =
+		name === "frame"
+			? {
+					...box,
+					moved: box.moved || was?.x !== becomes?.x || was?.y !== becomes?.y,
+					resized: box.resized || was?.width !== becomes?.width || was?.height !== becomes?.height,
+				}
+			: { ...box, restyled: true };
+	return { boxes: [...boxes.filter(({ at }) => at !== position), changed], background, lines };
 }
 
 /** `changes` with what `mark`, on a slide, adds to them. */

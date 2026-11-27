@@ -102,6 +102,16 @@ const SLIDE = {
 						},
 					],
 				},
+				{
+					type: "slideBox",
+					// A straight line, as a file's line imports: a box of no height.
+					attrs: {
+						frame: { x: 80, y: 460, width: 400, height: 0 },
+						stroke: { color: "#64748b", width: 2 },
+						path: "M 0 0 L 400 0",
+					},
+					content: [{ type: "paragraph" }],
+				},
 			],
 		},
 		{
@@ -135,6 +145,18 @@ const looseSlide = (...boxes: string[][]) =>
 			...blocks.map((block) => `      ${block}`),
 			`    </div>`,
 		]),
+		`  </div>`,
+		`</section>`,
+	].join("\n");
+
+/** The deck's HTML of a slide of no layout holding one box of `style`, holding `blocks`. */
+const boxSlide = (style: string, blocks: string[]) =>
+	[
+		`<section data-slide>`,
+		`  <div data-slide-body>`,
+		`    <div data-slide-box style="${style}">`,
+		...blocks.map((block) => `      ${block}`),
+		`    </div>`,
 		`  </div>`,
 		`</section>`,
 	].join("\n");
@@ -197,6 +219,46 @@ const CASES: { name: string; html: string; writtenBack: string | DeckReading }[]
 		writtenBack: [KEPT, looseSlide(["<p>After the body</p>"])].join("\n\n"),
 	},
 	{ name: "words alone", html: "Hello there", writtenBack: looseSlide(["<p>Hello there</p>"]) },
+	{
+		name: "a border of a style the deck has no word for, and a background that is no colour",
+		html: `<section data-slide><div data-slide-box style="left: 0px; top: 0px; width: 100px; height: 50px; border: 2px wavy red; background: fixed"><p>x</p></div></section>`,
+		writtenBack: boxSlide(
+			"left: 0px; top: 0px; width: 100px; height: 50px; border: 2px solid red",
+			["<p>x</p>"],
+		),
+	},
+	{
+		name: "text styled with images, beside text styled with fonts of any script",
+		html: `<section data-slide><div data-slide-box style="left: 0px; top: 0px; width: 100px; height: 50px"><p><span style="color: url(https://evil.example/d.png); font-family: url(x), serif">x</span> <span style="color: Teal; font-family: 'Noto Sans JP', &quot;游ゴシック&quot;, sans-serif">y</span></p></div></section>`,
+		writtenBack: boxSlide("left: 0px; top: 0px; width: 100px; height: 50px", [
+			`<p>x <span style="color: Teal; font-family: 'Noto Sans JP', &quot;游ゴシック&quot;, sans-serif">y</span></p>`,
+		]),
+	},
+	{
+		name: "a drawing of two paths each moving from where it is, with a description and shapes it doesn't draw",
+		html: `<section data-slide><div data-slide-box style="left: 0px; top: 0px; width: 100px; height: 100px"><svg viewBox="0 0 100 100"><desc>An arrow</desc><defs><rect width="5" height="5"/></defs><path d="m 10 10 l 20 0"/><path d="m 50 50 l 20 0"/></svg><p>x</p></div></section>`,
+		writtenBack: boxSlide("left: 0px; top: 0px; width: 100px; height: 100px", [
+			`<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M 10 10 l 20 0 M 50 50 l 20 0" fill="black"/></svg>`,
+			"<p>x</p>",
+		]),
+	},
+	{
+		name: "numbers past what any slide shows",
+		html: `<section data-slide><div data-slide-box style="left: 99999px; top: 0px; width: 10px; height: 10px; padding: 9999px 2px; transform: rotate(7210deg); border: 99999px solid red"><p style="line-height: 5000"><span style="font-size: 999999px">x</span><span style="font-size: 0.25px">y</span></p></div><div data-slide-box style="left: 0px; top: 0px; width: 10px; height: 10px; transform: rotate(1e-7deg)"><svg viewBox="0 0 10 10"><path d="M 0 0 L 99999 0 A 5 5 7210 0 1 1 1"/></svg><p>z</p></div></section>`,
+		writtenBack: [
+			`<section data-slide>`,
+			`  <div data-slide-body>`,
+			`    <div data-slide-box style="left: 3840px; top: 0px; width: 0px; height: 10px; border: 1584px solid red; padding: 3840px 2px; transform: rotate(10deg)">`,
+			`      <p style="line-height: 100"><span style="font-size: 4000px">x</span><span style="font-size: 1px">y</span></p>`,
+			`    </div>`,
+			`    <div data-slide-box style="left: 0px; top: 0px; width: 10px; height: 10px; transform: rotate(1e-7deg)">`,
+			`      <svg viewBox="0 0 10 10" preserveAspectRatio="none"><path d="M 0 0 L 3840 0 A 5 5 10 0 1 1 1" fill="black"/></svg>`,
+			`      <p>z</p>`,
+			`    </div>`,
+			`  </div>`,
+			`</section>`,
+		].join("\n"),
+	},
 	{
 		name: "elements nested as deep as may be read",
 		html: `<section data-slide><div data-slide-body><div data-slide-box>${"<div>".repeat(97)}x</div></div></section>`,

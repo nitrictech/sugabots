@@ -1,3 +1,5 @@
+import { isFiniteNumber, within } from "./css-values.ts";
+
 /*
  * A slide's size, and where a box sits on it, in a slide's pixels: the
  * pixels of the slide drawn `SLIDE_WIDTH` wide. Every length a deck stores is
@@ -38,9 +40,18 @@ export interface Frame {
 }
 
 /**
+ * How far from the slide's top left corner anything on it may reach, every
+ * way, in a slide's pixels: four slides' widths, far past anything a slide
+ * shows, and near enough that every file a deck is saved as can say it.
+ */
+export const SLIDE_REACH = 4 * SLIDE_WIDTH;
+
+/**
  * `value` as a frame: `undefined` unless it holds a finite left, top, width
- * and height, its width and height not below 0. A stored frame comes from
- * people's editors, files and bots, so it is read through this.
+ * and height, its width and height not below 0. Each of its edges is kept
+ * within `SLIDE_REACH`, so a frame reaching further is cut there, where
+ * nothing of the slide shows. A stored frame comes from people's editors,
+ * files and bots, so it is read through this.
  */
 export function frameIn(value: unknown): Frame | undefined {
 	if (typeof value !== "object" || value === null) return undefined;
@@ -49,11 +60,13 @@ export function frameIn(value: unknown): Frame | undefined {
 	if (!isFiniteNumber(width) || !isFiniteNumber(height) || width < 0 || height < 0) {
 		return undefined;
 	}
-	return { x, y, width, height };
+	const edges = [x, x + width, y, y + height];
+	// Recomputed only when cut, as a width taken back from its edges may differ in its last digit.
+	if (edges.every((edge) => Math.abs(edge) <= SLIDE_REACH)) return { x, y, width, height };
+	const reach = (edge: number) => within(edge, -SLIDE_REACH, SLIDE_REACH);
+	const [left, top] = [reach(x), reach(y)];
+	return { x: left, y: top, width: reach(x + width) - left, height: reach(y + height) - top };
 }
-
-const isFiniteNumber = (value: unknown): value is number =>
-	typeof value === "number" && Number.isFinite(value);
 
 /**
  * The frame of a box nothing places, as one a bot writes without saying

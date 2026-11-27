@@ -6,7 +6,14 @@ import type { SlideLayout } from "@sugabots/contracts/slide-layouts";
 import { DOMSerializer, type Node } from "@tiptap/pm/model";
 import type { Transaction } from "@tiptap/pm/state";
 import { type Editor, useEditorState } from "@tiptap/react";
-import { ChevronDown, ChevronLeft, ChevronRight, LayoutTemplate, X } from "lucide-react";
+import {
+	ChevronDown,
+	ChevronLeft,
+	ChevronRight,
+	LayoutTemplate,
+	SquarePlus,
+	X,
+} from "lucide-react";
 import {
 	type ReactNode,
 	type RefObject,
@@ -23,7 +30,8 @@ import { uploadArtifactImage } from "@/lib/artifacts.ts";
 import {
 	addImage,
 	addSlide,
-	boxesWaitOnSuggestion,
+	addTextBox,
+	type BoxPos,
 	canResetLayout,
 	changeLayout,
 	LAYOUT_NAMES,
@@ -41,7 +49,11 @@ import { failureMessage } from "@/lib/failure.ts";
 import type { KeepImage } from "@/lib/file-import.ts";
 import { type FollowedNode, followNode, keyOfFollowedNode } from "@/lib/followed-node.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
-import { importPowerPointFile, type PowerPointImported } from "@/lib/powerpoint-import.ts";
+import {
+	importPowerPointFile,
+	MAX_IMPORTED_SLIDES,
+	type PowerPointImported,
+} from "@/lib/powerpoint-import.ts";
 import { dispatchAsOneChange } from "@/lib/suggesting.ts";
 import {
 	type PendingSuggestion,
@@ -169,7 +181,7 @@ function DeckEditor({
 }) {
 	// What the stage draws under the slide's body, inside the editor, is put in this.
 	const [underSlide, setUnderSlide] = useState<HTMLElement>();
-	const addImageTo = useRef<(boxPos: number, file: File | undefined) => void>(undefined);
+	const addImageTo = useRef<(boxPos: BoxPos, file: File | undefined) => void>(undefined);
 	const [extensions] = useState(() => [
 		deckStage({
 			// The editor draws it while it updates, which may be while React renders.
@@ -244,7 +256,7 @@ function DeckView({
 	/** Drawn under the body of the slide on the stage, inside the editor (see `deck-stage.ts`). */
 	underSlide: HTMLElement | undefined;
 	/** Where the stage asks for an image for a slide's empty image box. */
-	addImageTo: RefObject<((boxPos: number, file: File | undefined) => void) | undefined>;
+	addImageTo: RefObject<((boxPos: BoxPos, file: File | undefined) => void) | undefined>;
 }) {
 	const others = useOthers(provider);
 	const deck = useEditorState({
@@ -307,10 +319,9 @@ function DeckView({
 	const sideBySide = useMediaQuery(SIDE_BY_SIDE);
 	const finePointer = useMediaQuery(FINE_POINTER);
 	const editable = !outOfDate;
-	// From Tailwind's `md`, as the strip's slides are dragged, and not while a suggestion may change which boxes the slide has.
-	const boxesMovable =
-		shown !== undefined && editable && sideBySide && !boxesWaitOnSuggestion(shown.node);
-	const slideMenu = useSlideMenu(editor, { slide: shown, editable, boxesEditable: boxesMovable });
+	// Moved, resized and deleted from their outlines and the slide's menu from Tailwind's `md`, as the strip's slides are dragged.
+	const boxesEditable = shown !== undefined && editable && sideBySide;
+	const slideMenu = useSlideMenu(editor, { slide: shown, editable, boxesEditable });
 	if (!shown) return null;
 	const change = (transaction: Transaction | undefined) => {
 		if (transaction) dispatchAsOneChange(editor, transaction, as.name);
@@ -340,6 +351,13 @@ function DeckView({
 	function resetShownLayout() {
 		const resetting = resetLayout(editor.state, current);
 		if (resetting) editor.view.dispatch(resetting);
+	}
+	/** Adds a text box to the slide shown, where one with no place said goes, to type in at once. */
+	function addShownTextBox() {
+		const adding = shown && addTextBox(editor.state, shown.pos, undefined);
+		if (!adding) return;
+		editor.view.dispatch(adding);
+		editor.view.focus();
 	}
 	return (
 		<>
@@ -415,6 +433,16 @@ function DeckView({
 										<ChevronDown aria-hidden size={12} className="text-subtle-foreground" />
 									</LayoutPicker>
 								)}
+								{editable && (
+									<IconButton
+										label="Add text box"
+										variant="bar"
+										className="size-8 max-md:size-11"
+										onClick={addShownTextBox}
+									>
+										<SquarePlus aria-hidden size={16} strokeWidth={1.75} />
+									</IconButton>
+								)}
 								<span className="flex-1" />
 								<SlidePager current={current} total={slides.length} onSelect={select} />
 							</div>
@@ -427,7 +455,7 @@ function DeckView({
 									askBoxOpen={asking !== undefined}
 								/>
 								{/* Only for a fine pointer: a touch drag is no move, and on a touch screen the outlines would take taps near a box's edge. */}
-								{boxesMovable && finePointer && deck.followed && (
+								{boxesEditable && finePointer && deck.followed && (
 									<BoxOutlines
 										// Its boxes are known by their place on the slide, which means nothing on another. The
 										// slide is known by itself, not by its place in the deck, which others' changes shift.
@@ -727,7 +755,7 @@ function useImageAdding(
 	return {
 		notice,
 		dismiss: () => setNotice(undefined),
-		add: (boxPos: number, file: File | undefined) => {
+		add: (boxPos: BoxPos, file: File | undefined) => {
 			const box = followNode(editor.state, boxPos);
 			if (!box) return;
 			if (file) return void keep(box, file);
@@ -757,12 +785,22 @@ const POWERPOINT_FILE: ImportedFileKind = {
 };
 
 /** What a PowerPoint file's import left out of the deck, as the person is told it, or `undefined` for nothing. */
-function leftOutInWords({ imagesLeftOut, othersLeftOut }: PowerPointImported): string | undefined {
+function leftOutInWords({
+	slidesLeftOut,
+	imagesLeftOut,
+	othersLeftOut,
+}: PowerPointImported): string | undefined {
 	const said = [
+		...(slidesLeftOut > 0 ? [slidesLeftOutInWords(slidesLeftOut)] : []),
 		...(imagesLeftOut > 0 ? [imagesLeftOutInWords(imagesLeftOut, POWERPOINT_FILE, "deck")] : []),
 		...(othersLeftOut > 0 ? [othersLeftOutInWords(othersLeftOut)] : []),
 	];
 	return said.length > 0 ? said.join(" ") : undefined;
+}
+
+function slidesLeftOutInWords(count: number): string {
+	const which = count === 1 ? "1 slide was" : `${count} slides were`;
+	return `A deck takes the first ${MAX_IMPORTED_SLIDES} slides of a PowerPoint file, so ${which} left out.`;
 }
 
 function othersLeftOutInWords(count: number): string {

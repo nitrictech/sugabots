@@ -266,10 +266,8 @@ const KIND_NAMES: Record<ArtifactKind, string> = {
 };
 
 /** Why a change to a live document couldn't be made as asked, and what to do instead. */
-const SUGGESTION_BLOCKED_REASONS: Record<Artifacts.SuggestionBlocked["blocked"], string> = {
-	unmarkable:
-		"This change has to be shown as a suggestion, and a suggestion can't be shown inside a code block. Say so, and ask them to change the code block themselves.",
-};
+const SUGGESTION_BLOCKED =
+	"This change has to be shown as a suggestion, and a suggestion can't be shown inside a code block. Say so, and ask them to change the code block themselves.";
 
 /** What was wrong with HTML written for a deck that can't be the deck, and what to do instead. */
 const DECK_HTML_REFUSALS: Record<Artifacts.DeckHtmlRefused["reason"], string> = {
@@ -304,7 +302,7 @@ function refusalFor(failure: AuthoringFailure): Refusal | Suggested | Unchanged 
 		case "ArtifactChangeSuggested":
 			return {
 				status: "suggested",
-				note: "This change was asked for from inside the document, so what it changes in words, and any blocks, boxes or slides it adds or removes, are shown there as a suggestion, which takes effect once somebody accepts it; until then the document reads as before. Anything it changed in how a deck looks was made at once. Say that you suggested it; don't make the change again.",
+				note: "This change was asked for from inside the document, so all of it is shown there as one suggestion, its words and how a deck looks alike, which takes effect once somebody accepts it and is undone if they reject it; until then reading the document gives it as before. Only a box moved in front of or behind another was moved at once. Say that you suggested it; don't make the change again.",
 			};
 		case "ArtifactUnchanged":
 			return { status: "unchanged", note: UNCHANGED_NOTES[failure.kind] };
@@ -319,7 +317,7 @@ function refusalFor(failure: AuthoringFailure): Refusal | Suggested | Unchanged 
 		case "ArtifactSuggestionBlocked":
 			return {
 				status: "refused",
-				reason: SUGGESTION_BLOCKED_REASONS[failure.blocked],
+				reason: SUGGESTION_BLOCKED,
 			};
 		case "ArtifactNotFound":
 			return { status: "refused", reason: "There is no artifact with that id in this pod." };

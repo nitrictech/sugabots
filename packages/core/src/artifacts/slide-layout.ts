@@ -1,10 +1,5 @@
-import {
-	bodyOf,
-	boxAttributesOf,
-	layoutOf,
-	SLIDE_TEXT_STEPS,
-} from "@sugabots/contracts/live-slides";
-import type { BoxRole, VerticalAlign } from "@sugabots/contracts/slide-box";
+import { bodyOf, layoutOf, SLIDE_TEXT_STEPS } from "@sugabots/contracts/live-slides";
+import type { BoxRole } from "@sugabots/contracts/slide-box";
 import {
 	type Frame,
 	roomBottom,
@@ -25,6 +20,7 @@ import {
 	COLUMN_LOOK,
 	cellInsetOf,
 	contentAreaOf,
+	drawnAttributesOf,
 	fittedImage,
 	HIGHLIGHT,
 	hasAccentBar,
@@ -36,8 +32,10 @@ import {
 	LIST_LOOK,
 	lineHeightOf,
 	linkInFile,
+	listStartOf,
 	ownTextStyleOf,
 	paintOf,
+	piecesOfTextblock,
 	QUOTE_LOOK,
 	RULE,
 	RULE_THICKNESS,
@@ -50,6 +48,7 @@ import {
 	type TextAlign,
 	type TextLook,
 	TINT,
+	tableGridOf,
 	textAlignOf,
 } from "./slide-design.ts";
 
@@ -205,7 +204,7 @@ const WHOLE_SLIDE: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: SLIDE_HEIGHT 
 export function arrangedSlide(slide: Node, measure: Measure): ArrangedSlide {
 	const layout = layoutOf(slide);
 	const boxes = bodyOf(slide).children;
-	const frames = boxes.map((box) => boxAttributesOf(box).frame);
+	const frames = boxes.map((box) => drawnAttributesOf(box).frame);
 	const stepping = boxes.map(holdsSteppedText);
 	const atStep = (step: number): ArrangedSlide => {
 		const laid = boxes.map((box, index) =>
@@ -284,7 +283,7 @@ function laidBox(
 	step: number,
 	room: number,
 ): LaidBox {
-	const attributes = boxAttributesOf(box);
+	const attributes = drawnAttributesOf(box);
 	const { frame, role, verticalAlign, rotation } = attributes;
 	const area = contentAreaOf(attributes);
 	const setting = settingOf({ layout, role, step, width: area.width }, measure);
@@ -293,7 +292,7 @@ function laidBox(
 		stackedWithin(
 			layOutsOf(box.children, setting, area.width),
 			boxLookOf(layout, role).gap * setting.unit,
-			heightToLayOut(area, verticalAlign, room),
+			verticalAlign === "top" ? heightToLayOut(area, room) : MOST_LAID_OUT,
 		);
 	const top = area.y + alignedOffset(verticalAlign, area.height, laid.height);
 	const bar = hasAccentBar(layout, role) ? accentBarOver(frame, setting.unit) : undefined;
@@ -333,31 +332,29 @@ function filledArea(
 		baseline: undefined,
 		draw: (pen, x, y) => {
 			const within = { x, y, width: area.width, height: area.height };
-			pen.image(address, fittedImage(natural, within, fit), within, radius);
+			// An image in an area of no room is nothing, as the app draws it.
+			if (within.width > 0 && within.height > 0) {
+				pen.image(address, fittedImage(natural, within, fit), within, radius);
+			}
 		},
 	};
 }
 
 /**
- * How tall what a box holds is laid out, at most, in its content `area`, as
- * `align` sits it there: as tall as it may be and still fit, `room` being how
- * far down the slide it may reach, or as the slide shows it, whichever is
- * taller. Past that, it doesn't fit, and is drawn only as far as it is laid
- * out.
+ * How tall what is set at the top of a box's content `area` is laid out, at
+ * most: as tall as it may be and still fit, `room` being how far down the
+ * slide it may reach, or as the slide shows it, whichever is taller. Past
+ * that, it doesn't fit, and is drawn only as far as it is laid out.
  */
-function heightToLayOut(area: Frame, align: VerticalAlign, room: number): number {
-	const reach = Math.max(SLIDE_HEIGHT, room);
-	const highest = Math.min(area.y, 0);
-	const bottom = area.y + area.height;
-	const middle = area.y + area.height / 2;
-	const height =
-		align === "top"
-			? reach - area.y
-			: align === "middle"
-				? 2 * Math.max(middle - highest, reach - middle)
-				: bottom - highest;
-	return height + FIT_ALLOWANCE;
-}
+const heightToLayOut = (area: Frame, room: number) =>
+	Math.max(SLIDE_HEIGHT, room) - area.y + FIT_ALLOWANCE;
+
+/**
+ * How tall what is set in the middle of a box or at its foot is laid out, at
+ * most: whole, as its end shows wherever its start is, but for what is taller
+ * than many slides, which is drawn from its start as though it ended there.
+ */
+const MOST_LAID_OUT = 16 * SLIDE_HEIGHT;
 
 /** Where on a slide blocks are set: in a box of which role on a slide of which layout, at which step, and across how much. */
 export interface Placing {
@@ -568,8 +565,9 @@ function laidHeading(heading: Node, setting: Setting, width: number, room: numbe
 /**
  * A paragraph or heading: its lines, at its own line height and alignment
  * where it sets them, and set at the size of its text when all of it has a
- * size of its own (`ownLineSizeOf`); and each image in it on its own, as the
- * app draws an image as a block of its own between the words around it.
+ * size of its own (`ownLineSizeOf`); and each image in it on lines of its own
+ * between the words around it (`piecesOfTextblock`). One holding nothing is
+ * nothing tall (`isEmptyTextblock`).
  */
 function laidTextblock(
 	block: Node,
@@ -585,26 +583,19 @@ function laidTextblock(
 		lineHeight: lineHeightOf(block) ?? blockType.lineHeight,
 	};
 	const align = textAlignOf(block) ?? "left";
-	const parts: LayOut[] = [];
-	let words: Node[] = [];
-	const endWords = () => {
-		if (words.length > 0) {
-			const inlines = inlinesOf(words, lined.type);
-			parts.push((partRoom) =>
-				laidLines(inlines, lined, setting.measure, { width, align, balanced }, partRoom),
-			);
-		}
-		words = [];
-	};
-	for (const child of block.children) {
-		if (child.type.name !== "image") {
-			words.push(child);
-			continue;
-		}
-		endWords();
-		parts.push(() => laidImage(child, lined, setting, width));
-	}
-	endWords();
+	const parts = piecesOfTextblock(block).map(
+		(piece): LayOut =>
+			piece.kind === "picture"
+				? () => laidImage(piece.image, lined, setting, width)
+				: (partRoom) =>
+						laidLines(
+							inlinesOf(piece.inline, lined.type),
+							lined,
+							setting.measure,
+							{ width, align, balanced },
+							partRoom,
+						),
+	);
 	return stackedWithin(parts, 0, room);
 }
 
@@ -666,7 +657,7 @@ function laidList(list: Node, setting: Setting, width: number, room: number): La
 		features: ["tnum"],
 	};
 	const strut = lineBoxOf([markerType], setting.text.lineHeight);
-	const start = Number(list.attrs.start) || 1;
+	const start = listStartOf(list);
 	const drawMarker =
 		list.type.name === "orderedList"
 			? (pen: Pen, index: number, x: number, baseline: number) => {
@@ -841,20 +832,18 @@ interface TableRow {
 	height: number;
 }
 
-/** A table's rows across `width`, its columns as wide as each other, as far as `room` reaches. */
+/** A table's rows across `width`, on its grid (`tableGridOf`), its columns as wide as each other, as far as `room` reaches. */
 function tableRows(table: Node, setting: Setting, width: number, room: number): TableRow[] {
-	let columns = 1;
-	for (const row of table.children) columns = Math.max(columns, spanOf(row));
-	const columnWidth = width / columns;
+	const grid = tableGridOf(table);
+	const columnWidth = width / grid.columns;
 	const fontSize = TABLE_LOOK.text.size * setting.unit;
 	const rows: TableRow[] = [];
 	let top = 0;
-	for (const row of table.children) {
+	for (const row of grid.rows) {
 		if (top > room) break;
-		let column = 0;
-		const cells = row.children.map((cell, index) => {
+		const cells = row.map(({ cell, column, span }) => {
 			const header = cell.type.name === "tableHeader";
-			const firstColumn = index === 0 && !header;
+			const firstColumn = column === 0 && !header;
 			const weight = header
 				? TABLE_LOOK.header.weight
 				: firstColumn
@@ -871,16 +860,13 @@ function tableRows(table: Node, setting: Setting, width: number, room: number): 
 				weight: header || firstColumn ? weight : setting.weight,
 			};
 			const inset = cellInsetOf(setting.tightCells, header, fontSize);
-			const span = Number(cell.attrs.colspan) || 1;
 			const cellWidth = span * columnWidth;
 			const content = stackedWithin(
 				layOutsOf(cell.children, cellSetting, cellWidth - 2 * inset.x),
 				TABLE_LOOK.blockGap * fontSize,
 				room - top - inset.y,
 			);
-			const x = column * columnWidth;
-			column += span;
-			return { header, x, width: cellWidth, inset, content };
+			return { header, x: column * columnWidth, width: cellWidth, inset, content };
 		});
 		let tallest = 0;
 		for (const { content, inset } of cells)
@@ -918,16 +904,12 @@ function laidTable(table: Node, setting: Setting, width: number, room: number): 
 	return stackedWithin(rows, 0, room);
 }
 
-function spanOf(row: Node): number {
-	let span = 0;
-	for (const cell of row.children) span += Number(cell.attrs.colspan) || 1;
-	return span;
-}
-
 /*
  * Lines of text: a textblock's words with their marks, broken into lines as
- * a browser breaks them, at spaces, zero-width spaces and soft hyphens, and
- * within a word only where it is wider than the line.
+ * the app breaks them, which keeps spaces as they are typed
+ * (`white-space: break-spaces`): after each space, zero-width space and soft
+ * hyphen, and within a word only where it is wider than the line. A space at
+ * a line's end takes its room there, as such a space does in the app.
  */
 
 /** A stretch of a line's text in one look. */
@@ -978,8 +960,8 @@ const LINE_SEPARATORS = /[\u2028\u2029]/;
 /**
  * A textblock's inline nodes as runs of `base` with their marks, and the
  * colour and size of their own (`withOwnStyle`): each box behind a stretch of
- * them padded at its ends, and each stretch of white space one space, none at
- * a line's start.
+ * them padded at its ends, their spaces as typed, a new line a line break,
+ * and a tab or other white space a space.
  *
  * The app draws each mark as an element, nested in the order the schema
  * lists marks, and a mark's element goes on over the next node only while
@@ -1021,13 +1003,14 @@ function inlinesOf(nodes: readonly Node[], base: Type): Inline[] {
 			continue;
 		}
 		const text = node.isText ? (node.text ?? "") : node.textContent;
-		for (const [index, line] of text.split(LINE_SEPARATORS).entries()) {
+		const lines = text.split(LINE_SEPARATORS).flatMap((line) => line.split("\n"));
+		for (const [index, line] of lines.entries()) {
 			if (index > 0) inlines.push({ kind: "break" });
-			inlines.push(runOf(line, styled, node.marks, backdrops()));
+			inlines.push(runOf(line.replace(/[\t\r\f]/g, " "), styled, node.marks, backdrops()));
 		}
 	}
 	closeTo(0);
-	return withWhiteSpaceCollapsed(inlines);
+	return inlines;
 }
 
 /** `base` in the colour and at the size `marks` give their text of its own, a size that never steps down. */
@@ -1112,7 +1095,10 @@ const bolder = (weight: number) => (weight < 350 ? 400 : weight < 550 ? 700 : 90
 
 const COLLAPSIBLE_SPACE = /[ \t\n\r\f]/;
 
-/** `inlines` with each stretch of white space one space, and none at the start or after a line break. */
+/**
+ * `inlines` with each stretch of white space one space, and none at the start
+ * or after a line break, as a browser shows an image's words.
+ */
 function withWhiteSpaceCollapsed(inlines: readonly Inline[]): Inline[] {
 	let afterSpace = true;
 	return inlines.map((inline) => {
@@ -1143,7 +1129,7 @@ interface Bit {
 interface Word {
 	bits: readonly Bit[];
 	width: number;
-	/** Its trailing space's width, which hangs at the end of a line. */
+	/** Its trailing space's width: where a justified line takes its room to spare. */
 	trailing: number;
 	/** The hyphen a soft hyphen it ends with shows at the end of a line that breaks there. */
 	hyphen: Bit | undefined;
@@ -1297,9 +1283,12 @@ function widthOfBits(bits: readonly Bit[]): number {
 const LINE_ALLOWANCE = 0.01;
 
 /**
- * `words` in lines no wider than `width`, a word wider than that broken where
- * it must be, as many as `mostLines`. A line that breaks at a soft hyphen has
- * room for the hyphen it shows, or the word goes on to the next line whole.
+ * `words` in lines no wider than `width`, each word with the space after it,
+ * which may not be left at the end of a line it doesn't fit; a word wider than
+ * the line, though, is broken where it must be, the space after it left where
+ * it falls. As many lines as `mostLines`. A line that breaks at a soft hyphen
+ * has room for the hyphen it shows, or the word goes on to the next line
+ * whole.
  */
 function filledLines(
 	words: readonly Word[],
@@ -1325,7 +1314,7 @@ function filledLines(
 	};
 	for (const word of words) {
 		if (lines.length >= mostLines) return lines;
-		while (line.length > 0 && used + word.width - word.trailing > width + LINE_ALLOWANCE) {
+		while (line.length > 0 && used + word.width > width + LINE_ALLOWANCE) {
 			endLine();
 		}
 		if (line.length === 0 && word.width - word.trailing > width + LINE_ALLOWANCE) {
@@ -1386,9 +1375,9 @@ function brokenWord(word: Word, width: number, measure: Measure, mostPieces: num
 }
 
 /**
- * `words` as a line, its trailing space dropped, as tall as its tallest text
- * and its block's own line; with the hyphen of a soft hyphen it ends with,
- * when it is `broken` there.
+ * `words` as a line, its spaces kept, its end's too, as tall as its tallest
+ * text and its block's own line; with the hyphen of a soft hyphen it ends
+ * with, when it is `broken` there.
  */
 function lineOf(words: readonly Word[], { type, lineHeight }: BlockType, broken: boolean): Line {
 	const bits = words.flatMap((word) => word.bits);
@@ -1398,17 +1387,8 @@ function lineOf(words: readonly Word[], { type, lineHeight }: BlockType, broken:
 		ends += word.bits.length;
 		if (word.trailing > 0) gaps.add(ends);
 	}
-	const last = bits.at(-1);
 	const lastWord = words.at(-1);
-	const trailing = lastWord?.trailing ?? 0;
-	const trimmed =
-		last?.inline.kind === "run" && last.text.endsWith(" ")
-			? [
-					...bits.slice(0, -1),
-					{ ...last, text: last.text.slice(0, -1), width: last.width - trailing },
-				]
-			: bits;
-	const shown = broken && lastWord?.hyphen ? [...trimmed, lastWord.hyphen] : trimmed;
+	const shown = broken && lastWord?.hyphen ? [...bits, lastWord.hyphen] : bits;
 	const sized = shown.flatMap((bit) =>
 		bit.inline.kind === "run" && bit.inline.sized && bit.text !== "" ? [bit.inline.type] : [],
 	);

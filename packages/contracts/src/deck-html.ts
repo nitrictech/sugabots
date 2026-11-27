@@ -1,4 +1,4 @@
-import { getSchema } from "@tiptap/core";
+import { getSchema, getStyleProperty } from "@tiptap/core";
 import {
 	type DOMOutputSpec,
 	DOMSerializer,
@@ -9,7 +9,6 @@ import {
 	type TagParseRule,
 } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
-import { type StyledElement, styleProperty } from "./css-values.ts";
 import {
 	liveDocumentExtensions,
 	SUGGESTED_DELETION,
@@ -17,6 +16,7 @@ import {
 	SUGGESTED_MODIFICATION,
 } from "./live-document.ts";
 import { BOX_CONTENT_ATTRIBUTE, newSlide, SLIDE } from "./live-slides.ts";
+import type { PageChildElement, PageElement, PageNode } from "./page-element.ts";
 
 /*
  * A deck as HTML, the form it is kept in outside the editor: every version
@@ -50,11 +50,11 @@ export const DECK_SCHEMA: Schema = getSchema(
 );
 
 /**
- * What reads HTML into a page of its own: a browser's `DOMParser`, or
- * linkedom's on the server. Either reads it inert, running nothing and
- * loading nothing, as a deck's HTML may be a bot's. A deck is read from the
- * page's body, and the reader is always handed a whole page, as linkedom
- * finds no body in anything less.
+ * `HtmlReader` parses a page of HTML into a document of its own, inert,
+ * running nothing and loading nothing, as a deck's HTML may be a bot's: a
+ * browser's `DOMParser`, or linkedom's on the server. The deck is read from
+ * the document's body, and the reader is always handed a whole page, as
+ * linkedom finds no body in anything less.
  */
 export interface HtmlReader {
 	parseFromString(html: string, type: "text/html"): { readonly body: unknown };
@@ -90,7 +90,7 @@ export type DeckReading =
  * suggestion is never read from HTML: one is made in the editor.
  */
 export function readDeckHtml(html: string, reader: HtmlReader): DeckReading {
-	let page: ElementInPage;
+	let page: PageElement;
 	try {
 		page = pageOf(html, reader);
 	} catch (error) {
@@ -106,7 +106,7 @@ export function readDeckHtml(html: string, reader: HtmlReader): DeckReading {
 	withSlidesAtTop(page);
 	withLooseContentOnSlides(page);
 	for (const slide of [...page.children].filter(isSlide)) tidySlide(slide);
-	const deck = withImageLinksAsAttributes(DECK_PARSER.parse(page as unknown as PageForParser));
+	const deck = withImageLinksAsAttributes(DECK_PARSER.parse(page));
 	if (wordsIn(deck.textContent) !== wordsIn(page.textContent ?? "")) {
 		return { outcome: "unreadable", reason: "wordsLost" };
 	}
@@ -148,8 +148,13 @@ export class UnreadableDeckHtml extends Error {
  */
 const MOST_NESTED_ELEMENTS = 100;
 
-/** What says nothing on a slide, words and all: what a page holds besides its body, and what runs or styles one. */
-const UNSAID = "head, title, meta, link, base, style, script, noscript, template, object";
+/**
+ * What says nothing on a slide, words and all: what a page holds besides its
+ * body, what runs or styles one, and what describes a drawing rather than
+ * draws it.
+ */
+const UNSAID =
+	"head, title, meta, link, base, style, script, noscript, template, object, desc, metadata";
 
 /** What a slide can hold that may be without words. */
 const CONTENT_ELEMENTS = "section[data-slide], div[data-slide-box], img, svg";
@@ -158,37 +163,6 @@ const SLIDE_ELEMENT = "section[data-slide]";
 
 /** A doctype, or the tag of a page's own `<html>`, `<head>` or `<body>`, opening or closing it. */
 const PAGE_TAGS = /<!doctype[^>]*>|<\/?(?:html|head|body)(?=[\s/>])[^>]*>/gi;
-
-/**
- * A node of a page read from HTML, as far as reading a deck from it goes.
- * The API reads HTML with a DOM of its own and is built without the
- * browser's types, so a node is typed by the little of it that is used.
- */
-interface NodeInPage {
-	readonly nodeType: number;
-	readonly textContent: string | null;
-	readonly ownerDocument: { createElement(name: string): ElementInPage } | null;
-	remove(): void;
-}
-
-interface ElementInPage extends NodeInPage, StyledElement {
-	readonly localName: string;
-	readonly childNodes: Iterable<NodeInPage>;
-	readonly children: Iterable<ElementInPage>;
-	hasAttribute(name: string): boolean;
-	setAttribute(name: string, value: string): void;
-	matches(selector: string): boolean;
-	contains(other: NodeInPage): boolean;
-	querySelector(selector: string): ElementInPage | null;
-	querySelectorAll(selector: string): Iterable<ElementInPage>;
-	insertBefore(node: NodeInPage, before: NodeInPage | null): unknown;
-	appendChild(node: NodeInPage): unknown;
-	replaceWith(...nodes: NodeInPage[]): void;
-	after(...nodes: NodeInPage[]): void;
-}
-
-/** The node ProseMirror's parser reads, named through its own type, as the API is built without the browser's. */
-type PageForParser = Parameters<ProseMirrorParser["parse"]>[0];
 
 const ELEMENT_NODE = 1;
 
@@ -199,17 +173,20 @@ const ELEMENT_NODE = 1;
  * `</body>` would end the body before what follows it. What its head held,
  * as its title, is left out with what else says nothing (`UNSAID`).
  */
-function pageOf(html: string, reader: HtmlReader): ElementInPage {
+function pageOf(html: string, reader: HtmlReader): PageElement {
 	const page = `<!doctype html><html><head></head><body>${html.replace(PAGE_TAGS, "")}</body></html>`;
 	const { body } = reader.parseFromString(page, "text/html");
-	if (typeof body !== "object" || body === null)
+	if (typeof body !== "object" || body === null) {
 		throw new TypeError("The HTML reader gave no body");
-	return body as ElementInPage;
+	}
+	return body as PageElement;
 }
 
 /** Whether `page` holds elements more than `most` deep, counted without recursion, as the page may be deep enough to exhaust a stack. */
-function nestsDeeperThan(page: ElementInPage, most: number): boolean {
-	const waiting = [...page.children].map((element) => ({ element, depth: 1 }));
+function nestsDeeperThan(page: PageElement, most: number): boolean {
+	const waiting: { element: PageChildElement; depth: number }[] = [...page.children].map(
+		(element) => ({ element, depth: 1 }),
+	);
 	for (let next = waiting.pop(); next; next = waiting.pop()) {
 		if (next.depth > most) return true;
 		for (const child of next.element.children) {
@@ -223,17 +200,16 @@ function nestsDeeperThan(page: ElementInPage, most: number): boolean {
 const wordsIn = (text: string) => text.replace(/\s+/g, "");
 
 /** Whether `node` is or holds words, or something a slide could hold that may be without them (`CONTENT_ELEMENTS`). */
-function holdsContent(node: NodeInPage): boolean {
+function holdsContent(node: PageNode): boolean {
 	if (wordsIn(node.textContent ?? "") !== "") return true;
-	if (node.nodeType !== ELEMENT_NODE) return false;
-	const element = node as ElementInPage;
-	return element.matches(CONTENT_ELEMENTS) || element.querySelector(CONTENT_ELEMENTS) !== null;
+	if (!isElement(node)) return false;
+	return node.matches(CONTENT_ELEMENTS) || node.querySelector(CONTENT_ELEMENTS) !== null;
 }
 
-const isElement = (node: NodeInPage): node is ElementInPage => node.nodeType === ELEMENT_NODE;
-const isSlide = (node: NodeInPage) => isElement(node) && node.matches(SLIDE_ELEMENT);
-const isBody = (node: NodeInPage) => isElement(node) && node.matches("div[data-slide-body]");
-const isNotes = (node: NodeInPage) => isElement(node) && node.matches("aside[data-speaker-notes]");
+const isElement = (node: PageNode): node is PageChildElement => node.nodeType === ELEMENT_NODE;
+const isSlide = (node: PageNode) => isElement(node) && node.matches(SLIDE_ELEMENT);
+const isBody = (node: PageNode) => isElement(node) && node.matches("div[data-slide-body]");
+const isNotes = (node: PageNode) => isElement(node) && node.matches("aside[data-speaker-notes]");
 
 /**
  * Puts every slide of `page` among its own children, as the schema holds
@@ -242,7 +218,7 @@ const isNotes = (node: NodeInPage) => isElement(node) && node.matches("aside[dat
  * a slide follow it instead, in order. What stood beside them keeps its
  * place among them.
  */
-function withSlidesAtTop(page: ElementInPage): void {
+function withSlidesAtTop(page: PageElement): void {
 	for (;;) {
 		const holder = [...page.children].find((child) => child.querySelector(SLIDE_ELEMENT) !== null);
 		if (!holder) return;
@@ -250,7 +226,7 @@ function withSlidesAtTop(page: ElementInPage): void {
 			holder.replaceWith(...holder.childNodes);
 			continue;
 		}
-		const outermost: ElementInPage[] = [];
+		const outermost: PageChildElement[] = [];
 		for (const inner of holder.querySelectorAll(SLIDE_ELEMENT)) {
 			if (!outermost.some((slide) => slide.contains(inner))) outermost.push(inner);
 		}
@@ -265,14 +241,12 @@ function withSlidesAtTop(page: ElementInPage): void {
  * notes as well as its body, and would leave them out. A run holding nothing
  * a slide could, as a line break, makes no slide.
  */
-function withLooseContentOnSlides(page: ElementInPage): void {
-	const document = page.ownerDocument;
-	if (!document) throw new TypeError("A page read from HTML has no document");
-	let run: NodeInPage[] = [];
+function withLooseContentOnSlides(page: PageElement): void {
+	let run: PageNode[] = [];
 	const endRun = () => {
 		const [first] = run;
 		if (first && run.some(holdsContent)) {
-			const slide = document.createElement("section");
+			const slide = page.ownerDocument.createElement("section");
 			slide.setAttribute("data-slide", "");
 			page.insertBefore(slide, first);
 			for (const node of run) slide.appendChild(node);
@@ -292,14 +266,14 @@ function withLooseContentOnSlides(page: ElementInPage): void {
  * bot may write blocks or boxes beside the body, after the notes, or a body
  * or notes twice, and the schema has no place for anything after the notes.
  */
-function tidySlide(slide: ElementInPage): void {
+function tidySlide(slide: PageChildElement): void {
 	const children = [...slide.childNodes];
-	const bodies = children.filter(isBody) as ElementInPage[];
-	const [firstNotes, ...moreNotes] = children.filter(isNotes) as ElementInPage[];
+	const bodies = children.filter(isBody) as PageChildElement[];
+	const [firstNotes, ...moreNotes] = children.filter(isNotes) as PageChildElement[];
 	const body = bodies[0] ?? newBody(slide);
 	const content = children.flatMap((child) => {
 		if (isNotes(child)) return [];
-		return isBody(child) ? [...(child as ElementInPage).childNodes] : [child];
+		return isBody(child) ? [...child.childNodes] : [child];
 	});
 	// Each goes to the body's end in turn, so what it holds already moves too and all keep their order.
 	for (const node of content) body.appendChild(node);
@@ -312,10 +286,9 @@ function tidySlide(slide: ElementInPage): void {
 	if (firstNotes) slide.appendChild(firstNotes);
 }
 
-function newBody(slide: ElementInPage): ElementInPage {
-	const document = slide.ownerDocument;
-	if (!document) throw new TypeError("A page read from HTML has no document");
-	const body = document.createElement("div");
+/** A new, empty body for `slide`, in its page. */
+function newBody(slide: PageChildElement): PageChildElement {
+	const body = slide.ownerDocument.createElement("div");
 	body.setAttribute("data-slide-body", "");
 	return body;
 }
@@ -335,9 +308,9 @@ const isTagRule = (rule: ParseRule): rule is TagParseRule => typeof rule.tag ===
 const KEEP_WHITE_SPACE = "white-space: pre-wrap";
 
 /** Whether `element`'s style keeps its spaces as they are. */
-const keepsWhiteSpace = (element: StyledElement) =>
+const keepsWhiteSpace = (element: PageElement) =>
 	["pre", "pre-wrap", "break-spaces"].includes(
-		styleProperty(element, "white-space")?.toLowerCase() ?? "",
+		getStyleProperty(element, "white-space")?.toLowerCase() ?? "",
 	);
 
 /** `rule`, read only from an element that keeps its spaces, keeping them, and before `rule` so it is tried first. */
@@ -393,20 +366,27 @@ function withImageLinksAsAttributes(deck: Node): Node {
 	return change.doc;
 }
 
-/** `deck` as HTML (see the top of this file). Throws a `RangeError` for a live document that is no deck. */
+/**
+ * `deck` as HTML (see the top of this file). Throws a `RangeError` for a
+ * live document that is no deck: one whose schema holds no slides, or a node
+ * other than the whole of one.
+ */
 export function htmlOfDeck(deck: Node): string {
-	if (deck.firstChild?.type.name !== SLIDE) throw new RangeError("Only a deck is written as HTML");
-	const serializer = deckSerializer(deck.type.schema);
+	const { schema } = deck.type;
+	if (!(SLIDE in schema.nodes) || deck.type !== schema.topNodeType) {
+		throw new RangeError("Only a deck is written as HTML");
+	}
+	const serializer = deckSerializer(schema);
+	// The serializer types its page as the browser's; it builds with what `WritingPage` says alone.
 	const writing = { document: WRITING_PAGE } as unknown as SerializingOptions;
 	return deck.children
-		.map((slide) => {
-			const section = serializer.serializeNode(slide, writing);
-			return written(section as unknown as WrittenElement, "");
-		})
+		.map((slide) =>
+			written(serializer.serializeNode(slide, writing) as unknown as WrittenElement, ""),
+		)
 		.join("\n\n");
 }
 
-/** What the serializer is told to write in: named through its own type, as the API is built without the browser's. */
+/** What the serializer is told to write in, named through its own type, as the API is built without the browser's. */
 type SerializingOptions = NonNullable<Parameters<DOMSerializer["serializeNode"]>[1]>;
 
 /** `schema`'s serializer, but that a paragraph or heading whose spaces HTML would close up says to keep them (`KEEP_WHITE_SPACE`). */
@@ -495,30 +475,23 @@ class WrittenElement {
 
 type WrittenNode = WrittenElement | WrittenText;
 
-const WRITING_PAGE = {
-	createElement: (name: string) => new WrittenElement(name, false),
-	createElementNS: (namespace: string, name: string) =>
-		new WrittenElement(name, namespace === SVG_NAMESPACE),
-	createTextNode: (text: string) => new WrittenText(text),
-	createDocumentFragment: () => new WrittenElement("", false),
-};
+/** What ProseMirror's serializer calls on the page it writes in, and all it calls. */
+interface WritingPage {
+	createElement(name: string): WrittenElement;
+	createElementNS(namespace: string, name: string): WrittenElement;
+	createTextNode(text: string): WrittenText;
+	createDocumentFragment(): WrittenElement;
+}
 
-/** The elements HTML writes without an end. */
-const VOID_ELEMENTS = new Set([
-	"area",
-	"base",
-	"br",
-	"col",
-	"embed",
-	"hr",
-	"img",
-	"input",
-	"link",
-	"meta",
-	"source",
-	"track",
-	"wbr",
-]);
+const WRITING_PAGE = {
+	createElement: (name) => new WrittenElement(name, false),
+	createElementNS: (namespace, name) => new WrittenElement(name, namespace === SVG_NAMESPACE),
+	createTextNode: (text) => new WrittenText(text),
+	createDocumentFragment: () => new WrittenElement("", false),
+} satisfies WritingPage;
+
+/** The elements without an end that a deck's schema writes: a line break, an image, and a table's column. */
+const VOID_ELEMENTS = new Set(["br", "img", "col"]);
 
 /** The elements whose children are written on lines of their own: a slide, its body, its boxes and its notes. */
 const STRUCTURE_ATTRIBUTES = [

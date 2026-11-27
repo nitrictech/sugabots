@@ -32,7 +32,7 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { client } from "@/api.ts";
 import { LAYOUT_NAMES } from "@/lib/deck.ts";
-import type { PendingSuggestion } from "@/lib/suggestions.ts";
+import type { DesignChanges, PendingSuggestion } from "@/lib/suggestions.ts";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -345,16 +345,57 @@ export function SuggestionCard({
 	);
 }
 
-/** What a suggestion would do, as a sentence that follows whose it is. */
-function changeInWords({ removes, adds, slides }: PendingSuggestion): string {
+/**
+ * What a suggestion would do, as sentences that follow whose it is: what it
+ * does to a slide, or else to words and to how a deck looks. A new layout
+ * moves, adds and removes a slide's boxes, which go without saying.
+ */
+function changeInWords({ removes, adds, slides, design }: PendingSuggestion): string {
 	if (slides?.adds && slides.removes) return "Moved a slide.";
 	if (slides?.adds) return "Added a slide.";
 	if (slides?.removes) return "Removed this slide.";
 	if (slides?.layout) return `Changed the layout to ${LAYOUT_NAMES[slides.layout]}.`;
+	const sentences = [wordsChangeInWords(removes, adds), design && designChangeInWords(design)];
+	const said = sentences.filter((sentence) => typeof sentence === "string" && sentence !== "");
+	return said.length > 0 ? said.join(" ") : "Changed the formatting.";
+}
+
+/** What a suggestion would do to words, as a sentence: `undefined` when it adds and removes none. */
+function wordsChangeInWords(removes: string, adds: string): string | undefined {
 	if (removes && adds) return `Changed “${removes}” to “${adds}”.`;
 	if (adds) return `Added “${adds}”.`;
 	if (removes) return `Removed “${removes}”.`;
-	return "Changed the formatting.";
+	return undefined;
+}
+
+/**
+ * What a suggestion would change of how a deck looks, as a sentence, such
+ * as "Moved and restyled a box and changed a slide's background.".
+ */
+function designChangeInWords({ boxes, background, lines }: DesignChanges): string | undefined {
+	const boxCounts = new Map<string, number>();
+	for (const box of boxes) {
+		const verbs = [
+			box.moved && "moved",
+			box.resized && "resized",
+			box.restyled && "restyled",
+		].filter((verb) => typeof verb === "string");
+		const done = listInWords(verbs);
+		if (done) boxCounts.set(done, (boxCounts.get(done) ?? 0) + 1);
+	}
+	const changes = [
+		...[...boxCounts].map(([done, count]) => `${done} ${count === 1 ? "a box" : `${count} boxes`}`),
+		...(background ? ["changed a slide's background"] : []),
+		...(lines ? ["changed how text is aligned or spaced"] : []),
+	];
+	const sentence = listInWords(changes);
+	return sentence && `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
+}
+
+/** `items` as a list in words: "a", "a and b", "a, b and c". */
+function listInWords(items: readonly string[]): string {
+	if (items.length <= 1) return items[0] ?? "";
+	return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
 const lowerFirst = (sentence: string) => sentence.charAt(0).toLowerCase() + sentence.slice(1);

@@ -15,14 +15,17 @@ import {
 import { type MouseEvent, type PointerEvent, useRef, useState } from "react";
 import {
 	addTextBox,
-	BOX_REMOVAL_BLOCKED_WORDS,
+	BOX_DELETION_BLOCKED_WORDS,
 	type BoxIndex,
+	boxDeletionBlocked,
 	boxesOf,
 	boxHolding,
-	boxRemovalBlocked,
 	canResetLayout,
+	placeOfFollowedBox,
 	resetLayout,
 	type SlideAt,
+	type SlidePoint,
+	slidePoint,
 	whereFollowedSlideIs,
 } from "@/lib/deck.ts";
 import { cutOrCopy, type PasteForm, pasteInto, readClipboard } from "@/lib/editor-clipboard.ts";
@@ -35,7 +38,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuShortcut,
 } from "@/ui/dropdown-menu.tsx";
-import { outlinedBoxOf, removeBoxFocusingWords } from "./box-outlines.tsx";
+import { deleteBoxFocusingWords, outlinedBoxOf } from "./box-outlines.tsx";
 import { drawnSlideBody } from "./deck-stage.ts";
 import { DRAWN_BOX } from "./slide-drawing.tsx";
 
@@ -92,10 +95,13 @@ interface OpenedMenu {
 	/** Where it opens: at the pointer, under the caret, or at the focused outline. */
 	anchor: Element | VirtualPoint;
 	region: Region;
-	/** The box it offers to delete, when the slide's boxes can be edited here. */
-	box: BoxIndex | undefined;
+	/**
+	 * The box it offers to delete, when the slide's boxes can be edited here,
+	 * followed through anybody's changes, so it deletes no other.
+	 */
+	box: FollowedNode | undefined;
 	/** Where on the slide, in its pixels, it was opened by the pointer, where a text box it adds goes. */
-	at: { x: number; y: number } | undefined;
+	at: SlidePoint | undefined;
 	/** The slide it was opened on, followed through anybody's changes, so it acts on no other. */
 	slide: FollowedNode | undefined;
 	/** Whether nothing was selected, which leaves nothing to cut or copy. */
@@ -107,12 +113,12 @@ interface OpenedMenu {
 /**
  * The menu of `slide`, the slide on the stage: `stageProps` go on the
  * element holding the editor and the boxes' outlines, which right-clicking
- * opens it from, and `menu` is the menu. `box` is the box it is open for, if
- * it is, which its outline marks. `editable` says whether the deck can be
- * changed here: where it can't, the menu only copies. `boxesEditable` says
- * whether the slide's boxes can be edited here, as their outlines are drawn.
- * `notice` is what to tell the person when the browser refused what they
- * chose, until they dismiss it.
+ * opens it from, and `menu` is the menu. `box` is the place on the slide of
+ * the box it is open for, if it is, which its outline marks. `editable` says
+ * whether the deck can be changed here: where it can't, the menu only
+ * copies. `boxesEditable` says whether the slide's boxes can be edited here,
+ * as their outlines are drawn. `notice` is what to tell the person when the
+ * browser refused what they chose, until they dismiss it.
  */
 export function useSlideMenu(
 	editor: Editor,
@@ -140,14 +146,17 @@ export function useSlideMenu(
 			: pointerTarget(view, slide, event.target);
 		if (!target) return;
 		event.preventDefault();
+		const openedOn = target.box === undefined ? undefined : boxesOf(slide.node)[target.box];
+		const box = openedOn && followNode(view.state, slide.pos + openedOn.startInSlide);
 		if (!byKeyboard && target.onWords && editable) putCaretAtPointer(view, event);
 		setOpened({
 			anchor: byKeyboard
 				? keyboardAnchor(view, slide, event.target)
 				: pointAt(event.clientX, event.clientY),
 			region: target.region,
-			box: boxesEditable ? target.box : undefined,
-			at: byKeyboard ? undefined : pointOnSlide(view, slide, event),
+			box: boxesEditable ? box : undefined,
+			// Opened in the notes, a text box it adds goes where one with no place said does.
+			at: byKeyboard || target.region !== "slide" ? undefined : pointOnSlide(view, slide, event),
 			slide: followNode(view.state, slide.pos),
 			nothingSelected: view.state.selection.empty,
 			focused: document.activeElement,
@@ -189,9 +198,11 @@ export function useSlideMenu(
 		if (!pasteInto(editor.view, content)) setNotice(NOTHING_TO_PASTE);
 	}
 
-	function deleteBox(box: BoxIndex) {
+	/** Deletes the box the menu was opened on, if it is still on the slide it was opened on. */
+	function deleteBoxFromMenu() {
 		const on = slideOpenedOn();
-		if (on) removeBoxFocusingWords(editor, on.pos, box);
+		const place = opened?.box && placeOfFollowedBox(editor.state.doc, opened.box);
+		if (on && place?.slidePos === on.pos) deleteBoxFocusingWords(editor, on.pos, place.box);
 	}
 
 	function resetSlideLayout() {
@@ -209,10 +220,13 @@ export function useSlideMenu(
 	}
 
 	const onSlide = editable && opened?.region === "slide";
-	const box = onSlide && opened?.box !== undefined ? opened.box : undefined;
-	const boxNode = box === undefined || !slide ? undefined : boxesOf(slide.node)[box]?.node;
-	const removalBlocked = boxNode && boxRemovalBlocked(editor.state, boxNode);
-	const offersBoxes = onSlide && boxesEditable;
+	// Where the box the menu was opened on is now: gone, or on another slide, it is offered no more.
+	const boxPlace = onSlide && opened?.box && placeOfFollowedBox(editor.state.doc, opened.box);
+	const box = boxPlace && boxPlace.slidePos === slide?.pos ? boxPlace.box : undefined;
+	const boxNode = boxPlace ? editor.state.doc.nodeAt(boxPlace.boxPos) : undefined;
+	const deletionBlocked = boxNode && boxDeletionBlocked(editor.state, boxNode);
+	// Wherever it was opened on the slide, its notes too, as a slide with no boxes leaves the caret nowhere else.
+	const offersTextBox = editable && opened !== undefined;
 	const offersReset = onSlide && slide !== undefined && canResetLayout(slide.node);
 
 	const menu = (
@@ -250,8 +264,8 @@ export function useSlideMenu(
 						</DropdownMenuItem>
 					</>
 				)}
-				{(offersBoxes || offersReset) && <DropdownMenuSeparator />}
-				{offersBoxes && (
+				{(offersTextBox || offersReset) && <DropdownMenuSeparator />}
+				{offersTextBox && (
 					<DropdownMenuItem onClick={addTextBoxFromMenu}>
 						<SquarePlus aria-hidden />
 						Add text box
@@ -260,15 +274,15 @@ export function useSlideMenu(
 				{box !== undefined && boxNode && (
 					<DropdownMenuItem
 						variant="destructive"
-						disabled={removalBlocked !== undefined}
-						onClick={() => deleteBox(box)}
+						disabled={deletionBlocked !== undefined}
+						onClick={deleteBoxFromMenu}
 					>
 						<Trash2 aria-hidden />
 						<span className="flex flex-col">
 							Delete
-							{removalBlocked && (
+							{deletionBlocked && (
 								<span className="text-muted-foreground text-2xs">
-									{BOX_REMOVAL_BLOCKED_WORDS[removalBlocked]}
+									{BOX_DELETION_BLOCKED_WORDS[deletionBlocked]}
 								</span>
 							)}
 						</span>
@@ -369,14 +383,18 @@ const pointAt = (x: number, y: number, height = 0): VirtualPoint => ({
 });
 
 /** Where on `slide` the pointer at `event` is, in the slide's pixels: `undefined` when its body isn't drawn. */
-function pointOnSlide(view: EditorView, slide: SlideAt, { clientX, clientY }: MouseEvent) {
+function pointOnSlide(
+	view: EditorView,
+	slide: SlideAt,
+	{ clientX, clientY }: MouseEvent,
+): SlidePoint | undefined {
 	const area = drawnSlideBody(view, slide.pos)?.getBoundingClientRect();
 	if (!area?.width) return undefined;
 	const slidePxPerWindowPx = SLIDE_WIDTH / area.width;
-	return {
-		x: (clientX - area.left) * slidePxPerWindowPx,
-		y: (clientY - area.top) * slidePxPerWindowPx,
-	};
+	return slidePoint(
+		(clientX - area.left) * slidePxPerWindowPx,
+		(clientY - area.top) * slidePxPerWindowPx,
+	);
 }
 
 /**

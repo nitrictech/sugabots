@@ -37,7 +37,7 @@ import { Ids, isUuid } from "../ids/ids.ts";
 import { sizeForPeople, type UserFacing } from "../user-message.ts";
 import { readHtml } from "./html-reader.ts";
 import { LiveDocuments } from "./live.ts";
-import type { Blocked, TextRefused } from "./suggestions.ts";
+import type { Refused, TextRefused } from "./suggestions.ts";
 
 /**
  * Reading a pod's artifacts, for people, and keeping the images a document
@@ -118,10 +118,10 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
  * text after it, people's edits included; a change that leaves it reading as
  * it did writes none and is refused as `Unchanged`. A change made in a
  * thread somebody started by asking for an edit from inside the document
- * writes no version and is refused as `Suggested`: what it changes in words,
- * and the blocks, boxes and slides it adds or removes, wait in the document
- * for one of the people there to accept them, though what it changes in how
- * a deck looks is made at once.
+ * writes no version and is refused as `Suggested`: it waits in the document
+ * as one suggestion, its words and how a deck looks alike, for one of the
+ * people there to accept or reject. Only a box it moves in front of or
+ * behind another is moved at once, as a suggestion can't hold that.
  */
 export interface AuthoringInterface {
 	readonly list: (by: AgentInPod) => Effect.Effect<ArtifactSummary[]>;
@@ -648,13 +648,13 @@ function versionOfLive(
 
 /** Why a change to a live document was blocked, as the failure the agent hears. */
 function whyBlocked(
-	blocked: Blocked | TextRefused | "unreadable",
+	blocked: Refused | "unreadable",
 ): Unreadable | SuggestionBlocked | DeckHtmlRefused {
 	switch (blocked) {
 		case "unreadable":
 			return new Unreadable();
 		case "unmarkable":
-			return new SuggestionBlocked({ blocked });
+			return new SuggestionBlocked();
 		default:
 			return new DeckHtmlRefused({ reason: blocked });
 	}
@@ -756,21 +756,18 @@ export class TooLarge extends Data.TaggedError("ArtifactTooLarge")<{
 
 /**
  * The change wrote no version: somebody asked for it from inside the
- * document, so what it changes in words, and the blocks, boxes and slides it
- * adds or removes, wait there as a suggestion, which takes effect if one of
- * the people in it accepts it. What it changes in how a deck looks was made
- * at once.
+ * document, so it waits there as one suggestion, its words and how a deck
+ * looks alike, which takes effect if one of the people in it accepts it. A
+ * box it moves in front of or behind another was moved at once.
  */
 export class Suggested extends Data.TaggedError("ArtifactChangeSuggested") {}
 
 /**
- * The change couldn't be made as asked, for a suggestion's sake, and none of
- * it was made: it was to be a suggestion, and what it changes can't carry a
- * suggestion's marks (`unmarkable`), as a code block can't.
+ * The change couldn't be made as asked, and none of it was made: it was to
+ * be a suggestion, and what it changes can't carry a suggestion's marks, as a
+ * code block can't.
  */
-export class SuggestionBlocked extends Data.TaggedError("ArtifactSuggestionBlocked")<{
-	readonly blocked: Blocked;
-}> {}
+export class SuggestionBlocked extends Data.TaggedError("ArtifactSuggestionBlocked") {}
 
 /**
  * The live document holds content this version of the app cannot read, as a
@@ -800,8 +797,8 @@ export class Unchanged extends Data.TaggedError("ArtifactUnchanged")<{
 
 /**
  * Why a change wrote no version. `Suggested` wrote its suggestion into the
- * live document, and what it changes in how a deck looks; the others left
- * the artifact as it was.
+ * live document, and moved any box it moves among a slide's others; the
+ * others left the artifact as it was.
  */
 export type NotWritten = Suggested | SuggestionBlocked | Unreadable | DeckHtmlRefused | Unchanged;
 

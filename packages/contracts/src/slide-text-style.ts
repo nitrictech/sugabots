@@ -1,10 +1,19 @@
-import { Extension, type Extensions } from "@tiptap/core";
+import { Extension, type Extensions, getStyleProperty } from "@tiptap/core";
 import { TextAlign } from "@tiptap/extension-text-align";
 import { Color } from "@tiptap/extension-text-style/color";
 import { FontFamily } from "@tiptap/extension-text-style/font-family";
 import { TextStyle } from "@tiptap/extension-text-style/text-style";
 import type { ParseRule, TagParseRule } from "@tiptap/pm/model";
-import { pixels, pixelsIn, type StyledElement, styleProperty } from "./css-values.ts";
+import {
+	cssColorIn,
+	fontFamilyIn,
+	isFiniteNumber,
+	NUMBER_PATTERN,
+	pixels,
+	pixelsIn,
+	within,
+} from "./css-values.ts";
+import type { PageElement } from "./page-element.ts";
 
 /*
  * How text on a slide may be styled beyond its marks, as a file made in
@@ -17,10 +26,14 @@ import { pixels, pixelsIn, type StyledElement, styleProperty } from "./css-value
  * deck's HTML says it (see `deck-html.ts`):
  *
  * - `<span style="color: #1e3a8a; font-family: Georgia, serif; font-size: 24px">`,
- *   the size in a slide's pixels, as every length on a slide is (see
+ *   the colour a `CssColor`, the font a list of `FontFamilies`, and the size
+ *   in a slide's pixels, as every length on a slide is (see
  *   `slide-geometry.ts`);
  * - `<p style="text-align: center; line-height: 1.2">`, the line height a
  *   multiple of the text's size.
+ *
+ * Each is read through its reader here, as a box's attributes are, so what
+ * an exporter reads is always of its kind and within bounds.
  *
  * Text with none of these is drawn as the slide styles draw text of its box's
  * role, at the size they step it to so that it fits (`SLIDE_TEXT_STEPS`). A
@@ -33,14 +46,91 @@ export const TEXT_STYLE = "textStyle";
 /** The blocks whose alignment and line height may be set: those whose lines are text. */
 const TEXT_BLOCKS = ["paragraph", "heading"];
 
-/** A stretch of text's size, in a slide's pixels, as a `font-size` in pixels says it: `null` for any other. */
-function fontSizeIn(element: StyledElement): number | null {
-	const size = pixelsIn(styleProperty(element, "font-size"));
-	return size !== undefined && size > 0 ? size : null;
+/** The sizes text may be, in a slide's pixels: the range PowerPoint holds. */
+export const TEXT_SIZES = { least: 1, most: 4000 } as const;
+
+/** The most a line may be tall, as a multiple of its text's size: far more space than any slide shows. */
+export const MOST_LINE_HEIGHT = 100;
+
+/**
+ * `value` as a stretch of text's size, in a slide's pixels: `null` unless it
+ * is a finite number above 0, and one outside `TEXT_SIZES` read as the
+ * nearest size within them.
+ */
+export const textSizeIn = (value: unknown): number | null =>
+	isFiniteNumber(value) && value > 0 ? within(value, TEXT_SIZES.least, TEXT_SIZES.most) : null;
+
+/**
+ * `value` as a paragraph's or heading's line height, a multiple of its
+ * text's size: `null` unless it is a finite number above 0, and one over
+ * `MOST_LINE_HEIGHT` read as that.
+ */
+export const lineHeightIn = (value: unknown): number | null =>
+	isFiniteNumber(value) && value > 0 ? Math.min(value, MOST_LINE_HEIGHT) : null;
+
+/** A stretch of text's size as its `font-size` says it in pixels (see `textSizeIn`). */
+const fontSizeOf = (element: PageElement) =>
+	textSizeIn(pixelsIn(getStyleProperty(element, "font-size")));
+
+/** A line height as `line-height` says it, a multiple of the text's size, or a percentage of it. */
+const LINE_HEIGHT = new RegExp(String.raw`^\s*(${NUMBER_PATTERN})\s*(%)?\s*$`, "i");
+
+function lineHeightOf(element: PageElement): number | null {
+	const [, number, percent] =
+		LINE_HEIGHT.exec(getStyleProperty(element, "line-height") ?? "") ?? [];
+	if (number === undefined) return null;
+	return lineHeightIn(percent ? Number(number) / 100 : Number(number));
 }
 
-const isFontSize = (value: unknown): value is number =>
-	typeof value === "number" && Number.isFinite(value) && value > 0;
+/**
+ * A stretch of text's colour, `color` on the `textStyle` mark, read and
+ * written as a `CssColor`, as a box's fill is. The text style package's
+ * `setColor` and `unsetColor` set it.
+ */
+const SlideColor = Color.extend({
+	addGlobalAttributes() {
+		return [
+			{
+				types: this.options.types,
+				attributes: {
+					color: {
+						default: null,
+						parseHTML: (element) => cssColorIn(getStyleProperty(element, "color")),
+						renderHTML: ({ color }) => {
+							const known = cssColorIn(color);
+							return known ? { style: `color: ${known}` } : {};
+						},
+					},
+				},
+			},
+		];
+	},
+});
+
+/**
+ * A stretch of text's font, `fontFamily` on the `textStyle` mark, read and
+ * written as a list of `FontFamilies`. The text style package's
+ * `setFontFamily` and `unsetFontFamily` set it.
+ */
+const SlideFontFamily = FontFamily.extend({
+	addGlobalAttributes() {
+		return [
+			{
+				types: this.options.types,
+				attributes: {
+					fontFamily: {
+						default: null,
+						parseHTML: (element) => fontFamilyIn(getStyleProperty(element, "font-family")),
+						renderHTML: ({ fontFamily }) => {
+							const known = fontFamilyIn(fontFamily);
+							return known ? { style: `font-family: ${known}` } : {};
+						},
+					},
+				},
+			},
+		];
+	},
+});
 
 /**
  * A stretch of text's size, `fontSize` on the `textStyle` mark: a number of
@@ -55,26 +145,16 @@ const FontSize = Extension.create({
 			attributes: {
 				fontSize: {
 					default: null,
-					parseHTML: fontSizeIn,
-					renderHTML: ({ fontSize }) =>
-						isFontSize(fontSize) ? { style: `font-size: ${pixels(fontSize)}` } : {},
+					parseHTML: fontSizeOf,
+					renderHTML: ({ fontSize }) => {
+						const size = textSizeIn(fontSize);
+						return size === null ? {} : { style: `font-size: ${pixels(size)}` };
+					},
 				},
 			},
 		},
 	],
 });
-
-/** A line height as `line-height` says it: a multiple of the text's size, or a percentage of it. `null` for any other. */
-function lineHeightIn(element: StyledElement): number | null {
-	const [, number, percent] =
-		/^\s*(\d+\.?\d*|\.\d+)\s*(%)?\s*$/.exec(styleProperty(element, "line-height") ?? "") ?? [];
-	if (number === undefined) return null;
-	const multiple = percent ? Number(number) / 100 : Number(number);
-	return multiple > 0 && Number.isFinite(multiple) ? multiple : null;
-}
-
-const isLineHeight = (value: unknown): value is number =>
-	typeof value === "number" && Number.isFinite(value) && value > 0;
 
 /**
  * A paragraph's or heading's line height, `lineHeight` on the block: a
@@ -90,20 +170,22 @@ const BlockLineHeight = Extension.create({
 			attributes: {
 				lineHeight: {
 					default: null,
-					parseHTML: lineHeightIn,
-					renderHTML: ({ lineHeight }) =>
-						isLineHeight(lineHeight) ? { style: `line-height: ${lineHeight}` } : {},
+					parseHTML: lineHeightOf,
+					renderHTML: ({ lineHeight }) => {
+						const multiple = lineHeightIn(lineHeight);
+						return multiple === null ? {} : { style: `line-height: ${multiple}` };
+					},
 				},
 			},
 		},
 	],
 });
 
-/** What CSS says of a stretch of text that the `textStyle` mark keeps. */
-const saysKeptStyle = (element: StyledElement) =>
-	styleProperty(element, "color") !== null ||
-	styleProperty(element, "font-family") !== null ||
-	fontSizeIn(element) !== null;
+/** Whether `element`'s style says something the `textStyle` mark keeps. */
+const saysKeptStyle = (element: PageElement) =>
+	cssColorIn(getStyleProperty(element, "color")) !== null ||
+	fontFamilyIn(getStyleProperty(element, "font-family")) !== null ||
+	fontSizeOf(element) !== null;
 
 /**
  * The text style mark, read from a span only when the span's style says
@@ -117,7 +199,7 @@ const SlideTextStyle = TextStyle.extend({
 			isTagRule(rule)
 				? {
 						...rule,
-						getAttrs: (element: RuleElement) =>
+						getAttrs: (element: PageElement) =>
 							saysKeptStyle(element) && (rule.getAttrs?.(element) ?? null),
 					}
 				: rule,
@@ -128,14 +210,9 @@ const SlideTextStyle = TextStyle.extend({
 const isTagRule = (rule: ParseRule): rule is TagParseRule => typeof rule.tag === "string";
 
 /**
- * The element a tag rule reads, as the parser gives it: named through the
- * rule's own type, as the API is built without the browser's.
- */
-type RuleElement = Parameters<NonNullable<TagParseRule["getAttrs"]>>[0];
-
-/**
  * What styles a deck's text, as the text style and text align packages do,
- * but for a stretch of text's size and a block's line height, which are
+ * but for a stretch of text's colour and font, read and written through
+ * their readers here, and its size and a block's line height, which are
  * numbers here (see `FontSize` and `BlockLineHeight`). The packages' commands
  * for colour, font and alignment (`setColor`, `setFontFamily`,
  * `setTextAlign`) work as they document; their `setFontSize` and
@@ -143,8 +220,8 @@ type RuleElement = Parameters<NonNullable<TagParseRule["getAttrs"]>>[0];
  */
 export const slideTextStyles: Extensions = [
 	SlideTextStyle,
-	Color,
-	FontFamily,
+	SlideColor,
+	SlideFontFamily,
 	FontSize,
 	TextAlign.configure({ types: TEXT_BLOCKS }),
 	BlockLineHeight,

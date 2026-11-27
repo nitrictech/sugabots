@@ -10,9 +10,10 @@ declare const cssColorParsed: unique symbol;
 
 /**
  * A CSS colour as written: a hex colour, a colour function of numbers such
- * as `rgb(30 41 59 / 50%)`, or a keyword such as `white`. Only `cssColorIn`
- * makes one, so a colour written into `background` can't name an image, which
- * every browser drawing the deck would fetch.
+ * as `rgb(30 41 59 / 50%)`, or one of CSS's colour names, such as `white`.
+ * Only `cssColorIn` makes one, so a colour written into `background` can't
+ * name an image, which every browser drawing the deck would fetch, nor be a
+ * word that is no colour, as `solid` in a border.
  */
 export type CssColor = string & { readonly [cssColorParsed]: true };
 
@@ -21,20 +22,221 @@ const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 /** A colour function whose arguments are numbers, percentages, angles and the separators between them, never another function. */
 const COLOR_FUNCTION = /^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([\w\s.,%/+-]*\)$/i;
 
-const COLOR_KEYWORD = /^[a-z]+$/i;
+/** CSS's colour names, and the two keywords that are colours too: none at all, and the colour of the text. */
+const COLOR_NAMES: ReadonlySet<string> = new Set([
+	"transparent",
+	"currentcolor",
+	"aliceblue",
+	"antiquewhite",
+	"aqua",
+	"aquamarine",
+	"azure",
+	"beige",
+	"bisque",
+	"black",
+	"blanchedalmond",
+	"blue",
+	"blueviolet",
+	"brown",
+	"burlywood",
+	"cadetblue",
+	"chartreuse",
+	"chocolate",
+	"coral",
+	"cornflowerblue",
+	"cornsilk",
+	"crimson",
+	"cyan",
+	"darkblue",
+	"darkcyan",
+	"darkgoldenrod",
+	"darkgray",
+	"darkgreen",
+	"darkgrey",
+	"darkkhaki",
+	"darkmagenta",
+	"darkolivegreen",
+	"darkorange",
+	"darkorchid",
+	"darkred",
+	"darksalmon",
+	"darkseagreen",
+	"darkslateblue",
+	"darkslategray",
+	"darkslategrey",
+	"darkturquoise",
+	"darkviolet",
+	"deeppink",
+	"deepskyblue",
+	"dimgray",
+	"dimgrey",
+	"dodgerblue",
+	"firebrick",
+	"floralwhite",
+	"forestgreen",
+	"fuchsia",
+	"gainsboro",
+	"ghostwhite",
+	"gold",
+	"goldenrod",
+	"gray",
+	"green",
+	"greenyellow",
+	"grey",
+	"honeydew",
+	"hotpink",
+	"indianred",
+	"indigo",
+	"ivory",
+	"khaki",
+	"lavender",
+	"lavenderblush",
+	"lawngreen",
+	"lemonchiffon",
+	"lightblue",
+	"lightcoral",
+	"lightcyan",
+	"lightgoldenrodyellow",
+	"lightgray",
+	"lightgreen",
+	"lightgrey",
+	"lightpink",
+	"lightsalmon",
+	"lightseagreen",
+	"lightskyblue",
+	"lightslategray",
+	"lightslategrey",
+	"lightsteelblue",
+	"lightyellow",
+	"lime",
+	"limegreen",
+	"linen",
+	"magenta",
+	"maroon",
+	"mediumaquamarine",
+	"mediumblue",
+	"mediumorchid",
+	"mediumpurple",
+	"mediumseagreen",
+	"mediumslateblue",
+	"mediumspringgreen",
+	"mediumturquoise",
+	"mediumvioletred",
+	"midnightblue",
+	"mintcream",
+	"mistyrose",
+	"moccasin",
+	"navajowhite",
+	"navy",
+	"oldlace",
+	"olive",
+	"olivedrab",
+	"orange",
+	"orangered",
+	"orchid",
+	"palegoldenrod",
+	"palegreen",
+	"paleturquoise",
+	"palevioletred",
+	"papayawhip",
+	"peachpuff",
+	"peru",
+	"pink",
+	"plum",
+	"powderblue",
+	"purple",
+	"rebeccapurple",
+	"red",
+	"rosybrown",
+	"royalblue",
+	"saddlebrown",
+	"salmon",
+	"sandybrown",
+	"seagreen",
+	"seashell",
+	"sienna",
+	"silver",
+	"skyblue",
+	"slateblue",
+	"slategray",
+	"slategrey",
+	"snow",
+	"springgreen",
+	"steelblue",
+	"tan",
+	"teal",
+	"thistle",
+	"tomato",
+	"turquoise",
+	"violet",
+	"wheat",
+	"white",
+	"whitesmoke",
+	"yellow",
+	"yellowgreen",
+]);
 
-/** Keywords CSS takes where a colour goes that are no colour: none at all, or whatever the cascade gives. */
-const NOT_COLORS = new Set(["none", "inherit", "initial", "unset", "revert", "auto"]);
-
-/** `value` as a CSS colour, trimmed, or `null` when it is no colour `CssColor` allows, as `none`. */
+/** `value` as a CSS colour, trimmed and as written, or `null` when it is no colour `CssColor` allows. */
 export function cssColorIn(value: unknown): CssColor | null {
 	if (typeof value !== "string") return null;
 	const trimmed = value.trim();
-	if (NOT_COLORS.has(trimmed.toLowerCase())) return null;
 	const isColor =
-		HEX_COLOR.test(trimmed) || COLOR_FUNCTION.test(trimmed) || COLOR_KEYWORD.test(trimmed);
+		HEX_COLOR.test(trimmed) ||
+		COLOR_FUNCTION.test(trimmed) ||
+		COLOR_NAMES.has(trimmed.toLowerCase());
 	return isColor ? (trimmed as CssColor) : null;
 }
+
+declare const fontFamilyParsed: unique symbol;
+
+/**
+ * A list of font families as CSS writes one, such as `"Source Serif",
+ * Georgia, serif`: each family a name of letters of any script, digits,
+ * spaces, hyphens and underscores, or such a name in quotes, which may also
+ * hold dots, commas, ampersands, pluses and the other kind of quote. Only
+ * `fontFamilyIn` makes one, so it names fonts and nothing else, never a
+ * `url(…)`.
+ */
+export type FontFamilies = string & { readonly [fontFamilyParsed]: true };
+
+const FAMILY_NAME = /^(?:[\p{L}\p{N}_ -]+|"[\p{L}\p{N}_ .,&'+-]+"|'[\p{L}\p{N}_ .,&"+-]+')$/u;
+
+/** `value` as a list of font families, trimmed and as written, or `null` when it lists anything else. */
+export function fontFamilyIn(value: unknown): FontFamilies | null {
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	const families = splitFamilies(trimmed);
+	const named = families.length > 0 && families.every((family) => FAMILY_NAME.test(family));
+	return named ? (trimmed as FontFamilies) : null;
+}
+
+/** The families a list of them names, split at each comma outside quotes, each trimmed. */
+function splitFamilies(list: string): string[] {
+	const families: string[] = [];
+	let quote: string | undefined;
+	let family = "";
+	for (const character of list) {
+		if (quote) {
+			if (character === quote) quote = undefined;
+		} else if (character === '"' || character === "'") {
+			quote = character;
+		} else if (character === ",") {
+			families.push(family.trim());
+			family = "";
+			continue;
+		}
+		family += character;
+	}
+	return quote ? [] : [...families, family.trim()];
+}
+
+/**
+ * A number as CSS and SVG write one, as a regular expression's source: a
+ * sign, digits with or without a point, and an exponent, as `-1.5e-7`.
+ */
+export const NUMBER_PATTERN = String.raw`[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?`;
+
+const PIXELS = new RegExp(String.raw`^\s*(${NUMBER_PATTERN})(?:px)?\s*$`, "i");
 
 /**
  * The finite number of pixels `value` says, as `24px`, or as a bare number,
@@ -43,38 +245,17 @@ export function cssColorIn(value: unknown): CssColor | null {
  * relative to.
  */
 export function pixelsIn(value: string | null | undefined): number | undefined {
-	const [, number] =
-		/^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(?:px)?\s*$/i.exec(value ?? "") ?? [];
-	if (number === undefined) return undefined;
+	const [, number] = PIXELS.exec(value ?? "") ?? [];
 	const pixels = Number(number);
-	return Number.isFinite(pixels) ? pixels : undefined;
+	return number !== undefined && Number.isFinite(pixels) ? pixels : undefined;
 }
 
 /** `value` as a CSS length in pixels, as a deck's HTML writes every length on a slide. */
 export const pixels = (value: number): string => `${value}px`;
 
-/**
- * An element of a page being read, as far as reading its inline style goes.
- * The API reads HTML with a DOM of its own and is built without the
- * browser's types, so an element is typed by the little of it that is read.
- */
-export interface StyledElement {
-	getAttribute(name: string): string | null;
-}
+export const isFiniteNumber = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value);
 
-/**
- * The value `element`'s inline style gives `property`, as written: the last
- * declaration of it, as CSS takes the last, or `null` when there is none.
- * It is read from the `style` attribute itself, as a browser's own reading
- * rewrites a value in its own words, such as a hex colour as `rgb()`.
- */
-export function styleProperty(element: StyledElement, property: string): string | null {
-	const wanted = property.toLowerCase();
-	const declarations = (element.getAttribute("style") ?? "").split(";").toReversed();
-	for (const declaration of declarations) {
-		const colon = declaration.indexOf(":");
-		if (colon < 0 || declaration.slice(0, colon).trim().toLowerCase() !== wanted) continue;
-		return declaration.slice(colon + 1).trim();
-	}
-	return null;
-}
+/** `value`, a number, at least `least` and at most `most`. */
+export const within = (value: number, least: number, most: number): number =>
+	Math.min(most, Math.max(least, value));
