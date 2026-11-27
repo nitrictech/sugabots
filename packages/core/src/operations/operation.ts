@@ -54,13 +54,13 @@ export class ApprovalCheckReached extends ApprovalNeeded {
  * One call of an operation, the `X` of `Approved<P, X, Targets, Operation>`, which the registry
  * hands its body with the principal and input. A bot's tool call is the
  * `tool_call` row the bot loop recorded before calling, which its approval is
- * stored against. A request is identified by its entrypoint. An approval check stops at the
+ * stored against. An approval check stops at the
  * approval proof after the operation has checked its other requirements.
  */
 export type Call =
 	| ApprovalCheck
 	| { readonly kind: "toolCall"; readonly toolCall: string }
-	| { readonly kind: "request"; readonly request: string };
+	| { readonly kind: "request" };
 
 export interface Operation<Contract extends OperationContract.Contract, Services> {
 	readonly kind: "request";

@@ -155,7 +155,7 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 		const principal = await signIn(memberId);
 		return runOnPostgres(
 			remove
-				.run(principal, { botId }, { kind: "request", request: crypto.randomUUID() })
+				.run(principal, { botId }, { kind: "request" })
 				.pipe(Effect.provideContext(deletionServices)),
 		);
 	};

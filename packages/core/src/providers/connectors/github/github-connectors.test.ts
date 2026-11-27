@@ -306,11 +306,7 @@ describe.skipIf(!process.env.DATABASE_URL)("GitHub connectors, against Postgres"
 		).pipe(Layer.provide(egressToGitHub(github.fetch)));
 		const principal = await setup.member(adminId);
 		const setEnabled = (enabled: boolean) =>
-			update.run(
-				principal,
-				{ projectId, connectorId, changes: { enabled } },
-				{ kind: "request", request: crypto.randomUUID() },
-			);
+			update.run(principal, { projectId, connectorId, changes: { enabled } }, { kind: "request" });
 		const expectedCredentials = [
 			expect.objectContaining({ host: "github.com", pathPrefix: "/acme/" }),
 		];

@@ -186,7 +186,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		const viewing = await runOnPostgres(
 			Scope.provide(scope)(
 				viewDesktop
-					.run(principal, { chatId, botId }, { kind: "request", request: randomUUID() })
+					.run(principal, { chatId, botId }, { kind: "request" })
 					.pipe(
 						Effect.provideService(DesktopViewer.Service, standIn),
 						Effect.provideService(Streams.Service, observedStreams),

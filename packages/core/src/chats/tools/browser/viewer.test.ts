@@ -178,18 +178,16 @@ describe.skipIf(!configured)("the desktop viewer, against Postgres and OpenSandb
 		return runOnPostgres(
 			Effect.exit(
 				Scope.provide(scope)(
-					viewDesktop
-						.run(principal, { chatId, botId: of }, { kind: "request", request: memberId })
-						.pipe(
-							Effect.flatMap(({ stream }) => Stream.runHead(stream)),
-							Effect.flatMap((first) =>
-								first._tag === "Some"
-									? Effect.succeed(first.value)
-									: Effect.die(new Error("The viewer ended before it opened")),
-							),
-							Effect.provideService(DesktopViewer.Service, viewer),
-							Effect.provideService(Streams.Service, streams),
+					viewDesktop.run(principal, { chatId, botId: of }, { kind: "request" }).pipe(
+						Effect.flatMap(({ stream }) => Stream.runHead(stream)),
+						Effect.flatMap((first) =>
+							first._tag === "Some"
+								? Effect.succeed(first.value)
+								: Effect.die(new Error("The viewer ended before it opened")),
 						),
+						Effect.provideService(DesktopViewer.Service, viewer),
+						Effect.provideService(Streams.Service, streams),
+					),
 				),
 			),
 		);

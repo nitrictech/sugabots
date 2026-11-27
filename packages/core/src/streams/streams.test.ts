@@ -965,7 +965,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					longRunning["events.followChat"](
 						await signedIn.member(world.ed),
 						{ chatId: world.chat },
-						{ kind: "request", request: randomUUID() },
+						{ kind: "request" },
 					),
 				),
 			);
@@ -991,7 +991,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 					longRunning["events.followChat"](
 						await signedIn.member(world.ed),
 						{ chatId: world.chat },
-						{ kind: "request", request: randomUUID() },
+						{ kind: "request" },
 					),
 				).pipe(Effect.asVoid),
 			);

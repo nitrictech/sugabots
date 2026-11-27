@@ -409,7 +409,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 
 		it("needs no approval for a member acting for themselves, or a call that needs none", async () => {
 			const { a } = world;
-			const request: Call = { kind: "request", request: "request-1" };
+			const request: Call = { kind: "request" };
 			expect(await approved(await as.member(a.vi), request, always, input)).toBe("ok");
 			expect(await approved(await as.botFor(a.ed, a.pub.id, a.chat), request, never, input)).toBe(
 				"ok",
@@ -418,7 +418,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 
 		it("refuses other non-bot principals", async () => {
 			const { a } = world;
-			const request: Call = { kind: "request", request: "request-1" };
+			const request: Call = { kind: "request" };
 			const principals = [
 				await as.webhook(a.workspace, a.project),
 				await as.compaction(a.chat, a.pub.id),
@@ -432,7 +432,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 		it("refuses approval when the input names a different chat from the target", async () => {
 			const { a } = world;
 			const member = await as.member(a.ed);
-			const request: Call = { kind: "request", request: "resolve" };
+			const request: Call = { kind: "request" };
 			const input = { chatId: a.chat, resolved: true };
 			const approveFor = (target: string) =>
 				outcome(
@@ -460,9 +460,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				tool: "other_tool",
 			});
 
-			expect(await approved(edsBot, { kind: "request", request: "request-2" }, always, input)).toBe(
-				"ApprovalNeeded",
-			);
+			expect(await approved(edsBot, { kind: "request" }, always, input)).toBe("ApprovalNeeded");
 			expect(await approved(edsBot, toolCallOf(pending), always, input)).toBe("ApprovalNeeded");
 			expect(
 				await decidedBy(edsBot, toolCallOf(allowed), always, { count: 5, query: "Ship it" }),
@@ -675,7 +673,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 
 		it("makes a personal bot ask its creator before any change, and before every call of a run from outside", async () => {
 			const { a } = world;
-			const request: Call = { kind: "request", request: "request-4" };
+			const request: Call = { kind: "request" };
 			const personalBots = [
 				{ bot: a.assistant, chat: a.assistantChat },
 				{ bot: a.personal, chat: a.personalChat },
@@ -711,7 +709,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 
 		it("makes a turn a personal bot's brief started ask before any change, as the personal bot would", async () => {
 			const { a } = world;
-			const request: Call = { kind: "request", request: "request-5" };
+			const request: Call = { kind: "request" };
 			const briefedBy = async (writerId: string) => {
 				const briefed = await seedProjectChat(a.workspace, a.pub.defaultProject, a.ed);
 				return as.turn(

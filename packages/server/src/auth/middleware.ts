@@ -16,7 +16,6 @@ import type {
 	OwnEndpointOperationName,
 } from "@sugabots/contracts/operations";
 import { SessionAuthentication } from "@sugabots/core/authentication/session";
-import { Ids } from "@sugabots/core/ids/ids";
 import type { Call, Running } from "@sugabots/core/operations/operation";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { MemberSession } from "@sugabots/core/principal";
@@ -75,7 +74,6 @@ export const sessionLayer = Layer.effect(
 	Effect.gen(function* () {
 		const authentication = yield* Authentication.Service;
 		const sessions = yield* SessionAuthentication.Service;
-		const ids = yield* Ids.Service;
 		return (httpEffect) =>
 			Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest;
@@ -101,7 +99,7 @@ export const sessionLayer = Layer.effect(
 						Effect.succeed(HttpServerResponse.mergeCookies(response, refreshedCookies)),
 					);
 				}
-				const call: Call = { kind: "request", request: yield* ids.next };
+				const call: Call = { kind: "request" };
 				return yield* httpEffect.pipe(
 					Effect.provideService(CurrentUserOfRequest, member),
 					Effect.provideService(AuthenticatedRequest, { principal, call, headers, cookie }),

@@ -1520,9 +1520,8 @@ const ensureAutomation = (
 ) =>
 	Effect.gen(function* () {
 		const projectId = yield* defaultProjectOf(input.botId);
-		const ids = yield* Ids.Service;
 		yield* automationsOperations["automations.create"]
-			.run(owner, { projectId, ...input.automation }, { kind: "request", request: yield* ids.next })
+			.run(owner, { projectId, ...input.automation }, { kind: "request" })
 			.pipe(
 				Effect.asVoid,
 				Effect.catchTag("AutomationNameTaken", () => Effect.void),

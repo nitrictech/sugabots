@@ -143,7 +143,6 @@ describe("attachments and approvals in a chat", () => {
 
 		const body = chatsOperations["chats.send"].run(who.ed, empty, {
 			kind: "request",
-			request: crypto.randomUUID(),
 		});
 
 		await expect(Effect.runPromise(Effect.orDie(body) as Effect.Effect<unknown>)).rejects.toThrow(

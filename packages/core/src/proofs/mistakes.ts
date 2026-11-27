@@ -883,7 +883,7 @@ export const chatServicesMistakes = named(
 	"chat",
 	"other chat",
 	(principal, other, chat, otherChat) =>
-		named({ kind: "request", request: "chat-service-example" } as const, (call) =>
+		named({ kind: "request" } as const, (call) =>
 			Effect.gen(function* () {
 				const reach = yield* proveRealReachesChat(principal, chat);
 				const changesOther = yield* proveRealCanChangeChat(
@@ -1057,53 +1057,50 @@ export const computerUseMistakes = named(
 	otherPrincipal,
 	"chat",
 	(principal, other, chat) =>
-		named(
-			{ kind: "request", request: "computer-example" } as const,
-			{ host: "example.com" },
-			(call, host) =>
-				Effect.gen(function* () {
-					const canUse = yield* proveCanUseChatComputer(principal, chat);
-					const otherUses = yield* proveCanUseChatComputer(other, chat);
-					const approved = yield* proveRealApproved(
-						principal,
-						call,
-						approvalRule("computers.runCommand"),
-						command,
-						chat,
-					);
+		named({ kind: "request" } as const, { host: "example.com" }, (call, host) =>
+			Effect.gen(function* () {
+				const canUse = yield* proveCanUseChatComputer(principal, chat);
+				const otherUses = yield* proveCanUseChatComputer(other, chat);
+				const approved = yield* proveRealApproved(
+					principal,
+					call,
+					approvalRule("computers.runCommand"),
+					command,
+					chat,
+				);
 
-					// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NoInfer<NameA>, NameC>'] Only the principal that can use the computer may request this host.
-					yield* proveComputerRequestApproved(principal, call, host, otherUses);
-					// @ts-expect-error TS2554 [Expected 4 arguments, but got 3.] Requesting a host requires authority to use the computer.
-					yield* proveComputerRequestApproved(principal, call, host);
-					yield* proveNamedApproval(
-						principal,
-						call,
-						// @ts-expect-error TS2345 [parameter of type 'ApprovalRule<OrdinaryApproval, "computers.requestHost">] A computer request uses its dedicated approval prover.
-						approvalRule("computers.requestHost"),
-						host,
-						chat,
-					);
+				// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NoInfer<NameA>, NameC>'] Only the principal that can use the computer may request this host.
+				yield* proveComputerRequestApproved(principal, call, host, otherUses);
+				// @ts-expect-error TS2554 [Expected 4 arguments, but got 3.] Requesting a host requires authority to use the computer.
+				yield* proveComputerRequestApproved(principal, call, host);
+				yield* proveNamedApproval(
+					principal,
+					call,
+					// @ts-expect-error TS2345 [parameter of type 'ApprovalRule<OrdinaryApproval, "computers.requestHost">] A computer request uses its dedicated approval prover.
+					approvalRule("computers.requestHost"),
+					host,
+					chat,
+				);
 
-					// A command run on the computer another principal may use, with this one's approval.
-					// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NameA, NameC>']
-					yield* turnComputers.runCommand(otherUses, approved);
+				// A command run on the computer another principal may use, with this one's approval.
+				// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NameA, NameC>']
+				yield* turnComputers.runCommand(otherUses, approved);
 
-					// A command run with no proof that the call may run.
-					// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameC], "computers.runCommand">']
-					yield* turnComputers.runCommand(canUse, canUse);
+				// A command run with no proof that the call may run.
+				// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameC], "computers.runCommand">']
+				yield* turnComputers.runCommand(canUse, canUse);
 
-					// A host request read back with the reach of the chat, not the proof the bot may use its computer.
-					const reach = yield* proveRealReachesChat(principal, chat);
-					// @ts-expect-error TS2739 [from type 'CanUseChatComputer<NameA, NameC>'] Chat reach does not prove permission to read a computer request.
-					yield* computerNetwork.requestedHost(reach, approved);
+				// A host request read back with the reach of the chat, not the proof the bot may use its computer.
+				const reach = yield* proveRealReachesChat(principal, chat);
+				// @ts-expect-error TS2739 [from type 'CanUseChatComputer<NameA, NameC>'] Chat reach does not prove permission to read a computer request.
+				yield* computerNetwork.requestedHost(reach, approved);
 
-					yield* turnComputers.runCommand(canUse, approved);
-					yield* computerNetwork.requestedHost(
-						canUse,
-						yield* proveComputerRequestApproved(principal, call, host, canUse),
-					);
-				}),
+				yield* turnComputers.runCommand(canUse, approved);
+				yield* computerNetwork.requestedHost(
+					canUse,
+					yield* proveComputerRequestApproved(principal, call, host, canUse),
+				);
+			}),
 		),
 );
 
@@ -1128,7 +1125,7 @@ export const chatFileReadProofMistakes = named(
 	principal,
 	otherPrincipal,
 	"file",
-	{ kind: "request", request: "chat-file-read-example" } as const,
+	{ kind: "request" } as const,
 	(principal, other, file, call) =>
 		Effect.gen(function* () {
 			const reach = yield* proveReachesFile(principal, file);
@@ -1221,7 +1218,7 @@ export const webProofMistakes = named(
 	webBotPrincipal,
 	otherPrincipal,
 	"workspace",
-	{ kind: "request", request: "web-proof-example" } as const,
+	{ kind: "request" } as const,
 	(principal, other, workspace, call) =>
 		Effect.gen(function* () {
 			const input = { url: "https://example.com" };

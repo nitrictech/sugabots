@@ -47,7 +47,7 @@ export async function stepOnComputer(
 	): Promise<Record<string, unknown>> => {
 		const called: Effect.Effect<object, unknown, Database | TurnComputers.Service> = workOnComputer[
 			name
-		].run(principal, input as never, { kind: "request", request: `test-${name}` });
+		].run(principal, input as never, { kind: "request" });
 		return {
 			...(await runOnPostgres(Effect.provideService(called, TurnComputers.Service, computers))),
 		};

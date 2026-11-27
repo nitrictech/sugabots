@@ -302,7 +302,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						return yield* scheduledWorkOperations["projectComputer.sleepIfIdle"].run(
 							principal,
 							{ computerId: crypto.randomUUID() },
-							{ kind: "request", request: crypto.randomUUID() },
+							{ kind: "request" },
 						);
 					}).pipe(
 						Effect.provide(SystemWorkAuthentication.layer),
@@ -640,7 +640,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					yield* scheduledWorkOperations["projectComputer.sleepIfIdle"].run(
 						principal,
 						{ computerId: secondRecord.id },
-						{ kind: "request", request: crypto.randomUUID() },
+						{ kind: "request" },
 					);
 				}).pipe(
 					Effect.provide(SystemWorkAuthentication.layer),

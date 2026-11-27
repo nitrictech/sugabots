@@ -3,20 +3,8 @@ import { eq } from "drizzle-orm";
 import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { TurnAuthentication } from "../../authentication/turn.ts";
-import {
-	file,
-	membership,
-	message,
-	projectChat,
-	toolCall,
-	turn,
-} from "../../database/schema.ts";
-import {
-	closeDatabase,
-	onDatabase,
-	onPostgres,
-	runOnPostgres,
-} from "../../database/testing.ts";
+import { file, membership, message, projectChat, toolCall, turn } from "../../database/schema.ts";
+import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { asRunningTurn } from "../../operations/running-turn.ts";
@@ -258,10 +246,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 		});
 	});
 
-	it.each([
-		"made a viewer",
-		"removed from the workspace",
-	] as const)(
+	it.each(["made a viewer", "removed from the workspace"] as const)(
 		"finishes a call admitted before its asker was %s",
 		async (change) => {
 			const { principal } = opened;
@@ -276,7 +261,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 						: db.delete(membership).where(eq(membership.memberId, principal.asker)),
 				);
 			const input = { chatId: principal.chat, resolved: true };
-			const call = { kind: "request", request: "resolve" } as const;
+			const call = { kind: "request" } as const;
 
 			const result = await run(
 				Effect.result(
@@ -310,5 +295,4 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 			expect(stored?.resolvedAt).not.toBeNull();
 		},
 	);
-
 });

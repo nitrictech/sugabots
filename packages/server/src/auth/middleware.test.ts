@@ -78,9 +78,6 @@ describe("the Session middleware", () => {
 			{ kind: "MemberSession", member: ada.id, session: `session-of-${ada.id}` },
 			{ kind: "MemberSession", member: ada.id, session: `session-of-${ada.id}` },
 		]);
-		const [firstCall, secondCall] = calls.map(({ call }) => call);
-		expect(firstCall).toEqual({ kind: "request", request: expect.any(String) });
-		expect(secondCall).toEqual({ kind: "request", request: expect.any(String) });
-		expect(firstCall).not.toEqual(secondCall);
+		expect(calls.map(({ call }) => call)).toEqual([{ kind: "request" }, { kind: "request" }]);
 	});
 });

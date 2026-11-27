@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
 import type {
 	AcceptedRun,
 	AutomationTriggerInput,
@@ -124,7 +124,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		return session;
 	};
 	/** A call of its own, as each HTTP request is. */
-	const aRequest = (): Call => ({ kind: "request", request: randomUUID() });
+	const aRequest = (): Call => ({ kind: "request" });
 	/**
 	 * The automations operations, each called for `memberId` signed in, by
 	 * the names and shapes these cases use.

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
 	FailureOf,
 	InputOf,
@@ -172,17 +171,13 @@ export async function servedRegistry(over: ServedOver = {}): Promise<{
 	return {
 		longRunning,
 		call: (principal, name, input) =>
-			runOn(
-				withClock(operations[name](principal, input, { kind: "request", request: randomUUID() })),
-			),
+			runOn(withClock(operations[name](principal, input, { kind: "request" }))),
 		follow: (principal, name, input) =>
 			runOn(
 				Effect.gen(function* () {
 					const scope = yield* Scope.make();
 					const started = yield* Effect.exit(
-						Scope.provide(scope)(
-							longRunning[name](principal, input, { kind: "request", request: randomUUID() }),
-						),
+						Scope.provide(scope)(longRunning[name](principal, input, { kind: "request" })),
 					);
 					if (Exit.isFailure(started)) {
 						yield* Scope.close(scope, Exit.void);
