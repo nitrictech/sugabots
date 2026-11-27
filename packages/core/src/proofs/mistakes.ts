@@ -1315,7 +1315,7 @@ export const connectorSearchMistakes = Effect.gen(function* () {
 
 export const computerAvailabilityMistake = Effect.gen(function* () {
 	// @ts-expect-error TS2345 [Argument of type 'string' is not assignable to parameter of type 'CanUseChatComputer<unknown, unknown>'] A computer id does not prove permission to use the chat's computer.
-	yield* turnComputers.requireComputer("computer-id");
+	yield* turnComputers.checkStep("computer-id");
 });
 
 declare const turnRecords: Turns.Records.Interface;

@@ -11,7 +11,7 @@ import {
 	type OrdinaryApproval,
 	proveComputerUseApproved,
 } from "../../proofs/approved.ts";
-import { type CanUseChatComputer, proveCanUseChatComputer } from "../../proofs/can-use-computer.ts";
+import { proveCanUseChatComputer } from "../../proofs/can-use-computer.ts";
 import { named } from "../../proofs/proof.ts";
 import { type Call, defineOperation } from "../operation.ts";
 
@@ -36,7 +36,7 @@ const usingComputer = <N extends ComputerOperation, A, E, R>(
 	rule: ApprovalRule<OrdinaryApproval, N>,
 	approvalInput: InputOf<NoInfer<N>>,
 	work: <P, C, X>(
-		canUse: CanUseChatComputer<P, C>,
+		step: TurnComputers.CheckedStep<P, C>,
 		approved: Approved<P, X, [C], N>,
 	) => Effect.Effect<A, E, R>,
 ) =>
@@ -53,7 +53,7 @@ const usingComputer = <N extends ComputerOperation, A, E, R>(
 				Effect.gen(function* () {
 					const canUse = yield* proveCanUseChatComputer(principal, chat);
 					const computers = yield* TurnComputers.Service;
-					yield* computers.requireComputer(canUse);
+					const step = yield* computers.checkStep(canUse);
 					const approved = yield* proveComputerUseApproved(
 						principal,
 						call,
@@ -61,7 +61,7 @@ const usingComputer = <N extends ComputerOperation, A, E, R>(
 						approvedInput,
 						canUse,
 					);
-					return yield* work(canUse, approved);
+					return yield* work(step, approved);
 				}),
 		);
 	});
@@ -75,7 +75,7 @@ export const runCommand = defineOperation(
 				call,
 				approvalRule("computers.runCommand"),
 				input,
-				(canUse, approved) => computers.runCommand(canUse, approved),
+				(step, approved) => computers.runCommand(step, approved),
 			),
 		),
 );
@@ -84,12 +84,8 @@ export const readFile = defineOperation(
 	computersContracts["computers.readFile"],
 	(principal, input, call) =>
 		Effect.flatMap(TurnComputers.Service, (computers) =>
-			usingComputer(
-				principal,
-				call,
-				approvalRule("computers.readFile"),
-				input,
-				(canUse, approved) => computers.readFile(canUse, approved),
+			usingComputer(principal, call, approvalRule("computers.readFile"), input, (step, approved) =>
+				computers.readFile(step, approved),
 			),
 		),
 );
@@ -98,12 +94,8 @@ export const writeFile = defineOperation(
 	computersContracts["computers.writeFile"],
 	(principal, input, call) =>
 		Effect.flatMap(TurnComputers.Service, (computers) =>
-			usingComputer(
-				principal,
-				call,
-				approvalRule("computers.writeFile"),
-				input,
-				(canUse, approved) => computers.writeFile(canUse, approved),
+			usingComputer(principal, call, approvalRule("computers.writeFile"), input, (step, approved) =>
+				computers.writeFile(step, approved),
 			),
 		),
 );
@@ -117,7 +109,7 @@ export const copyChatFile = defineOperation(
 				call,
 				approvalRule("computers.copyChatFile"),
 				input,
-				(canUse, approved) => computers.copyChatFile(canUse, approved),
+				(step, approved) => computers.copyChatFile(step, approved),
 			),
 		),
 );
@@ -126,12 +118,8 @@ export const shareFile = defineOperation(
 	computersContracts["computers.shareFile"],
 	(principal, input, call) =>
 		Effect.flatMap(TurnComputers.Service, (computers) =>
-			usingComputer(
-				principal,
-				call,
-				approvalRule("computers.shareFile"),
-				input,
-				(canUse, approved) => computers.shareFile(canUse, approved),
+			usingComputer(principal, call, approvalRule("computers.shareFile"), input, (step, approved) =>
+				computers.shareFile(step, approved),
 			),
 		),
 );
@@ -150,7 +138,7 @@ export const useBrowser = defineOperation(
 				call,
 				approvalRule("computers.useBrowser"),
 				input,
-				(canUse, approved) => computers.useBrowser(canUse, approved),
+				(step, approved) => computers.useBrowser(step, approved),
 			),
 		),
 );

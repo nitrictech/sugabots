@@ -1,7 +1,7 @@
 import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { askerOf, type TurnFacts } from "../authentication/turn-facts.ts";
+import type { TurnFacts } from "../authentication/turn-facts.ts";
 import { type Executor, query } from "../database/database.ts";
 import { computer, placedChat } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
@@ -14,7 +14,7 @@ import {
 	type ReachedAs,
 	type ReachFacts,
 	reachFacts,
-	turnReachesChat,
+	turnChatPlace,
 	whoActs,
 } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
@@ -110,7 +110,6 @@ export interface CanUseChatComputer<P, C> extends Proof<"CanUseChatComputer", [P
 	/** C's workspace and project, whose computer it is, which services take from here. */
 	readonly workspace: string;
 	readonly project: string;
-	readonly bot: string;
 	/**
 	 * The project's computer as this was proved, or null before one is made.
 	 * Resetting a computer replaces it with another, so an approval to work
@@ -173,7 +172,6 @@ export const proveCanUseChatComputer = <P, C>(
 			chat: chatId,
 			workspace: facts.project.workspace,
 			project: facts.project.id,
-			bot: acting.bot,
 			computer: made?.id ?? null,
 			machine: made?.machine ?? null,
 			turn: acting.turn,
@@ -191,12 +189,8 @@ export const proveCanUseChatComputer = <P, C>(
  */
 export const turnUsesComputer = (db: Executor, facts: TurnFacts, projectId: string) =>
 	Effect.gen(function* () {
-		if (facts.project !== projectId || !(yield* turnReachesChat(db, facts))) return false;
-		const asker = askerOf(facts);
-		const place = yield* reachFacts(db, projectId, {
-			...(asker && { member: asker }),
-			bot: facts.bot,
-		});
+		if (facts.project !== projectId) return false;
+		const place = yield* turnChatPlace(db, facts);
 		if (!place?.bot?.usesComputer) return false;
 		if (facts.askedBy.kind === "automation") return true;
 		return (

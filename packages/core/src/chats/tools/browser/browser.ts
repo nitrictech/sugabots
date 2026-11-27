@@ -29,6 +29,7 @@ interface BrowserResult {
 export interface BrowserSession {
 	/** Calls `tool` in the browser, giving up on it when `abortSignal` aborts. */
 	readonly call: (
+		computer: Computers.Computer,
 		tool: string,
 		input: unknown,
 		abortSignal: AbortSignal | undefined,
@@ -162,16 +163,17 @@ const desktopCommand = (
 export { DesktopUnavailable };
 
 export function browserSession(
-	turnComputer: TurnComputer,
+	run: TurnComputer["run"],
 	place: Place,
 	turn: BotBrowsing,
 ): BrowserSession {
 	let connecting: Promise<{ client: Client; note?: UserText } | Failed> | undefined;
 	let told = false;
 
-	const connect = async (): Promise<{ client: Client; note?: UserText } | Failed> => {
-		const { computer } = await turnComputer.open();
-		const browser = await turnComputer.run(
+	const connect = async (
+		computer: Computers.Computer,
+	): Promise<{ client: Client; note?: UserText } | Failed> => {
+		const browser = await run(
 			startBrowser(computer, place, turn).pipe(
 				Effect.catchTag("DesktopUnavailable", (unavailable) =>
 					Effect.succeed({ status: "failed" as const, error: unavailable.reason }),
@@ -179,7 +181,7 @@ export function browserSession(
 			),
 		);
 		if ("status" in browser) return browser;
-		const endpoint = await turnComputer.run(computer.endpoint(browser.browserPort));
+		const endpoint = await run(computer.endpoint(browser.browserPort));
 		const client = new Client({ name: "sugabots", version: "1" });
 		await client.connect(
 			new StreamableHTTPClientTransport(new URL(`${endpoint.url}/mcp`), {
@@ -197,8 +199,8 @@ export function browserSession(
 	};
 
 	return {
-		call: async (toolName, input, abortSignal) => {
-			connecting ??= connect().catch((cause: unknown) => {
+		call: async (computer, toolName, input, abortSignal) => {
+			connecting ??= connect(computer).catch((cause: unknown) => {
 				connecting = undefined;
 				if (cause instanceof Computers.Unavailable)
 					return { status: "failed", error: cause.userMessage };
