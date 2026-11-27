@@ -125,7 +125,7 @@ export const Answerable = meta.story({
 		await expect(
 			await canvas.findByText("Growth Desk wants to use Growth Desk Billing"),
 		).toBeVisible();
-		await expect(canvas.getByText("Destination https://billing.example.com/mcp")).toBeVisible();
+		await expect(canvas.getByText("Sends to https://billing.example.com/mcp")).toBeVisible();
 	},
 });
 

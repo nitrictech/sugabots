@@ -174,6 +174,13 @@ function markedConnectorsByHandle(connectors: readonly Connector[]): Map<string,
 	);
 }
 
+/**
+ * The connector recorded on `call`'s approval, as the approver sees it: its
+ * name and mark, its address only when `canApprove` and the connector is
+ * still as it was when the call was asked, and whether it has changed since,
+ * in which case allowing the call won't run it. Undefined for a call with no
+ * recorded connector, or one this member's lists don't include.
+ */
 export function useApprovalConnector(
 	call: ToolCallPart,
 	projectId: string | null | undefined,
@@ -192,11 +199,15 @@ export function useApprovalConnector(
 		projectConnectors?.find(({ id }) => id === binding.id) ??
 		botConnectors?.find(({ id }) => id === binding.id);
 	if (!connector) return undefined;
-	if ("restricted" in connector) return { name: connector.name, markId: undefined, url: null };
+	if ("restricted" in connector) {
+		return { name: connector.name, markId: undefined, url: null, changed: false };
+	}
+	const changed = connector.configurationRevision !== binding.revision;
 	return {
 		name: connector.name,
 		markId: connectorMarkFor(connector),
-		url: canApprove && connector.configurationRevision === binding.revision ? connector.url : null,
+		url: canApprove && !changed ? connector.url : null,
+		changed,
 	};
 }
 

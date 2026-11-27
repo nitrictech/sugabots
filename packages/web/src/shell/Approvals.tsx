@@ -176,7 +176,11 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 				/>
 			</Link>
 			<div className="ml-9 min-w-0 max-md:ml-0">
-				<ApprovalDestination browserUrl={call.approval?.browserUrl} connectorUrl={connector?.url} />
+				<ApprovalDestination
+					browserUrl={call.approval?.browserUrl}
+					connectorUrl={connector?.url}
+					connectorChanged={connector?.changed}
+				/>
 				<FoldedRequest input={call.input} />
 			</div>
 			<div className="ml-9 flex flex-wrap items-center gap-3 max-md:ml-0 max-md:flex-col max-md:items-stretch">

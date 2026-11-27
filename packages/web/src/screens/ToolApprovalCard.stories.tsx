@@ -251,11 +251,11 @@ export const BrowserPage = meta.story({
 	},
 	play: async ({ canvas, userEvent }) => {
 		await waitFor(() =>
-			expect(canvas.getByText("Page https://travel.example.com/checkout")).toBeVisible(),
+			expect(canvas.getByText("On the page https://travel.example.com/checkout")).toBeVisible(),
 		);
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog");
-		await expect(request).toHaveTextContent("Page https://travel.example.com/checkout");
+		await expect(request).toHaveTextContent("On the page https://travel.example.com/checkout");
 	},
 });
 

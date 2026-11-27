@@ -141,7 +141,12 @@ describe("an approval request", () => {
 			);
 
 			await screen.findByText("Linear Handler wants to use Bot Linear");
-			expect(screen.queryByText(`Destination ${url}`) !== null).toBe(showsDestination);
+			expect(screen.queryByText(`Sends to ${url}`) !== null).toBe(showsDestination);
+			expect(
+				screen.queryByText(
+					"This connector was changed after the request, so allowing it won't run it.",
+				) !== null,
+			).toBe(revision !== 2);
 		},
 	);
 

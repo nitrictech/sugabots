@@ -88,10 +88,10 @@ file backup.
 - **Collaboration chats are removed.** A helper bot now answers in the chat
   it was asked from, so each collaboration chat's messages move into that
   chat, among its own messages in time order. On the computer, the first use
-  of that chat moves each helper's folder into its `collaborations/`
-  subfolder. If a personal pod's computer went to a different bot from the
-  asking chat, look for the helper's folder under `/workspace/threads/` on
-  the original computer.
+  of that chat moves each helper's folder into that chat's `collaborations/`
+  folder. If the personal pod's computer went to a bot other than the one in
+  that chat, the helper's folder stays under `/workspace/threads/` on the
+  original computer.
 - **Work under way is stopped.** Every bot reply that was running or waiting
   for approval is cancelled, and every automation run under way is recorded as
   failed. Send the message again, or run the automation again, once the

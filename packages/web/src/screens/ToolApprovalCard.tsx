@@ -108,6 +108,7 @@ export function ToolApprovalCard({
 					<ApprovalDestination
 						browserUrl={call.approval?.browserUrl}
 						connectorUrl={boundConnector?.url}
+						connectorChanged={boundConnector?.changed}
 					/>
 					<FoldedRequest input={call.input} />
 				</div>
@@ -145,6 +146,7 @@ export function ToolApprovalCard({
 				input={call.input}
 				browserUrl={call.approval?.browserUrl}
 				connectorUrl={boundConnector?.url}
+				connectorChanged={boundConnector?.changed}
 				step={step}
 				open={reviewing}
 				onOpenChange={setReviewing}
@@ -299,15 +301,24 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 export function ApprovalDestination({
 	browserUrl,
 	connectorUrl,
+	connectorChanged,
 }: {
 	browserUrl?: string | undefined;
 	connectorUrl?: string | null | undefined;
+	connectorChanged?: boolean | undefined;
 }) {
+	if (connectorChanged) {
+		return (
+			<p className="m-0 pb-1.5 text-muted-foreground text-xs">
+				This connector was changed after the request, so allowing it won't run it.
+			</p>
+		);
+	}
 	const address = browserUrl ?? connectorUrl;
 	if (!address) return null;
 	return (
 		<p className="m-0 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
-			{browserUrl ? "Page" : "Destination"} {address}
+			{browserUrl ? "On the page" : "Sends to"} {address}
 		</p>
 	);
 }
@@ -334,6 +345,7 @@ function ReviewSheet({
 	input,
 	browserUrl,
 	connectorUrl,
+	connectorChanged,
 	step,
 	open,
 	onOpenChange,
@@ -343,6 +355,7 @@ function ReviewSheet({
 	input: ToolCallPart["input"];
 	browserUrl: string | undefined;
 	connectorUrl: string | null | undefined;
+	connectorChanged: boolean | undefined;
 	step: Step;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -374,7 +387,11 @@ function ReviewSheet({
 				<ScrollArea className="min-h-0 flex-1">
 					<div className="flex flex-col gap-4 px-4 py-4">
 						<ReviewHeading step={step} bot={bot} headingId={headingId} />
-						<ApprovalDestination browserUrl={browserUrl} connectorUrl={connectorUrl} />
+						<ApprovalDestination
+							browserUrl={browserUrl}
+							connectorUrl={connectorUrl}
+							connectorChanged={connectorChanged}
+						/>
 						<ExactRequest input={input} />
 					</div>
 				</ScrollArea>
