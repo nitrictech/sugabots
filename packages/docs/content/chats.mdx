@@ -1,6 +1,6 @@
 ---
 title: Chats
-description: Chats in projects and with bots, who answers, and how bots ask each other for help.
+description: Chats in projects and with bots, who answers, how bots ask each other for help, and steering or interrupting a bot while it works.
 ---
 
 There are two places to chat:
@@ -76,6 +76,41 @@ A few rules keep this from getting out of hand:
   nobody.
 - When the first bot picks up again, it can ask bots it hasn't asked yet, but
   not the same ones again.
+
+## Steering a bot while it works
+
+A bot's reply takes one or more steps: it thinks, uses a tool, reads what came
+back, and goes on. If you asked for the reply, a message you send the bot while
+it's still working joins that reply instead of starting a new one. The bot reads
+it before its next step, so you can correct it or add something it missed
+without waiting for it to finish. If the bot was waiting for you to approve a
+tool call, your message withdraws that request, and the bot carries on with
+what you said.
+
+A message from anyone else doesn't join the reply. It waits for the reply to
+finish, then gets an answer of its own.
+
+## Interrupting a reply
+
+While a bot is working, the message box shows a stop button when it's empty.
+Press it to interrupt the reply: the step under way stops, any approval it was
+waiting for is withdrawn, and the reply ends with what it had so far. A bot
+that was interrupted doesn't pick up again with what any bots it asked for
+help said.
+
+You can interrupt a reply if you asked for it, or if you can manage the
+project the chat is in. For an automation's run, those who can approve the
+run's tool calls can interrupt it too.
+
+## Seeing what a bot thought
+
+Some models think before they answer. When the bot's model does, and its
+provider sends that thinking back as text, it shows under the line above the
+reply that says how long the bot worked. While the bot works it's open, so you
+can follow along step by step. Once the reply is done it folds away; open it
+to read what the bot thought at each step, next to the tools it used.
+
+Anyone who can read the chat can read its thinking.
 
 ## Notifications
 
