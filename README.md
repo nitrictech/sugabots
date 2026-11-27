@@ -54,8 +54,8 @@ or explain what a bot already did.
 
 ### Bots that work together
 
-When a bot needs help, it asks another bot. The exchange shows up as
-a chat under its message, so you can see exactly who said what.
+When a bot needs help, it mentions another bot in the project. The helper
+replies right there in the same chat, so you can see exactly who said what.
 
 ### A different model for every bot
 
