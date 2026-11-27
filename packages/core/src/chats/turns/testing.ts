@@ -194,7 +194,9 @@ export interface PreparedTurnForTests extends OpenedTurnForTests {
 export const prepareTurn = (run: TurnRun) =>
 	Effect.gen(function* () {
 		const opened = yield* openTurn(run);
-		const context = yield* TurnExecution.Service.use((execution) => execution.context(opened.turnId));
+		const context = yield* TurnExecution.Service.use((execution) =>
+			execution.context(opened.turnId),
+		);
 		const prepared: PreparedTurnForTests = { ...opened, context };
 		return prepared;
 	});
