@@ -74,6 +74,10 @@ export const legacy = {
 		automation: "00000008-0000-4000-8000-000000000002",
 		trigger: "00000010-0000-4000-8000-000000000001",
 	},
+	/** The Notes pod's connection, which no bot had. */
+	notesConnection: "00000011-0000-4000-8000-000000000003",
+	/** Ana's file, in her personal pod, which had no bots and no chat left. */
+	diary: "00000006-0000-4000-8000-000000000004",
 	/** A file a bot wrote, deleted, with its folder's deletion still queued. */
 	deletedArtifact: "00000006-0000-4000-8000-0000000000dd",
 	/** What a summary of Trip cost, in {@link legacySummaryRequest}. */
@@ -128,6 +132,12 @@ export const legacyFiles: readonly LegacyFile[] = [
 		fileId: "00000006-0000-4000-8000-000000000001",
 		versionId: "00000007-0000-4000-8000-000000000001",
 		text: "# Itinerary",
+	},
+	{
+		kind: "version",
+		fileId: legacy.diary,
+		versionId: "00000007-0000-4000-8000-000000000004",
+		text: "Dear.",
 	},
 ];
 
@@ -199,9 +209,11 @@ INSERT INTO "agent" ("id", "workspace_id", "pod_id", "name", "handle", "provisio
 INSERT INTO "agent" ("id", "workspace_id", "name", "handle", "system_agent_key", "color", "face") VALUES
  ('0000000c-0000-4000-8000-000000000009', '0000000a-0000-4000-8000-000000000001', 'Compaction', 'compaction', 'compaction', 'rose', 'pill');
 
--- The Family pod's calendar, which its bots used.
+-- The Family pod's calendar, which its bots used, and the Notes pod's docs,
+-- which has no bots.
 INSERT INTO "connection" ("id", "workspace_id", "pod_id", "name", "handle", "kind", "url", "auth_kind", "tools", "created_by_id", "created_at") VALUES
- ('00000011-0000-4000-8000-000000000010', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'Calendar', 'calendar', 'http', 'https://calendar.example.com', 'header', '[]', '0000000b-0000-4000-8000-000000000001', '2026-10-01 09:03');
+ ('00000011-0000-4000-8000-000000000010', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'Calendar', 'calendar', 'http', 'https://calendar.example.com', 'header', '[]', '0000000b-0000-4000-8000-000000000001', '2026-10-01 09:03'),
+ ('00000011-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000002', 'Docs', 'docs', 'http', 'https://docs.example.com', 'header', '[]', '0000000b-0000-4000-8000-000000000002', '2026-10-02 09:02');
 
 -- Each pod's computer.
 INSERT INTO "sandbox" ("id", "workspace_id", "pod_id", "sandbox_provider_id", "provider_sandbox_id", "image") VALUES
@@ -254,6 +266,11 @@ INSERT INTO "artifact" ("id", "workspace_id", "pod_id", "kind", "title", "curren
  ('00000006-0000-4000-8000-000000000001', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'document', 'Itinerary', 1, '0000000c-0000-4000-8000-000000000001', '0000000f-0000-4000-8000-000000000002');
 INSERT INTO "artifact_version" ("id", "artifact_id", "number", "content_type", "size", "author_agent_id") VALUES
  ('00000007-0000-4000-8000-000000000001', '00000006-0000-4000-8000-000000000001', 1, 'text/markdown', 9, '0000000c-0000-4000-8000-000000000001');
+-- Ana's diary, in her personal pod, whose chat and bots are all gone.
+INSERT INTO "artifact" ("id", "workspace_id", "pod_id", "kind", "title", "current_version", "created_by_agent_id", "created_in_thread_id") VALUES
+ ('00000006-0000-4000-8000-000000000004', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000004', 'document', 'Diary', 1, NULL, NULL);
+INSERT INTO "artifact_version" ("id", "artifact_id", "number", "content_type", "size") VALUES
+ ('00000007-0000-4000-8000-000000000004', '00000006-0000-4000-8000-000000000004', 1, 'text/markdown', 5);
 
 -- Deletions queued and not yet done: a thread's folder and a written file's.
 INSERT INTO "blob_deletion" ("prefix") VALUES
@@ -338,12 +355,10 @@ INSERT INTO "agent" ("id", "workspace_id", "pod_id", "name", "handle", "color", 
 INSERT INTO "agent" ("id", "workspace_id", "name", "handle", "system_agent_key", "color", "face") VALUES
  ('0000000c-0000-4000-8000-00000000000a', '0000000a-0000-4000-8000-000000000001', 'Scribe', 'scribe', 'summarise', 'rose', 'pill');
 
--- Connections: the Family pod's Linear, signed in, and its GitHub app; and
--- one in the Notes pod, which has no bots.
+-- Connections: the Family pod's Linear, signed in, and its GitHub app.
 INSERT INTO "connection" ("id", "workspace_id", "pod_id", "name", "handle", "kind", "url", "auth_kind", "oauth_encrypted", "oauth_state", "tools", "settings", "app_credential_encrypted", "created_by_id", "created_at") VALUES
  ('00000011-0000-4000-8000-000000000001', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'Linear', 'linear', 'mcp', 'https://mcp.linear.app/mcp', 'oauth', 'sealed-tokens', 'state-1', '[{"name":"create_issue","readOnly":false},{"name":"list_issues","readOnly":true}]', NULL, NULL, '0000000b-0000-4000-8000-000000000001', '2026-10-02 09:00'),
- ('00000011-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'GitHub', 'github', 'github', 'https://api.github.com', 'header', NULL, NULL, '[]', '{"kind":"github","appId":"1","installationId":"2","owner":{"type":"User","login":"sam"}}', 'sealed-key', '0000000b-0000-4000-8000-000000000001', '2026-10-02 09:01'),
- ('00000011-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000002', 'Docs', 'docs', 'http', 'https://docs.example.com', 'header', NULL, NULL, '[]', NULL, NULL, '0000000b-0000-4000-8000-000000000002', '2026-10-02 09:02');
+ ('00000011-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'GitHub', 'github', 'github', 'https://api.github.com', 'header', NULL, NULL, '[]', '{"kind":"github","appId":"1","installationId":"2","owner":{"type":"User","login":"sam"}}', 'sealed-key', '0000000b-0000-4000-8000-000000000001', '2026-10-02 09:01');
 
 -- Routines: Planner's and Budget's started by the GitHub app, Planner's on a
 -- schedule, and the Personal Assistant's on one.
@@ -420,16 +435,14 @@ INSERT INTO "event" ("channel", "type", "payload") VALUES
  ('workspace:0000000a-0000-4000-8000-000000000001', 'pod.updated', '{"type":"pod.updated","podId":"0000000d-0000-4000-8000-000000000001"}'),
  ('thread:0000000f-0000-4000-8000-000000000002', 'tool_call.updated', '{"type":"tool_call.updated","toolCall":{"approval":{"deciders":"pod"}}}');
 
--- Files no thread holds: the Notes pod's, which has no main chat; one in
--- Pat's personal pod, by Helper; and one in Ana's, which has no bots.
+-- Files no thread holds: the Notes pod's, which has no main chat, and one in
+-- Pat's personal pod, by Helper.
 INSERT INTO "artifact" ("id", "workspace_id", "pod_id", "kind", "title", "current_version", "created_by_agent_id", "created_in_thread_id") VALUES
  ('00000006-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000002', 'document', 'Notes', 1, NULL, NULL),
- ('00000006-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000003', 'html', 'Chart', 1, '0000000c-0000-4000-8000-000000000004', NULL),
- ('00000006-0000-4000-8000-000000000004', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000004', 'document', 'Diary', 1, NULL, NULL);
+ ('00000006-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000003', 'html', 'Chart', 1, '0000000c-0000-4000-8000-000000000004', NULL);
 INSERT INTO "artifact_version" ("id", "artifact_id", "number", "content_type", "size") VALUES
  ('00000007-0000-4000-8000-000000000002', '00000006-0000-4000-8000-000000000002', 1, 'text/markdown', 5),
- ('00000007-0000-4000-8000-000000000003', '00000006-0000-4000-8000-000000000003', 1, 'text/html', 5),
- ('00000007-0000-4000-8000-000000000004', '00000006-0000-4000-8000-000000000004', 1, 'text/markdown', 5);
+ ('00000007-0000-4000-8000-000000000003', '00000006-0000-4000-8000-000000000003', 1, 'text/html', 5);
 
 -- Computers: hosts the pods allowed, Family's measured disk and a viewer's
 -- lease, and the provider's settings in the old words.

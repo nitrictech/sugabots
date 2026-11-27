@@ -160,8 +160,15 @@ WHERE "id" IN (SELECT "id" FROM "stranded");--> statement-breakpoint
 -- Copied OAuth tokens would refresh each other away, so every OAuth connection
 -- signs in again, the kept one too.
 UPDATE "connection" SET "oauth_encrypted" = NULL, "oauth_state" = NULL WHERE "auth_kind" = 'oauth';--> statement-breakpoint
--- A `pod` with no bots leaves its connections nobody to belong to.
-DELETE FROM "connection" WHERE "agent_id" IS NULL;--> statement-breakpoint
+-- A `personal` `pod` with no bots leaves its connections nobody to belong to.
+-- A `shared` one's stay with their `pod`, which becomes a project under the
+-- same id and takes them over (see "Projects own resources" below), as its
+-- computer does.
+DELETE FROM "connection" USING "pod"
+WHERE "connection"."agent_id" IS NULL AND "pod"."id" = "connection"."pod_id"
+	AND "pod"."kind" = 'personal';--> statement-breakpoint
+ALTER TABLE "connection" ALTER COLUMN "pod_id" DROP NOT NULL;--> statement-breakpoint
+UPDATE "connection" SET "pod_id" = NULL WHERE "agent_id" IS NOT NULL;--> statement-breakpoint
 INSERT INTO "sandbox_agent_allowed_host" ("workspace_id", "agent_id", "host", "added_by_id", "created_at")
 SELECT "host"."workspace_id", "agent"."id", "host"."host", "host"."added_by_id", "host"."created_at"
 FROM "sandbox_pod_allowed_host" AS "host"
@@ -195,11 +202,11 @@ ALTER TABLE "routine" DROP CONSTRAINT "routine_chat_id_thread_id_fkey";--> state
 ALTER TABLE "routine" DROP CONSTRAINT "routine_results_valid";--> statement-breakpoint
 ALTER TABLE "routine_execution" DROP CONSTRAINT "routine_execution_results_valid";--> statement-breakpoint
 DROP INDEX "sandbox_pod_id_idx";--> statement-breakpoint
-ALTER TABLE "connection" DROP COLUMN "pod_id";--> statement-breakpoint
 ALTER TABLE "routine" DROP COLUMN "results";--> statement-breakpoint
 ALTER TABLE "routine" DROP COLUMN "chat_id";--> statement-breakpoint
 ALTER TABLE "routine_execution" DROP COLUMN "results";--> statement-breakpoint
-ALTER TABLE "connection" ALTER COLUMN "agent_id" SET NOT NULL;--> statement-breakpoint
+-- A connection belongs to a bot, or, until its `pod` becomes a project, to its `shared` `pod`.
+ALTER TABLE "connection" ADD CONSTRAINT "connection_owner_check" CHECK (num_nonnulls("agent_id", "pod_id") = 1);--> statement-breakpoint
 -- A computer belongs to a bot, or, until its `pod` becomes a project, to its `shared` `pod`.
 ALTER TABLE "sandbox" ADD CONSTRAINT "sandbox_owner_check" CHECK (num_nonnulls("agent_id", "pod_id") = 1);--> statement-breakpoint
 CREATE UNIQUE INDEX "connection_name_idx" ON "connection" ("agent_id","name");--> statement-breakpoint
@@ -374,8 +381,22 @@ WHERE "main_chat"."main" AND "pod"."kind" = 'shared'
 -- A `personal` one's goes to a thread of the bot that made it, or else of the
 -- `pod`'s oldest bot other than its Personal Assistant, which only when it is
 -- its only bot: the bot's latest thread, or a new one with the `pod`'s owner
--- when it has none. A `personal` `pod` with no bots left has no thread to give
--- its files, and no project is kept for it, so they're deleted with it.
+-- when it has none. A `personal` `pod` with no bots left is given a Personal
+-- Assistant for its owner, on no model until they choose one, to keep their
+-- files where only they reach them. One whose owner has left the workspace
+-- has nobody to keep them for, so they're deleted with it.
+INSERT INTO "agent" ("workspace_id", "pod_id", "name", "handle", "provisioned_key", "color", "face", "visibility", "assistant_of", "created_by_id")
+SELECT "pod"."workspace_id", "pod"."id", 'Personal Assistant', 'personal-assistant', 'personal-assistant',
+	'teal', 'arc', 'private', "pod"."owner_id", "pod"."owner_id"
+FROM "pod"
+JOIN "workspace_member" ON "workspace_member"."workspace_id" = "pod"."workspace_id"
+	AND "workspace_member"."user_id" = "pod"."owner_id"
+WHERE "pod"."kind" = 'personal'
+	AND EXISTS (
+		SELECT 1 FROM "artifact"
+		WHERE "artifact"."pod_id" = "pod"."id" AND "artifact"."created_in_thread_id" IS NULL
+	)
+	AND NOT EXISTS (SELECT 1 FROM "agent" WHERE "agent"."pod_id" = "pod"."id");--> statement-breakpoint
 DO $$
 DECLARE
 	orphan record;
@@ -1737,6 +1758,8 @@ SELECT "workspace_id", "pod_id", "host", "added_by_id", "created_at" FROM "sandb
 DROP TABLE "sandbox_pod_allowed_host";--> statement-breakpoint
 UPDATE "connection" SET "project_id" = "project"."id"
 FROM "project" WHERE "project"."default_of_bot_id" = "connection"."bot_id";--> statement-breakpoint
+-- A `shared` `pod`'s connections that waited for it are that project's too.
+UPDATE "connection" SET "project_id" = "pod_id" WHERE "pod_id" IS NOT NULL;--> statement-breakpoint
 UPDATE "automation" SET "project_id" = "project"."id"
 FROM "project" WHERE "project"."default_of_bot_id" = "automation"."bot_id";--> statement-breakpoint
 INSERT INTO "project_allowed_host" ("workspace_id", "project_id", "host", "added_by_id", "created_at")
@@ -1758,7 +1781,9 @@ DROP INDEX "computer_bot_id_idx";--> statement-breakpoint
 DROP INDEX "automation_bot_name_idx";--> statement-breakpoint
 DROP INDEX "connection_github_bot_idx";--> statement-breakpoint
 ALTER TABLE "automation" DROP COLUMN "bot_id";--> statement-breakpoint
+ALTER TABLE "connection" DROP CONSTRAINT "connection_owner_check";--> statement-breakpoint
 ALTER TABLE "connection" DROP COLUMN "bot_id";--> statement-breakpoint
+ALTER TABLE "connection" DROP COLUMN "pod_id";--> statement-breakpoint
 ALTER TABLE "computer" DROP CONSTRAINT "computer_owner_check";--> statement-breakpoint
 ALTER TABLE "computer" DROP COLUMN "pod_id";--> statement-breakpoint
 ALTER TABLE "computer" DROP COLUMN "bot_id";--> statement-breakpoint

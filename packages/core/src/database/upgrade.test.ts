@@ -231,6 +231,49 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			}
 		});
 
+		it("keeps a shared pod's connectors in the project it became, bots or none", async () => {
+			expect(
+				await upgraded.rows(`select project_id from connector where id = $1`, [
+					legacy.notesConnection,
+				]),
+			).toEqual([{ project_id: legacy.pods.notes }]);
+		});
+
+		it("keeps the files of a personal pod with no bots for its owner alone", async () => {
+			const [diary] = await upgraded.rows<{
+				chat_id: string;
+				visibility: string;
+				assistant_of: string;
+			}>(
+				`select file.chat_id, bot.visibility, bot.assistant_of
+				 from file join placed_chat on placed_chat.id = file.chat_id
+				 join project on project.id = placed_chat.project_id
+				 join bot on bot.id = project.default_of_bot_id
+				 where file.id = $1`,
+				[legacy.diary],
+			);
+			expect(diary).toEqual({
+				chat_id: expect.any(String),
+				visibility: "personal",
+				assistant_of: legacy.members.ana,
+			});
+			const reachedBy = async (memberId: string) => {
+				const [row] = await upgraded.run(
+					query((db) =>
+						db.execute<{ reached: boolean }>(
+							sql`select ${reachesChatFor({ projectId: sql`c.project_id` }, memberId)} as reached
+								from placed_chat c where c.id = ${diary?.chat_id}::uuid`,
+							"objects",
+						),
+					),
+				);
+				return row?.reached;
+			};
+			expect(await reachedBy(legacy.members.ana)).toBe(true);
+			expect(await reachedBy(legacy.members.sam)).toBe(false);
+			expect(await reachedBy(legacy.members.pat)).toBe(false);
+		});
+
 		it("makes a shared pod a private project, and its bots private, with its members as theirs", async () => {
 			expect(
 				await upgraded.rows(`select visibility from project where id = $1`, [legacy.pods.family]),

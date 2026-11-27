@@ -24,7 +24,8 @@ update so far, so plan for it.
   the project, still leading it if it led the pod. Nobody gains access to
   anything they couldn't reach before.
 - **Each bot gets its own connectors.** A pod's connectors are copied to each
-  of its bots. Sign-ins can't be shared between copies, so **every OAuth
+  of its bots. A shared pod with no bots keeps its connectors in the project it
+  becomes. Sign-ins can't be shared between copies, so **every OAuth
   connector has to sign in again, once for each bot it was copied to**.
   Connectors that use an API key or no sign-in keep working.
 - **A pod's GitHub app goes to one bot**: the oldest bot with automations
@@ -60,7 +61,9 @@ update so far, so plan for it.
   So do the setup addresses each GitHub app was made with. You don't need to
   change them where they're configured.
 - **Files and computers.** Every file keeps its contents, and every computer
-  keeps its machine and its work. Files kept on disk move to their new folders
-  when the server starts.
+  keeps its machine and its work. A personal pod with no bots left gives its
+  files to a new Personal Assistant for its owner, with no model until they
+  choose one, so only they reach them. Files kept on disk move to their new
+  folders when the server starts.
 - **Old docs links.** Links to renamed docs pages, such as `/docs/pods`,
   redirect to the page that replaced them.
