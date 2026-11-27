@@ -3320,4 +3320,7 @@ DROP INDEX "migration_tool_call_chat_idx";--> statement-breakpoint
 DROP INDEX "migration_message_reply_idx";--> statement-breakpoint
 DROP INDEX "migration_thread_read_chat_idx";--> statement-breakpoint
 DROP INDEX "migration_thread_participant_chat_idx";--> statement-breakpoint
-DROP INDEX "migration_file_tool_call_idx";
+DROP INDEX "migration_file_tool_call_idx";--> statement-breakpoint
+CREATE INDEX "message_author_chat_created_at_idx" ON "message" ("author_member_id","chat_id","created_at" DESC NULLS LAST);
+--> statement-breakpoint
+CREATE INDEX "message_mention_trigram_idx" ON "message" USING gin ("content" gin_trgm_ops) WHERE "content" like '%@%' and "content" <> '' and "status" <> 'writing';

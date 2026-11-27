@@ -283,20 +283,24 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's workspace gui
 		});
 		const start = Date.now() - 60 * 60 * 1000;
 		await onDatabase((db) =>
-			db
-				.insert(message)
-				.values([
-					said("@sam can you look?", new Date(start)),
-					...Array.from({ length: 60 }, (_, index) =>
-						said(`Update ${index}`, new Date(start + (index + 1) * 1000)),
-					),
-				]),
+			db.insert(message).values([
+				said("@SAM can you look?", new Date(start)),
+				said("@sam-slater this is for someone else", new Date(start + 1000)),
+				said("@sam this is old", new Date(start - 31 * 24 * 60 * 60 * 1000)),
+				{
+					...said("@here we'll share more later", new Date(start + 2000)),
+					status: "writing" as const,
+				},
+				...Array.from({ length: 60 }, (_, index) =>
+					said(`Update ${index}`, new Date(start + (index + 1) * 1000)),
+				),
+			]),
 		);
 
 		const seen = await guideForSam();
 
 		expect(seen.waitingOnYou.unreadMentions).toEqual([
-			expect.objectContaining({ from: "Ada", preview: "@sam can you look?" }),
+			expect.objectContaining({ from: "Ada", preview: "@SAM can you look?" }),
 		]);
 	});
 

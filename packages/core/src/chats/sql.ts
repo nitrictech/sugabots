@@ -593,6 +593,16 @@ export const message = pgTable(
 			sql`num_nonnulls(${table.authorMemberId}, ${table.authorBotId}, ${table.automationTrigger}) = 1`,
 		),
 		index("message_chat_created_at_idx").on(table.chatId, table.createdAt),
+		index("message_author_chat_created_at_idx").on(
+			table.authorMemberId,
+			table.chatId,
+			table.createdAt.desc(),
+		),
+		index("message_mention_trigram_idx")
+			.using("gin", table.content.op("gin_trgm_ops"))
+			.where(
+				sql`${table.content} like '%@%' and ${table.content} <> '' and ${table.status} <> 'writing'`,
+			),
 		// A turn's reply, found by its turn on every write the turn makes while it runs.
 		index("message_turn_idx").on(table.turnId).where(sql`${table.turnId} is not null`),
 		uniqueIndex("message_retry_idx")

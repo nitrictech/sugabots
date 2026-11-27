@@ -48,15 +48,18 @@ import {
 	automationFeed,
 	automationRun,
 	bot,
+	chat,
 	member,
 	message,
 	OPENABLE_CHAT_KINDS,
 	placedChat,
 	project,
+	projectChat,
 	readCursor,
 	toolCall,
 	turn,
 } from "../../database/schema.ts";
+import { outerColumn } from "../../database/sql.ts";
 import {
 	type ApproverStanding,
 	approvedCalls,
@@ -269,6 +272,7 @@ export const make = Effect.gen(function* () {
 						workspaceId,
 						memberId,
 						reachesChat: reach.reachesChat,
+						reachesProject: reach.reachesProject,
 					});
 					const messages = yield* query((db) => unreadMentionCount(db, scope));
 					const runs = yield* query((db) => unreadRunMentionCount(db, scope));
@@ -284,6 +288,7 @@ export const make = Effect.gen(function* () {
 						workspaceId: reach.workspace.value,
 						memberId: canRead.actor.memberId,
 						reachesChat: reach.reachesChat,
+						reachesProject: reach.reachesProject,
 					});
 					const messages = yield* query((db) => unreadMentionRows(db, scope, limit));
 					return messages.map(
@@ -464,17 +469,27 @@ const projectChatsReached = Effect.fn("ChatView.projectChatsReached")(function* 
 	workspaceId: string,
 	reachesProject: ReachesProjectSql,
 ) {
-	const rows = yield* db
-		.select({ id: placedChat.id, projectId: placedChat.projectId })
-		.from(placedChat)
-		.where(
-			and(
-				inArray(placedChat.kind, ["project_chat", "automation_feed"]),
-				eq(placedChat.workspaceId, workspaceId),
-				reachesProject(placedChat.projectId),
-			),
-		);
-	return rows.flatMap(({ id, projectId }) => (projectId ? [{ id, projectId }] : []));
+	const reachedProjects = db
+		.select({ id: project.id })
+		.from(project)
+		.where(and(eq(project.workspaceId, workspaceId), reachesProject(project.id)))
+		// Keep reach on the project side of the join.
+		.offset(0)
+		.as("reached_projects");
+	const chats = db
+		.select({ id: projectChat.chatId, projectId: projectChat.projectId })
+		.from(projectChat)
+		.where(eq(projectChat.workspaceId, workspaceId));
+	const feeds = db
+		.select({ id: automationFeed.chatId, projectId: automation.projectId })
+		.from(automationFeed)
+		.innerJoin(automation, eq(automation.id, automationFeed.automationId))
+		.where(eq(automationFeed.workspaceId, workspaceId));
+	const placed = chats.unionAll(feeds).as("project_chats_and_feeds");
+	return yield* db
+		.select({ id: placed.id, projectId: reachedProjects.id })
+		.from(reachedProjects)
+		.innerJoin(placed, eq(placed.projectId, reachedProjects.id));
 });
 
 /** How many messages each of the chats holds, by its id; one with none is left out. */
@@ -519,17 +534,25 @@ const unreadMessageCounts = Effect.fn("ChatView.unreadMessageCounts")(function* 
 	chatIds: readonly string[],
 ) {
 	if (chatIds.length === 0) return new Map<string, number>();
-	const rows = yield* db
-		.select({ chatId: message.chatId, count: sql<number>`count(*)::int` })
-		.from(message)
-		.where(
-			and(
-				inArray(message.chatId, [...chatIds]),
-				finishedWordsFromOthers(memberId),
-				unreadBy(db, memberId, { chatId: message.chatId, at: message.createdAt }),
-			),
+	const rows = yield* db.execute<{ chatId: string; count: number }>(
+		sql`with chat_cutoffs as materialized (
+			select ${chat.id} as chat_id, ${caughtUpAt(db, memberId, chat.id)} as cutoff
+			from ${chat}
+			where ${chat.id} = any(${sql.param(chatIds)}::uuid[])
 		)
-		.groupBy(message.chatId);
+		select chat_cutoffs.chat_id as "chatId", unread.count
+		from chat_cutoffs
+		cross join lateral (
+			select count(*)::int as count
+			from ${message}
+			where ${message.chatId} = chat_cutoffs.chat_id
+				and ${message.createdAt} >= coalesce(chat_cutoffs.cutoff, '-infinity'::timestamptz)
+				and coalesce(${message.createdAt} > chat_cutoffs.cutoff, true)
+				and ${finishedWordsFromOthers(memberId)}
+		) as unread
+		where unread.count > 0`,
+		"objects",
+	);
 	return new Map(rows.map((row) => [row.chatId, row.count]));
 });
 
@@ -658,12 +681,9 @@ const latestEndedTurnsIn = Effect.fn("ChatView.latestEndedTurnsIn")(function* (
 });
 
 /** A `message` with words in it, finished, written by somebody other than `memberId`. */
-function finishedWordsFromOthers(memberId: string): SQL | undefined {
-	return and(
-		ne(message.content, ""),
-		ne(message.status, "writing"),
-		sql`${message.authorMemberId} is distinct from ${memberId}`,
-	);
+function finishedWordsFromOthers(memberId: string): SQL {
+	return sql`(${message.content} <> '' and ${message.status} <> 'writing'
+		and ${message.authorMemberId} is distinct from ${memberId})`;
 }
 
 /**
@@ -708,11 +728,13 @@ function caughtUpAt(db: Executor, memberId: string, chatId: SQLWrapper): SQL<Dat
 	const readThrough = db
 		.select({ at: sql`${readCursor.readThrough}` })
 		.from(readCursor)
-		.where(and(sql`${readCursor.chatId} = ${chatId}`, eq(readCursor.memberId, memberId)));
+		.where(
+			and(sql`${readCursor.chatId} = ${outerColumn(chatId)}`, eq(readCursor.memberId, memberId)),
+		);
 	const lastWritten = db
 		.select({ at: sql`max(${own.createdAt})` })
 		.from(own)
-		.where(and(sql`${own.chatId} = ${chatId}`, eq(own.authorMemberId, memberId)));
+		.where(and(sql`${own.chatId} = ${outerColumn(chatId)}`, eq(own.authorMemberId, memberId)));
 	return sql<Date | null>`greatest((${readThrough}), (${lastWritten}))`;
 }
 
@@ -722,7 +744,11 @@ function caughtUpAt(db: Executor, memberId: string, chatId: SQLWrapper): SQL<Dat
  * nobody.
  */
 function mentions(handle: string): SQL {
-	return sql`(${message.content} ~* ${mentionPattern(handle)} or (${message.authorMemberId} is not null and ${message.content} ~* ${mentionPattern(...GROUP_MENTION_HANDLES)}))`;
+	return sql`(${message.content} like '%@%' and (${message.content} ~* ${mentionPattern(handle)} or
+		(${message.authorMemberId} is not null and (${sql.join(
+			GROUP_MENTION_HANDLES.map((group) => sql`${message.content} ~* ${mentionPattern(group)}`),
+			sql` or `,
+		)}))))`;
 }
 
 /** How far back what waits for a member goes: past this, a message is old news, read or not. */
@@ -739,13 +765,14 @@ const unreadMentionRows = Effect.fn("ChatView.unreadMentionRows")(function* (
 	limit: number,
 ) {
 	const author = alias(bot, "author_bot");
+	const unread = unreadMentionCandidates(db, input).as("unread_mentions");
 	return yield* db
 		.select({
 			id: message.id,
 			parts: message.parts,
 			content: message.content,
 			createdAt: message.createdAt,
-			chatId: placedChat.id,
+			chatId: message.chatId,
 			projectSlug: project.slug,
 			defaultOfBotId: project.defaultOfBotId,
 			authorMember: namedMemberColumns,
@@ -758,13 +785,12 @@ const unreadMentionRows = Effect.fn("ChatView.unreadMentionRows")(function* (
 				shape: author.shape,
 			},
 		})
-		.from(message)
-		.innerJoin(placedChat, inProjectChat)
-		.innerJoin(project, eq(project.id, placedChat.projectId))
+		.from(unread)
+		.innerJoin(message, eq(message.id, unread.id))
+		.innerJoin(project, eq(project.id, unread.projectId))
 		.leftJoin(member, eq(member.id, message.authorMemberId))
 		.leftJoin(author, eq(author.id, message.authorBotId))
-		.where(unreadMentionOf(db, input))
-		.orderBy(desc(message.createdAt))
+		.orderBy(desc(unread.createdAt))
 		.limit(limit);
 });
 
@@ -774,33 +800,46 @@ const unreadMentionCount = Effect.fn("ChatView.unreadMentionCount")(function* (
 	input: AttentionScope,
 ) {
 	const [counted] = yield* db
-		.select({ count: sql<number>`count(*)::int` })
-		.from(message)
-		.innerJoin(placedChat, inProjectChat)
-		.where(unreadMentionOf(db, input));
+		.select({ count: count() })
+		.from(unreadMentionCandidates(db, input).as("unread_mentions"));
 	return counted?.count ?? 0;
 });
 
-/**
- * Joins `message` to its `placedChat` when that is a project's chat: the
- * chats whose messages notify members.
- */
-const inProjectChat = and(eq(placedChat.id, message.chatId), eq(placedChat.kind, "project_chat"));
-
-/**
- * Whether a `message`, joined to its `placedChat` by `inProjectChat`, is in
- * the workspace and reached, since `input.since`, finished by somebody else,
- * mentions the member and is unread by them.
- */
-function unreadMentionOf(db: Executor, input: AttentionScope) {
-	return and(
-		eq(placedChat.workspaceId, input.workspaceId),
-		input.reachesChat(placedChat),
-		gt(message.createdAt, input.since),
-		finishedWordsFromOthers(input.memberId),
-		mentions(input.handle),
-		unreadBy(db, input.memberId, { chatId: message.chatId, at: message.createdAt }),
-	);
+function unreadMentionCandidates(db: Executor, input: AttentionScope) {
+	const reachedProjects = db
+		.select({ id: project.id })
+		.from(project)
+		.where(and(eq(project.workspaceId, input.workspaceId), input.reachesProject(project.id)))
+		.offset(0)
+		.as("mention_projects");
+	const chats = db
+		.select({
+			id: projectChat.chatId,
+			projectId: projectChat.projectId,
+			cutoff: caughtUpAt(db, input.memberId, projectChat.chatId).as("cutoff"),
+		})
+		.from(reachedProjects)
+		.innerJoin(projectChat, eq(projectChat.projectId, reachedProjects.id))
+		.where(eq(projectChat.workspaceId, input.workspaceId))
+		.offset(0)
+		.as("mention_chat_cutoffs");
+	const candidates = db
+		.select({ id: message.id, chatId: message.chatId, createdAt: message.createdAt })
+		.from(message)
+		.where(
+			and(
+				gt(message.createdAt, input.since),
+				finishedWordsFromOthers(input.memberId),
+				mentions(input.handle),
+			),
+		)
+		.offset(0)
+		.as("mention_candidates");
+	return db
+		.select({ id: candidates.id, projectId: chats.projectId, createdAt: candidates.createdAt })
+		.from(candidates)
+		.innerJoin(chats, eq(chats.id, candidates.chatId))
+		.where(sql`coalesce(${candidates.createdAt} > ${chats.cutoff}, true)`);
 }
 
 /** A message that mentions the member and that they have not read. */
@@ -822,7 +861,7 @@ interface UnreadMention {
  * with their accounts.
  */
 const attentionScopeIn = Effect.fn("ChatView.attentionScopeIn")(function* (
-	reached: Pick<AttentionScope, "workspaceId" | "memberId" | "reachesChat">,
+	reached: Pick<AttentionScope, "workspaceId" | "memberId" | "reachesChat" | "reachesProject">,
 ) {
 	const handle = yield* query((db) => memberHandleOf(db, reached.memberId));
 	if (handle === undefined) {
@@ -837,6 +876,7 @@ const attentionScopeIn = Effect.fn("ChatView.attentionScopeIn")(function* (
 interface AttentionScope {
 	workspaceId: string;
 	reachesChat: ReachesChatSql;
+	reachesProject: ReachesProjectSql;
 	memberId: string;
 	/** The member's handle, which mentions of them use. */
 	handle: string;

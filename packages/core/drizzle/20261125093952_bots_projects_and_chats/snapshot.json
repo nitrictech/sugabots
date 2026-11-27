@@ -15274,6 +15274,48 @@
         "n|sch|public",
         "n|col|public.notification_delivery.approval_call_id"
       ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "message",
+        "message_author_chat_created_at_idx"
+      ],
+      "writes": [
+        "s|idx|public.message_author_chat_created_at_idx",
+        "n|idx|public.message_author_chat_created_at_idx",
+        "e|idx|public.message_author_chat_created_at_idx",
+        "n|rel|public.message_author_chat_created_at_idx"
+      ],
+      "reads": [
+        "n|tbl|public.message",
+        "n|sch|public",
+        "n|col|public.message.author_member_id",
+        "n|col|public.message.chat_id",
+        "n|col|public.message.created_at"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "message",
+        "message_mention_trigram_idx"
+      ],
+      "writes": [
+        "s|idx|public.message_mention_trigram_idx",
+        "n|idx|public.message_mention_trigram_idx",
+        "e|idx|public.message_mention_trigram_idx",
+        "n|rel|public.message_mention_trigram_idx"
+      ],
+      "reads": [
+        "n|tbl|public.message",
+        "n|sch|public",
+        "n|col|public.message.content"
+      ]
     }
   ],
   "deltas": [
@@ -25239,6 +25281,71 @@
         "where": null,
         "with": "",
         "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message",
+        "name": "message_author_chat_created_at_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "author_member_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "chat_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "created_at",
+            "isExpression": false,
+            "asc": false,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message",
+        "name": "message_mention_trigram_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "content",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": {
+              "name": "gin_trgm_ops",
+              "default": false
+            }
+          }
+        ],
+        "isUnique": false,
+        "where": "\"content\" like '%@%' and \"content\" <> '' and \"status\" <> 'writing'",
+        "with": "",
+        "method": "gin",
         "concurrently": false,
         "entityType": "indexes"
       }

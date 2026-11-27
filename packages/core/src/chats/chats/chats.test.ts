@@ -1729,6 +1729,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 			expect((await chats.approvals(workspaceId)).waiting).toEqual([
 				expect.objectContaining({ call: expect.objectContaining({ id: callId }) }),
 			]);
+			expect((await chats.attention(workspaceId)).waitingApprovals).toBe(1);
 		});
 
 		it("leaves out a request to change the bot's computer, which only its managers decide", async () => {

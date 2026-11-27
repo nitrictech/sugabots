@@ -12,7 +12,7 @@
 
 import { inArray, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { askedBy, type TurnFacts } from "../authentication/turn-facts.ts";
+import type { TurnFacts } from "../authentication/turn-facts.ts";
 import { reachesChatFor } from "../authorization/access.ts";
 import { rolesGrantedInProject } from "../authorization/permissions.ts";
 import { COMPUTER_REQUEST_TOOLS } from "../chats/tools/approvers.ts";
@@ -110,13 +110,10 @@ export function approvedCalls(standing: ApproverStanding, candidates: SQLWrapper
 	const turnApproval = approvalDecision(standing, approverRule(sql<boolean>`false`));
 	return sql`with pending_calls as (${candidates}),
 		turn_decisions as materialized (
-			select pending_turns.turn_id, decisions.allowed
+			select approver_turn.id as turn_id, ${turnApproval} as allowed
 			from (select distinct turn_id from pending_calls) as pending_turns
-			cross join lateral (
-				select ${turnApproval} as allowed
-				${fromApproverTurn(sql`pending_turns.turn_id`)}
-				limit 1
-			) as decisions
+			inner join ${turn} as approver_turn on approver_turn.id = pending_turns.turn_id
+			${approverTurnRelations}
 		)
 		select pending_calls.id
 		from pending_calls
@@ -283,12 +280,6 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 	const rows = yield* db.execute<Call & { memberId: string; reachesChat: boolean }>(
 		sql`with candidates as (
 			select * from ${toolCall} where ${inArray(toolCall.id, callIds)}
-		), called_in as materialized (
-			select distinct turn_id from candidates
-		), turn_askers as materialized (
-			select called_in.turn_id, asked.*
-			from called_in
-			left join lateral (${askedBy(sql`called_in.turn_id`)}) as asked on true
 		)
 		select ${member} as "memberId", ${reachesChat} as "reachesChat",
 			candidates.id, candidates.tool, candidates.input, candidates.execution_input as "executionInput"
@@ -299,7 +290,6 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 		inner join ${workspace} as audience_workspace on audience_workspace.id = approver_chat.workspace_id
 			and not audience_workspace.deleting
 		inner join ${membership} as audience on audience.workspace_id = audience_workspace.id and not audience.leaving
-		inner join turn_askers as approver_asked on approver_asked.turn_id = approver_turn.id
 		left join ${automationRun} as approver_run on approver_run.chat_id = approver_turn.chat_id
 		left join ${bot} as run_bot on run_bot.id = approver_run.bot_id
 		left join ${project} as computer_project on computer_project.id = candidates.approval_computer_project_id
@@ -336,7 +326,7 @@ function approverRule(computerRequest: SQL<boolean>): SQL<ApproverRule> {
 	return sql<ApproverRule>`case
 		when ${computerRequest} then 'computerRequest'
 		when approver_bot.visibility = 'personal' then 'personalBot'
-		when approver_asked.automation and approver_run.id is not null then 'run'
+		when approver_turn.asked_by_automation and approver_run.id is not null then 'run'
 		else 'asker'
 	end`;
 }
@@ -369,16 +359,19 @@ function decidesByRule(
 		when 'computerRequest' then ${standing.managesComputer}
 		when 'personalBot' then approver_bot.created_by_id = ${standing.member}
 		when 'run' then ${standing.managesRun} and ${standing.reachesChat}
-		else approver_asked.member_id = ${standing.member}
+		else approver_turn.asker_id = ${standing.member}
 	end`;
 }
 
+const approverTurnRelations = sql`
+	inner join ${bot} as approver_bot on approver_bot.id = approver_turn.bot_id
+	inner join ${placedChat} as approver_chat on approver_chat.id = approver_turn.chat_id
+	left join ${automationRun} as approver_run on approver_run.chat_id = approver_turn.chat_id
+`;
+
 function fromApproverTurn(turnId: SQLWrapper): SQL {
 	return sql`from ${turn} as approver_turn
-		inner join ${bot} as approver_bot on approver_bot.id = approver_turn.bot_id
-		inner join ${placedChat} as approver_chat on approver_chat.id = approver_turn.chat_id
-		left join ${automationRun} as approver_run on approver_run.chat_id = approver_turn.chat_id
-		left join lateral (${askedBy(sql`approver_turn.id`)}) as approver_asked on true
+		${approverTurnRelations}
 		where approver_turn.id = ${outerColumn(turnId)}`;
 }
 
