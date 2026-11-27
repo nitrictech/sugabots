@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SqlClient, Statement } from "effect/unstable/sql";
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { seedProjectChat } from "../../authentication/seed.test-support.ts";
 import { query, type RunEffect, transaction } from "../../database/database.ts";
+import { copyTestDatabase } from "../../database/test-setup.ts";
 import {
 	closeDatabase,
 	onDatabase,
@@ -10,7 +12,11 @@ import {
 	type TestInfrastructure,
 } from "../../database/testing.ts";
 import { asMember } from "../../operations/chats/testing.ts";
-import { type CallOperation, servedOperations } from "../../operations/testing.ts";
+import {
+	type CallOperation,
+	operationsForTests,
+	servedOperations,
+} from "../../operations/testing.ts";
 import type { BotPrincipal, MemberSession } from "../../principal.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { aChatAwaitingReply, openTurn, runningTurns, runOver } from "../turns/testing.ts";
@@ -33,8 +39,35 @@ const withBoundedMessageReads: RunEffect<TestInfrastructure> = (effect) =>
 		transaction(
 			Effect.gen(function* () {
 				const before = yield* messagesRead;
-				const result = yield* effect;
-				expect((yield* messagesRead) - before).toBeLessThan(UNRELATED_MATCHES / 10);
+				const messageQueries: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
+				const result = yield* Effect.provideService(
+					effect,
+					Statement.CurrentTransformer,
+					(statement) => {
+						const compiled = statement.compile();
+						if (/\b(?:from|join)\s+"?message"?\b/i.test(compiled[0])) {
+							messageQueries.push(compiled);
+						}
+						return Effect.succeed(statement);
+					},
+				);
+				const reads = (yield* messagesRead) - before;
+				const budget = UNRELATED_MATCHES / 10;
+				if (reads >= budget) {
+					const client = yield* SqlClient.SqlClient;
+					const plans = yield* Effect.all(
+						messageQueries.map(([queryText, params]) =>
+							client.unsafe<{ "QUERY PLAN": string }>(
+								`explain (analyze, buffers, timing off) ${queryText}`,
+								params,
+							),
+						),
+					);
+					const formatted = plans.map((plan) => plan.map((row) => row["QUERY PLAN"]).join("\n"));
+					throw new Error(
+						`Read ${reads} message rows, expected fewer than ${budget}\n${formatted.join("\n\n")}`,
+					);
+				}
 				return result;
 			}),
 		),
@@ -47,8 +80,14 @@ describe.skipIf(!process.env.DATABASE_URL)("matching messages within the reached
 	let workspaceId: string;
 	let targetChat: string;
 	let after: string;
+	let database: Awaited<ReturnType<typeof copyTestDatabase>> | undefined;
 
 	beforeAll(async () => {
+		const template = inject("testDatabaseTemplateUrl");
+		if (!template) throw new Error("Expected a test database template");
+		database = await copyTestDatabase(template, "search_workspace");
+		vi.stubEnv("DATABASE_URL", database.url);
+
 		const chats = await chatServicesForTests({ publishCommitted: () => Promise.resolve() });
 		const fixtures = await servedOperations({ chats });
 		const chatsAs = (memberId: string) => asMember(fixtures, memberId);
@@ -82,10 +121,19 @@ describe.skipIf(!process.env.DATABASE_URL)("matching messages within the reached
 		const [run] = await runOnPostgres(runningTurns(reached.chatId));
 		if (!run) throw new Error("The chat has no turn");
 		({ principal: acting } = await runOver(chats)(openTurn(run)));
-		call = await servedOperations({ chats, runOn: withBoundedMessageReads });
+		const operations = await operationsForTests({ chats });
+		call = (principal, name, input) =>
+			withBoundedMessageReads(operations[name](principal, input, { kind: "request" }));
 	}, 30_000);
 
-	afterAll(closeDatabase);
+	afterAll(async () => {
+		try {
+			await closeDatabase();
+			await database?.drop();
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
 
 	it("counts unread mentions without reading matches from unrelated chats", async () => {
 		expect(await call(member, "chats.attention", { workspace: workspaceId })).toMatchObject({

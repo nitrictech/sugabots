@@ -105,6 +105,23 @@ export function copyTemplateIfMissing(url: string, templateUrl: string): Effect.
 	);
 }
 
+export async function copyTestDatabase(templateUrl: string, suffix: string) {
+	const copy = new URL(templateUrl);
+	copy.pathname = `${copy.pathname}_${suffix}`;
+	const url = copy.toString();
+	const drop = () =>
+		Effect.runPromise(
+			withServer(url, (client, name) =>
+				client
+					.unsafe(`drop database if exists ${identifier(name)} with (force)`)
+					.pipe(Effect.asVoid),
+			),
+		);
+	await drop();
+	await Effect.runPromise(copyTemplateIfMissing(url, templateUrl));
+	return { url, drop };
+}
+
 /** Creates the database at `url` if the server has none by that name. */
 function createIfMissing(url: string): Effect.Effect<void> {
 	return withServer(url, (client, name) =>
