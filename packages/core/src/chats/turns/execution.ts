@@ -43,7 +43,7 @@ import {
 import { type Ended, TURN_CANCELLED } from "./lifecycle.ts";
 import type { TurnSetting } from "./loop-values.ts";
 import type { TurnRequest } from "./requests.ts";
-import { type NotRunnable, notRunnable, TurnStore } from "./store.ts";
+import { type Abandonment, type NotRunnable, notRunnable, TurnStore } from "./store.ts";
 
 /**
  * Running a bot's turn: one bot answering one message in a chat.
@@ -89,11 +89,7 @@ export const make = Effect.gen(function* () {
 	 * `ending` says. With no turn to end, members are told of a failure as a
 	 * notice in the chat, so nobody waits on a reply that cannot come.
 	 */
-	const refuseRun = (
-		run: TurnRun,
-		reason: string,
-		ending: { status: "failed" | "cancelled"; userMessage: UserText },
-	) =>
+	const refuseRun = (run: TurnRun, reason: string, ending: Abandonment) =>
 		Effect.gen(function* () {
 			const ended = yield* turns.abandon(run.executionId, { ...ending, handOnSteers: false });
 			if (!ended) {
@@ -230,7 +226,13 @@ export const make = Effect.gen(function* () {
 					> {
 						const request = run.request;
 						const loaded = yield* query((db) => loadTurnContext(db, request.chatId, undefined, 0));
-						if (!loaded) return yield* refuseRun(run, "The chat is gone", CANCELLED);
+						if (!loaded) {
+							return yield* refuseRun(run, "The chat is gone", {
+								status: "cancelled",
+								userMessage: TURN_CANCELLED,
+								closedBecause: "chatUnavailable",
+							});
+						}
 						const speaker = speakerIn(loaded, request.botId);
 						if (!speaker) {
 							return yield* refuseRun(run, "The bot does not answer in this chat", {
@@ -457,9 +459,6 @@ const loadAutomationInstructions = Effect.fn("TurnExecution.loadAutomationInstru
  * history limit. It bounds the query, not what the bot reads.
  */
 const MAX_HISTORY_MESSAGES = 1_000;
-
-/** How a run is refused whose reply nobody needs any more. */
-const CANCELLED = { status: "cancelled", userMessage: TURN_CANCELLED } as const;
 
 /** What members are told when a bot asked to reply in a chat is not in its project. */
 const NOT_HERE = userText`The bot asked to reply doesn't answer here, so it cannot reply.`;

@@ -25968,6 +25968,22 @@
         "identity": null,
         "entityType": "columns"
       }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "tool_call",
+        "name": "approval_closed_because",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
     }
   ]
 }

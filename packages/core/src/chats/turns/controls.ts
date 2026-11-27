@@ -44,7 +44,7 @@ export const makeControls = Effect.gen(function* () {
 							const conflict = new ToolApprovalConflict({ reason });
 							yield* toolCalls.withdrawPending(
 								candidate.call.turnId,
-								conflict.userMessage,
+								{ userMessage: conflict.userMessage, closedBecause: reason },
 								approvalId,
 							);
 							yield* signals.withdraw({ executionId: candidate.executionId, approvalId });

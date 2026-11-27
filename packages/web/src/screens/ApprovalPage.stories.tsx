@@ -99,9 +99,8 @@ const closedBrief: AnsweredApproval = {
 	call: {
 		...changedBrief.call,
 		status: "failed",
-		error: briefClosedReason,
 		finishedAt: closedAt,
-		approval: { ...pending, status: "denied", closedBecause: "settingsChanged" },
+		approval: { ...pending, status: "denied", closedBecause: "briefDestinationChanged" },
 	},
 	answer: { status: "closed", closedAt },
 };
@@ -119,6 +118,21 @@ const outside = {
 		approval: { ...pending, approvers: "computer-managers" },
 	},
 } satisfies ApprovalRequest;
+const unavailable: AnsweredApproval = {
+	...outside,
+	call: {
+		...outside.call,
+		id: "0199a3a0-0000-7000-8000-000000000808",
+		status: "failed",
+		finishedAt: closedAt,
+		approval: {
+			...outside.call.approval,
+			status: "denied",
+			closedBecause: "chatUnavailable",
+		},
+	},
+	answer: { status: "closed", closedAt },
+};
 const withoutFields = {
 	...outside,
 	call: { ...outside.call, id: "0199a3a0-0000-7000-8000-000000000805", input: null },
@@ -137,7 +151,7 @@ const brief: ApprovalRequest = {
 
 const approvals: WorkspaceApprovals = {
 	waiting: [answerable, outside, withoutFields, brief],
-	answered: [answered, stopped, closedBrief],
+	answered: [answered, stopped, closedBrief, unavailable],
 };
 
 const meta = preview.meta({
@@ -207,7 +221,8 @@ export const ClosedAfterAllow = meta.story({
 		} finally {
 			loaded.closedRequest.resolve();
 		}
-		const outcome = `${briefClosedReason} Ask Growth Desk to try again.`;
+		const outcome =
+			"This approval was closed because the chat Growth Desk wanted to start changed. Ask Growth Desk to try again.";
 		await expect(await canvas.findByText(outcome)).toBeVisible();
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
 		await expect(canvas.getByRole("link", { name: "Open chat" })).toBeVisible();
@@ -220,7 +235,7 @@ export const ClosedAfterAllow = meta.story({
 export const NoLongerWaiting = meta.story({
 	render: at(stopped.call.id),
 	play: async ({ canvas, userEvent }) => {
-		const outcome = "No longer waiting. The bot was stopped.";
+		const outcome = "No longer waiting. Growth Desk was stopped.";
 		await expect(await canvas.findByText(outcome)).toBeVisible();
 		await expect(canvas.queryByText(/try again/)).toBeNull();
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
@@ -236,9 +251,27 @@ export const SettingsChanged = meta.story({
 	render: at(closedBrief.call.id),
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(`${briefClosedReason} Ask Growth Desk to try again.`),
+			await canvas.findByText(
+				"This approval was closed because the chat Growth Desk wanted to start changed. Ask Growth Desk to try again.",
+			),
 		).toBeVisible();
 		await expect(await canvas.findByRole("link", { name: "Open chat" })).toBeVisible();
+	},
+});
+
+export const ChatUnavailable = meta.story({
+	globals: { theme: "light", viewport: { value: "galaxys9", isRotated: false } },
+	parameters: {
+		docs: { description: { story: "The approval closed when its chat became unavailable." } },
+	},
+	render: at(unavailable.call.id),
+	play: async ({ canvas, userEvent }) => {
+		const outcome =
+			"No longer waiting. This chat is no longer available. If you can still talk to Growth Desk, start a new chat.";
+		await expect(await canvas.findByText(outcome)).toBeVisible();
+		await expect(canvas.queryByRole("link", { name: "Open chat" })).toBeNull();
+		await userEvent.click(canvas.getByRole("link", { name: "Back to Approvals" }));
+		await expect(await canvas.findByText(outcome)).toBeVisible();
 	},
 });
 

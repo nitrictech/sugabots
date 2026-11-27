@@ -184,7 +184,7 @@ export const ClosedAfterAllow = meta.story({
 				approval: args.call.approval && {
 					...args.call.approval,
 					status: "denied",
-					closedBecause: "settingsChanged",
+					closedBecause: "connectorChanged",
 				},
 			}),
 		);
@@ -215,13 +215,38 @@ export const WithdrawnAfterNewMessage = meta.story({
 		}),
 	},
 	play: async ({ canvas, userEvent }) => {
-		const outcome = "No longer waiting. A new message reached the bot.";
+		const outcome = "No longer waiting. A new message reached Trip Planner.";
 		await waitFor(() => expect(canvas.getByText(outcome)).toBeVisible());
 		await userEvent.click(canvas.getByRole("button", { name: "See request" }));
 		const request = await screen.findByRole("dialog", { name: "Create event" });
 		await expect(request).toHaveTextContent(outcome);
 		await expect(request).not.toHaveTextContent("try again");
 		await expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
+	},
+});
+
+export const Expired = meta.story({
+	globals: { ...PHONE, theme: "dark" },
+	parameters: { docs: { description: { story: "Nobody answered within seven days." } } },
+	args: {
+		call: asking({
+			status: "failed",
+			finishedAt: "2026-11-17T09:00:00.000Z",
+			approval: {
+				id: "approval-1",
+				status: "denied",
+				approvers: "chat",
+				decidedByName: null,
+				decidedAt: null,
+				closedBecause: "approvalExpired",
+			},
+		}),
+	},
+	play: async ({ canvas }) => {
+		const outcome =
+			"No longer waiting. Nobody answered within 7 days. Ask Trip Planner to try again.";
+		await waitFor(() => expect(canvas.getByText(outcome)).toBeVisible());
+		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	},
 });
 
@@ -332,14 +357,14 @@ export const BrowserPage = meta.story({
 		);
 		await expect(
 			canvas.getByText(
-				"Allowing this lets the bot act anywhere on this page, which may change before you decide.",
+				"Allowing this lets Trip Planner act anywhere on this page, which may change before you decide.",
 			),
 		).toBeVisible();
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog");
 		await expect(request).toHaveTextContent("On the page https://travel.example.com/checkout");
 		await expect(request).toHaveTextContent(
-			"Allowing this lets the bot act anywhere on this page, which may change before you decide.",
+			"Allowing this lets Trip Planner act anywhere on this page, which may change before you decide.",
 		);
 	},
 });

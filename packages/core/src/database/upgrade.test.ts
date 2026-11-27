@@ -1494,7 +1494,8 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(
 				await upgraded.rows(
 					`select turn.status, turn.end_requested, turn.checkpoint, message.status as reply_status,
-					tool_call.status as call_status, tool_call.approval_status, tool_call.error
+					tool_call.status as call_status, tool_call.approval_status, tool_call.error,
+					tool_call.approval_closed_because
 					from turn join message on message.turn_id = turn.id
 					join tool_call on tool_call.turn_id = turn.id where turn.id = $1`,
 					[WAITING_TURN],
@@ -1507,6 +1508,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					reply_status: "cancelled",
 					call_status: "failed",
 					approval_status: "denied",
+					approval_closed_because: "botStopped",
 					error: "Turn cancelled",
 				},
 			]);

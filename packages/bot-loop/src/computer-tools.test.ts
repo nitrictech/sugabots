@@ -282,11 +282,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(await callsOf(turnId)).toMatchObject([
 				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
 			]);
+			await onDatabase((db) =>
+				db.update(toolCall).set({ error: null }).where(eq(toolCall.id, parked.id)),
+			);
 			expect(await chatsAs(adminId).approvals(workspaceId)).toMatchObject({
 				waiting: [],
 				answered: [
 					{
-						call: { id: parked.id, approval: { closedBecause: "settingsChanged" }, error },
+						call: { id: parked.id, approval: { closedBecause: reason }, error: null },
 						answer: { status: "closed" },
 					},
 				],

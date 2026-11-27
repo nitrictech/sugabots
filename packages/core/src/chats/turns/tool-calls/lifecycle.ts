@@ -1,4 +1,9 @@
-import type { JsonValue, ToolApprovalStatus, ToolCallStatus } from "@sugabots/contracts";
+import type {
+	ApprovalClosureReason,
+	JsonValue,
+	ToolApprovalStatus,
+	ToolCallStatus,
+} from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { Data, Schema } from "effect";
 
@@ -42,10 +47,16 @@ export interface ToolCallState {
 	readonly status: ToolCallStatus;
 	/** `null` for a call that needed nobody's approval. */
 	readonly approvalStatus: ToolApprovalStatus | null;
+	readonly approvalClosedBecause: ApprovalClosureReason | null;
 	/** Who made the decision. */
 	readonly decidedById: string | null;
 	readonly output: JsonValue | null;
 	readonly error: UserText | null;
+}
+
+export interface ToolCallAbandonment {
+	readonly userMessage: UserText;
+	readonly closedBecause: ApprovalClosureReason;
 }
 
 export type ToolCallEvent = Data.TaggedEnum<{
@@ -56,7 +67,7 @@ export type ToolCallEvent = Data.TaggedEnum<{
 	/** The allowed call began running. */
 	BeginExecution: Record<never, never>;
 	/** The call's turn ended before it finished; `userMessage` is what members are told of it. */
-	Abandon: { readonly userMessage: UserText };
+	Abandon: ToolCallAbandonment;
 }>;
 
 export const ToolCallEvent = Data.taggedEnum<ToolCallEvent>();
@@ -96,12 +107,13 @@ export function transition(state: ToolCallState, event: ToolCallEvent): Transiti
 				? next({ ...state, status: "running" })
 				: refused("The call is not approved for execution"),
 		// A pending approval becomes denied: nobody may allow a call whose turn is over.
-		Abandon: ({ userMessage }) => {
+		Abandon: ({ userMessage, closedBecause }) => {
 			if (isFinished(state.status)) return refused("The call has already finished");
 			return next({
 				...state,
 				status: "failed",
 				approvalStatus: state.approvalStatus === "pending" ? "denied" : state.approvalStatus,
+				approvalClosedBecause: state.approvalStatus === "pending" ? closedBecause : null,
 				error: userMessage,
 			});
 		},

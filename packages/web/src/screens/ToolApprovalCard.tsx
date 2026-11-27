@@ -366,7 +366,8 @@ export function ApprovalDestination({
 			)}
 			{browserUrl && waiting && (
 				<p className="m-0">
-					Allowing this lets the bot act anywhere on this page, which may change before you decide.
+					Allowing this lets {botName} act anywhere on this page, which may change before you
+					decide.
 				</p>
 			)}
 			{gitHub?.baseBranch && <p className="m-0">Base branch {gitHub.baseBranch}</p>}

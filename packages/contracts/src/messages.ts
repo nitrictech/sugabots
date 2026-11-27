@@ -14,6 +14,7 @@ import {
 } from "./automations.ts";
 import { type Bot, botColorSchema, botEyesSchema, botShapeSchema } from "./bots.ts";
 import { emailSchema } from "./email.ts";
+import { approvalSettingsChangeSchema } from "./errors/approvals.ts";
 import { FILE_WRITING_TOOLS, fileWrittenSchema } from "./files.ts";
 import { anyJsonSchema } from "./json.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
@@ -268,6 +269,21 @@ export const jsonValueSchema = anyJsonSchema.pipe(
 
 export type JsonValue = typeof jsonValueSchema.Type;
 
+export const APPROVAL_LIFETIME_DAYS = 7;
+
+const approvalClosureReasonSchema = Schema.Literals([
+	...approvalSettingsChangeSchema.literals,
+	"newMessage",
+	"botStopped",
+	"approvalExpired",
+	"automationRunEnded",
+	"chatUnavailable",
+	"replyFailed",
+	"withdrawn",
+]);
+
+export type ApprovalClosureReason = typeof approvalClosureReasonSchema.Type;
+
 /**
  * One call a bot made to a tool, in the middle of a reply. Sits
  * between the text parts at the point the call was made.
@@ -292,9 +308,7 @@ export const toolCallPartSchema = Schema.Struct({
 			approvers: toolApproversSchema,
 			decidedByName: Schema.NullOr(Schema.String),
 			decidedAt: Schema.NullOr(isoTimestampSchema),
-			closedBecause: Schema.optional(
-				Schema.Literals(["settingsChanged", "newMessage", "botStopped", "withdrawn"]),
-			),
+			closedBecause: Schema.optional(approvalClosureReasonSchema),
 			browserUrl: Schema.optional(Schema.String),
 			gitHub: Schema.optional(
 				Schema.Struct({

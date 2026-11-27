@@ -348,7 +348,9 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			expect(await admin.approvals(workspaceId)).toMatchObject({
 				waiting: [],
 				answered: [
-					{ call: { id: parked.id, approval: { closedBecause: "settingsChanged" }, error } },
+					{
+						call: { id: parked.id, approval: { closedBecause: "automationRoutineChanged" }, error },
+					},
 				],
 			});
 			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);

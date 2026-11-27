@@ -45,6 +45,7 @@ import {
 	type ApprovalDecision,
 	INTERRUPTED_CALL,
 	isFinished,
+	type ToolCallAbandonment,
 	ToolCallEvent,
 	type ToolCallState,
 	transition,
@@ -168,7 +169,7 @@ export interface Interface {
 	 */
 	readonly abandonUnfinished: (
 		turnIds: readonly string[],
-		userMessage: UserText,
+		ending: ToolCallAbandonment,
 	) => Effect.Effect<void>;
 	/**
 	 * Withdraws the approvals the turn `turnId` waits for that nobody has
@@ -179,7 +180,7 @@ export interface Interface {
 	 */
 	readonly withdrawPending: (
 		turnId: string,
-		userMessage: UserText,
+		ending: ToolCallAbandonment,
 		approvalId?: string,
 	) => Effect.Effect<readonly string[]>;
 	/** Forgets a reply's calls, for a retry that starts the reply again. */
@@ -210,6 +211,7 @@ export const make = Effect.gen(function* () {
 				.set({
 					status: next.status,
 					approvalStatus: next.approvalStatus,
+					approvalClosedBecause: next.approvalClosedBecause,
 					decidedById: next.decidedById,
 					output: next.output,
 					error: next.error,
@@ -337,7 +339,10 @@ export const make = Effect.gen(function* () {
 							and(eq(toolCall.id, callId), eq(toolCall.turnId, runsTurn.turn.value)),
 						);
 						if (!row) return undefined;
-						const interrupted = yield* apply(row, ToolCallEvent.Abandon({ userMessage }));
+						const interrupted = yield* apply(
+							row,
+							ToolCallEvent.Abandon({ userMessage, closedBecause: "replyFailed" }),
+						);
 						if (!interrupted) return undefined;
 						yield* emit([ChatEvent.ToolCallFinished(toolCallChange(interrupted))]);
 						return toToolCallPart(interrupted);
@@ -429,6 +434,7 @@ export const make = Effect.gen(function* () {
 									.set({
 										approvalId: approval.approvalId,
 										approvalStatus: "pending",
+										approvalClosedBecause: null,
 										approvalReason: approval.reason ?? null,
 										approvalComputerProjectId: approval.computerProjectId ?? null,
 										approvalResolvedTargets: approval.resolvedTargets ?? null,
@@ -537,7 +543,10 @@ export const make = Effect.gen(function* () {
 							Effect.gen(function* () {
 								const failed = yield* apply(
 									row,
-									ToolCallEvent.Abandon({ userMessage: APPROVAL_NO_LONGER_APPLIES }),
+									ToolCallEvent.Abandon({
+										userMessage: APPROVAL_NO_LONGER_APPLIES,
+										closedBecause: "connectorChanged",
+									}),
 								);
 								if (failed) yield* emit([ChatEvent.ToolCallFinished(toolCallChange(failed))]);
 								return refusedExecution(reason);
@@ -565,7 +574,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		abandonUnfinished: (turnIds, userMessage) =>
+		abandonUnfinished: (turnIds, ending) =>
 			operation(
 				"abandonUnfinished",
 				transaction(
@@ -588,8 +597,11 @@ export const make = Effect.gen(function* () {
 							apply(
 								row,
 								ToolCallEvent.Abandon({
+									...ending,
 									userMessage:
-										row.status === "running" && row.writeOrDelete ? INTERRUPTED_CALL : userMessage,
+										row.status === "running" && row.writeOrDelete
+											? INTERRUPTED_CALL
+											: ending.userMessage,
 								}),
 							),
 						);
@@ -602,7 +614,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		withdrawPending: (turnId, userMessage, approvalId) =>
+		withdrawPending: (turnId, ending, approvalId) =>
 			operation(
 				"withdrawPending",
 				transaction(
@@ -622,7 +634,7 @@ export const make = Effect.gen(function* () {
 								.for("update"),
 						);
 						const withdrawn = yield* Effect.forEach(pending, (row) =>
-							apply(row, ToolCallEvent.Abandon({ userMessage })),
+							apply(row, ToolCallEvent.Abandon(ending)),
 						);
 						yield* emit(
 							withdrawn.flatMap((row) =>
@@ -790,6 +802,7 @@ function stateOf(row: ToolCallRow): ToolCallState {
 	return {
 		status: row.status,
 		approvalStatus: row.approvalStatus,
+		approvalClosedBecause: row.approvalClosedBecause,
 		decidedById: row.decidedById,
 		output: row.output,
 		error: row.error,

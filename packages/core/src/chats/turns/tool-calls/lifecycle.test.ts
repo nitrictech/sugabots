@@ -14,6 +14,7 @@ const turnCancelled = userText`Turn cancelled`;
 const running: ToolCallState = {
 	status: "running",
 	approvalStatus: null,
+	approvalClosedBecause: null,
 	decidedById: null,
 	output: null,
 	error: null,
@@ -95,7 +96,10 @@ describe("running an approved call", () => {
 });
 
 describe("a call whose turn ended", () => {
-	const abandon = ToolCallEvent.Abandon({ userMessage: turnCancelled });
+	const abandon = ToolCallEvent.Abandon({
+		userMessage: turnCancelled,
+		closedBecause: "botStopped",
+	});
 
 	it("fails a running call", () => {
 		expect(transition(running, abandon)).toEqual({
@@ -107,7 +111,13 @@ describe("a call whose turn ended", () => {
 	it("denies a pending approval", () => {
 		expect(transition(parked, abandon)).toEqual({
 			_tag: "Next",
-			state: { ...parked, status: "failed", approvalStatus: "denied", error: turnCancelled },
+			state: {
+				...parked,
+				status: "failed",
+				approvalStatus: "denied",
+				approvalClosedBecause: "botStopped",
+				error: turnCancelled,
+			},
 		});
 	});
 

@@ -112,7 +112,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				const error =
 					reason === "expiry"
 						? "This approval expired before anyone decided it."
-						: "This approval was withdrawn because the turn lost access to its chat.";
+						: "This approval was withdrawn because its chat is no longer available.";
+				const closedBecause = reason === "expiry" ? "approvalExpired" : "chatUnavailable";
 				// Deletion can erase the entire turn. Check what the withdrawal did as
 				// its denial commits, while the request is held before its cleanup.
 				let checked: Promise<void> | undefined;
@@ -120,7 +121,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					if (!events.some(({ event }) => deniedCall(event) === parked.id)) return;
 					checked = (async () => {
 						expect(await callsOf(turnId)).toMatchObject([
-							{ status: "failed", approvalStatus: "denied", error },
+							{
+								status: "failed",
+								approvalStatus: "denied",
+								approvalClosedBecause: closedBecause,
+								error,
+							},
 						]);
 						await workflow.completed();
 						expect(await storedTurn(turnId)).toMatchObject({ status: "cancelled" });

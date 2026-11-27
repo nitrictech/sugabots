@@ -1,4 +1,5 @@
 import type {
+	ApprovalClosureReason,
 	AutomationState,
 	AutomationTrigger,
 	AutomationTriggerAuthor,
@@ -727,6 +728,7 @@ export const toolCall = pgTable(
 		sentInExecution: integer("sent_in_execution"),
 		approvalId: text("approval_id"),
 		approvalStatus: text("approval_status").$type<ToolApprovalStatus>(),
+		approvalClosedBecause: text("approval_closed_because").$type<ApprovalClosureReason>(),
 		approvalReason: text("approval_reason"),
 		approvalComputerProjectId: uuid("approval_computer_project_id"),
 		approvalConnectorAccess: text("approval_connector_access").$type<"allow" | "ask">(),

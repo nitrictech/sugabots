@@ -1,4 +1,5 @@
-import type { ChatDetails, ToolCallPart } from "@sugabots/contracts";
+import { APPROVAL_LIFETIME_DAYS, type ChatDetails, type ToolCallPart } from "@sugabots/contracts";
+import { ToolApprovalConflict } from "@sugabots/contracts/errors/approvals";
 
 /** What a member may decide in a chat, as its details say. */
 export type ApprovalPermissions = NonNullable<ChatDetails["permissions"]>;
@@ -40,14 +41,26 @@ export function routineChangeMessage(
 }
 
 export function closedApprovalMessage(call: ToolCallPart, botName: string): string {
-	switch (call.approval?.closedBecause) {
-		case "settingsChanged":
-			return `${call.error ?? "This request closed because its settings changed."} Ask ${botName} to try again.`;
+	const reason = call.approval?.closedBecause;
+	switch (reason) {
 		case "newMessage":
-			return "No longer waiting. A new message reached the bot.";
+			return `No longer waiting. A new message reached ${botName}.`;
 		case "botStopped":
-			return "No longer waiting. The bot was stopped.";
-		default:
+			return `No longer waiting. ${botName} was stopped.`;
+		case "approvalExpired":
+			return `No longer waiting. Nobody answered within ${APPROVAL_LIFETIME_DAYS} days. Ask ${botName} to try again.`;
+		case "automationRunEnded":
+			return "No longer waiting. The automation run ended. Start a new run if you still need this done.";
+		case "chatUnavailable":
+			return `No longer waiting. This chat is no longer available. If you can still talk to ${botName}, start a new chat.`;
+		case "replyFailed":
+			return `No longer waiting. ${botName} couldn't finish. Check what ${botName} already did before asking again.`;
+		case "withdrawn":
+		case undefined:
 			return "No longer waiting for approval.";
+		default: {
+			const message = new ToolApprovalConflict({ reason }).userMessage;
+			return `${message.replaceAll("the bot", () => botName)} Ask ${botName} to try again.`;
+		}
 	}
 }

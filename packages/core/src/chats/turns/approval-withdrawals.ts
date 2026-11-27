@@ -1,5 +1,6 @@
 export * as ApprovalWithdrawals from "./approval-withdrawals.ts";
 
+import { APPROVAL_LIFETIME_DAYS } from "@sugabots/contracts";
 import { userText } from "@sugabots/errors";
 import { and, asc, eq, exists, isNull, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Duration, Effect, Layer } from "effect";
@@ -111,11 +112,11 @@ export const layer = layerNoDeps.pipe(Layer.provide(TurnStore.layer));
 
 /** What members are told of an approval withdrawn because its turn was asked to end, by why. */
 const WITHDRAWN = {
-	lost_reach: userText`This approval was withdrawn because the turn lost access to its chat.`,
+	lost_reach: userText`This approval was withdrawn because its chat is no longer available.`,
 	approval_expired: userText`This approval expired before anyone decided it.`,
 };
 
-const APPROVAL_LIFETIME = Duration.days(7);
+const APPROVAL_LIFETIME = Duration.days(APPROVAL_LIFETIME_DAYS);
 const EXPIRY_BATCH_SIZE = 100;
 
 export const approvalCutoff = DateTime.now.pipe(

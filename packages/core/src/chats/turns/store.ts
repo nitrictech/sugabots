@@ -1,6 +1,7 @@
 export * as TurnStore from "./store.ts";
 
 import {
+	type ApprovalClosureReason,
 	type FilePart,
 	type Message,
 	messagePartsFor,
@@ -442,7 +443,13 @@ export const make = Effect.gen(function* () {
 	 * how it ended. A system bot's turn has no reply, so there is nothing to
 	 * announce.
 	 */
-	const endRun = (turnId: string, state: TurnState, userMessage: UserText, finishedAt: Date) =>
+	const endRun = (
+		turnId: string,
+		state: TurnState,
+		userMessage: UserText,
+		finishedAt: Date,
+		closedBecause: ApprovalClosureReason = state.status === "failed" ? "replyFailed" : "botStopped",
+	) =>
 		Effect.gen(function* () {
 			const ended = endedAs(state);
 			const [reply] = yield* query((db) =>
@@ -466,7 +473,12 @@ export const make = Effect.gen(function* () {
 					db.update(message).set({ status: ended.state }).where(eq(message.id, reply.messageId)),
 				);
 			}
-			yield* toolCalls.abandonUnfinished([turnId], userMessage);
+			yield* toolCalls.abandonUnfinished([turnId], {
+				userMessage,
+				closedBecause: state.endRequested
+					? closureByTurnEndRequest[state.endRequested]
+					: closedBecause,
+			});
 			if (reply) {
 				yield* emit([endAnnouncement({ turnId, finishedAt, ...reply }, ended)]);
 			}
@@ -475,13 +487,19 @@ export const make = Effect.gen(function* () {
 
 	const abandon = (
 		locked: { id: string; state: TurnState },
-		{ handOnSteers, ...outcome }: Abandonment,
+		{ handOnSteers, closedBecause, ...outcome }: Abandonment,
 	) =>
 		Effect.gen(function* () {
 			const decided = transition(locked.state, TurnEvent.Abandon(outcome));
 			if (decided._tag !== "Next" || decided.followUp?._tag !== "End") return undefined;
 			const writtenAt = yield* write(locked.id, decided.state, {}, { handOnSteers });
-			return yield* endRun(locked.id, decided.state, decided.followUp.userMessage, writtenAt);
+			return yield* endRun(
+				locked.id,
+				decided.state,
+				decided.followUp.userMessage,
+				writtenAt,
+				closedBecause,
+			);
 		});
 
 	/** Locks the turn found by `condition` and asks the lifecycle what `event` makes of it. */
@@ -574,10 +592,11 @@ export const make = Effect.gen(function* () {
 			const draft = draftOf(locked.checkpoint);
 			yield* writeReply(reply, draft, "cancelled");
 			const finishedAt = yield* write(locked.id, decided.state);
-			yield* toolCalls.abandonUnfinished(
-				[locked.id],
-				unfinishedCallsMessage(locked.state.endRequested),
-			);
+			const request = locked.state.endRequested;
+			yield* toolCalls.abandonUnfinished([locked.id], {
+				userMessage: unfinishedCallsMessage(request),
+				closedBecause: request ? closureByTurnEndRequest[request] : "botStopped",
+			});
 			yield* emit([
 				ChatEvent.TurnInterrupted({
 					chatId: reply.chatId,
@@ -686,6 +705,7 @@ export const make = Effect.gen(function* () {
 				decided.state,
 				decided.followUp.userMessage,
 				writtenAt,
+				"automationRunEnded",
 			);
 			return notRunnable(reason, ended);
 		});
@@ -812,6 +832,7 @@ export const make = Effect.gen(function* () {
 								(yield* abandon(retry, {
 									status: "cancelled",
 									userMessage: TURN_CANCELLED,
+									closedBecause: "chatUnavailable",
 									handOnSteers: false,
 								}));
 							return notRunnable("The chat is unavailable", ended);
@@ -1259,7 +1280,10 @@ export const make = Effect.gen(function* () {
 								: null;
 						yield* writeReply(reply, draftOf(locked.checkpoint), "failed");
 						yield* write(locked.id, decided.state, { retrying: willRetry, retryAt });
-						yield* toolCalls.abandonUnfinished([locked.id], userMessage);
+						yield* toolCalls.abandonUnfinished([locked.id], {
+							userMessage,
+							closedBecause: "replyFailed",
+						});
 						yield* emit([
 							ChatEvent.TurnFailed({
 								chatId: reply.chatId,
@@ -1315,7 +1339,13 @@ export const make = Effect.gen(function* () {
 								handOnSteers: ending._tag !== "LostReach",
 							},
 						);
-						yield* endRun(locked.id, decided.state, decided.followUp.userMessage, writtenAt);
+						yield* endRun(
+							locked.id,
+							decided.state,
+							decided.followUp.userMessage,
+							writtenAt,
+							ending._tag === "LostReach" ? "chatUnavailable" : undefined,
+						);
 					}),
 				),
 			),
@@ -1425,7 +1455,10 @@ export const make = Effect.gen(function* () {
 								.where(eq(turn.id, turnId)),
 						);
 						if (locked.state.status !== "waiting") return { _tag: "Steered" };
-						const approvalIds = yield* toolCalls.withdrawPending(turnId, STEERED_AWAY);
+						const approvalIds = yield* toolCalls.withdrawPending(turnId, {
+							userMessage: STEERED_AWAY,
+							closedBecause: "newMessage",
+						});
 						// Kept with the turn, so its next step tells the model they were
 						// withdrawn rather than denied.
 						const [kept] = yield* query((db) =>
@@ -1490,7 +1523,12 @@ export const make = Effect.gen(function* () {
 								)
 								.returning({ id: turn.id }),
 						);
-						if (withdrawn) yield* toolCalls.withdrawPending(turnId, userMessage);
+						if (withdrawn) {
+							yield* toolCalls.withdrawPending(turnId, {
+								userMessage,
+								closedBecause: closureByTurnEndRequest[request],
+							});
+						}
 					}),
 				),
 			),
@@ -1561,8 +1599,16 @@ export const layer = layerNoDeps.pipe(Layer.provide([ToolCallStore.layer, ChatFi
 export interface Abandonment {
 	readonly status: "failed" | "cancelled";
 	readonly userMessage: UserText;
+	readonly closedBecause?: "chatUnavailable";
 	readonly handOnSteers?: false;
 }
+
+const closureByTurnEndRequest = {
+	interrupted: "botStopped",
+	run_ended: "automationRunEnded",
+	lost_reach: "chatUnavailable",
+	approval_expired: "approvalExpired",
+} as const satisfies Record<TurnEndRequest, ApprovalClosureReason>;
 
 /**
  * LostEnding tells `endLost` whether the turn failed, lost reach and must

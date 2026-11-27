@@ -1073,7 +1073,7 @@ const resolvedApprovalRows = Effect.fn("ChatView.resolvedApprovalRows")(function
 					isNotNull(toolCall.decidedAt),
 					and(
 						eq(toolCall.approvalStatus, "denied"),
-						isNotNull(toolCall.error),
+						isNotNull(toolCall.approvalClosedBecause),
 						isNotNull(toolCall.finishedAt),
 					),
 				),

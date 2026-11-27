@@ -1,13 +1,8 @@
 import type { ToolCallPart } from "@sugabots/contracts";
-import {
-	approvalSettingsChangeSchema,
-	ToolApprovalConflict,
-} from "@sugabots/contracts/errors/approvals";
 import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { member, type ToolCallRow, toolCall } from "../../database/schema.ts";
-import { STEERED_AWAY, TURN_CANCELLED, TURN_INTERRUPTED } from "../tool-call-end-messages.ts";
 import { approversOf } from "../tools/approvers.ts";
 
 /**
@@ -102,17 +97,8 @@ export function toToolCallPart(
 	};
 }
 
-const settingsChangeMessages = new Set<string>(
-	approvalSettingsChangeSchema.literals.map(
-		(reason) => new ToolApprovalConflict({ reason }).userMessage,
-	),
-);
-
 function readApprovalClosure(row: ToolCallRow) {
-	const { approvalStatus, decidedAt, finishedAt, error } = row;
-	if (approvalStatus !== "denied" || decidedAt || !finishedAt || error === null) return undefined;
-	if (settingsChangeMessages.has(error)) return "settingsChanged";
-	if (error === STEERED_AWAY) return "newMessage";
-	if (error === TURN_CANCELLED || error === TURN_INTERRUPTED) return "botStopped";
-	return "withdrawn";
+	const { approvalStatus, decidedAt, finishedAt, approvalClosedBecause } = row;
+	if (approvalStatus !== "denied" || decidedAt || !finishedAt) return undefined;
+	return approvalClosedBecause ?? undefined;
 }

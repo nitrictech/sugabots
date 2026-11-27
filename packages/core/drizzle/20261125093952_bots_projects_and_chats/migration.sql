@@ -3426,3 +3426,15 @@ ALTER TABLE "event_retention" ADD PRIMARY KEY ("stream");
 ALTER TABLE "connector" ADD COLUMN "tool_definitions_fingerprint" text;
 --> statement-breakpoint
 ALTER TABLE "turn" ADD COLUMN "brief_recipient_bot_ids" uuid[];
+--> statement-breakpoint
+ALTER TABLE "tool_call" ADD COLUMN "approval_closed_because" text;
+--> statement-breakpoint
+UPDATE "tool_call"
+SET "approval_closed_because" = CASE "error"
+	WHEN 'Turn cancelled' THEN 'botStopped'
+	WHEN 'Turn interrupted' THEN 'botStopped'
+	WHEN 'Withdrawn: a new message reached the bot before this was decided' THEN 'newMessage'
+	ELSE 'withdrawn'
+END
+WHERE "approval_status" = 'denied' AND "decided_at" IS NULL AND "finished_at" IS NOT NULL
+	AND "error" IS NOT NULL;
