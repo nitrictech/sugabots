@@ -22,6 +22,7 @@ import type { InputOf, RequestOperationName } from "@sugabots/contracts/operatio
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { seedProjectChat } from "../../authentication/seed.test-support.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { recordingFirstComputer } from "../../computers/testing.ts";
 import { query } from "../../database/database.ts";
@@ -35,6 +36,7 @@ import {
 	project,
 	projectMember,
 	providerModel,
+	workspace,
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -693,6 +695,52 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await expect(projectsAs(adminId).members({ projectId: made.id })).rejects.toThrow(
 				ResourceHidden,
 			);
+		});
+
+		it("reads what a member reaches only once a removal under way has committed, then refuses it", async () => {
+			const diary = await aBot(editorId, "Diary", "private");
+			await botsAs(editorId).addMember({ botId: diary.id, memberId: viewerId });
+			const closed = await create(adminId, {
+				name: "Closed",
+				slug: "closed",
+				visibility: "private",
+			});
+			await repository.addMember(workspaceId, closed.id, viewerId);
+			const chatId = await seedProjectChat(workspaceId, closed.id, adminId);
+			const viewer = await signIn(viewerId);
+			const removing = holdTransaction(
+				Effect.gen(function* () {
+					yield* query((db) =>
+						db
+							.select({ id: workspace.id })
+							.from(workspace)
+							.where(eq(workspace.id, workspaceId))
+							.for("no key update"),
+					);
+					yield* query((db) =>
+						db
+							.delete(botMember)
+							.where(and(eq(botMember.botId, diary.id), eq(botMember.memberId, viewerId))),
+					);
+					yield* query((db) =>
+						db
+							.delete(projectMember)
+							.where(
+								and(eq(projectMember.projectId, closed.id), eq(projectMember.memberId, viewerId)),
+							),
+					);
+				}),
+			);
+			await removing.held;
+
+			const reads = [
+				callOperation(viewer, "bots.listMembers", { botId: diary.id }),
+				callOperation(viewer, "chats.messages", { chatId, limit: 1 }),
+			];
+			await waitUntilWaitingOnLocks(reads.length);
+			await removing.release();
+
+			for (const read of reads) await expect(read).rejects.toThrow(ResourceHidden);
 		});
 
 		it("lists an administrator of two workspaces only the projects of the one asked about", async () => {

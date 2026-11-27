@@ -93,6 +93,24 @@ export const readCommittedTransaction = <A, E, R>(body: Effect.Effect<A, E, R>) 
 	);
 
 /**
+ * Runs `proveAndRead`, which proves reach to something in the workspace
+ * `workspaceOf` finds and reads what it reaches, under a share of the
+ * workspace's lock (see {@link underWorkspaceShare}), so no change to who
+ * reaches what commits between the proof and the read. Nothing found is
+ * hidden as `resource`.
+ */
+export const readingUnderWorkspaceShare = <A, E, R>(
+	workspaceOf: Effect.Effect<string | undefined, never, Database>,
+	resource: ResourceHidden["resource"],
+	proveAndRead: Effect.Effect<A, E, R>,
+) =>
+	Effect.gen(function* () {
+		const workspaceId = yield* workspaceOf;
+		if (workspaceId === undefined) return yield* new ResourceHidden({ resource });
+		return yield* underWorkspaceShare(workspaceId, proveAndRead);
+	});
+
+/**
  * Runs an approval write, parking a call or deciding one, in a transaction
  * that first takes the workspace's row `FOR SHARE`, so it waits for a change
  * to who reaches what and sees it, and is refused in a workspace being
