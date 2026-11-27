@@ -12,8 +12,7 @@ import { failureForError, type ServedErrorTag } from "./errors.ts";
  * an operation's endpoint, the status of each of its errors by tag. It is
  * written from the API the server serves, and kept in the repository, so a
  * change to the public API shows up as a change to that file, which a
- * reviewer reads. The types of the operations' endpoints read their fields
- * from it, so it is also what keeps those types and the endpoints the same.
+ * reviewer reads.
  *
  * After changing the API on purpose, run `bun run test --project contracts -u`
  * and review the file's diff.

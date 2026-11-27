@@ -21,7 +21,7 @@ import {
 	type OperationContract,
 	type OperationContracts,
 	operationContracts,
-	requireTrue,
+	type PathParameters,
 } from "../operations/index.ts";
 import { type FailureForError, failureForError, type ServedErrorTag } from "./errors.ts";
 import { Session } from "./middleware.ts";
@@ -42,40 +42,34 @@ type OfferOf<Name extends Offered> = Contract<Name>["http"] & HttpOffer;
 type FieldsOf<Name extends Offered> =
 	Contract<Name>["input"] extends Schema.Struct<infer Fields> ? Fields : never;
 
-/**
- * The record of the public HTTP API, which `http-api.test.ts` writes from
- * the endpoints `endpointOf` builds. The types below read where each field
- * goes from it, rather than working it out a second time, so the endpoints
- * and their types are derived once, by `endpointOf`, and the test fails
- * while the record disagrees with it.
- */
-type HttpApiRecord = typeof import("./http-api.json");
+/** The names of the input's fields that `Name`'s path names as parameters. */
+type ParameterNames<Name extends Offered> = PathParameters<OfferOf<Name>["path"]> &
+	keyof FieldsOf<Name>;
 
-type RecordedOperations = HttpApiRecord["operations"];
+/** The input's fields that go in the path of the endpoint of `Name`. */
+type ParameterFields<Name extends Offered> = Pick<FieldsOf<Name>, ParameterNames<Name>>;
 
-/** The names of the fields the record puts at `Part` of the endpoint of `Name`. */
-type RecordedAt<
-	Name extends Offered,
-	Part extends "params" | "query" | "body",
-> = Name extends keyof RecordedOperations ? keyof RecordedOperations[Name][Part] : never;
+/** The input's other fields, which go in the query or the body. */
+type OtherFields<Name extends Offered> = Omit<FieldsOf<Name>, ParameterNames<Name>>;
 
-/** The input's fields the record puts at `Part` of the endpoint of `Name`. */
-type FieldsAt<Name extends Offered, Part extends "params" | "query" | "body"> = Pick<
-	FieldsOf<Name>,
-	RecordedAt<Name, Part> & keyof FieldsOf<Name>
->;
+/** Whether the endpoint of `Name` takes no body, so its other fields go in the query. */
+type Bodiless<Name extends Offered> = OfferOf<Name>["method"] extends BodilessMethod ? true : false;
 
-type ParamsOf<Name extends Offered> = [keyof FieldsAt<Name, "params">] extends [never]
+type ParamsOf<Name extends Offered> = [keyof ParameterFields<Name>] extends [never]
 	? never
-	: Schema.toCodecStringTree<Schema.Struct<FieldsAt<Name, "params">>>;
+	: Schema.toCodecStringTree<Schema.Struct<ParameterFields<Name>>>;
 
-type QueryOf<Name extends Offered> = [keyof FieldsAt<Name, "query">] extends [never]
+type QueryOf<Name extends Offered> = [keyof OtherFields<Name>] extends [never]
 	? never
-	: Schema.toCodecStringTree<Schema.Struct<FieldsAt<Name, "query">>>;
+	: Bodiless<Name> extends true
+		? Schema.toCodecStringTree<Schema.Struct<OtherFields<Name>>>
+		: never;
 
-type PayloadOf<Name extends Offered> = [keyof FieldsAt<Name, "body">] extends [never]
+type PayloadOf<Name extends Offered> = [keyof OtherFields<Name>] extends [never]
 	? never
-	: Schema.toCodecJson<Schema.Struct<FieldsAt<Name, "body">>>;
+	: Bodiless<Name> extends true
+		? never
+		: Schema.toCodecJson<Schema.Struct<OtherFields<Name>>>;
 
 type ErrorsOf<Name extends Offered> =
 	FailureForError<
@@ -85,22 +79,6 @@ type ErrorsOf<Name extends Offered> =
 			? Schema.toCodecJson<Failure>
 			: never
 		: never;
-
-/**
- * `true` when the record has every offered operation; otherwise the
- * operations it lacks, which a new operation is until the record is written
- * again with `bun run test --project contracts -u`.
- */
-type EveryOperationRecorded = [Exclude<Offered, keyof RecordedOperations>] extends [never]
-	? true
-	: {
-			readonly "operations missing from http-api.json, until `bun run test --project contracts -u` writes it again": Exclude<
-				Offered,
-				keyof RecordedOperations
-			>;
-		};
-
-requireTrue<EveryOperationRecorded>();
 
 /** The endpoint of the operation `Name`. */
 type EndpointOf<Name extends Offered> = HttpApiEndpoint.HttpApiEndpoint<
@@ -140,8 +118,9 @@ export type OperationGroup = { [Domain in OfferingDomain]: GroupOf<Domain> }[Off
 
 /**
  * The names of the parameters in `path`: its segments that start with `:`,
- * as the router reads them. `checkExposure` keeps every name a plain
- * identifier, so no segment holds anything after its name.
+ * as the router reads them, and as `PathParameters` reads them for the
+ * endpoints' types. `checkExposure` keeps every name a plain identifier, so
+ * no segment holds anything after its name.
  */
 const pathParameters = (path: string): ReadonlyArray<string> =>
 	path
@@ -150,7 +129,8 @@ const pathParameters = (path: string): ReadonlyArray<string> =>
 		.map((segment) => segment.slice(1));
 
 /** The methods whose requests carry no body, so an input's other fields go in the query. */
-const bodilessMethods: ReadonlySet<HttpMethod> = new Set<HttpMethod>(["GET", "DELETE"]);
+type BodilessMethod = "GET" | "DELETE";
+const bodilessMethods: ReadonlySet<HttpMethod> = new Set<BodilessMethod>(["GET", "DELETE"]);
 
 /** The endpoint of `contract`, which the HTTP API offers as `offer` says. */
 function endpointOf(contract: OperationContract.Contract, offer: HttpOffer) {
@@ -191,6 +171,12 @@ const NO_CONTENT = 204;
 /**
  * The groups of the operations the HTTP API offers, one per domain, built
  * from their contracts. `Api` adds them beside the endpoints written by hand.
+ *
+ * Built in a loop over the contracts, which TypeScript can't follow to the
+ * union of distinct groups `OperationGroup` describes, so the result is cast
+ * to it. Both read each endpoint's parts by the same rule: the path's `:name`
+ * segments are its parameters, and the other fields its query or body by
+ * method. `http-api.test.ts` records what the loop builds.
  */
 export const operationGroups = (() => {
 	const endpointsByDomain = new Map<string, Array<HttpApiEndpoint.Constraint>>();

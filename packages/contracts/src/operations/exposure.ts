@@ -119,7 +119,7 @@ type Segments<Path extends string> = Path extends `${infer Segment}/${infer Rest
 	: Path;
 
 /** The names of the `:name` parameters in an HTTP path, such as `chatId` in `/chats/:chatId/name`. */
-type PathParameters<Path extends string> =
+export type PathParameters<Path extends string> =
 	Segments<Path> extends infer Segment ? (Segment extends `:${infer Name}` ? Name : never) : never;
 
 /** Characters the router reads as more than a plain segment or a parameter's name. */
