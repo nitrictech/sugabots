@@ -1056,28 +1056,10 @@ export const make = Effect.gen(function* () {
 					(stored) =>
 						transaction(
 							Effect.gen(function* () {
-								// The fence shares the turn, as ending it locks it, so a call still
-								// running when the turn was cancelled finds it ended and shares
-								// nothing; and its asker must still be able to change the chat.
 								yield* holdTurnForToolWrite(
-									executionFence(reply.turnId, reply.executionNumber, {
-										permission: "project.change",
-									}),
-								).pipe(
-									Effect.catchTags({
-										TurnEnded: () => Effect.fail(new ReplyEnded()),
-										TurnExecutionSuperseded: () => Effect.fail(new ReplyEnded()),
-										// Sharing a file is no built-in tool, so no tool's switch is checked.
-										ApprovalRefused: Effect.die,
-									}),
-								);
-								const [running] = yield* query((db) =>
-									db
-										.select({ id: turn.id })
-										.from(turn)
-										.where(and(eq(turn.id, reply.turnId), eq(turn.status, "running"))),
-								);
-								if (!running) return yield* new ReplyEnded();
+									executionFence(reply.turnId, reply.executionNumber),
+									"running",
+								).pipe(Effect.mapError(() => new ReplyEnded()));
 								const attached = yield* files.attachToReply(stored);
 								const carried = yield* files.replyAttachments(reply.messageId);
 								yield* emit([

@@ -56,9 +56,8 @@ export const underWorkspaceLock = <A, E, R>(
 				new Error("The workspace's lock begins its own transaction, inside no other"),
 			);
 		}
-		return yield* transaction(
+		return yield* readCommittedTransaction(
 			Effect.gen(function* () {
-				yield* query((db) => db.execute(sql`set transaction isolation level read committed`));
 				if (isUuid(workspaceId)) {
 					const [locked] = yield* query((db) =>
 						db

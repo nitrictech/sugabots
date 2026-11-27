@@ -2,9 +2,7 @@ import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { seedBot } from "../../authentication/seed.test-support.ts";
 import { TurnAuthentication } from "../../authentication/turn.ts";
-import { query, transaction } from "../../database/database.ts";
 import {
 	file,
 	membership,
@@ -12,11 +10,9 @@ import {
 	projectChat,
 	toolCall,
 	turn,
-	workspace,
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
-	holdTransaction,
 	onDatabase,
 	onPostgres,
 	runOnPostgres,
@@ -33,7 +29,7 @@ import { named } from "../../proofs/proof.ts";
 import { proveReachesChat } from "../../proofs/reaches-chat.ts";
 import { Chats } from "../chats/chats.ts";
 import { chatServicesForTests } from "../testing.ts";
-import { executionFence, holdRunningTurn, holdTurnForToolWrite } from "./fence.ts";
+import { executionFence, holdRunningTurn } from "./fence.ts";
 import { TurnRecords } from "./records.ts";
 import { TurnStore } from "./store.ts";
 import {
@@ -263,14 +259,14 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 	});
 
 	it.each([
-		["made a viewer", "ActionForbidden"],
-		["removed from the workspace", "ResourceHidden"],
+		"made a viewer",
+		"removed from the workspace",
 	] as const)(
-		"refuses a call proved before its asker was %s, writing nothing",
-		async (change, refusal) => {
+		"finishes a call admitted before its asker was %s",
+		async (change) => {
 			const { principal } = opened;
 			if (principal._tag !== "BotForAsker") throw new Error("fixture");
-			const loseStanding = () =>
+			const changeMembership = () =>
 				onDatabase((db) =>
 					change === "made a viewer"
 						? db
@@ -296,7 +292,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 								chat,
 							);
 							// The change commits after the call was proved, before it writes.
-							yield* Effect.promise(loseStanding);
+							yield* Effect.promise(changeMembership);
 							const chats = yield* Chats.Service;
 							return yield* chats.setResolved(reach, canChange, approved);
 						}),
@@ -304,76 +300,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 				),
 			);
 
-			expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: refusal } });
+			expect(result._tag).toBe("Success");
 			const [stored] = await onDatabase((db) =>
 				db
 					.select({ resolvedAt: projectChat.resolvedAt })
 					.from(projectChat)
 					.where(eq(projectChat.chatId, principal.chat)),
 			);
-			expect(stored?.resolvedAt).toBeNull();
+			expect(stored?.resolvedAt).not.toBeNull();
 		},
 	);
 
-	/**
-	 * Changes the opened turn's asker's role under the workspace's lock, as a
-	 * change of role does, and holds the lock until released.
-	 */
-	const changingAskersRole = (role: "editor" | "viewer") => {
-		const { principal } = opened;
-		if (principal._tag !== "BotForAsker") throw new Error("fixture");
-		return holdTransaction(
-			Effect.gen(function* () {
-				yield* query((db) =>
-					db
-						.select({ id: workspace.id })
-						.from(workspace)
-						.where(eq(workspace.id, principal.workspace))
-						.for("no key update"),
-				);
-				yield* query((db) =>
-					db.update(membership).set({ role }).where(eq(membership.memberId, principal.asker)),
-				);
-			}),
-		);
-	};
-
-	it("waits for a change of role in progress, then refuses a write that needs managing a bot the asker no longer manages", async () => {
-		const { principal } = opened;
-		const othersBot = await seedBot(principal.workspace);
-		const demoting = changingAskersRole("editor");
-		await demoting.held;
-
-		const writing = run(
-			Effect.result(
-				transaction(
-					holdTurnForToolWrite(
-						executionFence(opened.turnId, principal.executionNumber, { managedBot: othersBot.id }),
-					),
-				),
-			),
-		);
-		await demoting.waitForWaiters(1);
-		await demoting.release();
-
-		expect(await writing).toMatchObject({
-			_tag: "Failure",
-			failure: { _tag: "ActionForbidden" },
-		});
-	});
-
-	it("shares no file once its asker can no longer change the chat", async () => {
-		const demoting = changingAskersRole("viewer");
-		await demoting.held;
-
-		const sharing = turns.attachFile(
-			{ ...replyTurnOf(opened), executionNumber: opened.principal.executionNumber },
-			{ name: "late.csv", contentType: "text/csv", content: new Uint8Array([0x61]) },
-		);
-		await demoting.waitForWaiters(1);
-		await demoting.release();
-
-		await expect(sharing).rejects.toMatchObject({ _tag: "ActionForbidden" });
-		expect(await turns.replyFiles(replyTurnOf(opened))).toEqual([]);
-	});
 });

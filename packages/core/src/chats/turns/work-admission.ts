@@ -2,7 +2,7 @@ export * as WorkAdmission from "./work-admission.ts";
 
 import { Context, Effect, Option } from "effect";
 import { Transaction } from "../../database/database.ts";
-import { readCommittedTransaction, underWorkspaceShare } from "../../proofs/workspace-lock.ts";
+import { readCommittedTransaction } from "../../proofs/workspace-lock.ts";
 import { Tier } from "../../tiers.ts";
 
 /**
@@ -27,30 +27,24 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 
 const approvalTransaction: unique symbol = Symbol("ApprovalAdmission");
 
-/** ApprovalAdmission records that its chat takes work in the transaction holding the workspace share. */
+/** ApprovalAdmission records that its chat accepts work for the rest of the transaction. */
 export interface ApprovalAdmission {
 	readonly chatId: string;
 	readonly [approvalTransaction]: Transaction["Service"];
 }
 
-/** underApprovalAdmission checks admission before taking the workspace share for an approval write. */
+/** underApprovalAdmission checks that chatId takes work before an approval write. */
 export const underApprovalAdmission = <A, E, R>(
 	chatId: string,
-	workspaceId: string,
 	body: (admitted: ApprovalAdmission | undefined) => Effect.Effect<A, E, R>,
 ) =>
 	readCommittedTransaction(
 		Effect.gen(function* () {
 			const admission = yield* Service;
 			const refused = yield* admission.refusal(chatId);
-			return yield* underWorkspaceShare(
-				workspaceId,
-				Effect.gen(function* () {
-					const open = yield* Transaction;
-					return yield* body(
-						refused ? undefined : Object.freeze({ chatId, [approvalTransaction]: open }),
-					);
-				}),
+			const open = yield* Transaction;
+			return yield* body(
+				refused ? undefined : Object.freeze({ chatId, [approvalTransaction]: open }),
 			);
 		}),
 	);

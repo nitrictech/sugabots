@@ -1,31 +1,11 @@
-import type { BuiltInToolKey } from "@sugabots/contracts";
-import {
-	ActionForbidden,
-	type ApprovalRefused,
-	ResourceHidden,
-	TurnEnded,
-} from "@sugabots/contracts/errors/proofs";
+import { TurnEnded } from "@sugabots/contracts/errors/proofs";
 import { TurnExecutionSuperseded } from "@sugabots/contracts/errors/turns";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Effect } from "effect";
-import { askerOf, turnFacts } from "../../authentication/turn-facts.ts";
-import type { ProjectPermission } from "../../authorization/permissions.ts";
-import { type Database, type Executor, query } from "../../database/database.ts";
-import { ACTIVE_TURN_STATUSES, placedChat, turn, workspace } from "../../database/schema.ts";
+import { type Database, query } from "../../database/database.ts";
+import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
 import type { Principal } from "../../principal.ts";
-import {
-	actorOf,
-	botRecord,
-	managesBot,
-	mayInProjectAs,
-	memberReaches,
-	reachFacts,
-	roleIn,
-	turnChatPlace,
-} from "../../proofs/facts.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
-import { toolIsOn, toolSwitchedOff } from "../../proofs/tool-switches.ts";
-import type { HoldsWorkspaceLock } from "../../proofs/workspace-lock.ts";
 
 /**
  * The fence every write `RunsTurn` guards checks in its own SQL: the turn
@@ -41,58 +21,16 @@ export const fenced = (proof: FencedProof) =>
 		eq(turn.executionNumber, proof.execution),
 	);
 
-/**
- * A proof about one execution of a turn, whose writes the fence guards:
- * `RunsTurn`, or `EndsTurn` for the write that ends it. A tool's write may
- * also say what it needs of the turn's asker in a project, and the built-in
- * tool whose switch must still be on for the turn's bot (see
- * `holdTurnForToolWrite`).
- */
 export type FencedProof = Pick<RunsTurn<unknown, unknown>, "execution"> & {
 	readonly turn: { readonly value: string };
-	readonly needs?: WriteNeeds | undefined;
-	readonly tool?: BuiltInToolKey | undefined;
 };
 
-/**
- * What a tool's write needs of the member its turn acts for, which its
- * operation proved before the write: the permission `permission` in the
- * project `project`, by default the turn's chat's; or to manage the bot
- * `managedBot`, as `CanManageBot` decides by their role.
- */
-export type WriteNeeds =
-	| { readonly project?: string; readonly permission: ProjectPermission }
-	| { readonly managedBot: string };
-
-/**
- * The fence for the writes of the execution `execution` of the turn
- * `turnId`, for a tool that writes on its turn's behalf once its call is
- * recorded, outside the running turn's records: what it keeps passes the same
- * check the loop's own writes do, what it `needs`, and, for a built-in
- * `tool`, that the tool is still on for the turn's bot.
- */
-export const executionFence = (
-	turnId: string,
-	execution: number,
-	needs?: WriteNeeds,
-	tool?: BuiltInToolKey,
-): FencedProof => ({
+export const executionFence = (turnId: string, execution: number): FencedProof => ({
 	turn: { value: turnId },
 	execution,
-	needs,
-	tool,
 });
 
-/** How the fence refuses a write: the turn ended, or a newer execution has taken it over. */
 export type FenceRefusal = TurnEnded | TurnExecutionSuperseded;
-
-/**
- * How the fence refuses a tool's write (see `holdTurnForToolWrite`): as it
- * refuses any write, because the member its turn acts for lost the chat or
- * project meanwhile, or the permission the write needs, or because the
- * write's tool was switched off for the bot.
- */
-export type ToolWriteRefusal = FenceRefusal | ResourceHidden | ActionForbidden | ApprovalRefused;
 
 /**
  * Why the fence refused a write for `runsTurn`: the turn ended, or a newer
@@ -128,116 +66,21 @@ export const holdRunningTurn = (runsTurn: FencedProof, lock: "update" | "share")
 		if (!held) return yield* Effect.fail(yield* fenceRefusal(runsTurn));
 	});
 
-/**
- * The fence every write a tool call makes on its turn's behalf passes, in the
- * write's own transaction: the loop's fence (see `holdRunningTurn`), shared,
- * and closed too once the turn was asked to end (see `TurnEndRequest`), so a
- * call already in flight stops writing as the request commits, while the
- * loop's own writes still record how the turn ended.
- *
- * It first shares the workspace's lock, which every change to who reaches
- * what takes, so a removal or demotion either commits before it, and is seen,
- * or waits for the write. Under it, the turn must still reach its chat and,
- * for a write that `needs` it, its member must still reach the project and
- * hold the permission there, or still manage the bot, and a built-in tool's
- * write needs the tool still on for the bot: a call proved before the change
- * doesn't write after it. A run that acts for no member has nothing of a
- * member to lose.
- */
-export const holdTurnForToolWrite = (
-	proof: FencedProof,
-): Effect.Effect<void, ToolWriteRefusal, Database> =>
-	Effect.andThen(shareWorkspaceLockOf(proof), holdTurnAndStanding(proof));
-
-/**
- * `holdTurnForToolWrite` for a write whose transaction already holds the
- * workspace's lock, `lock`, which keeps out every change to who reaches what
- * as sharing it would.
- */
-export const holdTurnUnderWorkspaceLock = <P, W>(
-	lock: HoldsWorkspaceLock<P, W>,
-): Effect.Effect<void, ToolWriteRefusal, Database> => {
-	const principal = lock.principal.value;
-	return principal._tag === "BotForAsker" || principal._tag === "AutomationRun"
-		? holdTurnAndStanding(executionFence(principal.turn, principal.executionNumber))
-		: Effect.void;
-};
-
-/** The turn's fence, shared, its asker's standing and its tool's switch, under the workspace's lock. */
-const holdTurnAndStanding = (proof: FencedProof): Effect.Effect<void, ToolWriteRefusal, Database> =>
+/** holdTurnForToolWrite also refuses writes once the turn has been asked to end. */
+export const holdTurnForToolWrite = (proof: FencedProof, status?: "running") =>
 	Effect.gen(function* () {
 		const [held] = yield* query((db) =>
 			db
-				.select({ id: turn.id, botId: turn.botId })
+				.select({ id: turn.id })
 				.from(turn)
-				.where(and(fenced(proof), isNull(turn.endRequested)))
+				.where(and(fenced(proof), isNull(turn.endRequested), status && eq(turn.status, status)))
 				.limit(1)
 				.for("share"),
 		);
 		if (!held) return yield* Effect.fail(yield* fenceRefusal(proof));
-		const standing = yield* query((db) => askerStanding(db, proof));
-		if (standing === "hidden") return yield* new ResourceHidden({ resource: "chat" });
-		if (standing === "forbidden") return yield* new ActionForbidden({ proof: "ToolWrite" });
-		const { tool } = proof;
-		if (tool && !(yield* query((db) => toolIsOn(db, held.botId, tool)))) {
-			return yield* toolSwitchedOff(tool);
-		}
 	});
 
-/**
- * Whether the turn still reaches its chat and its asker still has what the
- * write `needs`: the chat's project is looked up once, and again only for a
- * write that needs another project.
- */
-const askerStanding = (db: Executor, proof: FencedProof) =>
-	Effect.gen(function* () {
-		const facts = yield* turnFacts(db, proof.turn.value);
-		const chatPlace = facts && (yield* turnChatPlace(db, facts));
-		if (!facts || !chatPlace) return "hidden" as const;
-		const asker = askerOf(facts);
-		const { needs } = proof;
-		if (!needs || asker === undefined) return "allowed" as const;
-		if ("managedBot" in needs) {
-			const record = yield* botRecord(db, needs.managedBot);
-			if (!record) return "hidden" as const;
-			const role = yield* roleIn(db, record.workspace, asker);
-			return managesBot(actorOf(asker, role), record)
-				? ("allowed" as const)
-				: ("forbidden" as const);
-		}
-		const place =
-			needs.project === undefined || needs.project === facts.project
-				? chatPlace
-				: yield* reachFacts(db, needs.project, { member: asker });
-		if (!place?.member || !memberReaches(place.member, place.project)) return "hidden" as const;
-		return mayInProjectAs(place.member, place.project, needs.permission)
-			? ("allowed" as const)
-			: ("forbidden" as const);
-	});
-
-/**
- * Takes the lock of the workspace the turn's chat is in `FOR SHARE`: before
- * the turn's own row, the order every change to who reaches what takes them in.
- */
-const shareWorkspaceLockOf = (proof: FencedProof) =>
-	query((db) =>
-		db
-			.select({ id: workspace.id })
-			.from(workspace)
-			.innerJoin(placedChat, eq(placedChat.workspaceId, workspace.id))
-			.innerJoin(turn, eq(turn.chatId, placedChat.id))
-			.where(eq(turn.id, proof.turn.value))
-			.for("share", { of: workspace }),
-	);
-
-/**
- * Holds the fence for tool writes (see `holdTurnForToolWrite`) of the turn
- * `principal` acts in, when it is a bot in a turn, so a write an operation
- * makes for a bot's tool call passes it, with what the write `needs` and its
- * built-in `tool`'s switch. A member
- * signed in has no turn to fence.
- */
-export const holdTurnOf = (principal: Principal, needs?: WriteNeeds, tool?: BuiltInToolKey) =>
+export const holdTurnOf = (principal: Principal) =>
 	principal._tag === "BotForAsker" || principal._tag === "AutomationRun"
-		? holdTurnForToolWrite(executionFence(principal.turn, principal.executionNumber, needs, tool))
+		? holdTurnForToolWrite(executionFence(principal.turn, principal.executionNumber))
 		: Effect.void;

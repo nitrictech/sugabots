@@ -4,7 +4,7 @@ import type { BlobStore } from "../../../blob-store/blob-store.ts";
 import type { ChatFileStore, FileDescription } from "../../../files/chat-file-store.ts";
 import { splitLines } from "../../chats/read-chat-file-content.ts";
 import { hasImages } from "../../tools/images.ts";
-import type { ToolWriteRefusal } from "../fence.ts";
+import type { FenceRefusal } from "../fence.ts";
 
 /**
  * Results longer than this, as JSON, are kept as a file and the model is given
@@ -36,7 +36,7 @@ export type LongResult = {
 export const forModel = (
 	output: unknown,
 	keeping: Keeping,
-): Effect.Effect<unknown, ToolWriteRefusal> => {
+): Effect.Effect<unknown, FenceRefusal> => {
 	// Images reach the model as image parts rather than as text, so the limit
 	// is for the rest of the result.
 	if (!hasImages(output)) {
@@ -59,7 +59,7 @@ export interface ResultFiles {
 		content: BlobStore.Content<E>;
 	}) => Effect.Effect<
 		FileDescription,
-		E | ChatFileStore.FileTooLarge | BlobStore.Failure | ToolWriteRefusal
+		E | ChatFileStore.FileTooLarge | BlobStore.Failure | FenceRefusal
 	>;
 }
 
@@ -74,7 +74,7 @@ interface Keeping {
 const longResultFor = (
 	output: unknown,
 	{ files, chatId, toolCallId }: Keeping,
-): Effect.Effect<LongResult | undefined, ToolWriteRefusal> =>
+): Effect.Effect<LongResult | undefined, FenceRefusal> =>
 	Effect.gen(function* () {
 		const sent = JSON.stringify(output) ?? "";
 		if (sent.length <= MAX_RESULT_CHARACTERS) return undefined;

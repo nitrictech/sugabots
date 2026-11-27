@@ -28,7 +28,7 @@ import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proo
 import type { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
-import { holdTurnOf, type ToolWriteRefusal } from "../../chats/turns/turns.ts";
+import { holdTurnOf, type FenceRefusal } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations, Transaction, transaction } from "../../database/database.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
@@ -112,7 +112,7 @@ export interface Interface {
 		approved: Approved<P, X, [B], "bots.saveInstructions">,
 	) => Effect.Effect<
 		Bot,
-		AssistantInstructionsManaged | BotGone | ResourceHidden | ToolWriteRefusal
+		AssistantInstructionsManaged | BotGone | ResourceHidden | FenceRefusal
 	>;
 	/** The members of the bot, by name: a private bot's, and none of any other. */
 	readonly members: <P, B>(reach: ReachesBot<P, B>) => Effect.Effect<BotMember[]>;
@@ -146,7 +146,7 @@ export interface Interface {
 		reach: ReachesBot<P, B>,
 		pinned: boolean,
 		approved: Approved<P, X, [B], "bots.pin" | "bots.unpin">,
-	) => Effect.Effect<Bot, ResourceHidden | ToolWriteRefusal>;
+	) => Effect.Effect<Bot, ResourceHidden | FenceRefusal>;
 	/**
 	 * Another Personal Assistant for the member, whatever their role, on the
 	 * workspace's default model. Joining a workspace gives them their first; this
@@ -340,7 +340,7 @@ export const make = Effect.gen(function* () {
 					const saved = yield* transaction(
 						Effect.gen(function* () {
 							// Its asker must still manage the bot as the write commits.
-							yield* holdTurnOf(approved.principal.value, { managedBot: facts.id });
+							yield* holdTurnOf(approved.principal.value);
 							return yield* store.update(workspace, facts.id, {
 								instructions: approved.input.instructions,
 								description: approved.input.description,

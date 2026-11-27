@@ -47,10 +47,9 @@ import type {
 	CanSwitchOffAutomation,
 	ReachesProjectAutomation,
 } from "../../proofs/reaches-project-automation.ts";
-import { toolSwitchFor } from "../../proofs/tool-switches.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { ChatStore } from "../store/store.ts";
-import { holdTurnOf, type ToolWriteRefusal } from "../turns/turns.ts";
+import { holdTurnOf, type FenceRefusal } from "../turns/turns.ts";
 import type { RoutineInput, Scope } from "./automation.ts";
 import { automationsOf, projectRunsPage, restrictableAutomations } from "./automation-view.ts";
 import { makeAcceptWebhook, type WebhookAnswer } from "./automation-webhooks.ts";
@@ -107,7 +106,7 @@ export interface Interface {
 		canManage: CanManageProject<P, J>,
 		approved: Approved<P, X, [J], "automations.createWithRoutine">,
 		timeZone: string,
-	) => Effect.Effect<Automation, AutomationNameTaken | InvalidRoutineSchedule | ToolWriteRefusal>;
+	) => Effect.Effect<Automation, AutomationNameTaken | InvalidRoutineSchedule | FenceRefusal>;
 	/**
 	 * Changes an automation's own settings. Pausing it stops its routines;
 	 * enabling it again sets when each runs next from now.
@@ -135,7 +134,7 @@ export interface Interface {
 		| AutomationNameTaken
 		| InvalidRoutineSchedule
 		| TriggerSetInSettings
-		| ToolWriteRefusal
+		| FenceRefusal
 	>;
 	/** Pauses an automation of a bot's default project, for an admin who restricts the bot. */
 	readonly switchOff: <P, J, A>(
@@ -303,7 +302,7 @@ export const make = Effect.gen(function* () {
 					},
 					{ name, instructions },
 					cronRoutine(routineExpression, timeZone),
-					holdApprovedTurn(canManage, approved),
+					holdTurnOf(approved.principal.value),
 				),
 			);
 		},
@@ -321,7 +320,7 @@ export const make = Effect.gen(function* () {
 			const routine =
 				routineExpression === undefined ? undefined : cronRoutine(routineExpression, timeZone);
 			const scope = scopeOf(target, automation.value);
-			const fence = holdApprovedTurn(canManage, approved);
+			const fence = holdTurnOf(approved.principal.value);
 			const update = routine
 				? writes.updateWithSoleRoutine(scope, input, routine, fence)
 				: writes.update(scope, input, fence);
@@ -408,21 +407,6 @@ function scopeOf<J>(
 
 function projectOf<J>(reach: { workspace: string; project: Named<J, string> }) {
 	return { id: reach.project.value, workspaceId: reach.workspace };
-}
-
-/**
- * The fence for an approved change to the project's automations, which needs
- * its asker to manage the project still, and the bot's automations still on.
- */
-function holdApprovedTurn<P, J, X, Targets extends readonly unknown[]>(
-	canManage: CanManageProject<P, J>,
-	approved: Approved<P, X, Targets, "automations.createWithRoutine" | "automations.updateInChat">,
-) {
-	return holdTurnOf(
-		approved.principal.value,
-		{ project: canManage.reach.project.value, permission: "automation.manage" },
-		toolSwitchFor(approved.operation),
-	);
 }
 
 /** A routine on the cron `expression`, in the time zone `timezone`. */

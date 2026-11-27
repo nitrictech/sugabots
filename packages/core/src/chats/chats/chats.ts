@@ -47,7 +47,7 @@ import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import { memberColumns } from "../store/participants.ts";
 import { ChatStore } from "../store/store.ts";
-import { holdTurnOf, type ToolWriteRefusal, Turns } from "../turns/turns.ts";
+import { holdTurnOf, type FenceRefusal, Turns } from "../turns/turns.ts";
 import { toAutomationFeed, toProjectChat } from "./chat.ts";
 import { chatTitleFrom } from "./chat-title.ts";
 import { reachedChatOfKind } from "./reached-chat.ts";
@@ -133,13 +133,13 @@ export interface Interface {
 		reach: ReachesChat<P, C>,
 		canChange: CanChangeChat<P, C>,
 		approved: Approved<P, X, [C], "chats.setResolved">,
-	) => Effect.Effect<void, ResourceHidden | ToolWriteRefusal>;
+	) => Effect.Effect<void, ResourceHidden | FenceRefusal>;
 	readonly startBriefedChat: <P, B, X>(
 		mayBrief: MayBrief<P, B>,
 		approved: Approved<P, X, [B], "chats.startBriefedChat">,
 	) => Effect.Effect<
 		BotStartedChat,
-		ApprovalNeeded | ApprovalRefused | BotHasNoModel | ResourceHidden | ToolWriteRefusal
+		ApprovalNeeded | ApprovalRefused | BotHasNoModel | ResourceHidden | FenceRefusal
 	>;
 	/**
 	 * Records that the member has read the chat `reach` is about up to its
@@ -355,7 +355,7 @@ export const make = Effect.gen(function* () {
 						) {
 							return yield* new ApprovalRefused();
 						}
-						yield* holdTurnOf(principal, { project: mayBrief.project, permission: "project.read" });
+						yield* holdTurnOf(principal);
 						// Under the workspace's lock shared, which the fence took: the
 						// recipient must still go where the approval sent it.
 						yield* requireBriefDestination(mayBrief);
@@ -396,10 +396,7 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const principal = approved.principal.value;
-						yield* holdTurnOf(principal, {
-							project: reach.project.id,
-							permission: "project.change",
-						});
+						yield* holdTurnOf(principal);
 						const chat = yield* reachedChatOfKind(reach, ["project_chat"]);
 						yield* chats.setResolved(chat, approved.input.resolved);
 					}),

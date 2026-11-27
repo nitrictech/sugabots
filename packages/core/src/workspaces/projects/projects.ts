@@ -24,7 +24,7 @@ import {
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
-import { holdTurnUnderWorkspaceLock, type ToolWriteRefusal } from "../../chats/turns/turns.ts";
+import { holdTurnOf, type FenceRefusal } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations, Transaction } from "../../database/database.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
@@ -79,7 +79,7 @@ export interface Interface {
 		approved: Approved<P, X, [W, B], "projects.create">,
 	) => Effect.Effect<
 		Project,
-		UnusableProjectName | ProjectSlugTaken | BotNotPublic | PersonalBotInProject | ToolWriteRefusal,
+		UnusableProjectName | ProjectSlugTaken | BotNotPublic | PersonalBotInProject | FenceRefusal,
 		Transaction
 	>;
 	/**
@@ -141,7 +141,7 @@ export interface Interface {
 		lock: HoldsWorkspaceLock<P, W>,
 		canJoin: CanJoinProject<P, J>,
 		approved: Approved<P, X, [J], "projects.join">,
-	) => Effect.Effect<Project, ResourceHidden | ToolWriteRefusal, Transaction>;
+	) => Effect.Effect<Project, ResourceHidden | FenceRefusal, Transaction>;
 	/** The project's bots, by name, as the member acting sees them. */
 	readonly bots: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<Bot[]>;
 	/**
@@ -153,7 +153,7 @@ export interface Interface {
 		canChange: CanChangeProjectMembers<P, J>,
 		bot: ReachesBot<P, B>,
 		approved: Approved<P, X, [J, B], "projects.addBot">,
-	) => Effect.Effect<void, BotNotPublic | PersonalBotInProject | ToolWriteRefusal, Transaction>;
+	) => Effect.Effect<void, BotNotPublic | PersonalBotInProject | FenceRefusal, Transaction>;
 	/** Refused for the project's lead bot, until another is chosen. */
 	readonly removeBot: <P, J, B>(
 		canChange: CanChangeProjectMembers<P, J>,
@@ -205,7 +205,7 @@ export const make = Effect.gen(function* () {
 				"create",
 				Effect.gen(function* () {
 					yield* Transaction;
-					yield* holdTurnUnderWorkspaceLock(lock);
+					yield* holdTurnOf(lock.principal.value);
 					// The project's workspace and lead are the proved ones, not the input's.
 					const { workspace: _workspace, leadBotId: _leadBotId, ...input } = approved.input;
 					const workspaceId = lock.workspace.value;
@@ -308,7 +308,7 @@ export const make = Effect.gen(function* () {
 				"join",
 				Effect.gen(function* () {
 					yield* Transaction;
-					yield* holdTurnUnderWorkspaceLock(lock);
+					yield* holdTurnOf(lock.principal.value);
 					const { member } = canJoin;
 					const joined = yield* store.join(
 						canJoin.workspace,
@@ -334,7 +334,7 @@ export const make = Effect.gen(function* () {
 				"addBot",
 				Effect.gen(function* () {
 					yield* Transaction;
-					yield* holdTurnUnderWorkspaceLock(lock);
+					yield* holdTurnOf(lock.principal.value);
 					const { reach } = canChange;
 					yield* store.addBot(reach.workspace, reach.project.value, bot.bot.value);
 					yield* membersChanged(reach);

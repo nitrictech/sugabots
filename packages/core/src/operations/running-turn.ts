@@ -157,7 +157,7 @@ export const askForApprovals = (
 	approvals: Parameters<Records["askForApprovals"]>[2],
 ) =>
 	Effect.flatMap(Turns.Records.Service, (records) =>
-		WorkAdmission.underApprovalAdmission(principal.chat, principal.workspace, (admitted) =>
+		WorkAdmission.underApprovalAdmission(principal.chat, (admitted) =>
 			asRunningTurn(principal, (runs) =>
 				admitted
 					? records.askForApprovals(runs, step, approvals, admitted)

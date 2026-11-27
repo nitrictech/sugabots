@@ -1,7 +1,6 @@
 export * as Files from "./files.ts";
 
 import {
-	type BuiltInToolKey,
 	type FileAuthor,
 	type FileWritten,
 	type ListedFile,
@@ -34,7 +33,7 @@ import {
 	commitWrittenFile,
 	executionFence,
 	replayWrittenFile,
-	type ToolWriteRefusal,
+	type FenceRefusal,
 } from "../chats/turns/turns.ts";
 import {
 	type Database,
@@ -68,7 +67,6 @@ import type { ReachesChat } from "../proofs/reaches-chat.ts";
 import type { ReachesFile } from "../proofs/reaches-file.ts";
 import type { ReachesPage } from "../proofs/reaches-page.ts";
 import type { ReachesProject } from "../proofs/reaches-project.ts";
-import { toolSwitchFor } from "../proofs/tool-switches.ts";
 import { processLayer, Tier } from "../tiers.ts";
 
 /**
@@ -123,7 +121,7 @@ export interface Interface {
 		approved: Approved<P, X, [C], "files.write">,
 	) => Effect.Effect<
 		FileWritten,
-		ActionForbidden | ApprovalRefused | FileContentTooLarge | InvalidFileWrite | ToolWriteRefusal
+		ActionForbidden | ApprovalRefused | FileContentTooLarge | InvalidFileWrite | FenceRefusal
 	>;
 	/** Writes the file's next version, as `approved.input` gives it. */
 	readonly replace: <P, F, X>(
@@ -138,7 +136,7 @@ export interface Interface {
 		| FileStale
 		| FileKindFixed
 		| FileContentTooLarge
-		| ToolWriteRefusal
+		| FenceRefusal
 	>;
 	readonly edit: <P, F, X>(
 		canChange: CanChangeFile<P, F>,
@@ -151,7 +149,7 @@ export interface Interface {
 		| FileStale
 		| FileEditTextUnmatched
 		| FileContentTooLarge
-		| ToolWriteRefusal
+		| FenceRefusal
 	>;
 }
 
@@ -266,7 +264,7 @@ export const make = Effect.gen(function* () {
 				"create",
 				Effect.gen(function* () {
 					const input = yield* newWrittenFile(approved.input);
-					const writer = yield* fileWriter(approved, canChange.reach.project.id);
+					const writer = yield* fileWriter(approved);
 					const chatId = canChange.reach.chat.value;
 					if (writer.principal.chat !== chatId)
 						return yield* new ActionForbidden({ proof: "CanChangeChat" });
@@ -287,7 +285,7 @@ export const make = Effect.gen(function* () {
 				"replace",
 				Effect.gen(function* () {
 					const input = yield* writtenFileReplacement(approved.input);
-					const writer = yield* fileWriter(approved, reach.project.id);
+					const writer = yield* fileWriter(approved);
 					const found = yield* writtenFileIn(reach);
 					const replay = yield* replayFileWrite(writer);
 					if (replay) return replay;
@@ -303,7 +301,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"edit",
 				Effect.gen(function* () {
-					const writer = yield* fileWriter(approved, reach.project.id);
+					const writer = yield* fileWriter(approved);
 					const { input } = approved;
 					const found = yield* writtenFileIn(reach);
 					const replay = yield* replayFileWrite(writer);
@@ -363,15 +361,10 @@ interface ReplaceWrittenFile {
 interface FileWriter {
 	readonly principal: BotPrincipal;
 	readonly toolCallId: string;
-	/** The project the file is written in, where its turn's asker must still change things. */
-	readonly projectId: string;
-	/** The tool that writes it, which must still be on for the bot. */
-	readonly tool: BuiltInToolKey | undefined;
 }
 
 const fileWriter = <P, X, Target>(
 	approved: Approved<P, X, [Target], "files.write" | "files.edit">,
-	projectId: string,
 ): Effect.Effect<FileWriter, ActionForbidden | ApprovalRefused> =>
 	Effect.gen(function* () {
 		const principal = approved.principal.value;
@@ -383,18 +376,11 @@ const fileWriter = <P, X, Target>(
 		return {
 			principal,
 			toolCallId: call.toolCall,
-			projectId,
-			tool: toolSwitchFor(approved.operation),
 		};
 	});
 
-const fileWriteFence = ({ principal, projectId, tool }: FileWriter) =>
-	executionFence(
-		principal.turn,
-		principal.executionNumber,
-		{ project: projectId, permission: "project.change" },
-		tool,
-	);
+const fileWriteFence = ({ principal }: FileWriter) =>
+	executionFence(principal.turn, principal.executionNumber);
 
 const replayFileWrite = (writer: FileWriter) =>
 	replayWrittenFile(fileWriteFence(writer), writer.toolCallId);
