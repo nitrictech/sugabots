@@ -102,7 +102,7 @@ export const sessionLayer = Layer.effect(
 				const call: Call = { kind: "request" };
 				return yield* httpEffect.pipe(
 					Effect.provideService(CurrentUserOfRequest, member),
-					Effect.provideService(AuthenticatedRequest, { principal, call, headers, cookie }),
+					Effect.provideService(AuthenticatedRequest, { principal, call }),
 				);
 			});
 	}),
@@ -112,21 +112,10 @@ export const sessionLayer = Layer.effect(
 const signedOut = () => new Unauthorized({ message: userText`Invalid or expired session` });
 
 declare module "@sugabots/contracts/http/middleware" {
-	/**
-	 * What `sessionLayer` authenticated for the request being answered: an
-	 * ordinary request, which may trust better-auth's cookie cache. A
-	 * long-running operation, such as following a stream, is to authenticate
-	 * with `authenticateLongRunning` instead, which reads the session's row.
-	 */
+	/** The session and call established when the request was admitted. */
 	interface RequestAuthentication {
-		/** The member signed in, as better-auth's cookie cache or the bearer token's row has them. */
 		readonly principal: MemberSession;
-		/** This request, as the call each operation is handed. */
 		readonly call: Call;
-		/** The request's headers, which a long-running operation authenticates from again. */
-		readonly headers: Headers;
-		/** better-auth's one reading of the request's cookie, which that reuses. */
-		readonly cookie: SessionAuthentication.CookieSession | undefined;
 	}
 }
 
@@ -154,51 +143,19 @@ export const operationCaller = Effect.map(
 			),
 );
 
-/**
- * The function that starts a long-running operation, such as following a
- * stream, for the member whose session the request carries:
- * `follow(name, input)`. It authenticates the request again from the
- * session's row, not better-auth's cookie cache, so a session revoked since
- * the cache was filled can't open one; that is refused as `Unauthorized`.
- * What the operation holds open belongs to the scope it is run in. Yield it
- * where a group's handlers are built.
- */
-export const longRunningCaller = Effect.gen(function* () {
-	const operations = yield* Operations.LongRunning;
-	const sessions = yield* SessionAuthentication.Service;
-	return <Name extends LongRunningOperationName>(
-		name: Name,
-		input: InputOf<Name>,
-	): Effect.Effect<
-		Running<OutputOf<Name>>,
-		FailureOf<Name> | Unauthorized,
-		Scope.Scope | AuthenticatedRequest
-	> =>
-		Effect.gen(function* () {
-			const principal = yield* principalFromSessionRow(sessions);
-			const { call } = yield* AuthenticatedRequest;
-			return yield* operations[name](principal, input, call);
-		});
-});
-
-/**
- * An effect that refuses the request as `Unauthorized` unless its session's
- * row still holds, whatever better-auth's cookie cache says, for an endpoint
- * that answers who is signed in. Yield it where a group's handlers are built.
- */
-export const sessionRowCheck = Effect.map(SessionAuthentication.Service, (sessions) =>
-	Effect.asVoid(principalFromSessionRow(sessions)),
+/** Starts a long-running operation for the session admitted by the middleware. */
+export const longRunningCaller = Effect.map(
+	Operations.LongRunning,
+	(operations) =>
+		<Name extends LongRunningOperationName>(
+			name: Name,
+			input: InputOf<Name>,
+		): Effect.Effect<
+			Running<OutputOf<Name>>,
+			FailureOf<Name>,
+			Scope.Scope | AuthenticatedRequest
+		> =>
+			Effect.flatMap(Effect.service(AuthenticatedRequest), ({ principal, call }) =>
+				operations[name](principal, input, call),
+			),
 );
-
-/** The member whose session the request carries, read again from the session's row. */
-function principalFromSessionRow(sessions: SessionAuthentication.Interface) {
-	return Effect.gen(function* () {
-		const { headers, cookie } = yield* AuthenticatedRequest;
-		return yield* sessions.authenticateLongRunning(headers).pipe(
-			Effect.provideService(SessionAuthentication.Cookies, {
-				read: () => Effect.succeed(cookie),
-			}),
-			Effect.catchTag("SessionInvalid", () => Effect.fail(signedOut())),
-		);
-	});
-}

@@ -7,21 +7,16 @@ import {
 } from "../principal.ts";
 import { SessionAuthentication } from "./session.ts";
 
-/**
- * The session authenticator for HTTP cases run without a database: a
- * long-running operation takes the session from better-auth's reading of the
- * cookie, as an ordinary request does, rather than from its row. A bearer
- * token still needs the row, and dies here.
- */
-export const sessionsFromCookies = Layer.effect(
-	SessionAuthentication.Service,
-	Effect.map(SessionAuthentication.make, (sessions) =>
-		SessionAuthentication.Service.of({
-			...sessions,
-			authenticateLongRunning: sessions.authenticate,
+/** The session authenticator for HTTP cases run without a database. */
+export const sessionsFromCookies = Layer.succeed(SessionAuthentication.Service, {
+	authenticate: (headers) =>
+		Effect.gen(function* () {
+			const cookies = yield* SessionAuthentication.Cookies;
+			const found = yield* cookies.read(headers);
+			if (!found) return yield* new SessionAuthentication.SessionInvalid();
+			return authenticated.memberSession(found);
 		}),
-	),
-);
+});
 
 /** A bot acting for its asker in the turn `turn`, in chat bounds of `project`. */
 export const botForAskerForTests = (fields: {

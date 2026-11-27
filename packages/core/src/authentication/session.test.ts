@@ -37,7 +37,6 @@ describe("SessionAuthentication", () => {
 		});
 		auth = {
 			authenticate: (headers) => withCookie(service.authenticate(headers)),
-			authenticateLongRunning: (headers) => withCookie(service.authenticateLongRunning(headers)),
 		};
 		workspaceId = await seedWorkspace();
 	});
@@ -74,7 +73,7 @@ describe("SessionAuthentication", () => {
 		).rejects.toBeInstanceOf(SessionAuthentication.SessionInvalid);
 	});
 
-	it("uses the same expiry boundary for bearer, long-running cookie and session rechecks", async () => {
+	it("uses the same expiry boundary for bearer, cookie and session rechecks", async () => {
 		const memberId = await seedMember(workspaceId, "editor");
 		const signedIn = await seedSession(memberId);
 		const expiresAt = Date.UTC(2030, 0, 1);
@@ -93,7 +92,7 @@ describe("SessionAuthentication", () => {
 				const before = yield* expiryOf(principal);
 				yield* TestClock.adjust(1);
 				const bearerAtExpiry = yield* Effect.result(auth.authenticate(bearer(signedIn.token)));
-				const cookieAtExpiry = yield* Effect.result(auth.authenticateLongRunning(new Headers()));
+				const cookieAtExpiry = yield* Effect.result(auth.authenticate(new Headers()));
 				const recheckAtExpiry = yield* expiryOf(principal);
 				return { before, bearerAtExpiry, cookieAtExpiry, recheckAtExpiry };
 			}).pipe(Effect.provide(TestClock.layer())),
@@ -122,6 +121,19 @@ describe("SessionAuthentication", () => {
 		expect(principal.session).toBe(signedIn.id);
 	});
 
+	it("refuses a new request after its cached session was revoked", async () => {
+		const memberId = await seedMember(workspaceId, "editor");
+		const signedIn = await seedSession(memberId);
+		cookie = { session: signedIn.id, member: memberId };
+
+		expect((await runOnPostgres(auth.authenticate(new Headers()))).session).toBe(signedIn.id);
+		await onDatabase((db) => db.delete(session).where(eq(session.id, signedIn.id)));
+
+		await expect(runOnPostgres(auth.authenticate(new Headers()))).rejects.toBeInstanceOf(
+			SessionAuthentication.SessionInvalid,
+		);
+	});
+
 	it("refuses a request with neither a good cookie nor a bearer token", async () => {
 		cookie = undefined;
 
@@ -129,41 +141,23 @@ describe("SessionAuthentication", () => {
 			SessionAuthentication.SessionInvalid,
 		);
 		await expect(
-			runOnPostgres(auth.authenticateLongRunning(new Headers({ authorization: "Basic abc" }))),
+			runOnPostgres(auth.authenticate(new Headers({ authorization: "Basic abc" }))),
 		).rejects.toBeInstanceOf(SessionAuthentication.SessionInvalid);
 	});
 
-	it("reads the session's row for a long-running operation, so a revoked session opens none", async () => {
-		const memberId = await seedMember(workspaceId, "editor");
-		const signedIn = await seedSession(memberId);
-		cookie = { session: signedIn.id, member: memberId };
-
-		const opened = await runOnPostgres(auth.authenticateLongRunning(new Headers()));
-		expect(opened.session).toBe(signedIn.id);
-
-		await onDatabase((db) => db.delete(session).where(eq(session.id, signedIn.id)));
-
-		// The cookie cache still vouches for it for a few minutes; the row doesn't.
-		const ordinary = await runOnPostgres(auth.authenticate(new Headers()));
-		expect(ordinary.session).toBe(signedIn.id);
-		await expect(runOnPostgres(auth.authenticateLongRunning(new Headers()))).rejects.toBeInstanceOf(
-			SessionAuthentication.SessionInvalid,
-		);
-	});
-
-	it("refuses a long-running operation whose session expired, or whose cookie names another member", async () => {
+	it("refuses a request whose session expired, or whose cookie names another member", async () => {
 		const memberId = await seedMember(workspaceId, "editor");
 		const otherId = await seedMember(workspaceId, "editor");
 		const expired = await seedSession(memberId, -60);
 		const good = await seedSession(memberId);
 
 		cookie = { session: expired.id, member: memberId };
-		await expect(runOnPostgres(auth.authenticateLongRunning(new Headers()))).rejects.toBeInstanceOf(
+		await expect(runOnPostgres(auth.authenticate(new Headers()))).rejects.toBeInstanceOf(
 			SessionAuthentication.SessionInvalid,
 		);
 
 		cookie = { session: good.id, member: otherId };
-		await expect(runOnPostgres(auth.authenticateLongRunning(new Headers()))).rejects.toBeInstanceOf(
+		await expect(runOnPostgres(auth.authenticate(new Headers()))).rejects.toBeInstanceOf(
 			SessionAuthentication.SessionInvalid,
 		);
 	});

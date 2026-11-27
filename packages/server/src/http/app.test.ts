@@ -1,6 +1,5 @@
 import { healthResponseSchema, meSchema } from "@sugabots/contracts";
 import { SessionAuthentication } from "@sugabots/core/authentication/session";
-import { noDatabase } from "@sugabots/core/database/testing";
 import { Operations } from "@sugabots/core/operations/registry";
 import { unimplemented } from "@sugabots/core/testing";
 import { Effect, Layer, Logger, References, Schema } from "effect";
@@ -62,17 +61,9 @@ describe("GET /me after the session was revoked", () => {
 		const revokedApp = createTestApp(
 			Layer.merge(
 				identifiedBy(resolveMember),
-				Layer.effect(
-					SessionAuthentication.Service,
-					Effect.map(SessionAuthentication.make, (sessions) =>
-						SessionAuthentication.Service.of({
-							...sessions,
-							// The session's row is gone; only the cache still names it.
-							authenticateLongRunning: () =>
-								Effect.fail(new SessionAuthentication.SessionInvalid()),
-						}),
-					),
-				).pipe(Layer.provide(noDatabase)),
+				Layer.succeed(SessionAuthentication.Service, {
+					authenticate: () => Effect.fail(new SessionAuthentication.SessionInvalid()),
+				}),
 			),
 		);
 

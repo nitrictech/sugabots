@@ -56,7 +56,7 @@ export const desktopViewerRoutes = Layer.effectDiscard(
 				}
 				const headers = new Headers(request.headers);
 				const holder = yield* authentication.identify(headers);
-				const principal = yield* sessions.authenticateLongRunning(headers).pipe(
+				const principal = yield* sessions.authenticate(headers).pipe(
 					Effect.provideService(SessionAuthentication.Cookies, {
 						read: () =>
 							Effect.succeed(holder && { session: holder.session, member: holder.member.id }),

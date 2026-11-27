@@ -13,20 +13,15 @@ import { processLayer, Tier } from "../tiers.ts";
  * stream's and the desktop viewer's way in. A request carries better-auth's
  * session cookie, or the session's token as a bearer.
  *
- * Ordinary cookie requests use the entrypoint's session lookup. A long-running
- * operation reads the session's row again before it opens. A bearer token is
- * always authenticated from its session's row.
+ * Each request is admitted from an unexpired session row, even when
+ * better-auth reads the cookie from its cache.
  *
  * Each call takes better-auth's reading of the request's cookie as
  * {@link Cookies}, which the entrypoint provides for that request.
  */
 export interface Interface {
-	/** The session `headers` carry, for an ordinary request. */
+	/** The unexpired session `headers` carry, read from its row. */
 	readonly authenticate: (
-		headers: Headers,
-	) => Effect.Effect<MemberSession, SessionInvalid, Cookies>;
-	/** The session `headers` carry, read from its row, for a long-running operation. */
-	readonly authenticateLongRunning: (
 		headers: Headers,
 	) => Effect.Effect<MemberSession, SessionInvalid, Cookies>;
 }
@@ -96,16 +91,6 @@ export const make = Effect.gen(function* () {
 		authenticate: (headers) =>
 			operation(
 				"authenticate",
-				Effect.gen(function* () {
-					const token = bearerTokenIn(headers);
-					if (token !== undefined) return yield* fromBearer(token);
-					return authenticated.memberSession(yield* fromCookie(headers));
-				}),
-			),
-
-		authenticateLongRunning: (headers) =>
-			operation(
-				"authenticateLongRunning",
 				Effect.gen(function* () {
 					const token = bearerTokenIn(headers);
 					if (token !== undefined) return yield* fromBearer(token);
