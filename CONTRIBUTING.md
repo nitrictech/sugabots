@@ -194,6 +194,22 @@ installation's rows and one empty, then compares the copies' schemas and rows.
 Run it after changing a migration that's already been reviewed, such as when
 squashing migrations.
 
+The squashed migration `20261125093952_bots_projects_and_chats` was edited
+after it was first applied. A database that already ran it doesn't run it
+again, so any development, preview or test database built from an earlier copy
+of the branch keeps the old schema. Drop it and make it again. For the local
+development database and the test template (`sugabots_test`, or the database
+your `TEST_DATABASE_URL` names):
+
+```sh
+docker compose exec postgres dropdb -U sugabots --force sugabots
+docker compose exec postgres dropdb -U sugabots --force sugabots_test
+docker compose exec postgres createdb -U sugabots sugabots
+bun run db:migrate
+```
+
+The next test run makes and migrates the test template again.
+
 Computers are made from the published image their tag names on its registry,
 so a local build under the published name is never used. To try one, set the
 OpenSandbox provider's image to `sugabots-computer:dev` in the workspace's
