@@ -2318,7 +2318,7 @@ it.skipIf(!process.env.DATABASE_URL)(
 );
 
 it.skipIf(!process.env.DATABASE_URL)(
-	"backfills turn askers through a deep chain without repeatedly spilling unrelated turns",
+	"backfills turn askers through a deep chain without repeatedly scanning unrelated turns",
 	async () => {
 		const migration = await readFile(
 			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
@@ -2360,11 +2360,20 @@ it.skipIf(!process.env.DATABASE_URL)(
 				const {
 					rows: [explained],
 				} = await client.query<{
-					"QUERY PLAN": [{ Plan: { "Temp Written Blocks": number } }];
+					"QUERY PLAN": [
+						{
+							Plan: {
+								"Temp Written Blocks": number;
+								"Local Hit Blocks": number;
+								"Local Read Blocks": number;
+							};
+						},
+					];
 				}>(`explain (analyze, buffers, timing off, format json) ${backfill.slice(walk)}`);
 				const plan = explained?.["QUERY PLAN"][0]?.Plan;
 				if (!plan) throw new Error("Postgres did not return a plan for the turn asker backfill");
 				expect(plan["Temp Written Blocks"]).toBeLessThan(8_192);
+				expect(plan["Local Hit Blocks"] + plan["Local Read Blocks"]).toBeLessThan(1_000_000);
 				const result = await client.query(`
 					select count(*)::integer as turns_by_member
 					from "turn" where asker_id = md5('member')::uuid and not asked_by_automation
@@ -2380,6 +2389,7 @@ it.skipIf(!process.env.DATABASE_URL)(
 			}
 		});
 	},
+	UPGRADE_TIMEOUT_MS,
 );
 
 it("stages default projects' allowed hosts only for the migration transaction", async () => {
