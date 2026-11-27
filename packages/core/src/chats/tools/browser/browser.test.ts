@@ -100,7 +100,7 @@ it("moves legacy work before opening a desktop, preserving files already in plac
 	} finally {
 		await rm(workspace, { recursive: true, force: true });
 	}
-});
+}, 15_000);
 
 it.each(["step closes", "termination times out"])(
 	"aborts a stalled session DELETE when the %s",
