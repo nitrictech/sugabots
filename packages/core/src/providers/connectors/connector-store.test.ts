@@ -118,7 +118,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 	async function listTools(connectorId: string, tools: ConnectorTool[]) {
 		const target = await connectors.target(workspaceId, projectId, connectorId);
 		if (!target) throw new Error("no target");
-		await connectors.recordTest(workspaceId, connectorId, target.configurationUpdatedAt, {
+		await connectors.recordTest(workspaceId, target, {
 			tools,
 			definitions: tools.map(({ name, description, readOnly, destructive }) => ({
 				name,

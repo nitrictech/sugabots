@@ -243,11 +243,13 @@ const FAILURE_LIFETIME = Duration.minutes(1);
 interface KeptListing {
 	listing: ServerListing;
 	revision: number;
+	/** The revision the session opened under, before this listing was recorded. */
+	sessionRevision: number;
 	listedAt: number;
 }
 
 export interface Parts {
-	connectors: Pick<ConnectorStore.Interface, "targetsForProject">;
+	connectors: Pick<ConnectorStore.Interface, "targetsForProject" | "recordListing">;
 	/** Bound egress clients, so a session goes only to the connector's own address. */
 	httpClients: EgressHttpClients;
 	/** Opens a session with a server; the real one speaks MCP. */
@@ -395,10 +397,11 @@ export function from({
 				const now = yield* Clock.currentTimeMillis;
 				const useSession = <A>(
 					target: ConnectorTarget,
+					revision: number,
 					work: (session: ServerSession) => Promise<A>,
 				) =>
 					sessions.use(
-						`${target.connectorId}:${target.configurationRevision}`,
+						`${target.connectorId}:${revision}`,
 						() =>
 							connect(
 								{
@@ -416,36 +419,50 @@ export function from({
 							),
 						work,
 					);
-				const loadListing = async (target: ConnectorTarget): Promise<ServerListing> => {
-					const failure = `${target.connectorId}:${target.configurationRevision}`;
-					const failed = failedAt.get(failure);
-					if (failed !== undefined && now - failed < Duration.toMillis(FAILURE_LIFETIME)) {
-						throw new Error("The server failed to answer moments ago");
-					}
-					const known = kept.get(target.connectorId);
-					if (
-						known &&
-						known.revision === target.configurationRevision &&
-						now - known.listedAt < Duration.toMillis(LISTING_LIFETIME)
-					) {
-						return known.listing;
-					}
-					const listing = await useSession(target, (session) => session.list()).catch((cause) => {
-						if (!sessions.closed) failedAt.set(failure, now);
-						throw cause;
+				const loadListing = (target: ConnectorTarget) =>
+					Effect.gen(function* () {
+						const failure = `${target.connectorId}:${target.configurationRevision}`;
+						const failed = failedAt.get(failure);
+						if (failed !== undefined && now - failed < Duration.toMillis(FAILURE_LIFETIME)) {
+							return "unavailable" as const;
+						}
+						const known = kept.get(target.connectorId);
+						if (
+							known &&
+							known.revision === target.configurationRevision &&
+							now - known.listedAt < Duration.toMillis(LISTING_LIFETIME)
+						) {
+							return known;
+						}
+						const sessionRevision =
+							known?.revision === target.configurationRevision
+								? known.sessionRevision
+								: target.configurationRevision;
+						const listing = yield* Effect.tryPromise(() =>
+							useSession(target, sessionRevision, (session) => session.list()).catch((cause) => {
+								if (!sessions.closed) failedAt.set(failure, now);
+								throw cause;
+							}),
+						);
+						failedAt.delete(failure);
+						const revision = yield* connectors.recordListing(workspaceId, target, {
+							tools: listing.tools.map(({ described }) => described),
+							definitions: listing.definitions.tools,
+						});
+						if (revision === undefined) return "unavailable" as const;
+						const recorded = {
+							listing,
+							revision,
+							sessionRevision,
+							listedAt: now,
+						};
+						kept.set(target.connectorId, recorded);
+						return recorded;
 					});
-					failedAt.delete(failure);
-					kept.set(target.connectorId, {
-						listing,
-						revision: target.configurationRevision,
-						listedAt: now,
-					});
-					return listing;
-				};
 				const listings = yield* Effect.forEach(
 					targets,
 					(target) =>
-						Effect.tryPromise(() => loadListing(target)).pipe(
+						loadListing(target).pipe(
 							Effect.catch((failure): Effect.Effect<ListingOutcome> => {
 								if (needsSignIn(failure.cause)) {
 									return Effect.as(
@@ -464,21 +481,24 @@ export function from({
 					{ concurrency: "unbounded" },
 				);
 				const listed = targets.flatMap((target, index) => {
-					const listing = listings[index];
-					return typeof listing === "object" ? [{ target, listing }] : [];
+					const recorded = listings[index];
+					if (typeof recorded !== "object") return [];
+					return [{ target: { ...target, configurationRevision: recorded.revision }, ...recorded }];
 				});
 				const leftOut = (outcome: ListingOutcome) =>
 					targets.filter((_, index) => listings[index] === outcome);
 				return {
 					tools: Object.assign(
 						{},
-						...listed.map(({ target, listing }) => ({
+						...listed.map(({ target, listing, sessionRevision }) => ({
 							...offerAugmentationTools(
 								target,
 								listing.tools.map(({ described }) => described),
 								uploadSide,
 							),
-							...buildOfferedTools(target, listing, useSession),
+							...buildOfferedTools(target, listing, (work) =>
+								useSession(target, sessionRevision, work),
+							),
 						})),
 						ownTools.tools,
 					),
@@ -518,15 +538,12 @@ function builtInConnectorsAddableTo(installedUrls: readonly string[]): readonly 
 type OwnedTarget = ConnectorTarget & { projectId: string };
 
 /** What asking a connector's server for its tools came to. */
-type ListingOutcome = ServerListing | "unavailable" | "sign_in_expired";
+type ListingOutcome = KeptListing | "unavailable" | "sign_in_expired";
 
 function buildOfferedTools(
 	target: ConnectorTarget,
 	listing: ServerListing,
-	useSession: <A>(
-		target: ConnectorTarget,
-		work: (session: ServerSession) => Promise<A>,
-	) => Promise<A>,
+	useSession: <A>(work: (session: ServerSession) => Promise<A>) => Promise<A>,
 ): Record<string, OfferedTool> {
 	return Object.fromEntries(
 		listing.tools.map(({ described, inputSchema, tool }) =>
@@ -536,7 +553,7 @@ function buildOfferedTools(
 				{
 					...tool,
 					execute: (input, options) =>
-						useSession(target, (session) => session.run(listing, described.name, input, options)),
+						useSession((session) => session.run(listing, described.name, input, options)),
 				},
 				{ description: described.description ?? "", inputSchema },
 			),

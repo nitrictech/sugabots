@@ -88,6 +88,7 @@ const target = (extra: Partial<ConnectorTarget> = {}): ConnectorTarget => ({
 async function toolsFor(connector: ConnectorTarget) {
 	const offered = ConnectorCatalog.from({
 		connectors: {
+			recordListing: () => Effect.die("HTTP connectors have no MCP listing"),
 			targetsForProject: () =>
 				Effect.succeed({ targets: [connector], signInExpired: [], installedUrls: [connector.url] }),
 		},

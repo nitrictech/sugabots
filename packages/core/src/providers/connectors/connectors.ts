@@ -253,8 +253,7 @@ export const make = Effect.gen(function* () {
 			);
 			yield* connectors.recordTest(
 				at.workspaceId,
-				at.connectorId,
-				target.configurationUpdatedAt,
+				target,
 				found.ok ? found : { error: found.reason },
 			);
 			return result;
@@ -270,12 +269,7 @@ export const make = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const checked = yield* Effect.result(egress.validateProviderUrl(target.url));
 			const error = checked._tag === "Failure" ? checked.failure.userMessage : undefined;
-			yield* connectors.recordTest(
-				at.workspaceId,
-				at.connectorId,
-				target.configurationUpdatedAt,
-				error ? { error } : {},
-			);
+			yield* connectors.recordTest(at.workspaceId, target, error ? { error } : {});
 			const result: ConnectorTestResult = {
 				reachable: error === undefined,
 				latencyMs: 0,

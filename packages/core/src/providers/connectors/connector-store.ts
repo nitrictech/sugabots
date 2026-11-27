@@ -146,15 +146,22 @@ export interface Interface {
 		readonly addressRevision?: number | undefined;
 	}) => Effect.Effect<void, ConnectorAddressChanged | ConnectorNotFound>;
 	/**
-	 * Records what a test of the configuration last updated at `testedAt`
-	 * found, unless the connector has been reconfigured since.
+	 * Records what a test of `target` found while its configuration is current.
 	 */
 	readonly recordTest: (
 		workspaceId: string,
-		connectorId: string,
-		testedAt: Date,
+		target: ObservationTarget,
 		outcome: TestOutcome,
 	) => Effect.Effect<void>;
+	/**
+	 * Records the tools listed for `target` and returns the revision that owns
+	 * them, or undefined if the connector changed while it was being listed.
+	 */
+	readonly recordListing: (
+		workspaceId: string,
+		target: ObservationTarget,
+		listing: ToolListing,
+	) => Effect.Effect<number | undefined>;
 	readonly target: (
 		workspaceId: string,
 		projectId: string,
@@ -260,6 +267,47 @@ export const make = Effect.gen(function* () {
 			configurationUpdatedAt: row.updatedAt,
 			configurationRevision: row.configurationRevision,
 		};
+	};
+
+	const recordObservation = (
+		workspaceId: string,
+		target: ObservationTarget,
+		listing: ToolListing | undefined,
+		test?: { at: Date; error: UserText | null },
+	) => {
+		const definitions = listing?.definitions.toSorted((first, second) =>
+			Order.String(first.name, second.name),
+		);
+		const fingerprint =
+			definitions && createHash("sha256").update(stringify(definitions)).digest("hex");
+		return query((db) =>
+			db
+				.update(connector)
+				.set({
+					lastTestedAt: test?.at,
+					lastTestError: test?.error,
+					tools: listing?.tools,
+					toolDefinitionsFingerprint: fingerprint,
+					configurationRevision:
+						fingerprint === undefined
+							? undefined
+							: sql`case
+								when ${connector.toolDefinitionsFingerprint} is distinct from ${fingerprint}
+								then ${connector.configurationRevision} + 1 else ${connector.configurationRevision} end`,
+					updatedAt: test ? undefined : sql`${connector.updatedAt}`,
+				})
+				.where(
+					and(
+						eq(connector.id, target.connectorId),
+						eq(connector.workspaceId, workspaceId),
+						eq(connector.configurationRevision, target.configurationRevision),
+						test
+							? stillConfiguredAs(connector.updatedAt, target.configurationUpdatedAt)
+							: undefined,
+					),
+				)
+				.returning({ revision: connector.configurationRevision }),
+		).pipe(Effect.map(([row]) => row?.revision));
 	};
 
 	return Service.of({
@@ -575,42 +623,24 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map((deleted) => deleted.length > 0)),
 			),
 
-		recordTest: (workspaceId, connectorId, testedAt, outcome) =>
+		recordTest: (workspaceId, target, outcome) =>
 			operation(
 				"recordTest",
 				Effect.gen(function* () {
-					const now = yield* DateTime.nowAsDate;
-					const listing = "definitions" in outcome ? outcome : undefined;
-					const definitions = listing?.definitions.toSorted((first, second) =>
-						Order.String(first.name, second.name),
-					);
-					const fingerprint =
-						definitions && createHash("sha256").update(stringify(definitions)).digest("hex");
-					yield* query((db) =>
-						db
-							.update(connector)
-							.set({
-								lastTestedAt: now,
-								lastTestError: "error" in outcome ? outcome.error : null,
-								tools: listing?.tools,
-								toolDefinitionsFingerprint: fingerprint,
-								configurationRevision:
-									fingerprint === undefined
-										? undefined
-										: sql`case
-											when ${connector.toolDefinitionsFingerprint} is distinct from ${fingerprint}
-											then ${connector.configurationRevision} + 1 else ${connector.configurationRevision} end`,
-							})
-							.where(
-								and(
-									eq(connector.id, connectorId),
-									eq(connector.workspaceId, workspaceId),
-									stillConfiguredAs(connector.updatedAt, testedAt),
-								),
-							),
+					yield* recordObservation(
+						workspaceId,
+						target,
+						"definitions" in outcome ? outcome : undefined,
+						{
+							at: yield* DateTime.nowAsDate,
+							error: "error" in outcome ? (outcome.error ?? null) : null,
+						},
 					);
 				}),
 			),
+
+		recordListing: (workspaceId, target, listing) =>
+			operation("recordListing", recordObservation(workspaceId, target, listing)),
 
 		target: (workspaceId, projectId, connectorId) =>
 			operation(
@@ -926,9 +956,14 @@ interface ProjectTargets {
  * What a test found: the server's tools, absent for a connector whose tools
  * are Sugabots' own, or why it could not be asked.
  */
-type TestOutcome =
-	| { tools: ConnectorTool[]; definitions: ServerToolDefinitions }
-	| { error?: UserText };
+type TestOutcome = ToolListing | { error?: UserText };
+
+type ToolListing = { tools: ConnectorTool[]; definitions: ServerToolDefinitions };
+
+type ObservationTarget = Pick<
+	ConnectorTarget,
+	"connectorId" | "configurationRevision" | "configurationUpdatedAt"
+>;
 
 /** A GitHub connector's address until its app is installed on an account: the app's own page. */
 function gitHubAppUrl(slug: string) {

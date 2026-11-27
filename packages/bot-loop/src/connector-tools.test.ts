@@ -11,6 +11,7 @@ import {
 	seedTurnAnswering,
 	setRole,
 } from "@sugabots/core/authentication/seed.test-support";
+import { startBotChat } from "@sugabots/core/chats/chats/testing";
 import { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
 import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import { aChatWithConnectorAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
@@ -31,10 +32,11 @@ import {
 } from "@sugabots/core/providers/connectors/github/github.test-support";
 import { Models } from "@sugabots/core/providers/models/models";
 import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
-import { tool } from "ai";
+import { type JSONSchema7, jsonSchema, tool } from "ai";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer, Schema } from "effect";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { Clock, Context, Effect, Exit, Layer, Schema, Scope } from "effect";
+import { TestClock } from "effect/testing";
+import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
 	botLoopOnPostgres,
 	calling,
@@ -215,6 +217,62 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(execute).not.toHaveBeenCalled();
 		});
 
+		it("closes an approval when a catalog refresh finds a changed input schema", async () => {
+			const described = { name: "wipe", description: null, readOnly: false, destructive: false };
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ handle: "wiki", toolAccess: { wipe: "ask" } })
+					.where(eq(connector.id, connectorId)),
+			);
+			let inputSchema: JSONSchema7 = { type: "object", additionalProperties: false };
+			const list = vi.fn(async () => ({
+				definitions: { tools: [{ name: described.name, inputSchema }] },
+				instructions: undefined,
+				tools: [{ described, inputSchema, tool: { inputSchema: jsonSchema(inputSchema) } }],
+			}));
+			const run = vi.fn(async () => ({ removed: true }));
+			const catalog = ConnectorCatalog.from({
+				connectors: await runOnPostgres(
+					ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+				),
+				httpClients: { for: () => fetch },
+				connect: async () => ({ list, run, close: async () => {} }),
+			});
+			const scope = Scope.makeUnsafe();
+			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
+			const clock = await Effect.runPromise(Scope.provide(TestClock.make(), scope));
+			const connectorTools: ConnectorCatalog.Interface = {
+				forTurn: (...args) =>
+					catalog.forTurn(...args).pipe(Effect.provideService(Clock.Clock, clock)),
+			};
+			const { model } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
+			const workflow = await loop.runWorkflow(chatId, { model, connectorTools });
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+			expect(parked).toMatchObject({ connectorId, approvalStatus: "pending", input: {} });
+			expect(list).toHaveBeenCalledOnce();
+
+			inputSchema = { ...inputSchema, properties: { reason: { type: "string" } } };
+			await Effect.runPromise(clock.adjust(ConnectorCatalog.LISTING_LIFETIME));
+			const other = await startBotChat(chatsAs(adminId), {
+				botId,
+				messageId: crypto.randomUUID(),
+				content: "Check the wiki.",
+			});
+			await loop.runTurn(other.chat.id, { ...scriptedSteps({ text: ["Ready."] }), connectorTools });
+			expect(list).toHaveBeenCalledTimes(2);
+
+			await expect(
+				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({ _tag: "ToolApprovalConflict", reason: "connectorChanged" });
+			await workflow.completed();
+			expect(await callsOf(turnId)).toMatchObject([
+				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null },
+			]);
+			expect(run).not.toHaveBeenCalled();
+		});
+
 		it("refuses a demoted asker's Allow for a pending connector write", async () => {
 			await setRole(workspaceId, adminId, "editor");
 			const execute = vi.fn(async () => ({ removed: true }));
@@ -376,10 +434,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const connectors = await runOnPostgres(
 				ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
 			);
-			const target = await runOnPostgres(
-				connectors.target(workspaceId, saved.projectId, connectorId),
-			);
-			if (!target) throw new Error("No connector target");
 			const run = vi.fn(async () => ({ found: true }));
 			const catalog = ConnectorCatalog.from({
 				connectors,
@@ -408,16 +462,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const { model } = calling(CALL_TOOL, { tool: "wiki__lookup", arguments: {} });
 			const afterTest = Models.fromStream((request) =>
 				(request.step === 0
-					? connectors.recordTest(workspaceId, connectorId, target.configurationUpdatedAt, {
-							tools: [{ ...listed, readOnly: false, destructive: true }],
-							definitions: [
-								{
-									name: listed.name,
-									description: listed.description,
-									inputSchema: { type: "object" },
-									annotations: { readOnlyHint: false, destructiveHint: true },
-								},
-							],
+					? Effect.gen(function* () {
+							const target = yield* connectors.target(workspaceId, saved.projectId, connectorId);
+							if (!target) throw new Error("No connector target");
+							yield* connectors.recordTest(workspaceId, target, {
+								tools: [{ ...listed, readOnly: false, destructive: true }],
+								definitions: [
+									{
+										name: listed.name,
+										description: listed.description,
+										inputSchema: { type: "object" },
+										annotations: { readOnlyHint: false, destructiveHint: true },
+									},
+								],
+							});
 						})
 					: Effect.void
 				).pipe(Effect.andThen(model.stream(request))),
@@ -879,28 +937,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					sessionEvents.push("connect");
 					return { list, run, close };
 				};
-				const url = "https://wiki.example.com/mcp";
 				const discovery = ConnectorCatalog.from({
-					connectors: {
-						targetsForProject: () =>
-							Effect.succeed({
-								targets: [
-									{
-										connectorId,
-										handle: "wiki",
-										kind: "mcp",
-										url,
-										auth: "header",
-										headers: {},
-										toolAccess: {},
-										configurationUpdatedAt: new Date(),
-										configurationRevision: 1,
-									},
-								],
-								signInExpired: [],
-								installedUrls: [url],
-							}),
-					},
+					connectors: await runOnPostgres(
+						ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+					),
 					httpClients: { for: () => fetch },
 					connect,
 				});

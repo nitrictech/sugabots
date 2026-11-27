@@ -136,9 +136,15 @@ const target = (extra: Partial<ConnectorTarget> = {}): ConnectorTarget => ({
 	...extra,
 });
 
+const recordListing: ConnectorCatalog.Parts["connectors"]["recordListing"] = (
+	_workspaceId,
+	{ configurationRevision },
+) => Effect.succeed(configurationRevision);
+
 function toolsFor(...targets: ConnectorTarget[]) {
 	const offered = ConnectorCatalog.from({
 		connectors: {
+			recordListing,
 			targetsForProject: () =>
 				Effect.succeed({
 					targets,
@@ -249,6 +255,7 @@ describe("a turn's connector tools", () => {
 		});
 		const offered = ConnectorCatalog.from({
 			connectors: {
+				recordListing,
 				targetsForProject: () =>
 					Effect.succeed({
 						targets: [linear, target()],
@@ -291,6 +298,7 @@ describe("a turn's connector tools", () => {
 		});
 		const offered = ConnectorCatalog.from({
 			connectors: {
+				recordListing,
 				targetsForProject: () =>
 					Effect.succeed({
 						targets: [linear, target({ handle: "locked", headers: { "x-fixture-key": "nope" } })],
@@ -327,6 +335,7 @@ describe("a turn's connector tools", () => {
 		};
 		const offered = ConnectorCatalog.from({
 			connectors: {
+				recordListing,
 				targetsForProject: (_workspaceId, projectId) => {
 					const targets = projects[projectId] ?? [];
 					return Effect.succeed({
@@ -368,6 +377,7 @@ describe("a turn's connector tools", () => {
 		};
 		const offered = ConnectorCatalog.from({
 			connectors: {
+				recordListing,
 				targetsForProject: (_workspaceId, projectId) =>
 					Effect.succeed({
 						targets: [],
@@ -522,6 +532,7 @@ describe("a turn's connector tools", () => {
 			const provider = oauthClient(fetch, signedIn.url, tokens, async () => undefined);
 			const offered = ConnectorCatalog.from({
 				connectors: {
+					recordListing,
 					targetsForProject: () =>
 						Effect.succeed({
 							targets: [signedIn],
@@ -560,6 +571,7 @@ describe("a turn's connector tools", () => {
 			const targets = [connector];
 			const offered = ConnectorCatalog.from({
 				connectors: {
+					recordListing,
 					targetsForProject: () =>
 						Effect.succeed({
 							targets,
