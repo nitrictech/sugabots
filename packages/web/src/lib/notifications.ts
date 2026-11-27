@@ -227,7 +227,8 @@ export function useNotificationsInThisBrowser() {
 				const parsed = Schema.decodeUnknownResult(memberUpdateEventSchema)(event);
 				if (parsed._tag === "Failure") continue;
 				const update = parsed.success;
-				// Before the stream started, or across a reset, approvals may have changed unheard.
+				// Approvals are the only list this stream keeps current. A reset can
+				// skip old browser notifications, and tabs renew their presence reports.
 				if (
 					update.type === "approvals.changed" ||
 					update.type === "ready" ||

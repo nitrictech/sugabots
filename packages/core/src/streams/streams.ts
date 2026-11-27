@@ -100,7 +100,7 @@ export interface Interface {
 	 * it first proves, so no change of reach slips between; a first refusal
 	 * fails it. The stream it returns ends once it must, dropping whatever it
 	 * hadn't sent. A `reset` asks the client to refetch when its resume point
-	 * is gone or replay reaches its limit.
+	 * is gone or the missed events exceed the replay limit.
 	 */
 	readonly follow: <E>(following: Following<E>) => Effect.Effect<Running<Delivery>, E, Scope.Scope>;
 	/**
@@ -562,6 +562,7 @@ export const make = Effect.gen(function* () {
 										cursor: since,
 										controls: replayControls(),
 										through: startPosition,
+										maxReplayEvents: MAX_REPLAY_EVENTS,
 									},
 									BATCH,
 									signal,
@@ -576,7 +577,6 @@ export const make = Effect.gen(function* () {
 					// this, it fetches again, and what changes after arrives here.
 					yield* Queue.offer(outbox, { seq: start, event: streamEvent("ready") });
 				} else if (!replay) {
-					// The resume point is gone, or was never this stream's: start again.
 					yield* Queue.offer(outbox, { seq: start, event: streamEvent("reset") });
 				}
 				let current = first;
@@ -646,22 +646,15 @@ export const make = Effect.gen(function* () {
 				});
 				const sendReplay = Effect.fnUntraced(function* (firstPage: readonly EventStore.StoredOn[]) {
 					let page = firstPage;
-					let remaining = MAX_REPLAY_EVENTS;
 					while (true) {
 						for (const row of page) feeds.set(row.stream, row.seq);
 						if (!(yield* sendStored(page))) return false;
 						const position = feeds.get(stream) ?? startPosition;
-						if (page.length < Math.min(BATCH, remaining) || position >= startPosition) {
+						if (page.length < BATCH || position >= startPosition) {
 							// Filtered events still need a cursor so the next reconnect starts past them.
 							if (position > lastSentPosition) {
 								yield* Queue.offer(outbox, { seq: position, event: streamEvent("ready") });
 							}
-							return true;
-						}
-						remaining -= page.length;
-						if (remaining === 0) {
-							feeds.set(stream, startPosition);
-							yield* Queue.offer(outbox, { seq: start, event: streamEvent("reset") });
 							return true;
 						}
 						const next = yield* Effect.promise((signal) =>
@@ -671,7 +664,7 @@ export const make = Effect.gen(function* () {
 									controls: replayControls(),
 									through: startPosition,
 								},
-								Math.min(BATCH, remaining),
+								BATCH,
 								signal,
 							),
 						);

@@ -41,7 +41,11 @@ export interface Interface {
 		signal?: AbortSignal,
 	): Promise<Map<EventStream, StreamCursor>>;
 
-	/** replayPage reads a batch through page.through if given, or returns undefined for an unusable starting position. */
+	/**
+	 * replayPage reads a batch through `page.through` if given. It returns
+	 * undefined if the starting position is unusable or the followed stream
+	 * has more than `page.maxReplayEvents` events in that range, when set.
+	 */
 	replayPage(
 		page: ReplayPage,
 		limit: number,
@@ -136,16 +140,26 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 				"cursor" in page ? { stream: page.stream, since: afterCursor(page.cursor) } : page.feed;
 			if (!Number.isSafeInteger(feed.since)) return undefined;
 
-			const retained = sql`${feed.since} >= (${retentionBoundary(feed.stream)}) and ${validReplayPosition(page)}`;
 			const rows = await run((db) => {
+				const withinLimit =
+					"cursor" in page && page.maxReplayEvents !== undefined
+						? sql`not exists (${firstEventOverReplayLimit(db, feed, page.maxReplayEvents, page.through)})`
+						: sql`true`;
+				const canReplay = sql`${feed.since} >= (${retentionBoundary(feed.stream)}) and ${validReplayPosition(page)} and ${withinLimit}`;
 				const batch = selectFeedRows(db, [feed, ...page.controls], limit, page.through);
-				return db.execute<Omit<EventRow, "seq"> & { retained: boolean; seq: string | null }>(
-					sql`select retained, batch.* from (select ${retained} as retained) as replay
-						left join lateral (${batch}) as batch on retained order by batch.seq`,
+				// Materialize the check once. LIMIT 0 keeps Postgres from reading
+				// any payloads when the cursor needs a reset.
+				return db.execute<Omit<EventRow, "seq"> & { can_replay: boolean; seq: string | null }>(
+					sql`with replay as materialized (select ${canReplay} as can_replay)
+						select can_replay, batch.* from replay
+						left join lateral (
+							select * from (${batch}) as selected
+							limit case when replay.can_replay then null else 0 end
+						) as batch on true order by batch.seq`,
 					"objects",
 				);
 			}, signal);
-			if (!rows[0]?.retained) return undefined;
+			if (!rows[0]?.can_replay) return undefined;
 			return rows.flatMap(({ seq, stream, payload }) =>
 				seq === null ? [] : [{ seq: Number(seq), stream, event: payload }],
 			);
@@ -210,6 +224,33 @@ interface EventRow {
 	payload: StreamEvent;
 }
 
+function firstEventOverReplayLimit(
+	db: Executor,
+	feed: Feed,
+	maxReplayEvents: number,
+	through?: number,
+) {
+	return db
+		.select({ seq: event.seq })
+		.from(event)
+		.where(
+			and(
+				inStream(feed.stream),
+				gt(event.seq, feed.since),
+				through === undefined ? undefined : lte(event.seq, through),
+			),
+		)
+		.orderBy(asc(event.stream), asc(event.seq))
+		.offset(maxReplayEvents)
+		.limit(1);
+}
+
+function inStream(stream: EventStream) {
+	// Keep stream in the index order. An equality would let Postgres
+	// drop it from ORDER BY and scan the global sequence index.
+	return and(gte(event.stream, stream), lte(event.stream, stream));
+}
+
 function selectFeedRows(db: Executor, feeds: readonly Feed[], limit: number, through?: number) {
 	// Overlapping feeds on the same stream must still return each event once.
 	const batches = [...Map.groupBy(feeds, (feed) => feed.stream)].map(([stream, sameStream]) => {
@@ -218,10 +259,7 @@ function selectFeedRows(db: Executor, feeds: readonly Feed[], limit: number, thr
 			.from(event)
 			.where(
 				and(
-					// Keep stream in the index order. An equality would let Postgres
-					// drop it from ORDER BY and scan the global sequence index.
-					gte(event.stream, stream),
-					lte(event.stream, stream),
+					inStream(stream),
 					through === undefined ? undefined : lte(event.seq, through),
 					or(...sameStream.map(matchesFeed)),
 				),
@@ -270,6 +308,7 @@ export type ReplayPage = (
 	| {
 			readonly stream: EventStream;
 			readonly cursor: StreamCursor;
+			readonly maxReplayEvents?: number;
 	  }
 	| { readonly feed: Feed }
 ) & {

@@ -596,7 +596,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: live });
 	});
 
-	it("checkpoints filtered replay pages at startup before sending live events", async () => {
+	it("checkpoints 5,000 filtered events at startup before sending live events", async () => {
 		const world = await staffed();
 		const erin = await signedIn.member(world.erin);
 		const stream = workspaceStream(world.workspace);
@@ -609,7 +609,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			streamEvent("chat.changed", { chatId: world.chat }),
 		);
 		await runOnPostgres(
-			transaction(outbox.publish(Array.from({ length: 225 }, () => ({ stream, event: hidden })))),
+			transaction(outbox.publish(Array.from({ length: 5_000 }, () => ({ stream, event: hidden })))),
 		);
 		const start = (await stored.latest([stream])).get(stream);
 		const { follow: followWithLiveEvent } = await servedRegistry({
@@ -617,9 +617,8 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			eventStore: {
 				...stored,
 				async replayPage(page, limit, signal) {
-					const rows = await stored.replayPage(page, limit, signal);
 					if ("cursor" in page) await commit(stream, live);
-					return rows;
+					return stored.replayPage(page, limit, signal);
 				},
 			},
 		});
@@ -646,11 +645,11 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		expect(await reconnected.next()).toEqual(received);
 	});
 
-	it("resets at the startup cursor after replaying at most 5,000 missed events", async () => {
+	it("resets at the startup cursor before replaying any of 5,001 missed events", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);
-		const stream = chatStream(world.chat);
-		const changed = streamEvent("chat.changed", { chatId: world.chat });
+		const stream = workspaceStream(world.workspace);
+		const changed = Audience.forWorkspace(streamEvent("chat.changed", { chatId: world.chat }));
 		await commit(stream, changed);
 		const since = (await stored.latest([stream])).get(stream);
 		if (since === undefined) throw new Error("The stream has no cursor");
@@ -660,14 +659,14 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			),
 		);
 		const start = (await stored.latest([stream])).get(stream);
-		const resumed = await following(ed, "events.followChat", { chatId: world.chat, since });
-		for (let replayed = 0; replayed < 5_000; replayed += 1) {
-			expect(await nextType(resumed)).toBe("chat.changed");
-		}
+		const resumed = await following(ed, "events.followWorkspace", {
+			workspace: world.workspace,
+			since,
+		});
 		expect(await resumed.next()).toEqual({ seq: start, event: streamEvent("reset") });
 
-		const live = streamEvent("chat.changed", { chatId: "after replay" });
-		await commit(stream, live);
+		const live = streamEvent("chat.changed", { chatId: world.spareChat });
+		await commit(stream, Audience.forWorkspace(live));
 		expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: live });
 	});
 
