@@ -828,7 +828,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 									canDecide,
 									parked.approvalId ?? "",
 									"allow_once",
-									(approver) => network.grantHostRequest(isMember, approver),
+									(approver) =>
+										network.grantHostRequest(isMember, approver).pipe(Effect.as(undefined)),
 								);
 							}),
 						);

@@ -883,7 +883,7 @@ export const make = Effect.gen(function* () {
 								({ approvalId }) => approvalId,
 							);
 							const decided = yield* toolCalls.decisions(locked.id, waitingOn);
-							if (waitingOn.some((approvalId) => decided.get(approvalId) === "pending")) {
+							if (waitingOn.some((approvalId) => decided.get(approvalId)?.status === "pending")) {
 								if (executionChanged) {
 									yield* writeCheckpoint(locked.id, {
 										...resumedCheckpoint,

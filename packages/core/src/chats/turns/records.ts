@@ -273,16 +273,12 @@ export const make = Effect.gen(function* () {
 				callsStep,
 				recordedCallIds,
 				approvals: bound.map((approval) => {
-					const decision = withdrawn.has(approval.approvalId)
-						? "withdrawn"
-						: decided.get(approval.approvalId);
-					return {
-						...approval,
-						decision:
-							decision === "allowed" || decision === "denied" || decision === "withdrawn"
-								? decision
-								: "pending",
-					};
+					if (withdrawn.has(approval.approvalId)) return { ...approval, decision: "withdrawn" };
+					const recorded = decided.get(approval.approvalId);
+					if (recorded?.status === "denied") {
+						return { ...approval, decision: "denied", error: recorded.error };
+					}
+					return { ...approval, decision: recorded?.status === "allowed" ? "allowed" : "pending" };
 				}),
 				answered: begun.checkpoint?.answered ?? false,
 				steered: (yield* unreadSteers(runsTurn.turn.value, begun.checkpoint)).length > 0,

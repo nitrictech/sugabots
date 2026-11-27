@@ -154,12 +154,15 @@ const checkApprovalPermission = (
 			(check) => operation.run(principal, decoded.success as never, check),
 			{ kind: "approvalCheck", forDecision: true },
 		);
+		if (!checked) return yield* forbidden;
 		if (
-			!checked ||
-			(checked.resolvedTargets &&
-				!isDeepStrictEqual(checked.resolvedTargets, call.approvalResolvedTargets))
-		)
+			checked.resolvedTargets &&
+			!isDeepStrictEqual(checked.resolvedTargets, call.approvalResolvedTargets)
+		) {
+			if (name === "chats.startBriefedChat") return "briefDestinationChanged" as const;
 			return yield* forbidden;
+		}
+		return undefined;
 	});
 
 /** Every operation's body, by name: exactly one for each registered contract. */

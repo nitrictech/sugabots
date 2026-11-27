@@ -21,17 +21,28 @@ export class ToolApprovalNotFound
 	}
 }
 
-/** Somebody decided the tool call first, and the first decision recorded stands. */
+/** The approval was already decided or its call changed before it could be allowed. */
 export class ToolApprovalConflict
-	extends Schema.TaggedError<ToolApprovalConflict>()("ToolApprovalConflict", {})
+	extends Schema.TaggedError<ToolApprovalConflict>()("ToolApprovalConflict", {
+		reason: Schema.optional(Schema.Literals(["briefDestinationChanged", "connectorChanged"])),
+	})
 	implements DomainError
 {
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "The tool call was already decided";
+		return this.reason
+			? `The tool approval was invalidated: ${this.reason}`
+			: "The tool call was already decided";
 	}
 	get userMessage() {
-		return userText`That tool approval has already been decided`;
+		switch (this.reason) {
+			case "briefDestinationChanged":
+				return userText`This approval was closed because the brief now names a different bot or project.`;
+			case "connectorChanged":
+				return userText`This approval was closed because the connector or its tool settings changed.`;
+			default:
+				return userText`That tool approval has already been decided`;
+		}
 	}
 }

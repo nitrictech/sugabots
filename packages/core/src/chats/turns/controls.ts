@@ -35,9 +35,21 @@ export const makeControls = Effect.gen(function* () {
 						)
 							return yield* new ToolApprovalNotFound();
 						if (!candidate.executionId) return yield* new ToolApprovalNotFound();
-						if (decision !== "deny")
-							yield* allow(canDecide, candidate.call, candidate.executionNumber);
 						const approvalId = shownApprovalId;
+						const reason =
+							decision === "deny"
+								? undefined
+								: yield* allow(canDecide, candidate.call, candidate.executionNumber);
+						if (reason) {
+							const conflict = new ToolApprovalConflict({ reason });
+							yield* toolCalls.withdrawPending(
+								candidate.call.turnId,
+								conflict.userMessage,
+								approvalId,
+							);
+							yield* signals.withdraw({ executionId: candidate.executionId, approvalId });
+							return conflict;
+						}
 						const decided = { decision, memberId: isMember.member };
 						// Recorded and sent in one transaction: the engine writes the signal
 						// through the same connection, so both commit or neither does, and
@@ -55,6 +67,9 @@ export const makeControls = Effect.gen(function* () {
 							decision: decided,
 						});
 					}),
+				).pipe(
+					// Commit the withdrawal before returning the conflict to the approver.
+					Effect.flatMap((conflict) => (conflict ? Effect.fail(conflict) : Effect.void)),
 				),
 			),
 

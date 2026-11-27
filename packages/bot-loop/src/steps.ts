@@ -331,7 +331,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 										parked.map((approval) => [approval.toolCallId, approval]),
 									);
 									const sends: Turns.StepCall[] = [];
-									const denied: string[] = [];
+									const denied: Array<{ toolCallId: string; output: Turns.ToolResultOutput }> = [];
 									const withdrawn: string[] = [];
 									const asks: Array<
 										{ toolCallId: string; reopenCallId?: string } & Turns.ApprovalAsked
@@ -339,8 +339,12 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 									for (const call of unanswered) {
 										const approval = parkedFor.get(call.toolCallId);
 										if (approval?.decision === "allowed") sends.push(call);
-										else if (approval?.decision === "denied") denied.push(call.toolCallId);
-										else if (approval?.decision === "withdrawn") withdrawn.push(call.toolCallId);
+										else if (approval?.decision === "denied") {
+											denied.push({
+												toolCallId: call.toolCallId,
+												output: approval.error ? errorOutput(approval.error) : deniedOutput,
+											});
+										} else if (approval?.decision === "withdrawn") withdrawn.push(call.toolCallId);
 										else if (approval?.decision === "pending") {
 											return { _tag: "Waiting", approvals: [approval.approvalId], taken: false };
 										} else if (wasRecorded(call.toolCallId)) {
@@ -382,7 +386,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 									);
 									yield* recordResults([
 										...completed,
-										...denied.map((toolCallId) => ({ toolCallId, output: deniedOutput })),
+										...denied,
 										...withdrawn.map((toolCallId) => ({ toolCallId, output: withdrawnOutput })),
 										...tooLarge.map(({ toolCallId }) => ({
 											toolCallId,

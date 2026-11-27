@@ -1,3 +1,4 @@
+import type { ToolApprovalConflict } from "@sugabots/contracts/errors/approvals";
 import type { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { approvalsContracts } from "@sugabots/contracts/operations/approvals";
 import { Effect } from "effect";
@@ -19,7 +20,7 @@ export const makeDecide = <R>(
 		member: string,
 		call: Turns.ApprovalCall,
 		executionNumber: number,
-	) => Effect.Effect<void, ActionForbidden, R>,
+	) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden, R>,
 ) =>
 	defineOperation(approvalsContracts["approvals.decide"], (principal, input) =>
 		named(principal, input.toolCallId, (principal, call) =>
@@ -35,7 +36,7 @@ export const makeDecide = <R>(
 					input.decision,
 					(approver, call, executionNumber) =>
 						approver.rule === "computerRequest"
-							? network.grantHostRequest(isMember, approver)
+							? network.grantHostRequest(isMember, approver).pipe(Effect.as(undefined))
 							: checkApprovalPermission(isMember.member, call, executionNumber),
 				);
 			}),

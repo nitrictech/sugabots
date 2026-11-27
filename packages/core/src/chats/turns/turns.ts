@@ -252,7 +252,9 @@ export interface ControlsInterface {
 	 * the call's turn is locked, it checks the pending approval. On Allow,
 	 * `allow` checks the approver's permission for the recorded call and makes
 	 * any change the approval itself grants before the decision is recorded
-	 * and signalled. An approval that is no longer current is not found.
+	 * and signalled. If `allow` returns an invalidation reason, the approval
+	 * is closed and the turn wakes before the conflict is returned. An
+	 * approval that is no longer current is not found.
 	 * An approval that already has a decision is a conflict.
 	 */
 	readonly decide: <P, X, R>(
@@ -264,7 +266,7 @@ export interface ControlsInterface {
 			canDecide: CanDecide<P, X>,
 			call: ApprovalCall,
 			executionNumber: number,
-		) => Effect.Effect<void, ActionForbidden | NoComputerProvider, R>,
+		) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden | NoComputerProvider, R>,
 	) => Effect.Effect<
 		void,
 		| ToolApprovalNotFound

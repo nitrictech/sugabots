@@ -163,10 +163,11 @@ export interface StepApproval {
 }
 
 /** A call of the last step that waited for approval, with how its approver decided it so far. */
-export interface DecidedStepApproval extends StepApproval {
-	/** `withdrawn` when its asker steered the turn before anyone decided it. */
-	readonly decision: "pending" | "allowed" | "denied" | "withdrawn";
-}
+export type DecidedStepApproval = StepApproval &
+	(
+		| { readonly decision: "pending" | "allowed" | "withdrawn" }
+		| { readonly decision: "denied"; readonly error: string | null }
+	);
 
 /**
  * A tool the step offers the model, as its model request sends it: its

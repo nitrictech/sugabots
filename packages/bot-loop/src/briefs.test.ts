@@ -26,7 +26,14 @@ import { operationsForTests } from "@sugabots/core/operations/testing";
 import { and, eq } from "drizzle-orm";
 import { Context, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { botLoopOnPostgres, calling, callsOf, resumeAt, scriptedSteps } from "./testing.ts";
+import {
+	botLoopOnPostgres,
+	calling,
+	callsOf,
+	parkedCallOf,
+	resumeAt,
+	scriptedSteps,
+} from "./testing.ts";
 
 /**
  * Briefs through the bot loop on Postgres: start_chat, which starts a chat
@@ -273,6 +280,46 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 		);
 
 		await expect(briefing).rejects.toMatchObject({ _tag: "ApprovalNeeded" });
+		expect(
+			await onDatabase((db) =>
+				db
+					.select()
+					.from(placedChat)
+					.where(and(eq(placedChat.workspaceId, workspaceId), eq(placedChat.title, input.title))),
+			),
+		).toEqual([]);
+	});
+
+	it("closes a brief approval and wakes its turn if the handle now names another bot", async () => {
+		const original = await seedBot(workspaceId, { createdById: adminId });
+		const replacement = await seedBot(workspaceId, { createdById: adminId });
+		await onDatabase((db) =>
+			db.update(bot).set({ model: "m", handle: "report-writer" }).where(eq(bot.id, original.id)),
+		);
+		const input = { title: "Draft the report", brief: "Summarize it.", with: "@report-writer" };
+		const { model, requests } = calling(START_CHAT_TOOL, input);
+		const workflow = await loop.runWorkflow(chatId, { model });
+		await workflow.suspended();
+		const { turnId, parked } = await parkedCallOf(workflow.executionId);
+		expect(parked.approvalStatus).toBe("pending");
+
+		await onDatabase((db) =>
+			db.update(bot).set({ handle: "report-writer-old" }).where(eq(bot.id, original.id)),
+		);
+		await onDatabase((db) =>
+			db.update(bot).set({ model: "m", handle: "report-writer" }).where(eq(bot.id, replacement.id)),
+		);
+
+		const error =
+			"This approval was closed because the brief now names a different bot or project.";
+		await expect(
+			chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+		).rejects.toMatchObject({ userMessage: error });
+		await workflow.completed();
+		expect(await callsOf(turnId)).toMatchObject([
+			{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
+		]);
+		expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
 		expect(
 			await onDatabase((db) =>
 				db

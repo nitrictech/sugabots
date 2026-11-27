@@ -161,7 +161,7 @@ export interface Interface {
 	readonly decisions: (
 		turnId: string,
 		approvalIds: readonly string[],
-	) => Effect.Effect<ReadonlyMap<string, ToolApprovalStatus>>;
+	) => Effect.Effect<ReadonlyMap<string, { status: ToolApprovalStatus; error: UserText | null }>>;
 	/**
 	 * Fails these turns' unfinished calls, denying pending approvals, for turns
 	 * that ended before their tools returned. `userMessage` is what members are
@@ -174,12 +174,14 @@ export interface Interface {
 	/**
 	 * Withdraws the approvals the turn `turnId` waits for that nobody has
 	 * decided, as its asker's steer does: each such call ends unmade, telling
-	 * members `userMessage`, and announces it. A call already allowed is left
+	 * members `userMessage`, and announces it. Passing an approval id
+	 * withdraws only that approval. A call already allowed is left
 	 * for the turn to make. Says which approvals it withdrew.
 	 */
 	readonly withdrawPending: (
 		turnId: string,
 		userMessage: UserText,
+		approvalId?: string,
 	) => Effect.Effect<readonly string[]>;
 	/** Forgets a reply's calls, for a retry that starts the reply again. */
 	readonly forgetReply: (messageId: string) => Effect.Effect<void>;
@@ -632,7 +634,7 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		withdrawPending: (turnId, userMessage) =>
+		withdrawPending: (turnId, userMessage, approvalId) =>
 			operation(
 				"withdrawPending",
 				transaction(
@@ -641,7 +643,13 @@ export const make = Effect.gen(function* () {
 							db
 								.select()
 								.from(toolCall)
-								.where(and(eq(toolCall.turnId, turnId), eq(toolCall.approvalStatus, "pending")))
+								.where(
+									and(
+										eq(toolCall.turnId, turnId),
+										eq(toolCall.approvalStatus, "pending"),
+										approvalId === undefined ? undefined : eq(toolCall.approvalId, approvalId),
+									),
+								)
 								.orderBy(toolCall.createdAt, toolCall.id)
 								.for("update"),
 						);
@@ -666,7 +674,11 @@ export const make = Effect.gen(function* () {
 						approvalIds.length === 0
 							? Effect.succeed([])
 							: db
-									.select({ approvalId: toolCall.approvalId, status: toolCall.approvalStatus })
+									.select({
+										approvalId: toolCall.approvalId,
+										status: toolCall.approvalStatus,
+										error: toolCall.error,
+									})
 									.from(toolCall)
 									.where(
 										and(
@@ -677,8 +689,8 @@ export const make = Effect.gen(function* () {
 					),
 					(rows) =>
 						new Map(
-							rows.flatMap(({ approvalId, status }) =>
-								approvalId && status ? [[approvalId, status] as const] : [],
+							rows.flatMap(({ approvalId, status, error }) =>
+								approvalId && status ? [[approvalId, { status, error }] as const] : [],
 							),
 						),
 				),

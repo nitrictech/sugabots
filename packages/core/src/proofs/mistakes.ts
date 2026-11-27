@@ -991,7 +991,7 @@ export const decisionMistakes = named(principal, otherPrincipal, "call", (princi
 		const otherMember = yield* proveIsMember(other);
 		const canDecide = yield* proveCanDecide(isMember, call);
 
-		const changesNothing = () => Effect.void;
+		const changesNothing = () => Effect.undefined;
 
 		// A call decided as another principal's member than the approver `CanDecide` found.
 		// @ts-expect-error TS2345 [Argument of type 'CanDecide<NameA, NameC>' is not assignable to parameter of type 'CanDecide<NameB, NameC>']
