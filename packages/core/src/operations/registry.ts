@@ -255,6 +255,8 @@ const checkApprovalPermission = (
 			!sameResolvedTargets(call.approvalResolvedTargets, checked.resolvedTargets)
 		) {
 			if (name === "chats.startBriefedChat") return "briefDestinationChanged" as const;
+			if (checked.resolvedTargets.routineTimeZone !== call.approvalResolvedTargets?.routineTimeZone)
+				return "automationRoutineTimeZoneChanged" as const;
 			if (name === "automations.updateInChat") return "automationRoutineChanged" as const;
 			return yield* forbidden;
 		}

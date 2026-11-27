@@ -250,6 +250,89 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 		expect(await automationsOf(defaultProject)).toEqual([]);
 	});
 
+	describe.each(["create", "edit"] as const)("routine %s", (change) => {
+		const requestRoutine = async () => {
+			if (change === "create") return requestTool("create_automation", standup);
+			const { automation: created } = await defineAutomation([routine]);
+			return requestTool("update_automation", {
+				automationId: created.id,
+				name: "Renamed",
+				routineExpression: "0 10 * * 1-5",
+			});
+		};
+
+		const newTimeZone = "Pacific/Auckland";
+		const changeTimeZone = async () =>
+			loop.call(await chatsAs(adminId).principal(), "workspaces.changeTimeZone", {
+				workspace: workspaceId,
+				timeZone: newTimeZone,
+			});
+
+		it("closes the approval when the workspace time zone changes before Allow", async () => {
+			const { model } = await requestRoutine();
+			const workflow = await loop.runWorkflow(chatId, { model });
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+			const admin = chatsAs(adminId);
+			const { waiting } = await admin.approvals(workspaceId);
+			await changeTimeZone();
+
+			await expect(
+				admin.decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({
+				_tag: "ToolApprovalConflict",
+				reason: "automationRoutineTimeZoneChanged",
+			});
+			expect(waiting).toMatchObject([
+				{ call: { id: parked.id, approval: { routineTimeZone: routine.timezone } } },
+			]);
+			await workflow.completed();
+			expect(await callsOf(turnId)).toMatchObject([
+				{ id: parked.id, status: "failed", decidedById: null },
+			]);
+			expect(await admin.approvals(workspaceId)).toMatchObject({
+				waiting: [],
+				answered: [
+					{
+						call: {
+							id: parked.id,
+							approval: { closedBecause: "automationRoutineTimeZoneChanged" },
+						},
+					},
+				],
+			});
+		});
+
+		it("asks again when the workspace time zone changes after Allow", async () => {
+			const { model } = await requestRoutine();
+			const ran = await loop.runTurn(chatId, { model });
+			const parked = await approve(ran);
+			await changeTimeZone();
+
+			const principal = await ran.authentication.authenticate(ran.turnId);
+			expect(
+				await ran.steps.step(ran.run.request, principal, {
+					turnId: ran.turnId,
+					attempt: 0,
+					step: 1,
+				}),
+			).toMatchObject({ _tag: "Waiting" });
+			expect((await chatsAs(adminId).approvals(workspaceId)).waiting).toMatchObject([
+				{
+					call: {
+						id: parked.id,
+						approval: { id: expect.any(String), routineTimeZone: newTimeZone },
+					},
+				},
+			]);
+			const [reparked] = await callsOf(ran.turnId);
+			expect(reparked?.approvalId).not.toBe(parked.approvalId);
+			expect((await automationsOf(defaultProject)).map(({ name }) => name)).toEqual(
+				change === "create" ? [] : [standup.name],
+			);
+		});
+	});
+
 	it("closes an edit approval when a manager removes the automation before Allow", async () => {
 		const { automation: created } = await defineAutomation([routine]);
 		const { model } = requestTool("update_automation", { automationId: created.id, paused: true });

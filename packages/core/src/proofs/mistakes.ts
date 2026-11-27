@@ -668,21 +668,14 @@ export const projectAutomationsServiceMistakes = named(
 
 			const member = yield* proveIsMember(principal);
 			const settings = { name: "Daily report", instructions: "Write a report.", triggers: [] };
-			const routine = {
-				kind: "routine",
-				schedule: { repeat: "cron", expression: "0 9 * * *" },
-				timezone: "UTC",
-			} as const;
-
 			// @ts-expect-error TS2739 [from type 'CanManageProject<NameA, unknown>'] Reaching the project does not authorize creating an automation.
 			yield* automationsService.create(reach, member, settings);
 
 			// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameB], "automations.createWithRoutine">'] Creating an automation with a routine requires approval for that call.
-			yield* automationsService.createWithRoutine(canManage, member, routine.timezone);
+			yield* automationsService.createWithRoutine(canManage, member);
 
-			const { timezone } = routine;
 			// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameB, NameC], "automations.updateInChat">'] Changing an automation from a chat requires approval for that call.
-			yield* automationsService.updateInChat(canManage, automation, target, member, timezone);
+			yield* automationsService.updateInChat(canManage, automation, target, member);
 
 			yield* automationsService.create(canManage, member, settings);
 

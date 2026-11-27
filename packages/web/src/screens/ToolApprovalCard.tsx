@@ -118,6 +118,7 @@ export function ToolApprovalCard({
 						gitHub={call.approval?.gitHub}
 						briefDestination={call.approval?.briefDestination}
 						routineChange={call.approval?.routineChange}
+						routineTimeZone={call.approval?.routineTimeZone}
 						connectorUrl={boundConnector?.url}
 						connectorChanged={boundConnector?.changed}
 						waiting={call.approval?.status === "pending"}
@@ -160,6 +161,7 @@ export function ToolApprovalCard({
 				gitHub={call.approval?.gitHub}
 				briefDestination={call.approval?.briefDestination}
 				routineChange={call.approval?.routineChange}
+				routineTimeZone={call.approval?.routineTimeZone}
 				connectorUrl={boundConnector?.url}
 				connectorChanged={boundConnector?.changed}
 				waiting={call.approval?.status === "pending"}
@@ -324,6 +326,7 @@ export function ApprovalDestination({
 	gitHub,
 	briefDestination,
 	routineChange,
+	routineTimeZone,
 	connectorUrl,
 	connectorChanged,
 	waiting,
@@ -333,6 +336,7 @@ export function ApprovalDestination({
 	gitHub?: ApprovalGitHub | undefined;
 	briefDestination?: BriefDestination;
 	routineChange?: RoutineChange;
+	routineTimeZone?: string | undefined;
 	connectorUrl?: string | null | undefined;
 	connectorChanged?: boolean | undefined;
 	/** Whether the request still waits for an answer, which the browser note is about. */
@@ -349,7 +353,8 @@ export function ApprovalDestination({
 	const address = browserUrl ?? connectorUrl;
 	const gitHubLines = gitHub && (gitHub.baseBranch || gitHub.reviewCommit);
 	const routineMessage = routineChangeMessage(routineChange);
-	if (!address && !gitHubLines && !briefDestination && !routineMessage) return null;
+	if (!address && !gitHubLines && !briefDestination && !routineMessage && !routineTimeZone)
+		return null;
 	return (
 		<div className="space-y-1 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
 			{briefDestination && (
@@ -359,6 +364,7 @@ export function ApprovalDestination({
 				</p>
 			)}
 			{routineMessage && <p className="m-0">{routineMessage}</p>}
+			{routineTimeZone && <p className="m-0">Runs in the {routineTimeZone} time zone.</p>}
 			{address && (
 				<p className="m-0">
 					{browserUrl ? "On the page" : "Sends to"} {address}
@@ -402,6 +408,7 @@ function ReviewSheet({
 	gitHub,
 	briefDestination,
 	routineChange,
+	routineTimeZone,
 	connectorUrl,
 	connectorChanged,
 	waiting,
@@ -416,6 +423,7 @@ function ReviewSheet({
 	gitHub: ApprovalGitHub | undefined;
 	briefDestination: BriefDestination;
 	routineChange: RoutineChange;
+	routineTimeZone: string | undefined;
 	connectorUrl: string | null | undefined;
 	connectorChanged: boolean | undefined;
 	waiting: boolean;
@@ -456,6 +464,7 @@ function ReviewSheet({
 							gitHub={gitHub}
 							briefDestination={briefDestination}
 							routineChange={routineChange}
+							routineTimeZone={routineTimeZone}
 							connectorUrl={connectorUrl}
 							connectorChanged={connectorChanged}
 							waiting={waiting}

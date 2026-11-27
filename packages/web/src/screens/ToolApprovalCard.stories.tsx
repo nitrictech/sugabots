@@ -559,11 +559,14 @@ const askingToChangeRoutine = (routineChange: "add" | "replace") =>
 			decidedAt: null,
 			decidedByName: null,
 			routineChange,
+			routineTimeZone: "Australia/Sydney",
 		},
 	});
 
 export const AddFirstRoutine = meta.story({
-	parameters: { docs: { description: { story: "The automation has no routine yet." } } },
+	parameters: {
+		docs: { description: { story: "The first routine shows the time zone it will run in." } },
+	},
 	args: {
 		call: askingToChangeRoutine("add"),
 		connector: undefined,
@@ -573,6 +576,7 @@ export const AddFirstRoutine = meta.story({
 		await waitFor(() =>
 			expect(canvas.getByText("Adds the automation's first routine.")).toBeVisible(),
 		);
+		await expect(canvas.getByText("Runs in the Australia/Sydney time zone.")).toBeVisible();
 	},
 });
 
@@ -589,6 +593,8 @@ export const ReplaceRoutineOnPhone = meta.story({
 		const message = "Replaces the automation's existing routine.";
 		await waitFor(() => expect(canvas.getByText(message)).toBeVisible());
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
-		await expect(await screen.findByRole("dialog")).toHaveTextContent(message);
+		const review = await screen.findByRole("dialog");
+		await expect(review).toHaveTextContent(message);
+		await expect(review).toHaveTextContent("Runs in the Australia/Sydney time zone.");
 	},
 });

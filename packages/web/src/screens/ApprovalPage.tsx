@@ -111,6 +111,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 					gitHub={call.approval?.gitHub}
 					briefDestination={call.approval?.briefDestination}
 					routineChange={call.approval?.routineChange}
+					routineTimeZone={call.approval?.routineTimeZone}
 					connectorUrl={connector?.url}
 					connectorChanged={connector?.changed}
 					waiting={call.approval?.status === "pending"}

@@ -24,6 +24,7 @@ export class ToolApprovalNotFound
 export const approvalSettingsChangeSchema = Schema.Literals([
 	"briefDestinationChanged",
 	"automationRoutineChanged",
+	"automationRoutineTimeZoneChanged",
 	"automationRemoved",
 	"connectorChanged",
 	"connectorOff",
@@ -54,6 +55,8 @@ export class ToolApprovalConflict
 				return userText`This approval was closed because the chat the bot wanted to start changed.`;
 			case "automationRoutineChanged":
 				return userText`This approval was closed because the automation's routine changed.`;
+			case "automationRoutineTimeZoneChanged":
+				return userText`This approval was closed because the workspace time zone changed. Ask the bot to try again.`;
 			case "automationRemoved":
 				return userText`This approval was closed because the automation was removed.`;
 			case "connectorChanged":

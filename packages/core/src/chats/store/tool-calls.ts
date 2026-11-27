@@ -43,6 +43,7 @@ export function toToolCallPart(
 ): ToolCallPart {
 	const {
 		automationRoutineId,
+		routineTimeZone,
 		browserUrl,
 		briefBotName,
 		briefProjectName,
@@ -79,6 +80,7 @@ export function toToolCallPart(
 						...(automationRoutineId !== undefined && {
 							routineChange: automationRoutineId === null ? "add" : "replace",
 						}),
+						...(routineTimeZone && { routineTimeZone }),
 						...(gitHubRepositoryId && {
 							gitHub: {
 								repositoryId: gitHubRepositoryId,

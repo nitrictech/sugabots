@@ -101,14 +101,15 @@ export interface Interface {
 		| AutomationRepositoryNotConnected
 	>;
 	/**
-	 * Makes the automation `approved.input` describes, with its routine on the
-	 * project's time zone, `timeZone`, which the server reads, not the caller.
+	 * Creates the automation and routine in the time zone bound to `approved`.
 	 */
 	readonly createWithRoutine: <P, J, X>(
 		canManage: CanManageProject<P, J>,
 		approved: Approved<P, X, [J], "automations.createWithRoutine">,
-		timeZone: string,
-	) => Effect.Effect<Automation, AutomationNameTaken | InvalidRoutineSchedule | FenceRefusal>;
+	) => Effect.Effect<
+		Automation,
+		ApprovalNeeded | AutomationNameTaken | InvalidRoutineSchedule | FenceRefusal
+	>;
 	/**
 	 * Changes an automation's own settings. Pausing it stops its routines;
 	 * enabling it again sets when each runs next from now.
@@ -124,15 +125,13 @@ export interface Interface {
 		target: ReachesProjectAutomation<P, J, A>,
 	) => Effect.Effect<string | null, TriggerSetInSettings>;
 	/**
-	 * Changes the automation as `approved.input` says, a new routine on the
-	 * project's time zone, `timeZone`, which the server reads, not the caller.
+	 * Updates the automation and applies a routine change in the time zone bound to `approved`.
 	 */
 	readonly updateInChat: <P, J, A, X>(
 		canManage: CanManageProject<P, J>,
 		automation: Named<A, string>,
 		target: ReachesProjectAutomation<P, J, A>,
 		approved: Approved<P, X, [J, A], "automations.updateInChat">,
-		timeZone: string,
 	) => Effect.Effect<
 		Automation,
 		| ApprovalNeeded
@@ -300,8 +299,10 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
-		createWithRoutine: (canManage, approved, timeZone) => {
+		createWithRoutine: (canManage, approved) => {
 			const { name, instructions, routineExpression } = approved.input;
+			const timeZone = approved.resolvedTargets?.routineTimeZone;
+			if (!timeZone) return Effect.fail(new ApprovalNeeded());
 			return operation(
 				"createWithRoutine",
 				writes.createWithRoutine(
@@ -323,7 +324,7 @@ export const make = Effect.gen(function* () {
 		findSoleRoutineId: (target) =>
 			operation("findSoleRoutineId", findSoleRoutineId(target.automation.value)),
 
-		updateInChat: (_canManage, automation, target, approved, timeZone) => {
+		updateInChat: (_canManage, automation, target, approved) => {
 			const { name, instructions, paused, routineExpression } = approved.input;
 			const input: AutomationUpdate = {
 				name,
@@ -339,7 +340,8 @@ export const make = Effect.gen(function* () {
 						return (yield* writes.update(scope, input, fence)).automation;
 					}
 					const approvedRoutineId = approved.resolvedTargets?.automationRoutineId;
-					if (approvedRoutineId === undefined) return yield* new ApprovalNeeded();
+					const timeZone = approved.resolvedTargets?.routineTimeZone;
+					if (approvedRoutineId === undefined || !timeZone) return yield* new ApprovalNeeded();
 					const routine = cronRoutine(routineExpression, timeZone);
 					return (yield* writes.updateWithSoleRoutine(
 						scope,

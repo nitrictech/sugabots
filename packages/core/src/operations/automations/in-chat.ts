@@ -58,18 +58,15 @@ export const createWithRoutine = defineOperation(
 						const canManage = yield* proveCanManageProject(
 							yield* proveReachesProject(principal, project),
 						);
-						const approved = yield* proveApproved(
+						const approved = yield* proveApprovedAsResolved(
 							principal,
 							call,
 							approvalRule("automations.createWithRoutine"),
 							approvedInput,
+							{ routineTimeZone: place.timeZone },
 							project,
 						);
-						const created = yield* automations.createWithRoutine(
-							canManage,
-							approved,
-							place.timeZone,
-						);
+						const created = yield* automations.createWithRoutine(canManage, approved);
 						return { automation: showAutomation(created) };
 					}),
 			);
@@ -106,7 +103,10 @@ export const updateInChat = defineOperation(
 										call,
 										rule,
 										approvedInput,
-										{ automationRoutineId: yield* automations.findSoleRoutineId(target) },
+										{
+											automationRoutineId: yield* automations.findSoleRoutineId(target),
+											routineTimeZone: place.timeZone,
+										},
 										project,
 										automation,
 									);
@@ -115,7 +115,6 @@ export const updateInChat = defineOperation(
 							automation,
 							target,
 							approved,
-							place.timeZone,
 						);
 						return { automation: showAutomation(updated) };
 					}),

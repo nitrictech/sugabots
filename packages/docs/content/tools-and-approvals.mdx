@@ -72,7 +72,8 @@ decide. For GitHub, a request also shows what the bot didn't name but the
 call will use, such as the repository's default branch for a new pull
 request, or the commit a review is for. A request to start a chat shows which
 bot receives the brief and which project the chat starts in, or whether it
-starts in the bot's own chats.
+starts in the bot's own chats. A request to create or change a routine shows
+the time zone it will run in.
 
 If something the request depends on changed after the bot asked, choosing
 **Allow** closes the request and gives the reason. Here's what
@@ -87,6 +88,7 @@ can change while a request waits.
 - The computer the bot would use changed.
 - The host is now blocked.
 - The automation's routine changed.
+- The workspace time zone changed while the bot was asking to create or change a routine.
 - A tool was switched off.
 - The automation was removed.
 

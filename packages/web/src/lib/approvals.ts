@@ -58,6 +58,8 @@ export function closedApprovalMessage(call: ToolCallPart, botName: string): stri
 			return `This approval was closed because the chat ${botName} wanted to start changed. Ask ${botName} to try again.`;
 		case "automationRoutineChanged":
 			return `This approval was closed because the automation's routine changed. Ask ${botName} to try again.`;
+		case "automationRoutineTimeZoneChanged":
+			return `This approval was closed because the workspace time zone changed. Ask ${botName} to try again.`;
 		case "connectorChanged":
 			return `This approval was closed because the connector or its tool settings changed. Ask ${botName} to try again.`;
 		case "connectorOff":

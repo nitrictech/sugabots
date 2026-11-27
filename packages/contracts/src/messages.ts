@@ -325,6 +325,7 @@ export const toolCallPartSchema = Schema.Struct({
 				}),
 			),
 			routineChange: Schema.optional(Schema.Literals(["add", "replace"])),
+			routineTimeZone: Schema.optional(Schema.String),
 			connector: Schema.optional(Schema.Struct({ id: uuidSchema, revision: Schema.Int })),
 		}),
 	),
