@@ -1,4 +1,7 @@
+import { SugabotsIcon } from "@sugabots/avatars";
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
+import { FileText, Globe, MessageSquare, Monitor, SquareTerminal, Wrench, Zap } from "lucide-react";
+import type { ComponentType } from "react";
 import type { MarkedConnector } from "@/lib/connectors.ts";
 import { capitalise, countOf, listNames } from "@/lib/name-list.ts";
 import {
@@ -132,6 +135,44 @@ export function describeStep(call: ToolCallPart, fileNames: ReadonlyMap<string, 
 	const subject = fileName(input.file) ?? SUBJECT_ARGUMENTS.map((key) => input[key]).find(isWords);
 	return { action, subject: name(subject) };
 }
+
+/** An icon by a call's line: a Lucide icon, or a mark drawn the same way. */
+export type StepIcon = ComponentType<{ strokeWidth?: number }>;
+
+/**
+ * The icon a call to one of the product's own tools shows by its line: its
+ * family's, for what its tools work on, such as files, the computer or chats,
+ * and the Sugabots icon for Sugabots itself: its docs, the workspace and the
+ * bot's own settings. A tool in no family has the wrench.
+ */
+export function stepIcon(call: ToolCallPart): StepIcon {
+	// The bot's browser runs on the project's computer, whose desktop shows it.
+	if (call.tool.startsWith(BROWSER_TOOL_PREFIX)) return Monitor;
+	if (call.tool.startsWith(FILE_TOOL_PREFIX)) return FileText;
+	return TOOL_FAMILIES.find((family) => family.tools.includes(call.tool))?.icon ?? Wrench;
+}
+
+/** The product's own tools by family, beyond those whose names give theirs (the browser tools and the file tools). */
+const TOOL_FAMILIES: readonly { icon: StepIcon; tools: readonly string[] }[] = [
+	// The computer's files, and the chat's, are files too.
+	{ icon: FileText, tools: ["read_file", "write_file", "share_file", "read_chat_file"] },
+	{ icon: Monitor, tools: ["copy_file_to_computer"] },
+	{ icon: SquareTerminal, tools: ["run_command"] },
+	{ icon: Globe, tools: ["web_search", "web_fetch", "request_host"] },
+	{ icon: MessageSquare, tools: ["start_chat", "mark_resolved", "search_history"] },
+	{ icon: Zap, tools: ["list_automations", "create_automation", "update_automation"] },
+	// Sugabots itself: its docs and guide, the workspace, and the bot's own settings.
+	{
+		icon: SugabotsIcon,
+		tools: [
+			"read_docs",
+			"workspace_guide",
+			"create_project",
+			"workspace_role",
+			"save_instructions",
+		],
+	},
+];
 
 /**
  * A call's input and output as its row shows them opened. Each is text when

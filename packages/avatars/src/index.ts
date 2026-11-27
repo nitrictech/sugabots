@@ -26,5 +26,6 @@ export { LivelyGroup, useGroupTurn } from "./lively-group.tsx";
 export { type MoodLoop, useMoodLoop } from "./mood-loop.ts";
 export { type BotMood, botMoods } from "./moods.ts";
 export { CREATION_MOODS, WATCHING_MOODS } from "./screen-moods.ts";
+export * from "./sugabots-icon.tsx";
 export * from "./sugabots-logo.ts";
 export * from "./sugabots-mark.tsx";
