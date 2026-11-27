@@ -167,6 +167,11 @@ export interface Interface {
 		projectId: string,
 		connectorId: string,
 	) => Effect.Effect<ConnectorTarget | undefined>;
+	readonly targetForTurn: (
+		workspaceId: string,
+		projectId: string,
+		connectorId: string,
+	) => Effect.Effect<ConnectorTarget | undefined>;
 	/**
 	 * The MCP servers and HTTP endpoints a turn may use. A connector still
 	 * waiting on its sign-in offers nothing, and neither does one whose every
@@ -250,6 +255,22 @@ export class Service extends Context.Service<Service, Interface>()(
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ConnectorStore");
 	const cipher = yield* Secrets.Service;
+
+	const findConnector = (workspaceId: string, projectId: string, connectorId: string) =>
+		query((db) =>
+			db
+				.select()
+				.from(connector)
+				.where(
+					and(
+						eq(connector.id, connectorId),
+						eq(connector.workspaceId, workspaceId),
+						eq(connector.projectId, projectId),
+					),
+				)
+				.limit(1),
+		).pipe(Effect.map(([row]) => row));
+	const hasEnabledTools = (row: ConnectorRow) => row.enabled && !everyToolOff(row);
 
 	const toTarget = (row: ConnectorRow): ConnectorTarget => {
 		const headers: Record<string, string> = {};
@@ -682,19 +703,21 @@ export const make = Effect.gen(function* () {
 		target: (workspaceId, projectId, connectorId) =>
 			operation(
 				"target",
-				query((db) =>
-					db
-						.select()
-						.from(connector)
-						.where(
-							and(
-								eq(connector.id, connectorId),
-								eq(connector.workspaceId, workspaceId),
-								eq(connector.projectId, projectId),
-							),
-						)
-						.limit(1),
-				).pipe(Effect.map(([row]) => row && toTarget(row))),
+				findConnector(workspaceId, projectId, connectorId).pipe(
+					Effect.map((row) => row && toTarget(row)),
+				),
+			),
+
+		targetForTurn: (workspaceId, projectId, connectorId) =>
+			operation(
+				"targetForTurn",
+				findConnector(workspaceId, projectId, connectorId).pipe(
+					Effect.map((row) =>
+						row && row.kind !== "github" && hasEnabledTools(row) && isSignedIn(row, cipher)
+							? toTarget(row)
+							: undefined,
+					),
+				),
 			),
 
 		targetsForProject: (workspaceId, projectId) =>
@@ -715,7 +738,7 @@ export const make = Effect.gen(function* () {
 						.orderBy(asc(connector.createdAt)),
 				).pipe(
 					Effect.map((rows) => {
-						const used = rows.filter((row) => row.enabled && !everyToolOff(row));
+						const used = rows.filter(hasEnabledTools);
 						return {
 							targets: used.filter((row) => isSignedIn(row, cipher)).map(toTarget),
 							signInExpired: used
@@ -998,7 +1021,15 @@ type TestOutcome = ToolListing | { error?: UserText };
 type ToolListing = { tools: ConnectorTool[]; definitions: ServerToolDefinitions };
 
 export function fingerprintToolDefinitions(definitions: ServerToolDefinitions): string {
-	const ordered = definitions.toSorted((first, second) => Order.String(first.name, second.name));
+	const ordered = definitions
+		.map(({ name, description, inputSchema, annotations }) => ({
+			name,
+			description,
+			inputSchema,
+			readOnlyHint: annotations?.readOnlyHint,
+			destructiveHint: annotations?.destructiveHint,
+		}))
+		.sort((first, second) => Order.String(first.name, second.name));
 	return createHash("sha256").update(stringify(ordered)).digest("hex");
 }
 

@@ -90,6 +90,7 @@ async function toolsFor(connector: ConnectorTarget) {
 	const offered = ConnectorCatalog.from({
 		connectors: {
 			recordListing: () => Effect.die("HTTP connectors have no MCP listing"),
+			targetForTurn: () => Effect.succeed(connector),
 			targetsForProject: () =>
 				Effect.succeed({ targets: [connector], signInExpired: [], installedUrls: [connector.url] }),
 		},

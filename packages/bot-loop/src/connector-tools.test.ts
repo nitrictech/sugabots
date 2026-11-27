@@ -227,7 +227,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(execute).not.toHaveBeenCalled();
 		});
 
-		const parkWikiCall = async () => {
+		const parkWikiCall = async ({ volatileMetadata = false } = {}) => {
 			await onDatabase((db) =>
 				db
 					.update(connector)
@@ -236,19 +236,47 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 			const described = { name: "wipe", description: null, readOnly: false, destructive: false };
 			let inputSchema: JSONSchema7 = { type: "object", additionalProperties: false };
-			const list = vi.fn(async () => ({
-				definitions: { tools: [{ name: described.name, inputSchema }] },
-				instructions: undefined,
-				tools: [{ described, inputSchema, tool: { inputSchema: jsonSchema(inputSchema) } }],
+			const readLookupTool = vi.fn((_listingNumber: number) => ({
+				inputSchema: jsonSchema({ type: "object" }),
 			}));
+			let lists = 0;
+			const list = vi.fn(async () => {
+				const listingNumber = ++lists;
+				return {
+					definitions: {
+						tools: [
+							{
+								name: described.name,
+								inputSchema,
+								...(volatileMetadata ? { _meta: { listingNumber } } : {}),
+							},
+							{ name: "lookup", inputSchema: { type: "object" } },
+						],
+					},
+					instructions: undefined,
+					tools: [
+						{ described, inputSchema, tool: { inputSchema: jsonSchema(inputSchema) } },
+						{
+							described: { ...described, name: "lookup", readOnly: true },
+							inputSchema: { type: "object" as const },
+							get tool() {
+								return readLookupTool(listingNumber);
+							},
+						},
+					],
+				};
+			});
 			const run = vi.fn(async () => ({ removed: true }));
-			const connectorTools = ConnectorCatalog.from({
-				connectors: await runOnPostgres(
-					ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
-				),
+			const store = await runOnPostgres(
+				ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+			);
+			const targetsForProject = vi.fn(store.targetsForProject);
+			const parts = {
+				connectors: { ...store, targetsForProject },
 				httpClients: { for: () => fetch },
 				connect: async () => ({ list, run, close: async () => {} }),
-			});
+			};
+			const connectorTools = ConnectorCatalog.from(parts);
 			const { model, requests } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
 			const ran = await loop.runTurn(chatId, { model, connectorTools });
 			const [parked] = await callsOf(ran.turnId);
@@ -261,8 +289,58 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				inputSchema = { ...inputSchema, properties: { reason: { type: "string" } } };
 				return inputSchema;
 			};
-			return { ran, parked, allow, list, run, requests, changeDefinition };
+			const resumeWithFreshCatalog = async () =>
+				resumeAt(
+					{
+						...ran,
+						...(await loop.loopOver({ model, connectorTools: ConnectorCatalog.from(parts) })),
+					},
+					1,
+				);
+			return {
+				ran,
+				parked,
+				allow,
+				list,
+				run,
+				requests,
+				changeDefinition,
+				resumeWithFreshCatalog,
+				targetsForProject,
+				readLookupTool,
+			};
 		};
+
+		it("runs an allowed connector call while the server changes its informational metadata", async () => {
+			const { ran, parked, allow, run } = await parkWikiCall({ volatileMetadata: true });
+
+			await allow();
+			expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+			expect(run).toHaveBeenCalledOnce();
+			expect(await callsOf(ran.turnId)).toMatchObject([
+				{ id: parked.id, approvalStatus: "allowed", status: "completed" },
+			]);
+		});
+
+		it("looks up only the approved connector when a member allows its call", async () => {
+			const { allow, targetsForProject } = await parkWikiCall();
+			targetsForProject.mockClear();
+
+			await allow();
+
+			expect(targetsForProject).not.toHaveBeenCalled();
+		});
+
+		it("builds only the approved tool from the fresh listing before sending the call", async () => {
+			const { ran, allow, list, run, readLookupTool } = await parkWikiCall();
+			await allow();
+
+			expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+			expect(run).toHaveBeenCalledOnce();
+			expect(list).toHaveBeenCalledTimes(3);
+			expect(readLookupTool).toHaveBeenCalledWith(1);
+			expect(readLookupTool).not.toHaveBeenCalledWith(3);
+		});
 
 		it("lets the member try the same Allow again after a connector listing outage", async () => {
 			const { ran, parked, allow, list, run } = await parkWikiCall();
@@ -287,18 +365,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(run).toHaveBeenCalledOnce();
 		});
 
-		it("fails an allowed call if the connector cannot list its tools before it runs", async () => {
-			const { ran, parked, allow, list, run, requests } = await parkWikiCall();
-			await allow();
-			list.mockRejectedValueOnce(new Error("The connector stopped answering"));
-			expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
-			expect(run).not.toHaveBeenCalled();
-			const error = "We couldn't reach the connector. Try the tool again shortly.";
-			expect(await callsOf(ran.turnId)).toMatchObject([
-				{ id: parked.id, approvalStatus: "allowed", status: "failed", error },
-			]);
-			expect(toolResultFor(requests[1], "sdk-1")).toEqual(failedCall(error));
-		});
+		it.each(["warm", "cold"] as const)(
+			"reports a listing outage before running an allowed call with a %s catalog",
+			async (cache) => {
+				const { ran, parked, allow, list, run, requests, resumeWithFreshCatalog } =
+					await parkWikiCall();
+				await allow();
+				list.mockRejectedValue(new Error("The connector stopped answering"));
+				const next = cache === "cold" ? await resumeWithFreshCatalog() : await resumeAt(ran, 1);
+				expect(next).toEqual({ _tag: "Finished" });
+				expect(run).not.toHaveBeenCalled();
+				const error = "We couldn't reach the connector. Try the tool again shortly.";
+				expect(await callsOf(ran.turnId)).toMatchObject([
+					{ id: parked.id, approvalStatus: "allowed", status: "failed", error },
+				]);
+				expect(toolResultFor(requests[1], "sdk-1")).toEqual(failedCall(error));
+			},
+		);
 
 		it.each(["before Allow", "after Allow"] as const)(
 			"does not send an approved connector call when its server changes the definition %s",
@@ -339,7 +422,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
 				expect(run).toHaveBeenCalledExactlyOnceWith(
 					expect.objectContaining({
-						definitions: { tools: [{ name: "wipe", inputSchema }] },
+						definitions: {
+							tools: [expect.objectContaining({ name: "wipe", inputSchema }), expect.anything()],
+						},
 					}),
 					"wipe",
 					{},

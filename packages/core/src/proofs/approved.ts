@@ -1,4 +1,5 @@
 import { connectorToolKey } from "@sugabots/contracts";
+import type { ConnectorToolsUnavailable } from "@sugabots/contracts/errors/connectors";
 import { ApprovalNeeded, ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import {
 	type Approval,
@@ -239,9 +240,11 @@ export const proveConnectorApproved = <P, X, I, T, K, C>(
 	{
 		computerUse,
 		resolvedTargets,
+		listingError,
 	}: {
 		computerUse?: CanUseChatComputer<NoInfer<P>, C>;
 		resolvedTargets?: ResolvedTargets | null | undefined;
+		listingError?: ConnectorToolsUnavailable | undefined;
 	} = {},
 ) =>
 	proveApproval(
@@ -253,8 +256,9 @@ export const proveConnectorApproved = <P, X, I, T, K, C>(
 		{
 			connectorUse,
 			computerUse,
-			resolveTarget:
-				resolvedTargets === undefined
+			resolveTarget: listingError
+				? Effect.fail(listingError)
+				: resolvedTargets === undefined
 					? undefined
 					: resolvedTargets === null
 						? Effect.fail(new ApprovalRefused())
@@ -281,6 +285,7 @@ const proveApproval = <
 	K,
 	N extends ApprovedOperation,
 	const Targets extends [unknown, ...unknown[]],
+	E = never,
 >(
 	principal: Named<P, Principal>,
 	callNamed: Named<X, Call>,
@@ -298,7 +303,7 @@ const proveApproval = <
 		computerUse?: ComputerUse<NoInfer<P>> | undefined;
 		computerProjectId?: string;
 		resolvedTargets?: ResolvedTargets;
-		resolveTarget?: Effect.Effect<ResolvedTargets, ApprovalRefused> | undefined;
+		resolveTarget?: Effect.Effect<ResolvedTargets, ApprovalRefused | E> | undefined;
 	} = {},
 ) =>
 	Effect.gen(function* () {
@@ -389,8 +394,6 @@ const proveApproval = <
 		if (call.kind !== "toolCall" || !isUuid(call.toolCall))
 			return need === "nothing" && !connectorUse ? approved(null) : yield* new ApprovalNeeded();
 		const decision = yield* readRecordedCall(acting.turn, call.toolCall);
-		const resolvedTargets =
-			decision?.status === "allowed" ? yield* resolveApprovalTargets : undefined;
 		const recorded = decideRecordedCall(decision, {
 			need,
 			name: connectorUse ? connectorToolKey(connectorUse.reach.handle, connectorUse.tool) : tool,
@@ -398,10 +401,12 @@ const proveApproval = <
 			argumentsToApprove,
 			connectorUse,
 			computerProjectId,
-			resolvedTargets,
 		});
 		if (recorded === "refused") return yield* new ApprovalRefused();
 		if (recorded === "needed") return yield* new ApprovalNeeded();
+		const resolvedTargets = recorded === null ? undefined : yield* resolveApprovalTargets;
+		if (recorded !== null && !sameResolvedTargets(decision?.resolvedTargets, resolvedTargets))
+			return yield* new ApprovalNeeded();
 		return approved(recorded, decision?.sdkToolCallId, resolvedTargets);
 	});
 
@@ -439,7 +444,6 @@ function decideRecordedCall<P, K>(
 		argumentsToApprove,
 		connectorUse,
 		computerProjectId,
-		resolvedTargets,
 	}: {
 		need: Exclude<Need, "refused">;
 		name: string;
@@ -447,7 +451,6 @@ function decideRecordedCall<P, K>(
 		argumentsToApprove: unknown;
 		connectorUse: CanUseConnector<P, K> | undefined;
 		computerProjectId: string | undefined;
-		resolvedTargets: ResolvedTargets | undefined;
 	},
 ) {
 	if (
@@ -486,7 +489,6 @@ function decideRecordedCall<P, K>(
 	if (
 		decision?.status !== "allowed" ||
 		!decision.decidedBy ||
-		!sameResolvedTargets(decision.resolvedTargets, resolvedTargets) ||
 		(connectorUse && connectorApprovalNeedsRefresh(connectorUse.access, decision.accessAtApproval))
 	) {
 		return "needed";

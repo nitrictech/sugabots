@@ -29,9 +29,11 @@ export function offerAugmentationTools(
 	target: ConnectorTarget,
 	listed: readonly { name: string }[],
 	side: UploadSide,
+	name?: string,
 ): Record<string, OfferedTool> {
 	return Object.fromEntries(
-		augmentationToolsFor(target, listed).map(({ augmentation, tool: described }) => {
+		augmentationToolsFor(target, listed).flatMap(({ augmentation, tool: described }) => {
+			if (name !== undefined && described.name !== name) return [];
 			const builders: Record<string, AugmentationToolBuilder> =
 				augmentationToolBuilders[augmentation];
 			const tool = builders[described.name]?.(target, side);
@@ -41,7 +43,7 @@ export function offerAugmentationTools(
 				offered[1].usesComputer = (input) =>
 					typeof input.path === "string" && input.file === undefined;
 			}
-			return offered;
+			return [offered];
 		}),
 	);
 }

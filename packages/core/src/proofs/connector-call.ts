@@ -1,3 +1,4 @@
+import type { ConnectorToolsUnavailable } from "@sugabots/contracts/errors/connectors";
 import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { Effect } from "effect";
@@ -23,6 +24,7 @@ export const proveConnectorCall = <P, T, K, X, I>(
 				resolveApprovalTargets?: OfferedTool["resolveApprovalTargets"];
 		  })
 		| undefined,
+	listingError?: ConnectorToolsUnavailable,
 ) =>
 	Effect.gen(function* () {
 		const acting: Named<P, Principal> = running.principal;
@@ -57,6 +59,7 @@ export const proveConnectorCall = <P, T, K, X, I>(
 							)
 						: yield* proveConnectorApproved(acting, calling, input, running.turn, use, {
 								resolvedTargets,
+								listingError,
 							});
 				return { use, approved };
 			}),

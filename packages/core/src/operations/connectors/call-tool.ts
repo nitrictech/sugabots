@@ -33,6 +33,7 @@ export const callTool = defineOperation(
 								calling,
 								approvedInput,
 								described,
+								described ? undefined : calls.listingError(principal, input.connectorId),
 							);
 							const checked = yield* proveCall;
 							if (!described) return yield* new ResourceHidden({ resource: "connector" });

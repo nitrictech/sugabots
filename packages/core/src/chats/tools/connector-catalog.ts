@@ -156,12 +156,13 @@ function jsonSchemaOf(name: string, tool: Tool): JSONSchema7 {
 	return inputSchema;
 }
 
+type ApprovalListing =
+	| ConnectorToolsUnavailable
+	| ((tool: string) => Effect.Effect<OfferedTool | undefined, ConnectorToolsUnavailable>);
+
 export interface ConnectorToolSet {
 	tools: Record<string, OfferedTool>;
-	refreshForApproval: ReadonlyMap<
-		string,
-		(tool: string) => Effect.Effect<OfferedTool | undefined, ConnectorToolsUnavailable>
-	>;
+	refreshForApproval: ReadonlyMap<string, ApprovalListing>;
 	/** Connectors left out because their server couldn't be listed. */
 	unavailable: string[];
 	/** Connectors left out until someone signs in again, each with the project that holds it. */
@@ -266,7 +267,10 @@ interface KeptListing {
 }
 
 export interface Parts {
-	connectors: Pick<ConnectorStore.Interface, "targetsForProject" | "recordListing">;
+	connectors: Pick<
+		ConnectorStore.Interface,
+		"targetForTurn" | "targetsForProject" | "recordListing"
+	>;
 	/** Bound egress clients, so a session goes only to the connector's own address. */
 	httpClients: EgressHttpClients;
 	/** Opens a session with a server; the real one speaks MCP. */
@@ -289,7 +293,10 @@ export function from({
 	github,
 }: Parts): Interface {
 	const kept = new Map<string, KeptListing>();
-	const failedAt = new Map<string, number>();
+	const failedListings = new Map<
+		string,
+		{ revision: number; at: number; error: ConnectorToolsUnavailable }
+	>();
 
 	const openSession = (
 		workspaceId: string,
@@ -407,8 +414,11 @@ export function from({
 					} = recordedTargets ?? {};
 					return sameResolvedTargets(recorded, current.value);
 				}
-				const { targets } = yield* connectors.targetsForProject(reach.workspace, reach.project);
-				const target = targets.find(({ connectorId }) => connectorId === reach.connector.value);
+				const target = yield* connectors.targetForTurn(
+					reach.workspace,
+					reach.project,
+					reach.connector.value,
+				);
 				if (!target || target.configurationRevision !== reach.revision) return false;
 				const providers = oauth ? yield* oauth.clients : undefined;
 				const listing = yield* Effect.acquireUseRelease(
@@ -486,11 +496,14 @@ export function from({
 					);
 				const loadListing = (target: OwnedTarget) =>
 					Effect.gen(function* () {
-						const failure = `${target.connectorId}:${target.configurationRevision}`;
-						const failed = failedAt.get(failure);
-						if (failed !== undefined && now - failed < Duration.toMillis(FAILURE_LIFETIME)) {
-							return "unavailable" as const;
+						const failed = failedListings.get(target.connectorId);
+						if (
+							failed?.revision === target.configurationRevision &&
+							now - failed.at < Duration.toMillis(FAILURE_LIFETIME)
+						) {
+							return needsSignIn(failed.error.cause) ? ("sign_in_expired" as const) : failed.error;
 						}
+						failedListings.delete(target.connectorId);
 						const known = kept.get(target.connectorId);
 						if (
 							known &&
@@ -503,13 +516,23 @@ export function from({
 							known?.revision === target.configurationRevision
 								? known.sessionRevision
 								: target.configurationRevision;
-						const listing = yield* Effect.tryPromise(() =>
-							useSession(target, sessionRevision, (session) => session.list()).catch((cause) => {
-								if (!sessions.closed) failedAt.set(failure, now);
-								throw cause;
-							}),
+						const listing = yield* Effect.tryPromise({
+							try: () => useSession(target, sessionRevision, (session) => session.list()),
+							catch: (cause) => new ConnectorToolsUnavailable({ during: "toolCall", cause }),
+						}).pipe(
+							Effect.tapError((error) =>
+								Effect.sync(() => {
+									if (!sessions.closed) {
+										failedListings.set(target.connectorId, {
+											revision: target.configurationRevision,
+											at: now,
+											error,
+										});
+									}
+								}),
+							),
 						);
-						failedAt.delete(failure);
+						failedListings.delete(target.connectorId);
 						const revision = yield* recordListing(workspaceId, target, listing);
 						if (revision === undefined) return undefined;
 						const recorded = {
@@ -525,8 +548,11 @@ export function from({
 					Effect.gen(function* () {
 						const listing = yield* loadListing(target);
 						if (listing !== undefined) return listing;
-						const { targets } = yield* connectors.targetsForProject(workspaceId, target.projectId);
-						const current = targets.find(({ connectorId }) => connectorId === target.connectorId);
+						const current = yield* connectors.targetForTurn(
+							workspaceId,
+							target.projectId,
+							target.connectorId,
+						);
 						if (!current) return "unavailable" as const;
 						const revisions = yield* discoverConnectorRevisions(
 							turn.principal,
@@ -555,20 +581,21 @@ export function from({
 								}
 								return Effect.as(
 									Effect.logError(`Connector ${target.handle} left out of the turn`, failure.cause),
-									"unavailable" as const,
+									failure,
 								);
 							}),
 						),
 					{ concurrency: "unbounded" },
 				);
 				const listed = listings.flatMap((recorded) => {
-					if (typeof recorded !== "object") return [];
+					if (typeof recorded === "string" || recorded instanceof ConnectorToolsUnavailable)
+						return [];
 					const { target, listing, revision, sessionRevision } = recorded;
 					const current = targetWithListing(target, revision, listing);
 					const use = <A>(work: (session: ServerSession) => Promise<A>) =>
 						useSession(target, sessionRevision, work);
-					const offer = (target: ConnectorTarget, listing: ServerListing) =>
-						buildConnectorTools(target, listing, uploadSide, use);
+					const offer = (target: ConnectorTarget, listing: ServerListing, name?: string) =>
+						buildConnectorTools(target, listing, uploadSide, use, name);
 					const refresh = (name: string) =>
 						Effect.gen(function* () {
 							const fresh = yield* Effect.tryPromise(() => use((session) => session.list())).pipe(
@@ -581,19 +608,31 @@ export function from({
 							);
 							const revision = yield* recordListing(workspaceId, current, fresh);
 							if (revision === undefined) return undefined;
-							const tools = offer(targetWithListing(current, revision, fresh), fresh);
+							const tools = offer(targetWithListing(current, revision, fresh), fresh, name);
 							return tools[connectorToolKey(current.handle, name)];
 						});
 					return [{ target, listing, tools: offer(current, listing), refresh }];
 				});
 				const leftOut = (outcome: ListingOutcome) =>
 					targets.filter((_, index) => listings[index] === outcome);
+				const listingErrors = listings.flatMap((listing, index) => {
+					const target = targets[index];
+					return listing instanceof ConnectorToolsUnavailable && target
+						? [[target.connectorId, listing] as const]
+						: [];
+				});
 				return {
 					tools: Object.assign({}, ...listed.map(({ tools }) => tools), ownTools.tools),
-					refreshForApproval: new Map(
-						listed.map(({ target, refresh }) => [target.connectorId, refresh]),
+					refreshForApproval: new Map<string, ApprovalListing>([
+						...listed.map(({ target, refresh }) => [target.connectorId, refresh] as const),
+						...listingErrors,
+					]),
+					unavailable: targets.flatMap(({ handle }, index) =>
+						listings[index] === "unavailable" ||
+						listings[index] instanceof ConnectorToolsUnavailable
+							? [handle]
+							: [],
 					),
-					unavailable: leftOut("unavailable").map((target) => target.handle),
 					signInExpired: [
 						...signInExpired,
 						...leftOut("sign_in_expired").map(({ handle, projectId }) => ({ handle, projectId })),
@@ -629,7 +668,11 @@ function builtInConnectorsAddableTo(installedUrls: readonly string[]): readonly 
 type OwnedTarget = ConnectorTarget & { projectId: string };
 
 /** What asking a connector's server for its tools came to. */
-type ListingOutcome = (KeptListing & { target: OwnedTarget }) | "unavailable" | "sign_in_expired";
+type ListingOutcome =
+	| (KeptListing & { target: OwnedTarget })
+	| ConnectorToolsUnavailable
+	| "unavailable"
+	| "sign_in_expired";
 
 function targetWithListing(target: ConnectorTarget, revision: number, listing: ServerListing) {
 	return {
@@ -644,15 +687,24 @@ function buildConnectorTools(
 	listing: ServerListing,
 	upload: UploadSide,
 	useSession: <A>(work: (session: ServerSession) => Promise<A>) => Promise<A>,
+	name?: string,
 ): Record<string, OfferedTool> {
+	const selected =
+		name === undefined
+			? undefined
+			: listing.tools.findLast(({ described }) => described.name === name);
+	const tools = name === undefined ? listing.tools : selected ? [selected] : [];
 	return {
-		...offerAugmentationTools(
-			target,
-			listing.tools.map(({ described }) => described),
-			upload,
-		),
+		...(selected
+			? {}
+			: offerAugmentationTools(
+					target,
+					listing.tools.map(({ described }) => described),
+					upload,
+					name,
+				)),
 		...Object.fromEntries(
-			listing.tools.map(({ described, inputSchema, tool }) =>
+			tools.map(({ described, inputSchema, tool }) =>
 				offeredTool(
 					target,
 					described,

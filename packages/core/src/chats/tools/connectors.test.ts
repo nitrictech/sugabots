@@ -142,10 +142,13 @@ const recordListing: ConnectorCatalog.Parts["connectors"]["recordListing"] = (
 	{ configurationRevision },
 ) => Effect.succeed(configurationRevision);
 
+const targetForTurn = () => Effect.die("This case does not look up a single connector");
+
 function toolsFor(...targets: ConnectorTarget[]) {
 	const offered = ConnectorCatalog.from({
 		connectors: {
 			recordListing,
+			targetForTurn,
 			targetsForProject: () =>
 				Effect.succeed({
 					targets,
@@ -257,6 +260,7 @@ describe("a turn's connector tools", () => {
 		const offered = ConnectorCatalog.from({
 			connectors: {
 				recordListing,
+				targetForTurn,
 				targetsForProject: () =>
 					Effect.succeed({
 						targets: [linear, target()],
@@ -300,6 +304,7 @@ describe("a turn's connector tools", () => {
 		const offered = ConnectorCatalog.from({
 			connectors: {
 				recordListing,
+				targetForTurn,
 				targetsForProject: () =>
 					Effect.succeed({
 						targets: [linear, target({ handle: "locked", headers: { "x-fixture-key": "nope" } })],
@@ -337,6 +342,7 @@ describe("a turn's connector tools", () => {
 		const offered = ConnectorCatalog.from({
 			connectors: {
 				recordListing,
+				targetForTurn,
 				targetsForProject: (_workspaceId, projectId) => {
 					const targets = projects[projectId] ?? [];
 					return Effect.succeed({
@@ -379,6 +385,7 @@ describe("a turn's connector tools", () => {
 		const offered = ConnectorCatalog.from({
 			connectors: {
 				recordListing,
+				targetForTurn,
 				targetsForProject: (_workspaceId, projectId) =>
 					Effect.succeed({
 						targets: [],
@@ -534,6 +541,7 @@ describe("a turn's connector tools", () => {
 			const offered = ConnectorCatalog.from({
 				connectors: {
 					recordListing,
+					targetForTurn,
 					targetsForProject: () =>
 						Effect.succeed({
 							targets: [signedIn],
@@ -573,6 +581,7 @@ describe("a turn's connector tools", () => {
 			const offered = ConnectorCatalog.from({
 				connectors: {
 					recordListing,
+					targetForTurn,
 					targetsForProject: () =>
 						Effect.succeed({
 							targets,

@@ -48,6 +48,10 @@ export interface Interface {
 				resolveApprovalTargets?: OfferedTool["resolveApprovalTargets"];
 		  }
 		| undefined;
+	readonly listingError: (
+		principal: BotPrincipal,
+		connectorId: string,
+	) => ConnectorToolsUnavailable | undefined;
 	readonly validateArguments: (
 		principal: BotPrincipal,
 		connectorId: string,
@@ -116,7 +120,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 				if (turn?.executionNumber !== principal.executionNumber)
 					return yield* new ResourceHidden({ resource: "connector" });
 				const refresh = turn.refreshForApproval.get(binding.connectorId);
-				if (!refresh) return false;
+				if (typeof refresh !== "function") return false;
 				const fresh = yield* refresh(binding.tool);
 				if (!fresh || turns.get(principal.turn) !== turn)
 					return yield* new ResourceHidden({ resource: "connector" });
@@ -185,6 +189,12 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					resolveApprovalTargets: tool.resolveApprovalTargets,
 				}
 			);
+		},
+		listingError: (principal, connectorId) => {
+			const turn = turns.get(principal.turn);
+			if (turn?.executionNumber !== principal.executionNumber) return undefined;
+			const listing = turn.refreshForApproval.get(connectorId);
+			return typeof listing === "function" ? undefined : listing;
 		},
 		validateArguments: (principal, connectorId, name, args) =>
 			Effect.promise(async () => {
