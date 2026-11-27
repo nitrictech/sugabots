@@ -5,11 +5,11 @@ import {
 } from "@sugabots/contracts";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { Minus } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useBots } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botSettingsLink, projectBotsLink, projectMembersLink, projectsLink } from "@/lib/links.ts";
-import { countOf } from "@/lib/name-list.ts";
+import { countOf, listNames } from "@/lib/name-list.ts";
 import { projectHeadcount } from "@/lib/project-headcount.ts";
 import {
 	useDeleteProject,
@@ -123,12 +123,22 @@ function ProjectSettingsSectionContent({
 
 function ProjectDetails({ project }: { project: Project }) {
 	const may = project.permissions;
-	// Three mutations, so a failed rename is said under the name, and a failed change to the
-	// lead bot or to the other details (description, visibility, colour) above the page.
+	// Separate mutations, so a failed rename is said under the name, a failed move to public in
+	// its confirmation, and a failed change to the lead bot or to the other details
+	// (description, making it private, colour) above the page.
 	const rename = useUpdateProject(project.id);
 	const updateDetails = useUpdateProject(project.id);
 	const relead = useUpdateProject(project.id);
+	const makePublic = useUpdateProject(project.id);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
+	const [confirmingPublic, setConfirmingPublic] = useState(false);
+	const isPublic = project.visibility === "public";
+	// The server refuses to make a project with private bots public, so the switch says so first.
+	const privateBotNames = (useProjectBots(project.id).data ?? [])
+		.filter((bot) => bot.visibility === "private")
+		.map((bot) => bot.name);
+	const publicBlocked = !isPublic && privateBotNames.length > 0;
+	const visibilitySubId = useId();
 	const remove = useDeleteProject();
 	const router = useRouter();
 	const { leaveForPage } = useLeave();
@@ -204,20 +214,27 @@ function ProjectDetails({ project }: { project: Project }) {
 					<SettingsRow
 						label="Public"
 						sub={
-							project.visibility === "public"
-								? "Listed for everyone in the workspace to join"
-								: "Only members added to it can see it"
+							<span id={visibilitySubId}>
+								{isPublic
+									? "Listed for everyone in the workspace to join"
+									: publicBlocked
+										? privateBotsHoldReason(privateBotNames)
+										: "Only members added to it can see it"}
+							</span>
 						}
 						trailing={
 							<Switch
-								checked={project.visibility === "public"}
-								disabled={updateDetails.isPending}
-								aria-label={project.visibility === "public" ? "Make private" : "Make public"}
-								onCheckedChange={(on) =>
-									void updateDetails
-										.mutateAsync({ visibility: on ? "public" : "private" })
-										.catch(() => {})
-								}
+								checked={isPublic}
+								disabled={updateDetails.isPending || publicBlocked}
+								aria-label={isPublic ? "Make private" : "Make public"}
+								aria-describedby={visibilitySubId}
+								onCheckedChange={(on) => {
+									if (on) {
+										setConfirmingPublic(true);
+										return;
+									}
+									void updateDetails.mutateAsync({ visibility: "private" }).catch(() => {});
+								}}
 							/>
 						}
 					/>
@@ -250,8 +267,34 @@ function ProjectDetails({ project }: { project: Project }) {
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={deleteProject}
 			/>
+			<DeleteDialog
+				open={confirmingPublic}
+				onOpenChange={(open) => {
+					setConfirmingPublic(open);
+					if (!open) makePublic.reset();
+				}}
+				title={`Make ${project.name} public?`}
+				description="Everyone in the workspace will be able to see it and join it, and read its chats and files."
+				confirmLabel="Make public"
+				pending={makePublic.isPending}
+				error={makePublic.error ? failureMessage(makePublic.error) : undefined}
+				onDelete={async () => {
+					try {
+						await makePublic.mutateAsync({ visibility: "public" });
+					} catch {
+						return;
+					}
+					setConfirmingPublic(false);
+				}}
+			/>
 		</SettingsPage>
 	);
+}
+
+/** Why a project with private bots can't be made public, and what to do first. */
+function privateBotsHoldReason(names: readonly string[]) {
+	const one = names.length === 1;
+	return `Only members added to it can see it. It can't be public while ${listNames(names)} ${one ? "is a private bot" : "are private bots"} in it: take ${one ? "it" : "them"} out first, choosing another lead bot if needed.`;
 }
 
 /**

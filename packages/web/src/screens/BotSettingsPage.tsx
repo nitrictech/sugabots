@@ -755,12 +755,12 @@ const VISIBILITY_SWITCHES = {
 	public: {
 		label: "Make public",
 		description:
-			"Everyone in the workspace will be able to see it and talk to it, and read its chats and files. It can then join any project.",
+			"Everyone in the workspace will be able to see it and talk to it, and read its chats and files. It can then join any project. Its invited members are removed, so if you make it private again, you'll invite them again.",
 	},
 	private: {
 		label: "Make private",
 		description:
-			"Only you, admins and the members you add will see it and its chats and files. It will leave every public project it's in. If it leads one, choose another lead bot there first.",
+			"Only its creator, admins and the members you add will see it and its chats and files. It will leave every public project it's in. If it leads one, choose another lead bot there first.",
 	},
 } as const;
 
@@ -773,7 +773,9 @@ const VISIBILITY_SWITCHES = {
 function VisibilityRow({ bot }: { bot: Bot }) {
 	const viewerId = useSession().member?.id;
 	const update = useUpdateBot(bot.id);
+	// The visibility asked about, kept while the confirmation closes so its words stay put.
 	const [switching, setSwitching] = useState<"public" | "private">();
+	const [asking, setAsking] = useState(false);
 	if (bot.visibility === "personal") {
 		const mine = bot.createdBy !== null && bot.createdBy.id === viewerId;
 		return (
@@ -801,7 +803,9 @@ function VisibilityRow({ bot }: { bot: Bot }) {
 							aria-label="Visibility"
 							value={current}
 							onValueChange={(chosen) => {
-								if (chosen !== current) setSwitching(chosen);
+								if (chosen === current) return;
+								setSwitching(chosen);
+								setAsking(true);
 							}}
 						>
 							<RadioGroupItem value="public">Public</RadioGroupItem>
@@ -813,10 +817,10 @@ function VisibilityRow({ bot }: { bot: Bot }) {
 				}
 			/>
 			<DeleteDialog
-				open={switching !== undefined}
+				open={asking}
 				onOpenChange={(open) => {
 					if (!open) {
-						setSwitching(undefined);
+						setAsking(false);
 						update.reset();
 					}
 				}}
@@ -832,7 +836,7 @@ function VisibilityRow({ bot }: { bot: Bot }) {
 					} catch {
 						return;
 					}
-					setSwitching(undefined);
+					setAsking(false);
 				}}
 			/>
 		</>
