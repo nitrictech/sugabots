@@ -1,8 +1,8 @@
 export * as Operations from "./registry.ts";
 
 import { TriggerSetInSettings } from "@sugabots/contracts/errors/automations";
-import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { WebToolOff } from "@sugabots/contracts/errors/web";
 import {
 	botLoopTools,
 	type FailureOf,
@@ -22,6 +22,7 @@ import { isBrowserTool } from "../chats/tools/browser/browser.ts";
 import type { Turns } from "../chats/turns/turns.ts";
 import type { Principal } from "../principal.ts";
 import { type ComputerApprovalTarget, computerApprovalTarget } from "../proofs/approved.ts";
+import { automationWasRemoved } from "../proofs/automation-in-turn.ts";
 import { ComputerUseOff, proveCanUseChatComputer } from "../proofs/can-use-computer.ts";
 import {
 	checkConnectorApprovalPermission,
@@ -29,6 +30,7 @@ import {
 } from "../proofs/can-use-connector.ts";
 import { briefRecipientChanged } from "../proofs/may-brief.ts";
 import { named } from "../proofs/proof.ts";
+import { ToolSwitchedOff } from "../proofs/tool-switches.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { makeDecide } from "./approvals/decide.ts";
 import { automationsOperations } from "./automations/index.ts";
@@ -138,15 +140,16 @@ const checkApprovalPermission = (
 			}
 			if (call.approvalResolvedTargets && "computer" in call.approvalResolvedTargets) {
 				const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
-				const target = yield* named(principal, principal.chat, (principal, chat) =>
-					proveCanUseChatComputer(principal, chat).pipe(
-						Effect.map(computerApprovalTarget),
-						Effect.mapError(() => forbidden),
+				const target = yield* Effect.result(
+					named(principal, principal.chat, (principal, chat) =>
+						proveCanUseChatComputer(principal, chat).pipe(Effect.map(computerApprovalTarget)),
 					),
 				);
-				if (target.provider === null) return "noComputerProvider" as const;
-				if (computerTargetChanged(call.approvalResolvedTargets, target))
-					return "computerTargetChanged" as const;
+				if (target._tag === "Success")
+					return checkComputerApprovalTarget(call.approvalResolvedTargets, target.success);
+				const conflict = computerApprovalFailure(target.failure);
+				if (conflict) return conflict;
+				return yield* forbidden;
 			}
 			return;
 		}
@@ -172,10 +175,20 @@ const checkApprovalPermission = (
 			}),
 		);
 		if (result._tag === "Failure") {
-			if (result.failure instanceof NoComputerProvider) return "noComputerProvider" as const;
-			if (result.failure instanceof ComputerUseOff) return "computerUseChanged" as const;
+			const computerConflict = computerApprovalFailure(result.failure);
+			if (computerConflict) return computerConflict;
+			if (result.failure instanceof ToolSwitchedOff || result.failure instanceof WebToolOff)
+				return "toolSwitchedOff" as const;
 			if (name === "automations.updateInChat" && result.failure instanceof TriggerSetInSettings)
 				return "automationRoutineChanged" as const;
+			if (
+				name === "automations.updateInChat" &&
+				result.failure instanceof ResourceHidden &&
+				result.failure.resource === "automation" &&
+				Schema.is(operationContracts["automations.updateInChat"].input)(decoded.success) &&
+				(yield* automationWasRemoved(principal, decoded.success.automationId))
+			)
+				return "automationRemoved" as const;
 			const approvedBot = call.approvalResolvedTargets?.bot;
 			if (
 				name === "chats.startBriefedChat" &&
@@ -188,11 +201,13 @@ const checkApprovalPermission = (
 			return yield* forbidden;
 		}
 		const checked = result.success;
-		if (
-			checked.computerTarget &&
-			computerTargetChanged(call.approvalResolvedTargets, checked.computerTarget)
-		)
-			return "computerTargetChanged" as const;
+		if (checked.computerTarget) {
+			const conflict = checkComputerApprovalTarget(
+				call.approvalResolvedTargets,
+				checked.computerTarget,
+			);
+			if (conflict) return conflict;
+		}
 		if (
 			checked.resolvedTargets &&
 			!sameResolvedTargets(call.approvalResolvedTargets, checked.resolvedTargets)
@@ -204,15 +219,22 @@ const checkApprovalPermission = (
 		return undefined;
 	});
 
-function computerTargetChanged(
+function computerApprovalFailure(error: DomainError) {
+	return error instanceof ComputerUseOff ? ("computerUseChanged" as const) : undefined;
+}
+
+function checkComputerApprovalTarget(
 	recorded: ResolvedTargets | null,
 	current: ComputerApprovalTarget,
-): boolean {
-	return (
+) {
+	if (current.provider === null) return "noComputerProvider" as const;
+	if (
 		recorded?.provider !== current.provider ||
 		recorded?.computer !== current.computer ||
 		recorded?.machine !== current.machine
-	);
+	)
+		return "computerTargetChanged" as const;
+	return undefined;
 }
 
 /** Every operation's body, by name: exactly one for each registered contract. */

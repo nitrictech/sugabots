@@ -36,6 +36,8 @@ export const toolIsOn = (db: Executor, botId: string, tool: BuiltInToolKey) =>
 		([row]) => row !== undefined && !row.disabledTools.includes(tool),
 	);
 
+export class ToolSwitchedOff extends ApprovalRefused {}
+
 /** The refusal of a call whose built-in tool `tool` is switched off. */
 export const toolSwitchedOff = (tool: BuiltInToolKey) =>
-	new ApprovalRefused(tool === AUTOMATIONS_TOOL_KEY ? { reason: "automationsOff" } : {});
+	new ToolSwitchedOff(tool === AUTOMATIONS_TOOL_KEY ? { reason: "automationsOff" } : {});

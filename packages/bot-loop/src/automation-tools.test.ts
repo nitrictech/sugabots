@@ -8,7 +8,13 @@ import {
 	ApprovalRefused,
 	ResourceHidden,
 } from "@sugabots/contracts/errors/proofs";
-import { seedBot, seedMember, seedProject } from "@sugabots/core/authentication/seed.test-support";
+import { AUTOMATIONS_TOOL_KEY } from "@sugabots/contracts/operations/automations";
+import {
+	seedBot,
+	seedMember,
+	seedProject,
+	setRole,
+} from "@sugabots/core/authentication/seed.test-support";
 import { AutomationRunner } from "@sugabots/core/chats/automations/automation-runner";
 import { startRunning } from "@sugabots/core/chats/automations/testing";
 import { startBotChat } from "@sugabots/core/chats/chats/testing";
@@ -221,6 +227,57 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			});
 		},
 	);
+
+	it("closes a create approval when a manager switches off the automations tool", async () => {
+		const { model } = requestTool("create_automation", standup);
+		const workflow = await loop.runWorkflow(chatId, { model });
+		await workflow.suspended();
+		const { turnId, parked } = await parkedCallOf(workflow.executionId);
+		const admin = chatsAs(adminId);
+		await loop.call(await admin.principal(), "bots.update", {
+			botId,
+			changes: { disabledTools: [AUTOMATIONS_TOOL_KEY] },
+		});
+
+		await expect(
+			admin.decide({ toolCallId: parked.id, decision: "allow_once" }),
+		).rejects.toMatchObject({ _tag: "ToolApprovalConflict", reason: "toolSwitchedOff" });
+		await workflow.completed();
+		expect(await callsOf(turnId)).toMatchObject([
+			{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null },
+		]);
+		expect((await admin.approvals(workspaceId)).waiting).toEqual([]);
+		expect(await automationsOf(defaultProject)).toEqual([]);
+	});
+
+	it("closes an edit approval when a manager removes the automation before Allow", async () => {
+		const { automation: created } = await defineAutomation([routine]);
+		const { model } = requestTool("update_automation", { automationId: created.id, paused: true });
+		const workflow = await loop.runWorkflow(chatId, { model });
+		await workflow.suspended();
+		const { turnId, parked } = await parkedCallOf(workflow.executionId);
+		const admin = chatsAs(adminId);
+		await loop.call(await admin.principal(), "automations.remove", {
+			projectId: defaultProject,
+			automationId: created.id,
+		});
+
+		await setRole(workspaceId, adminId, "viewer");
+		await expect(
+			admin.decide({ toolCallId: parked.id, decision: "allow_once" }),
+		).rejects.toMatchObject({ _tag: "ActionForbidden" });
+		expect(await callsOf(turnId)).toMatchObject([{ id: parked.id, approvalStatus: "pending" }]);
+
+		await setRole(workspaceId, adminId, "admin");
+		await expect(
+			admin.decide({ toolCallId: parked.id, decision: "allow_once" }),
+		).rejects.toMatchObject({ _tag: "ToolApprovalConflict", reason: "automationRemoved" });
+		await workflow.completed();
+		expect(await callsOf(turnId)).toMatchObject([
+			{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null },
+		]);
+		expect((await admin.approvals(workspaceId)).waiting).toEqual([]);
+	});
 
 	it.each([
 		{ name: "adds a first routine", triggers: [], expression: "0 10 * * 1-5" },

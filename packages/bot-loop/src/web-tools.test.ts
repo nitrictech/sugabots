@@ -137,9 +137,18 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's web tools, against Postgres
 		expect(reply).toMatchObject({ status: "complete", content: "Looking. Found it." });
 	});
 
-	it.each(["webhook", "github", "member bounds"] as const)(
-		"shows the full fetch URL and waits for its approver in %s",
-		async (source) => {
+	it.each([
+		{ source: "webhook", switchedOff: false, name: "allows a webhook run's fetch" },
+		{ source: "github", switchedOff: false, name: "allows a GitHub run's fetch" },
+		{ source: "member bounds", switchedOff: false, name: "allows a fetch in member bounds" },
+		{
+			source: "member bounds",
+			switchedOff: true,
+			name: "closes a fetch approval after switch-off",
+		},
+	] as const)(
+		"$name after showing the full URL to the approver",
+		async ({ source, switchedOff }) => {
 			await enableWebSearch(workspaceId, adminId);
 			const memberBounds = source === "member bounds";
 			const member = await seedMember(workspaceId, "editor");
@@ -200,6 +209,22 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's web tools, against Postgres
 					: new ActionForbidden({ proof: "CanDecide" })
 				).userMessage,
 			});
+
+			if (switchedOff) {
+				await loop.call(await chatsAs(member).principal(), "bots.update", {
+					botId: selected.id,
+					changes: { disabledTools: [WEB_FETCH_TOOL] },
+				});
+				await expect(
+					chatsAs(approver).decide({ toolCallId: parked.id, decision: "allow_once" }),
+				).rejects.toMatchObject({ _tag: "ToolApprovalConflict", reason: "toolSwitchedOff" });
+				await workflow.completed();
+				expect(await callsOf(turnId)).toMatchObject([
+					{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null },
+				]);
+				expect(webFetch).not.toHaveBeenCalled();
+				return;
+			}
 
 			await chatsAs(approver).decide({ toolCallId: parked.id, decision: "allow_once" });
 			await workflow.completed();

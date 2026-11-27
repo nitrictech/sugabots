@@ -5,11 +5,14 @@ import { ComputerHostBlocked, NoComputerProvider } from "@sugabots/contracts/err
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import {
 	seedAutomation,
+	seedConnector,
 	seedMember,
 	seedProject,
 	seedRun,
 } from "@sugabots/core/authentication/seed.test-support";
 import { seedChat } from "@sugabots/core/chats/seed.test-support";
+import { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
+import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import { aChatAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
@@ -22,6 +25,7 @@ import {
 	blockedHost,
 	bot,
 	computer,
+	connector,
 	membership,
 	projectAllowedHost,
 	toolCall,
@@ -33,6 +37,7 @@ import { proveCanDecide } from "@sugabots/core/proofs/can-decide";
 import { proveIsMember } from "@sugabots/core/proofs/is-member";
 import { named } from "@sugabots/core/proofs/proof";
 import { authenticators, principals } from "@sugabots/core/proofs/world.test-support";
+import { ConnectorStore } from "@sugabots/core/providers/connectors/connector-store";
 import { Egress } from "@sugabots/core/providers/network/egress";
 import { unimplemented } from "@sugabots/core/testing";
 import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
@@ -295,6 +300,60 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				],
 			});
 			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+		});
+
+		it("closes a connector upload approval when a manager switches off computer use", async () => {
+			await enableComputers();
+			const projectId = await runOnPostgres(defaultProjectOf(botId));
+			const connectorId = await seedConnector(workspaceId, projectId, {
+				toolAccess: { upload_file: "ask" },
+			});
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ handle: "linear", url: "https://mcp.linear.app/mcp" })
+					.where(eq(connector.id, connectorId)),
+			);
+			const upload = vi.fn<typeof fetch>();
+			const connectorTools = ConnectorCatalog.from({
+				connectors: await runOnPostgres(
+					ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+				),
+				httpClients: { for: () => upload },
+				connect: async () => ({
+					list: async () => ({ definitions: { tools: [] }, tools: [], instructions: undefined }),
+					run: vi.fn(),
+					close: async () => {},
+				}),
+			});
+			const { model } = calling(CALL_TOOL, {
+				tool: "linear__upload_file",
+				arguments: {
+					path: "report.txt",
+					uploadUrl: "https://storage.googleapis.com/uploads.linear.app/example",
+					headers: {},
+				},
+			});
+			const workflow = await loop.runWorkflow(chatId, { model, connectorTools });
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+			expect(parked).toMatchObject({
+				connectorId,
+				approvalResolvedTargets: { computer: null },
+			});
+
+			const manager = await signedIn.member(adminId);
+			await loop.call(manager, "bots.update", { botId, changes: { usesComputer: false } });
+			const admin = chatsAs(adminId);
+			await expect(
+				admin.decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({ _tag: "ToolApprovalConflict", reason: "computerUseChanged" });
+			await workflow.completed();
+			expect(await callsOf(turnId)).toMatchObject([
+				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null },
+			]);
+			expect((await admin.approvals(workspaceId)).waiting).toEqual([]);
+			expect(upload).not.toHaveBeenCalled();
 		});
 
 		it.each(["computer", "machine"] as const)(
