@@ -164,6 +164,7 @@ export const migrationScale = {
 } as const;
 
 export const personalPodMute = "2099-01-01T10:00:00.000Z";
+export const sharedPodMute = "2099-02-01T10:00:00.000Z";
 export const startedThreadCall = "00000003-0000-4000-8000-000000000124";
 export const fileToolCalls = {
 	write: "00000003-0000-4000-8000-000000000121",
@@ -663,13 +664,15 @@ INSERT INTO "message" ("thread_id", "author_user_id", "reply_to_message_id", "ki
 VALUES ('${legacy.directMessages.samAndPat}', '${legacy.members.pat}', '00000001-0000-4000-8000-0000000000d1', 'text', 'complete', '[]', 'Got the tickets.');
 `;
 
-export const legacyPersonalPodNotifications = `
+export const legacyNotificationOverrides = `
 INSERT INTO "notification_override" ("user_id", "pod_id", "level", "muted_until") VALUES
  ('${legacy.members.pat}', '0000000d-0000-4000-8000-000000000003', 'nothing', '${personalPodMute}'),
- ('${legacy.members.lee}', '0000000d-0000-4000-8000-000000000005', 'nothing', '2099-01-01T08:00:00.000Z');
+ ('${legacy.members.lee}', '0000000d-0000-4000-8000-000000000005', 'nothing', '2099-01-01T08:00:00.000Z'),
+ ('${legacy.members.pat}', '${legacy.pods.family}', 'nothing', '${sharedPodMute}');
 INSERT INTO "notification_override" ("user_id", "agent_id", "level", "muted_until") VALUES
  ('${legacy.members.pat}', '${legacy.bots.helper}', 'all', '2099-01-01T09:00:00.000Z'),
- ('${legacy.members.lee}', '${legacy.bots.sketch}', NULL, '${personalPodMute}');
+ ('${legacy.members.lee}', '${legacy.bots.sketch}', NULL, '${personalPodMute}'),
+ ('${legacy.members.pat}', '${legacy.bots.planner}', 'all', '2099-02-01T09:00:00.000Z');
 `;
 
 export const legacyRecordedToolCalls = `

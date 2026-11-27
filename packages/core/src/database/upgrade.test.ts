@@ -49,6 +49,7 @@ import { inMemoryComputers } from "../computers/testing.ts";
 import { ChatFileStore } from "../files/chat-file-store.ts";
 import { Files } from "../files/files.ts";
 import { Ids } from "../ids/ids.ts";
+import { forMessage } from "../notifications/recipients.ts";
 import { blockHost } from "../operations/computers/block-host.ts";
 import { runCommand } from "../operations/computers/use-computer.ts";
 import { viewDesktop } from "../operations/computers/view-desktop.ts";
@@ -95,7 +96,7 @@ import {
 	legacyFiles,
 	legacyKeyOf,
 	legacyMigrationScaleRows,
-	legacyPersonalPodNotifications,
+	legacyNotificationOverrides,
 	legacyRecordedToolCalls,
 	legacyRows,
 	legacySessions,
@@ -103,6 +104,7 @@ import {
 	legacySummaryRequest,
 	migrationScale,
 	personalPodMute,
+	sharedPodMute,
 	startedThreadCall,
 } from "./upgrade.test-support.ts";
 
@@ -191,7 +193,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					],
 				);
 				await client.query(legacyMigrationScaleRows);
-				await client.query(legacyPersonalPodNotifications);
+				await client.query(legacyNotificationOverrides);
 				await client.query(legacyRecordedToolCalls);
 				await client.query(
 					`with added as (
@@ -1131,6 +1133,54 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				bots: { [sketch]: "nothing" },
 				mutedUntil: { bots: { [sketch]: personalPodMute } },
 			});
+		});
+
+		it("keeps shared pod notification mutes in a bot's chat and automation feed", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const pat = await upgraded.signIn(legacy.members.pat);
+			const { planner, budget } = legacy.bots;
+			const { family } = legacy.pods;
+			expect.soft(await call(pat, "notifications.settings", {})).toMatchObject({
+				projects: { [family]: "nothing" },
+				bots: { [planner]: "all", [budget]: "nothing" },
+				mutedUntil: {
+					projects: { [family]: sharedPodMute },
+					bots: { [planner]: sharedPodMute, [budget]: sharedPodMute },
+				},
+			});
+
+			for (const [chatId, resultOf] of [
+				[legacy.threads.askPlanner, null],
+				[migrationScale.feed, { chatId: migrationScale.resultRunChat }],
+			] as const) {
+				const recipientsAt = (now: string) =>
+					upgraded
+						.run(
+							query((db) =>
+								forMessage(
+									db,
+									{
+										chatId,
+										messageId: migrationScale.feedResult,
+										author: { kind: "bot", botId: planner },
+										authorName: "Planner",
+										content: "@pat-rivera @sam-rivera The digest is ready.",
+										fileNames: [],
+										fileTitles: [],
+										repliesTo: null,
+										resultOf,
+									},
+									new Date(now),
+								),
+							),
+						)
+						.then((recipients) => recipients.map(({ memberId }) => memberId).sort());
+				expect.soft(await recipientsAt("2099-02-01T09:30:00Z")).toEqual([legacy.members.sam]);
+				expect(await recipientsAt("2099-02-01T10:30:00Z")).toEqual([
+					legacy.members.sam,
+					legacy.members.pat,
+				]);
+			}
 		});
 
 		const readRecordedToolCalls = async () => {

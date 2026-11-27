@@ -541,14 +541,19 @@ FROM "orphan_file_bot" source JOIN "orphan_file_chat" destination ON destination
 WHERE a."created_in_thread_id" IS NULL AND a."pod_id" = source."pod_id"
 	AND a."created_by_agent_id" IS NOT DISTINCT FROM source."created_by_agent_id";--> statement-breakpoint
 DELETE FROM "artifact" WHERE "created_in_thread_id" IS NULL;--> statement-breakpoint
--- A personal pod's level applied where its bot had no level of its own.
+-- A pod's level applied where its bot had no level of its own. Carry it to
+-- the bot's own chats and automation feeds, which leave the pod's project.
 -- Either mute kept the bot quiet until it expired.
 INSERT INTO "notification_override" AS bot_override ("user_id", "agent_id", "level", "muted_until", "updated_at")
 SELECT pod_override."user_id", "agent"."id", pod_override."level", pod_override."muted_until", pod_override."updated_at"
 FROM "pod"
-JOIN "notification_override" pod_override ON pod_override."pod_id" = "pod"."id" AND pod_override."user_id" = "pod"."owner_id"
+JOIN "notification_override" pod_override ON pod_override."pod_id" = "pod"."id"
 JOIN "agent" ON "agent"."pod_id" = "pod"."id"
-WHERE "pod"."kind" = 'personal'
+WHERE ("pod"."kind" = 'personal' AND "pod"."owner_id" = pod_override."user_id")
+	OR ("pod"."kind" = 'shared' AND EXISTS (
+		SELECT 1 FROM "pod_member"
+		WHERE "pod_member"."pod_id" = "pod"."id" AND "pod_member"."user_id" = pod_override."user_id"
+	))
 ON CONFLICT ("user_id", "agent_id") WHERE "agent_id" IS NOT NULL
 DO UPDATE SET "level" = coalesce(bot_override."level", excluded."level"),
 	"muted_until" = greatest(bot_override."muted_until", excluded."muted_until"),
