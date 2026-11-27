@@ -25,6 +25,7 @@ import {
 	ConnectorNeededNoSignIn,
 	ConnectorNotFound,
 	ConnectorOAuthStartFailed,
+	ConnectorToolsUnavailable,
 	GitHubAppNotInstalled,
 	GitHubDeliveryIdInvalid,
 	GitHubRequestFailed,
@@ -113,7 +114,14 @@ export const connectorsContracts = {
 			arguments: Schema.Record(Schema.String, Schema.Unknown),
 		}),
 		output: Schema.Unknown,
-		errors: [...refusals, ApprovalNeeded, ApprovalRefused, TurnEnded, TurnExecutionSuperseded],
+		errors: [
+			...refusals,
+			ApprovalNeeded,
+			ApprovalRefused,
+			ConnectorToolsUnavailable,
+			TurnEnded,
+			TurnExecutionSuperseded,
+		],
 		changes: true,
 		http: { kind: "heldBack", reason: "Connector tool calls belong to a turn." },
 		botLoop: {

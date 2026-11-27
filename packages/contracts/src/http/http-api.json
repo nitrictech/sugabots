@@ -15,6 +15,7 @@
 			},
 			"errors": {
 				"ActionForbidden": 403,
+				"ConnectorToolsUnavailable": 503,
 				"ResourceHidden": 404,
 				"ToolApprovalConflict": 409,
 				"ToolApprovalNotFound": 404

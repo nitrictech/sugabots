@@ -227,42 +227,86 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(execute).not.toHaveBeenCalled();
 		});
 
+		const parkWikiCall = async () => {
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ handle: "wiki", toolAccess: { wipe: "ask" } })
+					.where(eq(connector.id, connectorId)),
+			);
+			const described = { name: "wipe", description: null, readOnly: false, destructive: false };
+			let inputSchema: JSONSchema7 = { type: "object", additionalProperties: false };
+			const list = vi.fn(async () => ({
+				definitions: { tools: [{ name: described.name, inputSchema }] },
+				instructions: undefined,
+				tools: [{ described, inputSchema, tool: { inputSchema: jsonSchema(inputSchema) } }],
+			}));
+			const run = vi.fn(async () => ({ removed: true }));
+			const connectorTools = ConnectorCatalog.from({
+				connectors: await runOnPostgres(
+					ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+				),
+				httpClients: { for: () => fetch },
+				connect: async () => ({ list, run, close: async () => {} }),
+			});
+			const { model, requests } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
+			const ran = await loop.runTurn(chatId, { model, connectorTools });
+			const [parked] = await callsOf(ran.turnId);
+			const parkedApprovalId = parked?.approvalId;
+			if (!parkedApprovalId) throw new Error("No connector call parked");
+			const admin = asMember(await loop.callWithConnectorCatalog(connectorTools), adminId);
+			const allow = (approvalId = parkedApprovalId) =>
+				admin.decide({ toolCallId: parked.id, approvalId, decision: "allow_once" });
+			const changeDefinition = () => {
+				inputSchema = { ...inputSchema, properties: { reason: { type: "string" } } };
+				return inputSchema;
+			};
+			return { ran, parked, allow, list, run, requests, changeDefinition };
+		};
+
+		it("lets the member try the same Allow again after a connector listing outage", async () => {
+			const { ran, parked, allow, list, run } = await parkWikiCall();
+			list.mockRejectedValueOnce(new Error("The connector stopped answering"));
+			await expect(allow()).rejects.toMatchObject({
+				isRetryable: true,
+				userMessage: "We couldn't reach the connector. Try Allow again shortly.",
+			});
+			expect(await callsOf(ran.turnId)).toMatchObject([
+				{
+					id: parked.id,
+					approvalId: parked.approvalId,
+					status: "awaiting_approval",
+					approvalStatus: "pending",
+					decidedById: null,
+				},
+			]);
+			expect(run).not.toHaveBeenCalled();
+
+			await allow();
+			expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+			expect(run).toHaveBeenCalledOnce();
+		});
+
+		it("fails an allowed call if the connector cannot list its tools before it runs", async () => {
+			const { ran, parked, allow, list, run, requests } = await parkWikiCall();
+			await allow();
+			list.mockRejectedValueOnce(new Error("The connector stopped answering"));
+			expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+			expect(run).not.toHaveBeenCalled();
+			const error = "We couldn't reach the connector. Try the tool again shortly.";
+			expect(await callsOf(ran.turnId)).toMatchObject([
+				{ id: parked.id, approvalStatus: "allowed", status: "failed", error },
+			]);
+			expect(toolResultFor(requests[1], "sdk-1")).toEqual(failedCall(error));
+		});
+
 		it.each(["before Allow", "after Allow"] as const)(
 			"does not send an approved connector call when its server changes the definition %s",
 			async (when) => {
-				const described = { name: "wipe", description: null, readOnly: false, destructive: false };
-				await onDatabase((db) =>
-					db
-						.update(connector)
-						.set({ handle: "wiki", toolAccess: { wipe: "ask" } })
-						.where(eq(connector.id, connectorId)),
-				);
-				let inputSchema: JSONSchema7 = { type: "object", additionalProperties: false };
-				const list = vi.fn(async () => ({
-					definitions: { tools: [{ name: described.name, inputSchema }] },
-					instructions: undefined,
-					tools: [{ described, inputSchema, tool: { inputSchema: jsonSchema(inputSchema) } }],
-				}));
-				const run = vi.fn(async () => ({ removed: true }));
-				const connectorTools = ConnectorCatalog.from({
-					connectors: await runOnPostgres(
-						ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
-					),
-					httpClients: { for: () => fetch },
-					connect: async () => ({ list, run, close: async () => {} }),
-				});
-				const { model } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
-				const ran = await loop.runTurn(chatId, { model, connectorTools });
-				const [parked] = await callsOf(ran.turnId);
-				if (!parked) throw new Error("No connector call parked");
+				const { ran, parked, allow, list, run, changeDefinition } = await parkWikiCall();
 				expect(parked).toMatchObject({ connectorId, approvalStatus: "pending", input: {} });
 				expect(list).toHaveBeenCalledOnce();
 
-				const admin = asMember(await loop.callWithConnectorCatalog(connectorTools), adminId);
-				const allow = () => admin.decide({ toolCallId: parked.id, decision: "allow_once" });
-				const changeDefinition = () => {
-					inputSchema = { ...inputSchema, properties: { reason: { type: "string" } } };
-				};
 				if (when === "before Allow") {
 					changeDefinition();
 					await expect(allow()).rejects.toMatchObject({
@@ -278,7 +322,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				}
 
 				await allow();
-				changeDefinition();
+				const inputSchema = changeDefinition();
 				expect(await resumeAt(ran, 1)).toMatchObject({ _tag: "Waiting" });
 				expect(list).toHaveBeenCalledTimes(3);
 				expect(run).not.toHaveBeenCalled();
@@ -288,15 +332,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					approvalStatus: "pending",
 					connectorRevision: 3,
 				});
-				expect(renewed?.approvalId).not.toBe(parked.approvalId);
+				if (!renewed?.approvalId) throw new Error("No renewed connector approval");
+				expect(renewed.approvalId).not.toBe(parked.approvalId);
 
-				await allow();
+				await allow(renewed.approvalId);
 				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
 				expect(run).toHaveBeenCalledExactlyOnceWith(
 					expect.objectContaining({
-						definitions: { tools: [{ name: described.name, inputSchema }] },
+						definitions: { tools: [{ name: "wipe", inputSchema }] },
 					}),
-					described.name,
+					"wipe",
 					{},
 					expect.anything(),
 				);

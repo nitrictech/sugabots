@@ -9,6 +9,7 @@ import {
 	connectorToolKey,
 	connectorToolWritesOrDeletes,
 } from "@sugabots/contracts";
+import { ConnectorToolsUnavailable } from "@sugabots/contracts/errors/connectors";
 import type { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import { asSchema, type JSONSchema7, type Tool } from "ai";
 import { Clock, Context, Duration, Effect, Layer } from "effect";
@@ -157,7 +158,10 @@ function jsonSchemaOf(name: string, tool: Tool): JSONSchema7 {
 
 export interface ConnectorToolSet {
 	tools: Record<string, OfferedTool>;
-	refreshForApproval: ReadonlyMap<string, (tool: string) => Effect.Effect<OfferedTool | undefined>>;
+	refreshForApproval: ReadonlyMap<
+		string,
+		(tool: string) => Effect.Effect<OfferedTool | undefined, ConnectorToolsUnavailable>
+	>;
 	/** Connectors left out because their server couldn't be listed. */
 	unavailable: string[];
 	/** Connectors left out until someone signs in again, each with the project that holds it. */
@@ -188,7 +192,7 @@ export interface Interface {
 		tool: string,
 		input: Readonly<Record<string, unknown>>,
 		recordedTargets: ResolvedTargets | null,
-	): Effect.Effect<boolean>;
+	): Effect.Effect<boolean, ConnectorToolsUnavailable>;
 	forTurn(
 		workspaceId: string,
 		projects: TurnProjects,
@@ -407,29 +411,24 @@ export function from({
 				const target = targets.find(({ connectorId }) => connectorId === reach.connector.value);
 				if (!target || target.configurationRevision !== reach.revision) return false;
 				const providers = oauth ? yield* oauth.clients : undefined;
-				const listed = yield* Effect.result(
-					Effect.acquireUseRelease(
-						Effect.tryPromise(() => openSession(reach.workspace, target, providers)),
-						(session) => Effect.tryPromise(() => session.list()),
-						(session) =>
-							Effect.tryPromise((signal) => session.close(signal)).pipe(
-								Effect.timeout(Duration.millis(SERVER_CLOSE_TIMEOUT_MS)),
-								Effect.catch((cause) =>
-									Effect.logWarning("The connector's approval session failed to close", cause),
-								),
-								Effect.forkDetach({ uninterruptible: false }),
-								Effect.asVoid,
+				const listing = yield* Effect.acquireUseRelease(
+					Effect.tryPromise(() => openSession(reach.workspace, target, providers)),
+					(session) => Effect.tryPromise(() => session.list()),
+					(session) =>
+						Effect.tryPromise((signal) => session.close(signal)).pipe(
+							Effect.timeout(Duration.millis(SERVER_CLOSE_TIMEOUT_MS)),
+							Effect.catch((cause) =>
+								Effect.logWarning("The connector's approval session failed to close", cause),
 							),
+							Effect.forkDetach({ uninterruptible: false }),
+							Effect.asVoid,
+						),
+				).pipe(
+					Effect.mapError(
+						({ cause }) => new ConnectorToolsUnavailable({ during: "approval", cause }),
 					),
 				);
-				if (listed._tag === "Failure") {
-					yield* Effect.logWarning(
-						"Checking an approved connector's tools failed",
-						listed.failure.cause,
-					);
-					return false;
-				}
-				return (yield* recordListing(reach.workspace, target, listed.success)) === reach.revision;
+				return (yield* recordListing(reach.workspace, target, listing)) === reach.revision;
 			}),
 		forTurn: (workspaceId, { projectId, ownProjectId }, turn, sessions = connectorSessions()) =>
 			Effect.gen(function* () {
@@ -572,22 +571,17 @@ export function from({
 						buildConnectorTools(target, listing, uploadSide, use);
 					const refresh = (name: string) =>
 						Effect.gen(function* () {
-							const fresh = yield* Effect.result(
-								Effect.tryPromise(() => use((session) => session.list())),
+							const fresh = yield* Effect.tryPromise(() => use((session) => session.list())).pipe(
+								Effect.tapError(({ cause }) =>
+									Effect.logWarning("Checking an approved connector's tools failed", cause),
+								),
+								Effect.mapError(
+									({ cause }) => new ConnectorToolsUnavailable({ during: "toolCall", cause }),
+								),
 							);
-							if (fresh._tag === "Failure") {
-								yield* Effect.logWarning(
-									"Checking an approved connector's tools failed",
-									fresh.failure.cause,
-								);
-								return undefined;
-							}
-							const revision = yield* recordListing(workspaceId, current, fresh.success);
+							const revision = yield* recordListing(workspaceId, current, fresh);
 							if (revision === undefined) return undefined;
-							const tools = offer(
-								targetWithListing(current, revision, fresh.success),
-								fresh.success,
-							);
+							const tools = offer(targetWithListing(current, revision, fresh), fresh);
 							return tools[connectorToolKey(current.handle, name)];
 						});
 					return [{ target, listing, tools: offer(current, listing), refresh }];

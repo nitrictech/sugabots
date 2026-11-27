@@ -2,6 +2,7 @@ export * as ConnectorCalls from "./connector-calls.ts";
 
 import { safeValidateTypes } from "@ai-sdk/provider-utils";
 import { connectorToolKey } from "@sugabots/contracts";
+import type { ConnectorToolsUnavailable } from "@sugabots/contracts/errors/connectors";
 import { ApprovalNeeded, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { asSchema } from "ai";
 import { Context, Duration, Effect, Layer, Option } from "effect";
@@ -26,7 +27,7 @@ export interface Interface {
 	readonly refreshApprovedTool: <P, T, K, X>(
 		turn: RunsTurn<P, T>,
 		approved: Approved<NoInfer<P>, X, [T, K], "connectors.callTool">,
-	) => Effect.Effect<boolean, ResourceHidden | ApprovalNeeded>;
+	) => Effect.Effect<boolean, ResourceHidden | ApprovalNeeded | ConnectorToolsUnavailable>;
 	readonly offer: (
 		principal: BotPrincipal,
 		projects: ConnectorCatalog.TurnProjects,

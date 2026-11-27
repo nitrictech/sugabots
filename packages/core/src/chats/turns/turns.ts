@@ -26,6 +26,7 @@ import type {
 	ToolApprovalConflict,
 	ToolApprovalNotFound,
 } from "@sugabots/contracts/errors/approvals";
+import type { ConnectorToolsUnavailable } from "@sugabots/contracts/errors/connectors";
 import type { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { DomainError, UserText } from "@sugabots/errors";
 import { inArray, type SQLWrapper } from "drizzle-orm";
@@ -273,10 +274,18 @@ export interface ControlsInterface {
 		checkConnector?: (
 			call: ApprovalCall,
 			executionNumber: number,
-		) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden, ConnectorRequirements>,
+		) => Effect.Effect<
+			ToolApprovalConflict["reason"],
+			ActionForbidden | ConnectorToolsUnavailable,
+			ConnectorRequirements
+		>,
 	) => Effect.Effect<
 		void,
-		ToolApprovalNotFound | ToolApprovalConflict | ResourceHidden | ActionForbidden,
+		| ToolApprovalNotFound
+		| ToolApprovalConflict
+		| ResourceHidden
+		| ActionForbidden
+		| ConnectorToolsUnavailable,
 		R | ConnectorRequirements
 	>;
 	/**

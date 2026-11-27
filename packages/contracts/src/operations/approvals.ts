@@ -6,6 +6,7 @@
 import { Schema } from "effect";
 import { toolApprovalDecisionSchema } from "../approvals.ts";
 import { ToolApprovalConflict, ToolApprovalNotFound } from "../errors/approvals.ts";
+import { ConnectorToolsUnavailable } from "../errors/connectors.ts";
 import { ActionForbidden, ResourceHidden } from "../errors/proofs.ts";
 import { uuidOrStringSchema } from "../uuid.ts";
 import { OperationContract } from "./operation.ts";
@@ -25,7 +26,13 @@ export const approvalsContracts = {
 			...toolApprovalDecisionSchema.fields,
 		}),
 		output: Schema.Void,
-		errors: [ResourceHidden, ActionForbidden, ToolApprovalNotFound, ToolApprovalConflict],
+		errors: [
+			ResourceHidden,
+			ActionForbidden,
+			ToolApprovalNotFound,
+			ToolApprovalConflict,
+			ConnectorToolsUnavailable,
+		],
 		changes: true,
 		http: {
 			kind: "offered",

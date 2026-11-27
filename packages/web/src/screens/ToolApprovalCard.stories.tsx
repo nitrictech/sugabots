@@ -196,6 +196,37 @@ export const ClosedAfterAllow = meta.story({
 	},
 });
 
+const connectorUnavailableMessage = "We couldn't reach the connector. Try Allow again shortly.";
+
+export const ConnectorUnavailableOnAllow = meta.story({
+	globals: { ...PHONE, theme: "dark" },
+	parameters: {
+		docs: { description: { story: "Allow can be tried again from the request on a phone." } },
+	},
+	beforeEach({ msw, args }) {
+		msw.use(
+			http.post(`${import.meta.env.VITE_API_URL}/tool-calls/${args.call.id}/approval`, () =>
+				HttpResponse.json(
+					{
+						_tag: "ServiceUnavailable",
+						message: connectorUnavailableMessage,
+					},
+					{ status: 503 },
+				),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
+		const request = await screen.findByRole("dialog", { name: "Create event" });
+		await userEvent.click(screen.getByRole("button", { name: "Allow: Create event" }));
+		await expect(await screen.findByRole("alert")).toHaveTextContent(connectorUnavailableMessage);
+		await waitFor(() => expect(request).toBeVisible());
+		await expect(screen.getByRole("button", { name: "Allow: Create event" })).toBeEnabled();
+		await expect(screen.getByRole("button", { name: "Deny: Create event" })).toBeEnabled();
+	},
+});
+
 /** WithdrawnAfterNewMessage shows a request the bot left behind when a new message arrived. */
 export const WithdrawnAfterNewMessage = meta.story({
 	globals: PHONE,

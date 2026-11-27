@@ -153,19 +153,16 @@ const checkConnectorApprovalTarget = (
 		const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
 		const calls = yield* ConnectorCalls.Service;
 		const matches = yield* named(principal, call.connectorId, (principal, id) =>
-			proveCanReachConnector(principal, id).pipe(
-				Effect.flatMap((reach) =>
-					reach.revision === call.connectorRevision
-						? calls.checkApproval(
-								reach,
-								decoded.success.tool,
-								decoded.success.arguments,
-								call.approvalResolvedTargets,
-							)
-						: Effect.succeed(false),
-				),
-				Effect.orElseSucceed(() => false),
-			),
+			Effect.gen(function* () {
+				const reach = yield* Effect.option(proveCanReachConnector(principal, id));
+				if (reach._tag === "None" || reach.value.revision !== call.connectorRevision) return false;
+				return yield* calls.checkApproval(
+					reach.value,
+					decoded.success.tool,
+					decoded.success.arguments,
+					call.approvalResolvedTargets,
+				);
+			}),
 		);
 		return matches ? undefined : ("connectorChanged" as const);
 	});

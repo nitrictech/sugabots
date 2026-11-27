@@ -1,4 +1,5 @@
 import type { ToolApprovalConflict } from "@sugabots/contracts/errors/approvals";
+import type { ConnectorToolsUnavailable } from "@sugabots/contracts/errors/connectors";
 import type { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { approvalsContracts } from "@sugabots/contracts/operations/approvals";
 import { Effect } from "effect";
@@ -25,7 +26,11 @@ export const makeDecide = <R, ConnectorRequirements>(
 		member: string,
 		call: Turns.ApprovalCall,
 		executionNumber: number,
-	) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden, ConnectorRequirements>,
+	) => Effect.Effect<
+		ToolApprovalConflict["reason"],
+		ActionForbidden | ConnectorToolsUnavailable,
+		ConnectorRequirements
+	>,
 ) =>
 	defineOperation(approvalsContracts["approvals.decide"], (principal, input) =>
 		named(principal, input.toolCallId, (principal, call) =>

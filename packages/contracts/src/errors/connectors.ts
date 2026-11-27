@@ -39,6 +39,25 @@ export class ConnectorAddressChanged
 	}
 }
 
+export class ConnectorToolsUnavailable
+	extends Schema.TaggedError<ConnectorToolsUnavailable>()("ConnectorToolsUnavailable", {
+		during: Schema.Literals(["approval", "toolCall"]),
+		cause: Schema.Defect(),
+	})
+	implements DomainError
+{
+	readonly isRetryable = true;
+	override readonly [ErrorReporter.severity] = "Warn" as const;
+	override get message() {
+		return `The connector could not list its tools: ${String(this.cause)}`;
+	}
+	get userMessage() {
+		return this.during === "approval"
+			? userText`We couldn't reach the connector. Try Allow again shortly.`
+			: userText`We couldn't reach the connector. Try the tool again shortly.`;
+	}
+}
+
 /** Another of the project's connectors has that name. */
 export class ConnectorNameTaken
 	extends Schema.TaggedError<ConnectorNameTaken>()("ConnectorNameTaken", {})

@@ -35,7 +35,7 @@ const error = Schema.optional(PublicError);
 const failureFields = { message, details, error };
 
 /** The statuses the API answers its failures with. */
-type FailureStatus = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 500;
+type FailureStatus = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 500 | 503;
 
 /**
  * The base class of a failure answered with `status`: a tagged error whose
@@ -97,6 +97,11 @@ export class InternalServerError extends failureAnswered<InternalServerError>()(
 	{ reference: Schema.optional(Schema.String) },
 ) {}
 
+export class ServiceUnavailable extends failureAnswered<ServiceUnavailable>()(
+	"ServiceUnavailable",
+	503,
+) {}
+
 /** Every failure the API answers with, decoded from its body by its `_tag`. */
 export const apiFailureSchema = Schema.Union([
 	BadRequest,
@@ -107,6 +112,7 @@ export const apiFailureSchema = Schema.Union([
 	PayloadTooLarge,
 	UnsupportedMediaType,
 	InternalServerError,
+	ServiceUnavailable,
 ]);
 
 export type ApiFailure = typeof apiFailureSchema.Type;
@@ -203,6 +209,8 @@ export const failureForError = {
 
 	// Too large to take.
 	FileTooLarge: PayloadTooLarge,
+
+	ConnectorToolsUnavailable: ServiceUnavailable,
 
 	// What was asked for can't be done as asked.
 	AdministratorInEveryPrivateBot: BadRequest,

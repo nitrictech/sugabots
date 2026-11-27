@@ -212,6 +212,37 @@ export const Answerable = meta.story({
 	},
 });
 
+const connectorUnavailableMessage = "We couldn't reach the connector. Try Allow again shortly.";
+
+export const ConnectorUnavailableOnAllow = meta.story({
+	globals: { theme: "light" },
+	parameters: {
+		docs: {
+			description: { story: "The connector can't be reached, and the request stays pending." },
+		},
+	},
+	render: at(answerable.call.id),
+	beforeEach({ msw }) {
+		msw.use(
+			http.post(`${API}/tool-calls/${answerable.call.id}/approval`, () =>
+				HttpResponse.json(
+					{
+						_tag: "ServiceUnavailable",
+						message: connectorUnavailableMessage,
+					},
+					{ status: 503 },
+				),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: /^Allow/ }));
+		await expect(await canvas.findByRole("alert")).toHaveTextContent(connectorUnavailableMessage);
+		await expect(canvas.getByRole("button", { name: /^Allow/ })).toBeEnabled();
+		await expect(canvas.getByRole("button", { name: /^Deny/ })).toBeEnabled();
+	},
+});
+
 /** Answered says which way it went, who answered it, and when, with no way to answer again. */
 export const Answered = meta.story({
 	render: at(answered.call.id),
