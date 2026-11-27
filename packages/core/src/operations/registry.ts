@@ -1,6 +1,5 @@
 export * as Operations from "./registry.ts";
 
-import { isDeepStrictEqual } from "node:util";
 import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import {
@@ -45,6 +44,7 @@ import {
 	type Running,
 	runToApproval,
 	type ServicesOf,
+	sameResolvedTargets,
 } from "./operation.ts";
 import { projectsOperations } from "./projects/index.ts";
 import { providersOperations } from "./providers/index.ts";
@@ -171,7 +171,7 @@ const checkApprovalPermission = (
 		const checked = result.success;
 		if (
 			checked.resolvedTargets &&
-			!isDeepStrictEqual(checked.resolvedTargets, call.approvalResolvedTargets)
+			!sameResolvedTargets(call.approvalResolvedTargets, checked.resolvedTargets)
 		) {
 			if (name === "chats.startBriefedChat") return "briefDestinationChanged" as const;
 			return yield* forbidden;

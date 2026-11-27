@@ -429,3 +429,29 @@ export const ANetworkRequestNotYours = meta.story({
 		).toBeInTheDocument();
 	},
 });
+
+/** The brief names the destination before the asker shares its contents. */
+export const BriefInProject = meta.story({
+	args: {
+		call: asking({
+			tool: "start_chat",
+			input: { with: "@ada", title: "Launch notes", brief: "Draft the release notes." },
+			approval: {
+				id: "approval-brief",
+				status: "pending",
+				approvers: "chat",
+				decidedByName: null,
+				decidedAt: null,
+				briefDestination: { botName: "Ada", projectName: "Launch" },
+			},
+		}),
+		connector: undefined,
+	},
+	globals: { ...PHONE, theme: "light" },
+	play: async ({ canvas, userEvent }) => {
+		const destination = "Starts a chat with Ada in Launch";
+		await waitFor(() => expect(canvas.getByText(destination)).toBeVisible());
+		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
+		await expect(await screen.findByRole("dialog")).toHaveTextContent(destination);
+	},
+});

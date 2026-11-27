@@ -20,7 +20,12 @@ export const startBriefedChat = defineOperation(
 						call,
 						approvalRule("chats.startBriefedChat"),
 						approvedInput,
-						{ bot: mayBrief.bot.value, project: mayBrief.project },
+						{
+							bot: mayBrief.bot.value,
+							project: mayBrief.project,
+							briefBotName: mayBrief.name,
+							briefProjectName: mayBrief.projectName,
+						},
 						mayBrief.bot,
 					);
 					return { chat: yield* chats.startBriefedChat(mayBrief, approved) };

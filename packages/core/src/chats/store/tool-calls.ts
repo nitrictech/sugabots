@@ -43,6 +43,8 @@ export function toToolCallPart(
 ): ToolCallPart {
 	const {
 		browserUrl,
+		briefBotName,
+		briefProjectName,
 		gitHubRepositoryId,
 		gitHubBaseBranch,
 		gitHubReviewCommit,
@@ -68,6 +70,9 @@ export function toToolCallPart(
 						decidedByName,
 						decidedAt: row.decidedAt?.toISOString() ?? null,
 						...(browserUrl && { browserUrl }),
+						...(briefBotName && {
+							briefDestination: { botName: briefBotName, projectName: briefProjectName ?? null },
+						}),
 						...(gitHubRepositoryId && {
 							gitHub: {
 								repositoryId: gitHubRepositoryId,

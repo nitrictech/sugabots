@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import { connectorToolKey } from "@sugabots/contracts";
 import { ApprovalNeeded, ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import {
@@ -20,7 +19,12 @@ import { sameRecordedInput } from "../chats/tools/recorded-input.ts";
 import { query } from "../database/database.ts";
 import { toolCall } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import { ApprovalCheckReached, type Call, type ResolvedTargets } from "../operations/operation.ts";
+import {
+	ApprovalCheckReached,
+	type Call,
+	type ResolvedTargets,
+	sameResolvedTargets,
+} from "../operations/operation.ts";
 import type { Principal } from "../principal.ts";
 import type { CanUseChatComputer } from "./can-use-computer.ts";
 import type { CanUseConnector } from "./can-use-connector.ts";
@@ -481,7 +485,7 @@ function decideRecordedCall<P, K>(
 	if (
 		decision?.status !== "allowed" ||
 		!decision.decidedBy ||
-		!isDeepStrictEqual(decision.resolvedTargets ?? null, resolvedTargets ?? null) ||
+		!sameResolvedTargets(decision.resolvedTargets, resolvedTargets) ||
 		(connectorUse?.access === "ask" && decision.accessAtApproval !== "ask")
 	) {
 		return "needed";

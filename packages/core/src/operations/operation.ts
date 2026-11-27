@@ -17,6 +17,7 @@
  * returns and fails with; the body's type must keep to it.
  */
 
+import { isDeepStrictEqual } from "node:util";
 import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import type { OperationContract } from "@sugabots/contracts/operations";
 import type { DomainError } from "@sugabots/errors";
@@ -35,9 +36,25 @@ export interface ApprovalCheck {
 /**
  * What a tool call's names and ids stood for as its approval was asked, by a
  * name its operation gives each: an id, or null where it stood for nothing yet,
- * such as a computer not made yet.
+ * such as a computer not made yet. Briefs also keep the display names the
+ * approver saw, so a later rename doesn't rewrite the request.
  */
 export type ResolvedTargets = { readonly [name: string]: string | null };
+
+export function sameResolvedTargets(
+	recorded: ResolvedTargets | null | undefined,
+	current: ResolvedTargets | null | undefined,
+): boolean {
+	return isDeepStrictEqual(withoutBriefDisplayNames(recorded), withoutBriefDisplayNames(current));
+}
+
+function withoutBriefDisplayNames(
+	targets: ResolvedTargets | null | undefined,
+): ResolvedTargets | null {
+	if (!targets) return null;
+	const { briefBotName: _botName, briefProjectName: _projectName, ...binding } = targets;
+	return binding;
+}
 
 interface ApprovalCheckDetails {
 	readonly computerProjectId?: string;

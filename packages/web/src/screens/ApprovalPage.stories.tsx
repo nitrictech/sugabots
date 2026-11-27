@@ -115,8 +115,19 @@ const withoutFields = {
 	call: { ...outside.call, id: "0199a3a0-0000-7000-8000-000000000805", input: null },
 };
 
+const briefRequest = request("06", "awaiting_approval", pending);
+const brief: ApprovalRequest = {
+	...briefRequest,
+	call: {
+		...briefRequest.call,
+		tool: "start_chat",
+		input: { with: "@ada", title: "Launch notes", brief: "Draft the release notes." },
+		approval: { ...pending, briefDestination: { botName: "Ada", projectName: null } },
+	},
+};
+
 const approvals: WorkspaceApprovals = {
-	waiting: [answerable, stopped, outside, withoutFields],
+	waiting: [answerable, stopped, outside, withoutFields, brief],
 	answered: [answered],
 };
 
@@ -237,5 +248,15 @@ export const Missing = meta.story({
 		await expect(
 			await canvas.findByText("This request is no longer here", undefined),
 		).toBeInTheDocument();
+	},
+});
+
+/** A brief can start a chat in the recipient bot's own chats. */
+export const BriefInBotsOwnChats = meta.story({
+	render: at(brief.call.id),
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText("Starts a chat with Ada in Ada's own chats"),
+		).toBeVisible();
 	},
 });

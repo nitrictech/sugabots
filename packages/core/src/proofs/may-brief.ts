@@ -36,6 +36,7 @@ export interface MayBrief<P, B> extends Proof<"MayBrief", [P, B]> {
 	/** B's workspace, which services take from here. */
 	readonly workspace: string;
 	readonly project: string;
+	readonly projectName: string | null;
 	readonly turnRule: BriefTurnRule | null;
 }
 
@@ -86,7 +87,8 @@ export const withBriefRecipient = <P, A, E, R>(
 				asker: acting.asker,
 				briefingBot: acting.bot,
 				turnRule,
-				project: destination,
+				project: destination.id,
+				projectName: destination.defaultOf ? null : destination.name,
 			});
 			return use(proof);
 		});
@@ -131,5 +133,5 @@ const resolveBrief = (acting: BotForAsker, record: BotRecord) =>
 		) {
 			return yield* new ResourceHidden({ resource: "project" });
 		}
-		return { record, turn, destination };
+		return { turn, destination: reach.project };
 	});

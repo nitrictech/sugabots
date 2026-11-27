@@ -117,6 +117,7 @@ export function ToolApprovalCard({
 						botName={bot.name}
 						browserUrl={call.approval?.browserUrl}
 						gitHub={call.approval?.gitHub}
+						briefDestination={call.approval?.briefDestination}
 						connectorUrl={boundConnector?.url}
 						connectorChanged={boundConnector?.changed}
 						waiting={call.approval?.status === "pending"}
@@ -157,6 +158,7 @@ export function ToolApprovalCard({
 				input={call.input}
 				browserUrl={call.approval?.browserUrl}
 				gitHub={call.approval?.gitHub}
+				briefDestination={call.approval?.briefDestination}
 				connectorUrl={boundConnector?.url}
 				connectorChanged={boundConnector?.changed}
 				waiting={call.approval?.status === "pending"}
@@ -312,11 +314,13 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 }
 
 type ApprovalGitHub = NonNullable<ToolCallPart["approval"]>["gitHub"];
+type BriefDestination = NonNullable<ToolCallPart["approval"]>["briefDestination"];
 
 export function ApprovalDestination({
 	botName,
 	browserUrl,
 	gitHub,
+	briefDestination,
 	connectorUrl,
 	connectorChanged,
 	waiting,
@@ -324,6 +328,7 @@ export function ApprovalDestination({
 	botName: string;
 	browserUrl?: string | undefined;
 	gitHub?: ApprovalGitHub | undefined;
+	briefDestination?: BriefDestination;
 	connectorUrl?: string | null | undefined;
 	connectorChanged?: boolean | undefined;
 	/** Whether the request still waits for an answer, which the browser note is about. */
@@ -339,9 +344,15 @@ export function ApprovalDestination({
 	}
 	const address = browserUrl ?? connectorUrl;
 	const gitHubLines = gitHub && (gitHub.baseBranch || gitHub.reviewCommit);
-	if (!address && !gitHubLines) return null;
+	if (!address && !gitHubLines && !briefDestination) return null;
 	return (
 		<div className="space-y-1 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
+			{briefDestination && (
+				<p className="m-0">
+					Starts a chat with {briefDestination.botName} in{" "}
+					{briefDestination.projectName ?? `${briefDestination.botName}'s own chats`}
+				</p>
+			)}
 			{address && (
 				<p className="m-0">
 					{browserUrl ? "On the page" : "Sends to"} {address}
@@ -382,6 +393,7 @@ function ReviewSheet({
 	input,
 	browserUrl,
 	gitHub,
+	briefDestination,
 	connectorUrl,
 	connectorChanged,
 	waiting,
@@ -394,6 +406,7 @@ function ReviewSheet({
 	input: ToolCallPart["input"];
 	browserUrl: string | undefined;
 	gitHub: ApprovalGitHub | undefined;
+	briefDestination: BriefDestination;
 	connectorUrl: string | null | undefined;
 	connectorChanged: boolean | undefined;
 	waiting: boolean;
@@ -432,6 +445,7 @@ function ReviewSheet({
 							botName={bot.name}
 							browserUrl={browserUrl}
 							gitHub={gitHub}
+							briefDestination={briefDestination}
 							connectorUrl={connectorUrl}
 							connectorChanged={connectorChanged}
 							waiting={waiting}

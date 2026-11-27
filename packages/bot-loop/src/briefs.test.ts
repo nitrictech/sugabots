@@ -18,6 +18,7 @@ import {
 	chatParticipant,
 	message,
 	placedChat,
+	project,
 	projectBot,
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
@@ -151,11 +152,15 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 		if (!target) throw new Error("No recipient bot");
 		let source = chatId;
 		let expectedProject = recipient.defaultProject;
-		if (destination === "the asking project") {
+		const projectName = destination === "the asking project" ? "Launch" : null;
+		if (projectName) {
 			expectedProject = await seedProject(workspaceId, {
 				leadBotId: botId,
 				bots: [recipient.id],
 			});
+			await onDatabase((db) =>
+				db.update(project).set({ name: projectName }).where(eq(project.id, expectedProject)),
+			);
 			const started = await chatsAs(adminId).startProjectChat({
 				projectId: expectedProject,
 				retryKey: crypto.randomUUID(),
@@ -188,6 +193,21 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 			{ _tag: "Waiting", approvals: [parked.approvalId], taken: true },
 		]);
 		expect(parked).toMatchObject({ tool: START_CHAT_TOOL, approvalStatus: "pending", input });
+		if (projectName) {
+			await onDatabase((db) =>
+				db.update(project).set({ name: "Release" }).where(eq(project.id, expectedProject)),
+			);
+		}
+		expect((await chatsAs(adminId).approvals(workspaceId)).waiting).toContainEqual(
+			expect.objectContaining({
+				call: expect.objectContaining({
+					id: parked.id,
+					approval: expect.objectContaining({
+						briefDestination: { botName: target.name, projectName },
+					}),
+				}),
+			}),
+		);
 		const startedChats = () =>
 			onDatabase((db) =>
 				db

@@ -181,6 +181,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 					botName={bot.name}
 					browserUrl={call.approval?.browserUrl}
 					gitHub={call.approval?.gitHub}
+					briefDestination={call.approval?.briefDestination}
 					connectorUrl={connector?.url}
 					connectorChanged={connector?.changed}
 					waiting={call.approval?.status === "pending"}

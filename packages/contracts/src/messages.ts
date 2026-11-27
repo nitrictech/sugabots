@@ -301,6 +301,12 @@ export const toolCallPartSchema = Schema.Struct({
 					replyCommentId: Schema.optional(Schema.String),
 				}),
 			),
+			briefDestination: Schema.optional(
+				Schema.Struct({
+					botName: Schema.String,
+					projectName: Schema.NullOr(Schema.String),
+				}),
+			),
 			connector: Schema.optional(Schema.Struct({ id: uuidSchema, revision: Schema.Int })),
 		}),
 	),

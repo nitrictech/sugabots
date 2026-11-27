@@ -81,7 +81,7 @@ export interface BotPlace extends Pick<BotFacts, "visibility" | "createdById"> {
 }
 
 export interface ReachFacts {
-	readonly project: ProjectFacts;
+	readonly project: ProjectFacts & { readonly name: string };
 	readonly member: MemberPlace | undefined;
 	readonly bot: BotPlace | undefined;
 }
@@ -147,6 +147,7 @@ const reachFactsWhere = (
 		const selected = db
 			.select({
 				id: project.id,
+				name: project.name,
 				workspace: project.workspaceId,
 				leadBot: project.leadBotId,
 				visibility: project.visibility,
@@ -196,6 +197,7 @@ const reachFactsWhere = (
 			(row): ReachFacts => ({
 				project: {
 					id: row.id,
+					name: row.name,
 					workspace: row.workspace,
 					leadBot: row.leadBot,
 					visibility: row.visibility,
