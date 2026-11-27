@@ -115,9 +115,7 @@ const connectorAccess = (
  * Whether the bot's own connector `connector` is on in the project its turn's
  * chat is in: always in the bot's default project, where the connector lives;
  * in any other, only once one of that project's managers turned it on there,
- * for the address revision it still has. The row is shared until the
- * transaction ends, so a call checked inside one can't run on after it is
- * turned off.
+ * for the address revision it still has.
  */
 const onWhereTurnWorks = (
 	acting: BotForAsker | AutomationRun,
@@ -150,8 +148,7 @@ const onWhereTurnWorks = (
 						eq(projectBotConnector.addressRevision, connector.addressRevision),
 					),
 				)
-				.limit(1)
-				.for("share"),
+				.limit(1),
 		);
 		return turnedOn !== undefined;
 	});

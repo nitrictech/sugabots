@@ -19,7 +19,6 @@ import {
 	megabytes,
 	readSharableFile,
 } from "../computer/tools.ts";
-import { type HandOff, readHandOff } from "../connector-hand-off.ts";
 import { type Failed, failed } from "../failed.ts";
 import { refusedHeader } from "../http/tools.ts";
 import { unreadableFileRefusal } from "../unreadable-file.ts";
@@ -89,10 +88,7 @@ export function signedUploadTool(
 					description: "The headers given for the upload, exactly as given",
 				}),
 		}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
-		execute: async (
-			{ file, path, uploadUrl, headers },
-			{ abortSignal, context },
-		): Promise<UploadResult> => {
+		execute: async ({ file, path, uploadUrl, headers }, { abortSignal }): Promise<UploadResult> => {
 			const source = sourceOf(file, path);
 			if ("status" in source) return source;
 			if (!isUnder(uploadUrl, service.destination)) {
@@ -111,8 +107,9 @@ export function signedUploadTool(
 			if (!(content instanceof Uint8Array)) return content;
 			return put(
 				upload.for({ baseUrl: service.destination }),
-				readHandOff(context),
-				{ url: uploadUrl, headers, content },
+				uploadUrl,
+				headers,
+				content,
 				abortSignal,
 				run,
 			);
@@ -173,28 +170,24 @@ async function computerFileContent(
 	return "content" in read ? read.content : read;
 }
 
-/**
- * PUTs `content` with `headers` as given, handing the request to the network
- * through `handOff`, and says what the service answered.
- */
+/** PUTs `content` with `headers` as given, and says what the service answered. */
 async function put(
 	fetch: ReturnType<EgressHttpClients["for"]>,
-	handOff: HandOff,
-	{ url, headers, content }: { url: string; headers: Record<string, string>; content: Uint8Array },
+	url: string,
+	headers: Record<string, string>,
+	content: Uint8Array,
 	abortSignal: AbortSignal | undefined,
 	run: RunEffect<never>,
 ): Promise<UploadResult> {
 	const timeout = AbortSignal.timeout(TIMEOUT_MS);
 	let response: Response;
 	try {
-		response = await handOff(() =>
-			fetch(url, {
-				method: "PUT",
-				headers,
-				body: content,
-				signal: abortSignal ? AbortSignal.any([timeout, abortSignal]) : timeout,
-			}),
-		);
+		response = await fetch(url, {
+			method: "PUT",
+			headers,
+			body: content,
+			signal: abortSignal ? AbortSignal.any([timeout, abortSignal]) : timeout,
+		});
 	} catch (cause) {
 		if (cause instanceof EgressRefused) return failed(cause.userMessage);
 		if (timeout.aborted) {

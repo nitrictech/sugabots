@@ -1270,11 +1270,11 @@ declare const anotherTurnApproval: RecordedApproval<
 >;
 
 export const connectorCallMistakes = Effect.gen(function* () {
-	// @ts-expect-error TS2554 [Expected 4 arguments, but got 2.] A connector call requires the approval recorded for that call.
+	// @ts-expect-error TS2554 [Expected 3 arguments, but got 2.] A connector call requires the approval recorded for that call.
 	yield* connectorCalls.callTool(connectorTurn, connectorUse);
 	// @ts-expect-error TS2345 [parameter of type 'Approved<"principal", "other call", ["turn", "connector"], "connect] The recorded approval belongs to a different turn principal.
-	yield* connectorCalls.callTool(connectorTurn, connectorUse, anotherTurnApproval, Effect.void);
-	yield* connectorCalls.callTool(connectorTurn, connectorUse, connectorApproval, Effect.void);
+	yield* connectorCalls.callTool(connectorTurn, connectorUse, anotherTurnApproval);
+	yield* connectorCalls.callTool(connectorTurn, connectorUse, connectorApproval);
 });
 
 declare const approvalWithdrawals: Turns.ApprovalWithdrawals.Interface;

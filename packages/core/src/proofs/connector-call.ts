@@ -25,21 +25,3 @@ export const proveConnectorCall = <P, T, K, X, I>(
 			return { use, approved };
 		}),
 	);
-
-/**
- * Proves again what `proveConnectorCall` proved of the call to `tool` before
- * its tool hands the request to the network: the turn still runs and its asker
- * still stands, and the connector is still on for the turn, at the revision it
- * was listed at. Run in the transaction that starts the request, whose locks
- * keep a revocation from committing until the request has gone.
- */
-export const recheckConnectorCall = <P, T, K>(
-	running: RunsTurn<P, T>,
-	connector: Named<K, string>,
-	tool: string,
-	listed: Parameters<typeof proveCanUseConnector>[3],
-) =>
-	Effect.gen(function* () {
-		yield* Turns.holdTurnForToolWrite(running);
-		yield* proveCanUseConnector(running.principal, connector, tool, listed);
-	});

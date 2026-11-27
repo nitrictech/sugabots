@@ -2,7 +2,6 @@ import { Effect, Logger, Stream } from "effect";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { ChatFileStore } from "../../../files/chat-file-store.ts";
 import { createEgressHttpClients } from "../../../providers/network/egress.ts";
-import { type HandOff, HandOffRefused, withHandOff } from "../connector-hand-off.ts";
 import { SignedUploadRefused, signedUploadTool } from "./tool.ts";
 
 const CHAT = "0199a3a0-0000-7000-8000-000000000001";
@@ -65,20 +64,12 @@ function uploadWith(status = 200, answer = "") {
 		upload,
 		run: (effect) => Effect.runPromise(effect.pipe(Effect.provide(logger))),
 	});
-	const call = (
-		input: {
-			file?: string;
-			path?: string;
-			uploadUrl: string;
-			headers: Record<string, string>;
-		},
-		handOff?: HandOff,
-	) =>
-		tool.execute?.(input, {
-			toolCallId: "call",
-			messages: [],
-			...(handOff && { context: withHandOff(undefined, handOff) }),
-		} as never);
+	const call = (input: {
+		file?: string;
+		path?: string;
+		uploadUrl: string;
+		headers: Record<string, string>;
+	}) => tool.execute?.(input, { toolCallId: "call", messages: [] } as never);
 	return { call, sent, logged };
 }
 
@@ -95,19 +86,6 @@ describe("a signed upload tool", () => {
 		expect(sent[0]?.body).toEqual(SCREENSHOT);
 		expect(sent[0]?.headers.get("x-goog-content-length-range")).toBe("10,10");
 		expect(sent[0]?.headers.get("content-disposition")).toBe('attachment; filename="bug.png"');
-	});
-
-	it("reads the file before it proves the call again, and sends nothing once that refuses", async () => {
-		const { call, sent } = uploadWith();
-		const handOff: HandOff = async () => {
-			expect(sent).toEqual([]);
-			throw new HandOffRefused();
-		};
-
-		await expect(
-			call({ file: FILE, uploadUrl: SIGNED_URL, headers: SIGNED_HEADERS }, handOff),
-		).rejects.toBeInstanceOf(HandOffRefused);
-		expect(sent).toEqual([]);
 	});
 
 	it.each([

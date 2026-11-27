@@ -43,7 +43,6 @@ import {
 import { processLayer, Tier } from "../../tiers.ts";
 import { offerAugmentationTools } from "./augmentations.ts";
 import type { ComputerAtPlace } from "./computer/tools.ts";
-import { readHandOff } from "./connector-hand-off.ts";
 import { gitHubNote, gitHubTools } from "./github/tools.ts";
 import { httpTools } from "./http/tools.ts";
 import type { UploadSide } from "./signed-upload/tool.ts";
@@ -529,11 +528,7 @@ function buildOfferedTools(
 				{
 					...tool,
 					execute: (input, options) =>
-						useSession(target, (session) =>
-							readHandOff(options.context)(() =>
-								session.run(listing, described.name, input, options),
-							),
-						),
+						useSession(target, (session) => session.run(listing, described.name, input, options)),
 				},
 				{ description: described.description ?? "", inputSchema },
 			),

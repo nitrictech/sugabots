@@ -4,7 +4,6 @@ import { Computers } from "../../../computers/computers.ts";
 import { BOT_BRANCH_PREFIX } from "../../../providers/connectors/github/connected.ts";
 import { BUNDLE_REF, pushBundle } from "../../../providers/connectors/github/push.ts";
 import { type ComputerAtPlace, inComputer, type Place } from "../computer/tools.ts";
-import { readHandOff } from "../connector-hand-off.ts";
 import {
 	botBranchSchema,
 	commitSchema,
@@ -40,7 +39,7 @@ export function pushTool(
 			}).pipe(Schema.toStandardSchemaV1, Schema.toStandardJSONSchemaV1),
 			execute: async (
 				{ repository, directory, commit, branch, force = false },
-				{ abortSignal, context },
+				{ abortSignal },
 			) => {
 				const path = connected.repository(repository);
 				if (!path) return notConnectorRepository(repository, connected.repositories);
@@ -49,28 +48,25 @@ export function pushTool(
 					bundleCommit(opened, computer.place, { turnId, directory, commit }),
 				);
 				if (!("bundle" in bundled)) return bundled;
-				// Bundling can take a while, so the push is proved again as it goes.
-				return readHandOff(context)(() =>
-					onRepository(path, (target) =>
-						Effect.gen(function* () {
-							const credential = yield* connected.writeCredential(target);
-							yield* pushBundle({
-								bundle: bundled.bundle,
-								commit,
-								remoteUrl: `https://github.com/${target}.git`,
-								credential,
-								branch,
-								force,
-							});
-							return {
-								status: "pushed",
-								repository: target,
-								branch,
-								commit,
-								url: `https://github.com/${target}/tree/${branch}`,
-							};
-						}),
-					),
+				return onRepository(path, (target) =>
+					Effect.gen(function* () {
+						const credential = yield* connected.writeCredential(target);
+						yield* pushBundle({
+							bundle: bundled.bundle,
+							commit,
+							remoteUrl: `https://github.com/${target}.git`,
+							credential,
+							branch,
+							force,
+						});
+						return {
+							status: "pushed",
+							repository: target,
+							branch,
+							commit,
+							url: `https://github.com/${target}/tree/${branch}`,
+						};
+					}),
 				);
 			},
 		}),
