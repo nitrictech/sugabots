@@ -3226,10 +3226,6 @@ BEGIN
 	RETURN NULL;
 END;
 $$;--> statement-breakpoint
-CREATE TRIGGER bot_administrators
-AFTER INSERT OR UPDATE OF "visibility" ON "bot"
-FOR EACH ROW WHEN (NEW."visibility" = 'private')
-EXECUTE FUNCTION add_administrators_to_private_bot();--> statement-breakpoint
 -- Only adds: somebody demoted keeps the private bots they are in.
 CREATE FUNCTION add_new_administrator_to_private_bots() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -3248,12 +3244,18 @@ AFTER INSERT OR UPDATE OF "role" ON "membership"
 FOR EACH ROW WHEN (NEW."role" IN ('owner', 'admin') AND NOT NEW."leaving")
 EXECUTE FUNCTION add_new_administrator_to_private_bots();--> statement-breakpoint
 -- A `shared` `pod`'s bots become private, its people their members, and
--- nobody else: a creator who had left the `pod` stays out (the trigger above
--- adds the owner and admins, who were in every `shared` `pod`). Each stays in
+-- nobody else: a creator who had left the `pod` stays out. Each stays in
 -- the private project its `pod` became, so its own chats, files, connectors
 -- and automations, in its default project, are reached by those who reached
 -- them before, and nobody else.
+-- Install the bot trigger after the backfill so it cannot hold a lock for
+-- every workspace until the migration commits.
 UPDATE "bot" SET "visibility" = 'private' WHERE "in_shared_pod";--> statement-breakpoint
+INSERT INTO "bot_member" ("workspace_id", "bot_id", "member_id")
+SELECT b."workspace_id", b."id", m."member_id"
+FROM "bot" b
+INNER JOIN "membership" m ON m."workspace_id" = b."workspace_id"
+WHERE b."in_shared_pod" AND m."role" IN ('owner', 'admin') AND NOT m."leaving";--> statement-breakpoint
 INSERT INTO "bot_member" ("workspace_id", "bot_id", "member_id")
 SELECT b."workspace_id", b."id", pm."member_id"
 FROM "bot" b
@@ -3262,6 +3264,10 @@ INNER JOIN "project" p ON p."id" = pb."project_id" AND p."default_of_bot_id" IS 
 INNER JOIN "project_member" pm ON pm."project_id" = p."id"
 WHERE b."in_shared_pod"
 ON CONFLICT ("bot_id", "member_id") DO NOTHING;--> statement-breakpoint
+CREATE TRIGGER bot_administrators
+AFTER INSERT OR UPDATE OF "visibility" ON "bot"
+FOR EACH ROW WHEN (NEW."visibility" = 'private')
+EXECUTE FUNCTION add_administrators_to_private_bot();--> statement-breakpoint
 -- A bot's own connectors stay off in each project but its default one until
 -- one of that project's managers turns them on there, for the address each
 -- has then, numbered by its address revision, which every change of address
