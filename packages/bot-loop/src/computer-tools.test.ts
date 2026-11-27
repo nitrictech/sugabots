@@ -1,3 +1,5 @@
+import { EventEmitter } from "node:events";
+import { runInNewContext } from "node:vm";
 import { HOST_REQUEST_TOOL, memberStream } from "@sugabots/contracts";
 import { ComputerHostBlocked, NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
@@ -325,13 +327,37 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			calls: [{ toolCallId, toolName: "browser_tabs", input: { action: "list" } }],
 		});
 
+		const setNaturalBrowsing = (naturalBrowsing: boolean) =>
+			onDatabase((db) => db.update(bot).set({ naturalBrowsing }).where(eq(bot.id, botId)));
+
+		it.each([
+			["enables", false],
+			["disables", true],
+		] as const)("%s natural browsing on the same desktop", async (_change, initiallyEnabled) => {
+			await setNaturalBrowsing(initiallyEnabled);
+			const browser = standInBrowser();
+			const { model } = scriptedSteps(listTabs("before"), listTabs("after"), { text: ["Done."] });
+			const run = await stepBrowserRun(model, browser);
+
+			await run.step(0);
+			const [session] = browser.sessions.keys();
+			if (!session) throw new Error("No browser session opened");
+			expect(browser.sessions.get(session)?.showsCursor()).toBe(initiallyEnabled);
+
+			await setNaturalBrowsing(!initiallyEnabled);
+			await run.step(1);
+			await run.step(2);
+			expect([...browser.sessions.keys()]).toEqual([session]);
+			expect(browser.sessions.get(session)?.showsCursor()).toBe(!initiallyEnabled);
+		});
+
 		it("opens a fresh MCP session when the cached session has expired", async () => {
 			const browser = standInBrowser();
 			const { model } = scriptedSteps(listTabs("before"), listTabs("after"), { text: ["Done."] });
 			const run = await stepBrowserRun(model, browser);
 
 			await run.step(0);
-			const [session] = browser.sessions;
+			const [session] = browser.sessions.keys();
 			if (!session) throw new Error("No browser session opened");
 			browser.sessions.delete(session);
 			expect((await browser.ping(session)).status).toBe(404);
@@ -356,7 +382,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const run = await stepBrowserRun(model, browser);
 
 			await run.step(0);
-			const [session] = browser.sessions;
+			const [session] = browser.sessions.keys();
 			if (!session) throw new Error("No browser session opened");
 			expect((await browser.ping(session)).status).toBe(200);
 
@@ -430,6 +456,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			});
 			expect(browser.handled).toEqual([]);
 			if (!waiting) throw new Error("No modal approval");
+			const [session] = browser.sessions.keys();
+			if (!session) throw new Error("No browser session opened");
+			await setNaturalBrowsing(true);
 
 			if (toolName === "browser_handle_dialog") {
 				browser.replaceDialog("Discard the receipt?");
@@ -447,6 +476,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await workflow.completed();
 			expect(browser.handled).toEqual([{ tool: toolName, input }]);
 			expect(JSON.stringify(requests.at(-1)?.continuationMessages)).toContain("Handled modal");
+			expect([...browser.sessions.keys()]).toEqual([session]);
+			expect(browser.sessions.get(session)?.showsCursor()).toBe(true);
 		});
 
 		describe("asking for a host", () => {
@@ -876,7 +907,7 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 	const url = "https://shop.example.com/checkout";
 	const clicked: string[] = [];
 	const handled: { tool: string; input: unknown }[] = [];
-	const sessions = new Set<string>();
+	const sessions = new Map<string, ReturnType<typeof standInBrowserPage>>();
 	let sessionCount = 0;
 	let modalSession: string | null = null;
 	let dialogMessage = "Submit the receipt?";
@@ -893,7 +924,8 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 		},
 		fetch: async (request: Request) => {
 			const session = request.headers.get("mcp-session-id");
-			if (session !== null && !sessions.has(session)) return new Response(null, { status: 404 });
+			const browserPage = session === null ? undefined : sessions.get(session);
+			if (session !== null && !browserPage) return new Response(null, { status: 404 });
 			if (request.method === "DELETE" && session !== null) {
 				sessions.delete(session);
 				if (modalSession === session) modalSession = null;
@@ -909,7 +941,10 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 				Response.json({ jsonrpc: "2.0", id, result: value }, { headers });
 			if (method === "initialize") {
 				const opened = `session-${++sessionCount}`;
-				sessions.add(opened);
+				sessions.set(
+					opened,
+					standInBrowserPage(() => tab, url),
+				);
 				return result(
 					{
 						protocolVersion: params?.protocolVersion,
@@ -919,7 +954,7 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 					{ "mcp-session-id": opened },
 				);
 			}
-			if (session === null) return new Response(null, { status: 400 });
+			if (session === null || !browserPage) return new Response(null, { status: 400 });
 			if (method === "notifications/initialized") return new Response(null, { status: 202 });
 			if (method === "ping") return result({});
 			const modalOpen = modalSession !== null && modalSession === session;
@@ -939,8 +974,9 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 							'### Error\nError: Tool "browser_run_code_unsafe" does not handle the modal state.',
 							true,
 						);
-					const target = { browserTab: tab, browserDocument: tab, browserUrl: url };
-					return reply(`### Result\n${JSON.stringify(target)}`);
+					const { code } = params.arguments as { code: string };
+					const value = await browserPage.run(code);
+					return reply(value === undefined ? "" : `### Result\n${JSON.stringify(value)}`);
 				}
 				case "browser_tabs":
 					return reply(`### Result\n- 0: (current) [](${url})`);
@@ -975,5 +1011,45 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 					body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
 				}),
 			),
+	};
+}
+
+function standInBrowserPage(currentTab: () => string, url: string) {
+	let cursorVisible = false;
+	const pages: object[] = [];
+	const context = Object.assign(new EventEmitter(), {
+		pages: () => pages,
+		newCDPSession: async () => ({
+			send: async (method: string) => {
+				if (method === "Target.getTargetInfo") return { targetInfo: { targetId: currentTab() } };
+				if (method === "Page.getFrameTree")
+					return { frameTree: { frame: { loaderId: currentTab(), url } } };
+				throw new Error(`Unexpected browser protocol request ${method}`);
+			},
+			detach: async () => {},
+		}),
+	});
+	class Locator {}
+	const page = {
+		context: () => context,
+		locator: () => new Locator(),
+		screencast: {
+			showActions: async () => {
+				cursorVisible = true;
+			},
+			hideActions: async () => {
+				cursorVisible = false;
+			},
+		},
+	};
+	pages.push(page);
+	return {
+		showsCursor: () => cursorVisible,
+		run: (code: string) => {
+			const runCode = runInNewContext(`(${code})`) as (
+				browserPage: typeof page,
+			) => Promise<unknown>;
+			return runCode(page);
+		},
 	};
 }

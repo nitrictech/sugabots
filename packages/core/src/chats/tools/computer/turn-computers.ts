@@ -30,6 +30,7 @@ import {
 	type BrowserSession,
 	type BrowserTarget,
 	browserSession,
+	type CachedBrowserSession,
 	isBrowserTool,
 } from "../browser/browser.ts";
 import { type Failed, failed } from "../failed.ts";
@@ -171,7 +172,7 @@ export const make = Effect.gen(function* () {
 	const keyOf = (turnId: string, executionNumber: number) => `${turnId}/${executionNumber}`;
 	const browserSessions = yield* Cache.make({
 		capacity: 1_024,
-		lookup: (_desktop: string): Effect.Effect<string | undefined> => Effect.undefined,
+		lookup: (_desktop: string): Effect.Effect<CachedBrowserSession | undefined> => Effect.undefined,
 	});
 
 	/** The step's computer `canUse` was proved for, in the chat and project it names. */

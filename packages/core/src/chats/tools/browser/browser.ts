@@ -174,21 +174,52 @@ const desktopCommand = (
 /** There is no desktop to reach, for `reason`. */
 export { DesktopUnavailable };
 
+export interface CachedBrowserSession {
+	readonly id: string;
+	readonly naturalBrowsing: boolean | undefined;
+}
+
 export function browserSession(
 	run: TurnComputer["run"],
 	place: Place,
 	turn: BotBrowsing,
 	providerId: string,
-	sessions: Cache.Cache<string, string | undefined>,
+	sessions: Cache.Cache<string, CachedBrowserSession | undefined>,
 ): BrowserSession {
 	interface ConnectedBrowser {
 		client: Client;
 		transport: StreamableHTTPClientTransport;
 		key: string;
+		naturalBrowsing: boolean | undefined;
 		note?: UserText;
 	}
 	let connecting: Promise<ConnectedBrowser | Failed> | undefined;
 	let told = false;
+
+	const configureAndCacheSession = async (connected: ConnectedBrowser, signal?: AbortSignal) => {
+		if (connected.naturalBrowsing !== turn.naturalBrowsing) {
+			const accent = turn.naturalBrowsing ? botPalettes[turn.color].face : undefined;
+			const result = await connected.client
+				.callTool(
+					{ name: RUN_CODE_TOOL, arguments: { code: naturalBrowsingCode(accent) } },
+					undefined,
+					{ signal },
+				)
+				.catch(() => undefined);
+			// Playwright refuses to run code while a modal is open.
+			connected.naturalBrowsing = result && !result.isError ? turn.naturalBrowsing : undefined;
+		}
+		const { sessionId } = connected.transport;
+		await run(
+			Cache.set(
+				sessions,
+				connected.key,
+				sessionId === undefined
+					? undefined
+					: { id: sessionId, naturalBrowsing: connected.naturalBrowsing },
+			),
+		);
+	};
 
 	const connect = async (computer: Computers.Computer): Promise<ConnectedBrowser | Failed> => {
 		const browser = await run(
@@ -202,16 +233,16 @@ export function browserSession(
 		const endpoint = await run(computer.endpoint(browser.browserPort));
 		const key = JSON.stringify([providerId, computer.id, sessionName(turn)]);
 		// Pending modals belong to the MCP session that opened them, even when a step ends.
-		const sessionId = browser.started ? undefined : await run(Cache.get(sessions, key));
-		const openClient = async (sessionId?: string) => {
+		const cached = browser.started ? undefined : await run(Cache.get(sessions, key));
+		const openClient = async (session?: CachedBrowserSession) => {
 			const client = new Client({ name: "sugabots", version: "1" });
 			const transport = new StreamableHTTPClientTransport(new URL(`${endpoint.url}/mcp`), {
 				requestInit: { headers: endpoint.headers },
 				fetch: endpoint.fetch,
-				sessionId,
+				sessionId: session?.id,
 			});
 			await client.connect(transport);
-			if (sessionId) {
+			if (session) {
 				try {
 					await client.ping();
 				} catch (cause) {
@@ -219,16 +250,13 @@ export function browserSession(
 					throw cause;
 				}
 			}
-			return { client, transport, key };
+			return { client, transport, key, naturalBrowsing: session ? session.naturalBrowsing : false };
 		};
-		const connected = await openClient(sessionId).catch((cause: unknown) => {
-			if (sessionId && cause instanceof StreamableHTTPError && cause.code === 404)
-				return openClient();
+		const connected = await openClient(cached).catch((cause: unknown) => {
+			if (cached && cause instanceof StreamableHTTPError && cause.code === 404) return openClient();
 			throw cause;
 		});
-		await run(Cache.set(sessions, key, connected.transport.sessionId));
-		if (turn.naturalBrowsing && (!sessionId || sessionId !== connected.transport.sessionId))
-			await browseNaturally(connected.client, botPalettes[turn.color].face);
+		await configureAndCacheSession(connected);
 		return {
 			...connected,
 			...(browser.started && {
@@ -254,7 +282,7 @@ export function browserSession(
 		target: async (computer, tool, input, signal) => {
 			const connected = await connectOnce(computer);
 			if ("status" in connected) return undefined;
-			if (tool === "browser_handle_dialog" || tool === "browser_file_upload")
+			if (handlesBrowserModal(tool))
 				return readBrowserModalTarget(connected.client, connected.transport.sessionId, signal);
 			const index =
 				tool === "browser_tabs" &&
@@ -284,6 +312,12 @@ export function browserSession(
 					await connected.client.close();
 				}
 			}
+			if (
+				!result.isError &&
+				handlesBrowserModal(toolName) &&
+				connected.naturalBrowsing !== turn.naturalBrowsing
+			)
+				await configureAndCacheSession(connected, abortSignal);
 			const note = told ? undefined : connected.note;
 			told = true;
 			return toBrowserResult(result.content, note);
@@ -296,6 +330,10 @@ export function browserSession(
 }
 
 const RUN_CODE_TOOL = "browser_run_code_unsafe";
+
+function handlesBrowserModal(tool: string) {
+	return tool === "browser_handle_dialog" || tool === "browser_file_upload";
+}
 
 const browserUrlSchema = Schema.NonEmptyString.check(Schema.isMaxLength(8_192));
 const browserTargetSchema = Schema.Struct({
@@ -375,46 +413,36 @@ async function readBrowserTarget(client: Client, index: number | null, signal: A
 }
 
 /**
- * Has the browser's MCP server act naturally for the rest of this session,
- * the turn's, in `accent`. Browsing naturally only helps members watching, so
- * when the server refuses it the bot browses plainly rather than failing.
- */
-async function browseNaturally(client: Client, accent: string) {
-	await client
-		.callTool({ name: RUN_CODE_TOOL, arguments: { code: naturalBrowsingCode(accent) } })
-		.catch(() => undefined);
-}
-
-/**
- * Playwright code for the browser's MCP server: a cursor on each tab, drawn
- * by Playwright, that moves to what the bot uses and rings it; a smooth
- * scroll to it first; and typing at a typing pace rather than setting a
- * field's value.
+ * naturalBrowsingCode generates Playwright code to show a cursor in `accent`,
+ * scroll smoothly and type at a typing pace. An undefined accent disables these.
  *
- * The scrolling and typing wrap the Locator methods the server's tools act
- * through, which every MCP session in the server shares, so they're wrapped
- * once and act naturally only for a session whose browser context is marked.
- * Each session connects to the browser anew, with a context of its own, so
- * the next turn's browses plainly unless this runs again.
+ * Each MCP session has its own browser context. The server shares the Locator
+ * methods across sessions, so the wrappers check whether that context shows a cursor.
  */
-function naturalBrowsingCode(accent: string) {
+function naturalBrowsingCode(accent: string | undefined) {
 	return `async (page) => {
-	const cursor = ${JSON.stringify(cursorOptions(accent))};
+	const cursor = ${JSON.stringify(accent === undefined ? null : cursorOptions(accent))};
+	const context = page.context();
+	if (context.sugabotsShowCursor) context.off("page", context.sugabotsShowCursor);
+	if (!cursor) {
+		context.sugabotsShowCursor = undefined;
+		await Promise.all(context.pages().map((tab) => tab.screencast.hideActions()));
+		return;
+	}
+	const showCursor = (tab) => tab.screencast.showActions(cursor);
+	context.sugabotsShowCursor = (tab) => showCursor(tab).catch(() => {});
+	context.on("page", context.sugabotsShowCursor);
+	await Promise.all(context.pages().map(showCursor));
+
 	const TYPING_DELAY_MILLISECONDS = 70;
 	// Long text is typed faster, so filling in a long field doesn't hold up a turn.
 	const LONGEST_TYPING_MILLISECONDS = 6000;
 	// A smooth scroll that had nowhere to go never says it ended.
 	const LONGEST_SCROLL_MILLISECONDS = 1500;
-	const context = page.context();
-	context.sugabotsNaturalBrowsing = true;
-	const showCursor = (tab) => tab.screencast.showActions(cursor);
-	await Promise.all(context.pages().map(showCursor));
-	context.on("page", (tab) => showCursor(tab).catch(() => {}));
-
 	const Locator = Object.getPrototypeOf(page.locator("body"));
 	if (Locator.sugabotsWrapped) return;
 	Locator.sugabotsWrapped = true;
-	const natural = (locator) => locator.page().context().sugabotsNaturalBrowsing === true;
+	const natural = (locator) => locator.page().context().sugabotsShowCursor !== undefined;
 	const scrollSmoothlyTo = (locator) =>
 		locator
 			.evaluate(

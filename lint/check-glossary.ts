@@ -413,7 +413,11 @@ const CHECKED_WORDS: readonly CheckedWord[] = [
 	{ word: "truncated output" },
 	{ word: "turn-taking" },
 	{ word: "witness" },
-	{ word: "vm" },
+	{
+		word: "vm",
+		// Node's module for running JavaScript in a separate context.
+		otherMeanings: /node:vm/g,
+	},
 
 	// Errors
 	{ word: "error id" },
