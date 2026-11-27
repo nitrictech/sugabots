@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedBot,
+	seedComputer,
 	seedConnector,
 	seedMember,
 	seedMessage,
@@ -15,10 +16,11 @@ import {
 	setRole,
 } from "../authentication/seed.test-support.ts";
 import { turnFacts } from "../authentication/turn-facts.ts";
+import type { Computers } from "../computers/computers.ts";
 import { query } from "../database/database.ts";
-import { connector, projectMember, toolCall, turn } from "../database/schema.ts";
+import { computer, connector, projectMember, toolCall, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
-import type { Call } from "../operations/operation.ts";
+import { ApprovalCheckReached, type Call } from "../operations/operation.ts";
 import type { BotForAsker, Principal } from "../principal.ts";
 import {
 	type ApprovalRule,
@@ -26,10 +28,12 @@ import {
 	approvalRule,
 	type OrdinaryApproval,
 	proveApproved,
+	proveComputerUseApproved,
 	proveConnectorApproved,
 } from "./approved.ts";
 import { approvalAudience } from "./approvers.ts";
 import { proveCanDecide } from "./can-decide.ts";
+import { proveCanUseChatComputer } from "./can-use-computer.ts";
 import { proveCanUseConnector } from "./can-use-connector.ts";
 import { proveEndsTurn } from "./ends-turn.ts";
 import { proveIsMember } from "./is-member.ts";
@@ -601,6 +605,60 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ok");
 			await setRole(a.workspace, approver, "editor");
 			expect(await approved(principal, toolCallOf(allowed), always, input)).toBe("ApprovalNeeded");
+		});
+
+		it("takes an approval to work on a computer as covering only the machine it was on", async () => {
+			const { a } = world;
+			const computerBot = await seedBot(a.workspace, { createdById: a.ed, usesComputer: true });
+			const project = await seedProject(a.workspace, {
+				leadBotId: computerBot.id,
+				members: [a.ed],
+			});
+			const computerId = await seedComputer(a.workspace, project);
+			const edsBot = await as.botFor(
+				a.ed,
+				computerBot.id,
+				await seedProjectChat(a.workspace, project, a.ed),
+			);
+			const rule = approvalRule("computers.runCommand");
+			const command = { command: "make deploy", timeout_seconds: 60 };
+			const approvedFor = (call: Call) =>
+				named(edsBot, edsBot.chat, call, command, (principal, chat, call, input) =>
+					Effect.gen(function* () {
+						const canUse = yield* proveCanUseChatComputer(principal, chat);
+						yield* proveComputerUseApproved(principal, call, rule, input, canUse);
+					}),
+				);
+			const checked = await runOnPostgres(
+				approvedFor({ kind: "approvalCheck" }).pipe(
+					Effect.flip,
+					Effect.map((reached) =>
+						reached instanceof ApprovalCheckReached ? reached.details : undefined,
+					),
+				),
+			);
+			const allowed = await seedApprovalCall(edsBot, {
+				tool: rule.tool,
+				status: "allowed",
+				decidedBy: a.ed,
+				input: command,
+			});
+			await onDatabase((db) =>
+				db
+					.update(toolCall)
+					.set({ approvalResolvedTargets: checked?.resolvedTargets ?? null })
+					.where(eq(toolCall.id, allowed)),
+			);
+			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ok");
+
+			// Its provider recovered it onto another machine, under the same record.
+			await onDatabase((db) =>
+				db
+					.update(computer)
+					.set({ providerComputerId: "another-machine" as Computers.ComputerId })
+					.where(eq(computer.id, computerId)),
+			);
+			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ApprovalNeeded");
 		});
 
 		it("makes a personal bot ask its creator before any change, and before every call of a run from outside", async () => {

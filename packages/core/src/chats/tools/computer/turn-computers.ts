@@ -450,24 +450,30 @@ function inComputer<A extends object>(
 
 /**
  * The computer an approver allowed the call on: the project's computer
- * record as the call was proved, or null when it had none, so only a computer
- * the step made for it will do. Undefined for a call nobody approved, which
- * any computer of the project serves.
+ * record and the provider's machine under it as the call was proved, or null
+ * when it had none, so only a computer the step made for it will do.
+ * Undefined for a call nobody approved, which any computer of the project
+ * serves.
  */
-type ApprovedComputer = { readonly record: string | null } | undefined;
+type ApprovedComputer =
+	| { readonly record: string | null; readonly machine: string | null }
+	| undefined;
 
 /** The computer the call `approved` was allowed on, as `canUse` proved it. */
 function approvedComputer<P, C, X, N extends ApprovedOperation>(
 	canUse: CanUseChatComputer<P, C>,
 	approved: Approved<P, X, [C], N>,
 ): ApprovedComputer {
-	return approved.decidedBy === null ? undefined : { record: canUse.computer };
+	return approved.decidedBy === null
+		? undefined
+		: { record: canUse.computer, machine: canUse.machine };
 }
 
 /**
  * Opens the step's computer, which takes the step's lease on it, and checks it
- * is the one `expected` names: a computer reset or made since the call was
- * approved needs a fresh approval. A refusal the bot can act on becomes a result.
+ * is the one `expected` names: a computer reset, made or moved to another
+ * machine since the call was approved needs a fresh approval. A refusal the
+ * bot can act on becomes a result.
  */
 function openAsApproved(
 	computer: TurnComputer,
@@ -487,7 +493,9 @@ function openAsApproved(
 		);
 		if ("status" in opened || expected === undefined) return opened;
 		const asApproved =
-			expected.record === null ? opened.madeInStep : opened.record === expected.record;
+			expected.record === null
+				? opened.madeInStep
+				: opened.record === expected.record && opened.computer.id === expected.machine;
 		if (!asApproved) return yield* new ApprovalNeeded();
 		return opened;
 	});

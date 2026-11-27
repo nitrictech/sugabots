@@ -117,6 +117,13 @@ export interface CanUseChatComputer<P, C> extends Proof<"CanUseChatComputer", [P
 	 * on one doesn't cover its replacement.
 	 */
 	readonly computer: string | null;
+	/**
+	 * The provider's id for the machine `computer` was on as this was proved,
+	 * or null before one is made. Its provider may recover or upgrade a
+	 * computer onto a new machine under the same record, and an approval to
+	 * work on one machine doesn't cover another.
+	 */
+	readonly machine: string | null;
 	/** The turn working on it, and which execution of the turn: the step that opened the computer. */
 	readonly turn: string;
 	readonly executionNumber: number;
@@ -156,7 +163,7 @@ export const proveCanUseChatComputer = <P, C>(
 		}
 		const [made] = yield* query((db) =>
 			db
-				.select({ id: computer.id })
+				.select({ id: computer.id, machine: computer.providerComputerId })
 				.from(computer)
 				.where(eq(computer.projectId, facts.project.id))
 				.limit(1),
@@ -168,6 +175,7 @@ export const proveCanUseChatComputer = <P, C>(
 			project: facts.project.id,
 			bot: acting.bot,
 			computer: made?.id ?? null,
+			machine: made?.machine ?? null,
 			turn: acting.turn,
 			executionNumber: acting.executionNumber,
 		});

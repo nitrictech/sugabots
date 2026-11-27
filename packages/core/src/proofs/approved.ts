@@ -157,6 +157,30 @@ export const proveApprovedAsResolved = <
 ) => proveApproval(principal, call, rule, input, targets, { resolvedTargets });
 
 /**
+ * `proveApproved` for a bot's work on its chat's computer, as `computerUse`
+ * proved it: an approval covers the computer the project had when it was
+ * given, on the machine it was on then, not one made since in its place, nor
+ * the same computer its provider has since recovered or upgraded onto another
+ * machine.
+ */
+export const proveComputerUseApproved = <
+	P,
+	X,
+	N extends Exclude<ApprovedOperation, "connectors.callTool">,
+	I,
+	C,
+>(
+	principal: Named<P, Principal>,
+	call: Named<X, Call>,
+	rule: ApprovalRule<OrdinaryApproval, N>,
+	input: Named<I, InputOf<NoInfer<N>>>,
+	computerUse: CanUseChatComputer<NoInfer<P>, C>,
+) =>
+	proveApproval(principal, call, rule, input, [computerUse.chat], {
+		resolvedTargets: { computer: computerUse.computer, machine: computerUse.machine },
+	});
+
+/**
  * `proveApproved` for a bot's request to reach a host, bound to the project
  * whose computer it asked from, not to that computer: allowing it adds the
  * host to the project's allowed hosts, which are the project's policy for
