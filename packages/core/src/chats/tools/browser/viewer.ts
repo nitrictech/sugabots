@@ -13,6 +13,7 @@ import {
 	bot as botTable,
 	chatParticipant,
 	computer as computerTable,
+	projectBot,
 } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
 import type { CanUseComputer } from "../../../proofs/can-use-computer.ts";
@@ -99,7 +100,11 @@ export const make = Effect.gen(function* () {
 	const ids = yield* Ids.Service;
 	const operation = yield* serviceOperations<Interface>("DesktopViewer");
 
-	/** Whether the bot is the one the chat is with, or was added to it. */
+	/**
+	 * Whether the bot is the one the chat is with, or was added to it and is
+	 * still one of its project's bots: a bot that left the project, as one made
+	 * private leaves a public one, no longer works on its computer.
+	 */
 	const takesPart = <P, C, B>(chat: ReachesChat<P, C>, bot: Named<B, string>) =>
 		chat.project.defaultOf?.id === bot.value
 			? Effect.succeed(true)
@@ -107,6 +112,13 @@ export const make = Effect.gen(function* () {
 					db
 						.select({ id: chatParticipant.id })
 						.from(chatParticipant)
+						.innerJoin(
+							projectBot,
+							and(
+								eq(projectBot.projectId, chat.project.id),
+								eq(projectBot.botId, chatParticipant.botId),
+							),
+						)
 						.where(
 							and(
 								eq(chatParticipant.chatId, chat.chat.value),

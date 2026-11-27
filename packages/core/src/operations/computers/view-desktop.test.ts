@@ -16,16 +16,19 @@ import {
 } from "../../authentication/seed.test-support.ts";
 import { chatServicesForTests } from "../../chats/testing.ts";
 import { DesktopViewer } from "../../chats/tools/browser/viewer.ts";
+import { ComputerProviderStore } from "../../computers/computer-provider-store.ts";
 import { Computers } from "../../computers/computers.ts";
+import { ProjectComputers } from "../../computers/project-computers.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { inMemoryEventStore } from "../../database/events/testing.ts";
-import { bot, chatParticipant, session } from "../../database/schema.ts";
+import { chatParticipant, session } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import type { MemberSession } from "../../principal.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { Streams } from "../../streams/streams.ts";
+import { unimplemented } from "../../testing.ts";
 import { type CallOperation, servedRegistry } from "../testing.ts";
 import { viewDesktop } from "./view-desktop.ts";
 
@@ -62,47 +65,51 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		setNetwork: unexpectedComputerCall,
 	} satisfies Computers.Computer;
 
-	/** Shows a desktop on the computer seeded for the chat's project, whoever may use it. */
-	const standIn = DesktopViewer.Service.of({
-		openComputer: (chat, bot) =>
-			Effect.succeed({
-				id: computers.get(chat.project.id) ?? "",
-				computer: desktopComputer,
-				holder: { kind: "viewer", id: randomUUID() },
-				chat: chat.chat.value,
-				bot: { id: bot.value, color: "green" },
-			}),
-		show: (opened, canUse) =>
-			Effect.succeed({
-				endpoint: { url: `http://desktop.test/${opened.id}`, headers: {} },
-				password: "password",
-				control: canUse.control,
-			}),
-		stillShown: (chat, shown) =>
-			Effect.gen(function* () {
-				const unavailable = new DesktopUnavailable({
-					reason: userText`The bot has no desktop here.`,
-				});
-				const [found] = yield* Effect.tryPromise({
-					try: () =>
-						onDatabase((db) =>
-							db
-								.select({ usesComputer: bot.usesComputer })
-								.from(bot)
-								.where(eq(bot.id, shown.value)),
-						),
-					catch: () => unavailable,
-				});
-				if (leftAfterOpening.has(chat.chat.value) || !found?.usesComputer)
-					return yield* unavailable;
-				return computers.get(chat.project.id) ?? "";
-			}),
-	});
+	/**
+	 * Shows a desktop on the computer seeded for the chat's project, once the
+	 * viewer's own check finds the bot works there, as it does again on each
+	 * proof: only opening a computer and starting its desktop are stood in for.
+	 */
+	const standInOver = (production: DesktopViewer.Interface) =>
+		DesktopViewer.Service.of({
+			openComputer: (chat, shown) =>
+				Effect.map(production.stillShown(chat, shown), (id) => ({
+					id,
+					computer: desktopComputer,
+					holder: { kind: "viewer", id: randomUUID() },
+					chat: chat.chat.value,
+					bot: { id: shown.value, color: "green" },
+				})),
+			show: (opened, canUse) =>
+				Effect.succeed({
+					endpoint: { url: `http://desktop.test/${opened.id}`, headers: {} },
+					password: "password",
+					control: canUse.control,
+				}),
+			stillShown: (chat, shown) =>
+				leftAfterOpening.has(chat.chat.value)
+					? Effect.fail(new DesktopUnavailable({ reason: userText`The bot has no desktop here.` }))
+					: production.stillShown(chat, shown),
+		});
+	let standIn: DesktopViewer.Interface;
 
 	beforeAll(async () => {
 		const chats = await chatServicesForTests(bus);
 		({ call } = await servedRegistry({ chats, bus: Layer.succeed(EventBus.Service, bus) }));
 		signedIn = principals(await authenticators());
+		standIn = standInOver(
+			await runOnPostgres(
+				Effect.provide(
+					DesktopViewer.Service,
+					DesktopViewer.layerNoDeps.pipe(
+						Layer.provide([
+							unimplemented(ProjectComputers.Service),
+							unimplemented(ComputerProviderStore.Service),
+						]),
+					),
+				),
+			),
+		);
 		streams = await runOnPostgres(
 			Effect.provide(
 				Streams.Service,
@@ -316,6 +323,24 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		});
 
 		expect(await ed.ends()).toBe(true);
+	});
+
+	it("closes once its bot leaves the chat's project, and opens no more for it there", async () => {
+		const world = await staffed();
+		const helper = await seedBot(world.workspace, { createdById: world.ed, usesComputer: true });
+		const ed = await signedIn.member(world.ed);
+		await call(ed, "projects.addBot", { projectId: world.project, botId: helper.id });
+		await onDatabase((db) =>
+			db.insert(chatParticipant).values({ chatId: world.chat, botId: helper.id }),
+		);
+		const watching = await view(ed, world.chat, helper.id);
+
+		await call(ed, "projects.removeBot", { projectId: world.project, botId: helper.id });
+
+		expect(await watching.ends()).toBe(true);
+		await expect(view(ed, world.chat, helper.id)).rejects.toMatchObject({
+			_tag: "DesktopUnavailable",
+		});
 	});
 
 	it("refuses to open, handing on no desktop, when its first proof after opening is refused", async () => {
