@@ -178,7 +178,7 @@ export const MadePrivate = meta.story({
 	},
 	play: async ({ args, userEvent }) => {
 		const dialog = await screen.findByRole("dialog", { name: "New bot" });
-		const choice = within(dialog).getByRole("group", { name: "Who can see it" });
+		const choice = within(dialog).getByRole("radiogroup", { name: "Who can see it" });
 		await expect(within(choice).getByRole("radio", { name: "Public" })).toBeChecked();
 		await expect(
 			within(dialog).getByText("Everyone in the workspace can see it and talk to it."),

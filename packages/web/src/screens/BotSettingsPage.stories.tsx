@@ -253,7 +253,7 @@ export const PrivateBotMembers = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		const visibility = await canvas.findByRole("group", { name: "Visibility" });
+		const visibility = await canvas.findByRole("radiogroup", { name: "Visibility" });
 		await expect(within(visibility).getByRole("radio", { name: "Private" })).toBeChecked();
 		await expect(
 			canvas.getByText(/^Only its members can see it and talk to it/),
@@ -274,7 +274,7 @@ export const PrivateBotMembers = meta.story({
  */
 export const MakingPrivate = meta.story({
 	play: async ({ canvas, userEvent }) => {
-		const visibility = await canvas.findByRole("group", { name: "Visibility" });
+		const visibility = await canvas.findByRole("radiogroup", { name: "Visibility" });
 		await userEvent.click(within(visibility).getByRole("radio", { name: "Private" }));
 		const dialog = await within(document.body).findByRole("dialog", {
 			name: `Make ${growthDesk.name} private?`,

@@ -7,7 +7,7 @@ import { BotCrumb } from "@/shell/BotCrumb.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { SettingsGroup, SettingsPage, SettingsRow } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 
 export function BotConnectorRestrictions({ bot }: { bot: Bot }) {
 	const connectors = useRestrictableConnectors(bot.defaultProjectId);
@@ -19,11 +19,11 @@ export function BotConnectorRestrictions({ bot }: { bot: Bot }) {
 					key={id}
 					label={name}
 					trailing={
-						<Toggle
-							label={`Turn off ${name}`}
+						<Switch
+							aria-label={`Turn off ${name}`}
 							checked={enabled}
 							disabled={!enabled || update.isPending}
-							onChange={() => update.mutate({ connectorId: id, json: { enabled: false } })}
+							onCheckedChange={() => update.mutate({ connectorId: id, json: { enabled: false } })}
 						/>
 					}
 				/>
@@ -43,11 +43,11 @@ export function BotAutomationRestrictions({ bot }: { bot: Bot }) {
 					key={id}
 					label={name}
 					trailing={
-						<Toggle
-							label={`Pause ${name}`}
+						<Switch
+							aria-label={`Pause ${name}`}
 							checked={state === "enabled"}
 							disabled={state === "paused" || update.isPending}
-							onChange={() =>
+							onCheckedChange={() =>
 								update.mutate({ projectId, automationId: id, json: { state: "paused" } })
 							}
 						/>

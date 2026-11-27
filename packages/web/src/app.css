@@ -947,6 +947,14 @@
 @utility max-h-dialog {
 	max-height: calc(100dvh - 20px);
 }
+/* The new-bot dialog's height on a wide screen, so moving between its steps does not resize it. */
+@utility h-bot-editor {
+	height: 580px;
+}
+/* The avatar editor's height on a wide screen. */
+@utility h-avatar-editor {
+	height: 460px;
+}
 @utility max-h-approval {
 	max-height: min(38rem, calc(100dvh - 4rem));
 }

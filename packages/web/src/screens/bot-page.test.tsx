@@ -132,10 +132,10 @@ describe("what everybody sees", () => {
 		mount(page);
 
 		const profile = await screen.findByRole("region", { name: "Profile" });
-		const visibility = await within(profile).findByRole("group", { name: "Visibility" });
+		const visibility = await within(profile).findByRole("radiogroup", { name: "Visibility" });
 		expect(
-			within(visibility).getByRole<HTMLInputElement>("radio", { name: "Public" }).checked,
-		).toBe(true);
+			within(visibility).getByRole("radio", { name: "Public" }).getAttribute("aria-checked"),
+		).toBe("true");
 		within(visibility).getByRole("radio", { name: "Private" });
 		expect(within(visibility).queryByRole("radio", { name: "Personal" })).toBeNull();
 	});
@@ -147,7 +147,7 @@ describe("what everybody sees", () => {
 		const profile = await screen.findByRole("region", { name: "Profile" });
 		await within(profile).findByText("Visibility");
 		within(profile).getByText("Public");
-		expect(within(profile).queryByRole("group", { name: "Visibility" })).toBeNull();
+		expect(within(profile).queryByRole("radiogroup", { name: "Visibility" })).toBeNull();
 	});
 
 	it("says a bot nobody added was made with the workspace", async () => {

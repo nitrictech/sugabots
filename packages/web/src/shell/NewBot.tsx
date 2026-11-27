@@ -42,8 +42,8 @@ import { CloseButton } from "@/ui/close-button.tsx";
 import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/ui/dialog.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { LetterTile } from "@/ui/letter-tile.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SettingsRadioMark } from "@/ui/settings-page.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs.tsx";
 
@@ -143,12 +143,12 @@ export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<v
 		<DialogContent
 			showCloseButton={false}
 			// On a phone, a page of its own, as tall as what the keyboard leaves.
-			className="max-h-dialog gap-0 overflow-hidden p-0 sm:max-w-195 max-md:inset-0 max-md:flex max-md:h-visible max-md:max-h-none max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:flex-col max-md:rounded-none"
+			className="max-h-dialog gap-0 overflow-hidden p-0 sm:max-w-3xl max-md:inset-0 max-md:flex max-md:h-visible max-md:max-h-none max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:flex-col max-md:rounded-none"
 		>
 			<DialogTitle className="sr-only">New bot</DialogTitle>
 			<form
 				onSubmit={submit}
-				className="flex min-h-0 min-w-0 flex-col max-md:flex-1 max-md:overflow-y-auto md:h-145 md:flex-row"
+				className="flex min-h-0 min-w-0 flex-col max-md:flex-1 max-md:overflow-y-auto md:h-bot-editor md:flex-row"
 			>
 				{phone ? (
 					<PhoneNewBot
@@ -181,7 +181,7 @@ export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<v
 				) : (
 					<>
 						<div
-							className="flex w-75 shrink-0 flex-col items-center gap-5 p-6 transition-colors"
+							className="flex w-72 shrink-0 flex-col items-center gap-5 p-6 transition-colors"
 							style={stage}
 						>
 							<input
@@ -681,7 +681,7 @@ function Tile({
 	return (
 		<label
 			className={cn(
-				size === "sm" ? "size-14" : "size-17",
+				size === "sm" ? "size-14" : "size-16",
 				"grid shrink-0 cursor-pointer place-items-center rounded-xl transition-colors has-focus-visible:shadow-(--ring-shadow)",
 				// One inset ring rather than a border round a fill, whose two rounded edges leave a seam.
 				chosen ? "bg-chip inset-ring-2 inset-ring-subtle-foreground" : "hover:bg-chip",
@@ -701,7 +701,7 @@ function Tile({
 }
 
 /** The height of a right-hand page's title row, the same for the models and a avatar's parts. */
-const HEADER_ROW = "flex h-5.5 shrink-0 items-center";
+const HEADER_ROW = "flex h-6 shrink-0 items-center";
 
 /** A step past the start: Back, and its title or tabs beside it. */
 function StepHeader({ onBack, children }: { onBack?: () => void; children: ReactNode }) {
@@ -826,6 +826,12 @@ function ProviderMark({ model }: { model: OfferedModel }) {
 }
 
 /** What each choice of who sees a new bot means, in a line under the choice. */
+const VISIBILITY_OPTIONS: readonly { value: BotVisibility; label: string }[] = [
+	{ value: "public", label: "Public" },
+	{ value: "private", label: "Private" },
+	{ value: "personal", label: "Personal" },
+];
+
 const VISIBILITY_MEANINGS: Record<BotVisibility, string> = {
 	public: "Everyone in the workspace can see it and talk to it.",
 	private: "Only you, admins and the members you invite can see it.",
@@ -846,18 +852,19 @@ function VisibilityChoice({
 	const meaning = useId();
 	return (
 		<div className="flex w-full flex-col gap-1.5">
-			<SegmentedControl
-				label="Who can see it"
-				options={[
-					{ value: "public", label: "Public" },
-					{ value: "private", label: "Private" },
-					{ value: "personal", label: "Personal" },
-				]}
+			<RadioGroup
+				aria-label="Who can see it"
+				aria-describedby={meaning}
 				value={value}
-				onChange={onChange}
+				onValueChange={onChange}
 				className="w-full"
-				describedBy={meaning}
-			/>
+			>
+				{VISIBILITY_OPTIONS.map((option) => (
+					<RadioGroupItem key={option.value} value={option.value} className="flex-1">
+						{option.label}
+					</RadioGroupItem>
+				))}
+			</RadioGroup>
 			<p id={meaning} className="text-muted-foreground text-xs">
 				{VISIBILITY_MEANINGS[value]}
 			</p>

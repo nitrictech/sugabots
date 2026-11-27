@@ -55,7 +55,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { InstructionsField } from "@/ui/instructions-field.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import {
 	SettingsControlRow,
 	SettingsDanger,
@@ -65,7 +65,8 @@ import {
 	SettingsRowAlert,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import { BotAutomations } from "./AutomationEditing.tsx";
 import { AddMembersMenu, MemberRows } from "./MemberList.tsx";
@@ -238,7 +239,7 @@ function EditableFace({ bot, save, savePending }: { bot: Bot; save: Save; savePe
 				<span
 					aria-hidden
 					// Cut out of the face by a ring of the page's own colour.
-					className="absolute -right-1.5 -bottom-1.5 grid size-5.5 place-items-center rounded-full border-2 border-background bg-chip text-muted-foreground transition-colors group-hover/face:bg-hover group-hover/face:text-foreground"
+					className="absolute -right-1.5 -bottom-1.5 grid size-6 place-items-center rounded-full border-2 border-background bg-chip text-muted-foreground transition-colors group-hover/face:bg-hover group-hover/face:text-foreground"
 				>
 					<Pencil size={11} strokeWidth={2.2} />
 				</span>
@@ -356,14 +357,14 @@ function LookEditor({
 	return (
 		<DialogContent
 			showCloseButton={false}
-			className="max-h-dialog gap-0 overflow-hidden p-0 sm:max-w-170"
+			className="max-h-dialog gap-0 overflow-hidden p-0 sm:max-w-2xl"
 		>
 			<DialogTitle className="sr-only">{bot.name}'s avatar</DialogTitle>
 			<form
 				onSubmit={submit}
-				className="flex min-h-0 min-w-0 flex-col max-md:overflow-y-auto md:h-115 md:flex-row"
+				className="flex min-h-0 min-w-0 flex-col max-md:overflow-y-auto md:h-avatar-editor md:flex-row"
 			>
-				<div className="flex shrink-0 flex-col gap-4 p-6 transition-colors md:w-65" style={stage}>
+				<div className="flex shrink-0 flex-col gap-4 p-6 transition-colors md:w-64" style={stage}>
 					<div className="grid flex-1 place-items-center py-2">
 						<BotAvatar color={avatar.color} eyes={avatar.eyes} shape={avatar.shape} size={88} />
 					</div>
@@ -497,7 +498,7 @@ function Instructions({
 				readOnly={!editable}
 				maxLength={INSTRUCTIONS_MAX_LENGTH}
 				placeholder="No instructions yet."
-				className="min-h-75"
+				className="min-h-72"
 			/>
 		</SettingsGroup>
 	);
@@ -732,13 +733,17 @@ function ToolRow({
 			sub={sub}
 			trailing={
 				canChange ? (
-					<Toggle
-						checked={on}
-						disabled={offReason !== undefined}
-						tooltip={offReason}
-						label={`${on ? "Turn off" : "Turn on"} ${label}`}
-						onChange={onChange}
-					/>
+					<Tooltip label={offReason} side="top" disabled={offReason === undefined}>
+						{/* On a wrapper, as a disabled switch receives no pointer events. */}
+						<span className="inline-flex shrink-0">
+							<Switch
+								checked={on}
+								disabled={offReason !== undefined}
+								aria-label={`${on ? "Turn off" : "Turn on"} ${label}`}
+								onCheckedChange={onChange}
+							/>
+						</span>
+					</Tooltip>
 				) : (
 					<SettingsValue>{on ? "On" : "Off"}</SettingsValue>
 				)
@@ -800,17 +805,16 @@ function VisibilityRow({ bot }: { bot: Bot }) {
 				sub={VISIBILITY_MEANINGS[current]}
 				trailing={
 					bot.permissions.update ? (
-						<SegmentedControl
-							label="Visibility"
-							options={[
-								{ value: "public", label: "Public" },
-								{ value: "private", label: "Private" },
-							]}
+						<RadioGroup
+							aria-label="Visibility"
 							value={current}
-							onChange={(chosen) => {
+							onValueChange={(chosen) => {
 								if (chosen !== current) setSwitching(chosen);
 							}}
-						/>
+						>
+							<RadioGroupItem value="public">Public</RadioGroupItem>
+							<RadioGroupItem value="private">Private</RadioGroupItem>
+						</RadioGroup>
 					) : (
 						<SettingsValue>{current === "public" ? "Public" : "Private"}</SettingsValue>
 					)
