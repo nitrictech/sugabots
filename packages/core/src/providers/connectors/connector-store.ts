@@ -277,7 +277,27 @@ export const make = Effect.gen(function* () {
 		test?: { at: Date; error: UserText | null },
 	) => {
 		const fingerprint = listing && fingerprintToolDefinitions(listing.definitions);
-		return query((db) =>
+		const sameConnector = and(
+			eq(connector.id, target.connectorId),
+			eq(connector.workspaceId, workspaceId),
+		);
+		const readRevision = (revision: number, fingerprint: string) =>
+			query((db) =>
+				db
+					.select({ revision: connector.configurationRevision })
+					.from(connector)
+					.where(
+						and(
+							sameConnector,
+							eq(connector.configurationRevision, revision),
+							eq(connector.toolDefinitionsFingerprint, fingerprint),
+						),
+					),
+			).pipe(Effect.map(([row]) => row?.revision));
+		if (!test && fingerprint !== undefined && fingerprint === target.toolDefinitionsFingerprint)
+			return readRevision(target.configurationRevision, fingerprint);
+
+		const update = query((db) =>
 			db
 				.update(connector)
 				.set({
@@ -295,8 +315,7 @@ export const make = Effect.gen(function* () {
 				})
 				.where(
 					and(
-						eq(connector.id, target.connectorId),
-						eq(connector.workspaceId, workspaceId),
+						sameConnector,
 						or(
 							and(
 								eq(connector.configurationRevision, target.configurationRevision),
@@ -306,7 +325,7 @@ export const make = Effect.gen(function* () {
 							),
 							// One revision with a new fingerprint means another listing won.
 							// An edit would have taken a revision of its own.
-							fingerprint !== undefined && fingerprint !== target.toolDefinitionsFingerprint
+							test && fingerprint !== undefined && fingerprint !== target.toolDefinitionsFingerprint
 								? and(
 										eq(connector.configurationRevision, target.configurationRevision + 1),
 										eq(connector.toolDefinitionsFingerprint, fingerprint),
@@ -317,6 +336,14 @@ export const make = Effect.gen(function* () {
 				)
 				.returning({ revision: connector.configurationRevision }),
 		).pipe(Effect.map(([row]) => row?.revision));
+		if (test || fingerprint === undefined) return update;
+		return update.pipe(
+			Effect.flatMap((revision) =>
+				revision === undefined
+					? readRevision(target.configurationRevision + 1, fingerprint)
+					: Effect.succeed(revision),
+			),
+		);
 	};
 
 	return Service.of({

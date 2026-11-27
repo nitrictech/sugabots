@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConnectorTool, NewConnector } from "@sugabots/contracts";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedConnector, seedMember } from "../../authentication/seed.test-support.ts";
@@ -625,7 +625,7 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		});
 	});
 
-	it("uses the same revision for two discoveries of the same tools", async () => {
+	it("keeps the revision and row version for repeated discoveries of the same tools", async () => {
 		const made = await create({ name: "Wiki", url: "https://wiki.example.com/mcp" });
 		const target = await connectors.target(workspaceId, projectId, made.id);
 		if (!target) throw new Error("No connector to list");
@@ -640,12 +640,29 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		]);
 
 		expect(revisions).toEqual([2, 2]);
+		const current = await connectors.target(workspaceId, projectId, made.id);
+		if (!current) throw new Error("No connector to list");
+		const rowVersion = async () => {
+			const [row] = await onDatabase((db) =>
+				db
+					.select({ xmin: sql<string>`xmin::text` })
+					.from(connector)
+					.where(eq(connector.id, made.id)),
+			);
+			return row?.xmin;
+		};
+		const before = await rowVersion();
+		expect(await connectors.recordListing(workspaceId, current, listing)).toBe(2);
+		expect(await connectors.recordListing(workspaceId, target, listing)).toBe(2);
+		expect(await rowVersion()).toBe(before);
 		expect(await connectors.recordTest(workspaceId, target, listing)).toBe(true);
 		expect(await shown(made.id)).toMatchObject({ status: "connected" });
+		expect(await rowVersion()).not.toBe(before);
 		await connectors.update(workspaceId, projectId, made.id, {
 			url: "https://another.example.com/mcp",
 		});
 		expect(await connectors.recordListing(workspaceId, target, listing)).toBeUndefined();
+		expect(await connectors.recordListing(workspaceId, current, listing)).toBeUndefined();
 	});
 
 	it("records what a test found, and forgets it when the connector changes", async () => {
