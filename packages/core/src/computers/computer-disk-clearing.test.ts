@@ -8,6 +8,7 @@ import { automation, message, type TurnStatus, turn } from "../database/schema.t
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { Ids } from "../ids/ids.ts";
 import { defaultProjectOf } from "../workspaces/projects/project-reads.ts";
+import { measureDisk } from "./computer-disk.ts";
 import { BOT_CACHES, prepareDiskClearing, SET_ASIDE_DIRECTORY } from "./computer-disk-clearing.ts";
 import { Computers } from "./computers.ts";
 import { localComputerEgress, removeWorkVolumes } from "./testing.ts";
@@ -246,7 +247,9 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 		};
 
 		beforeEach(async () => {
-			await run(`rm -rf ${Computers.CHATS_DIRECTORY} ${Computers.BOTS_DIRECTORY}`);
+			await run(
+				`rm -rf ${[...Computers.CHAT_DIRECTORIES, ...Computers.BOT_DIRECTORIES].join(" ")}`,
+			);
 		});
 
 		/** Every path under `directory`, relative to it. */
@@ -254,6 +257,46 @@ describe.skipIf(!env.DATABASE_URL)("what may be cleared from a computer, against
 			(await run(`cd ${directory} && find . -mindepth 1 | sort`)).split("\n").filter(Boolean);
 
 		const chatFolders = () => pathsUnder(Computers.CHATS_DIRECTORY);
+
+		it(
+			"measures and clears unvisited folders from both layouts",
+			async () => {
+				const legacyChats = Computers.LEGACY_CHATS_DIRECTORY;
+				const legacyHomes = Computers.LEGACY_BOTS_DIRECTORY;
+				const folded = crypto.randomUUID();
+				const resolved = await aChat(true, at(60));
+				const open = await aChat(false, at(60));
+				const deletedBot = crypto.randomUUID();
+				await run(
+					[
+						`cd ${Computers.WORK_DIRECTORY}`,
+						`mkdir -p ${legacyChats}/${folded} ${legacyChats}/${resolved} ${legacyChats}/${open} chats/${resolved}`,
+						`mkdir -p ${legacyHomes}/${deletedBot} ${legacyHomes}/${botId}/.cache bots/${botId}`,
+						`head -c 2000000 /dev/zero > ${legacyChats}/${resolved}/clone`,
+						`head -c 3000000 /dev/zero > ${legacyHomes}/${botId}/.cache/download`,
+						`head -c 1000000 /dev/zero > bots/${botId}/notes`,
+					].join(" && "),
+				);
+
+				const { folders } = await runOnPostgres(measureDisk(computer));
+				expect
+					.soft(folders?.find(({ kind }) => kind === "chats")?.bytes)
+					.toBeGreaterThanOrEqual(2_000_000);
+				const homes = folders?.filter((folder) => folder.kind === "home" && folder.botId === botId);
+				expect.soft(homes).toHaveLength(1);
+				expect.soft(homes?.[0]?.bytes).toBeGreaterThanOrEqual(4_000_000);
+
+				await runOnPostgres(freeDiskSpace(computer, workspaceId, ALWAYS_FULL));
+				expect.soft(await pathsUnder(legacyChats)).toEqual([`./${open}`]);
+				expect.soft(await chatFolders()).toEqual([]);
+				expect.soft(await pathsUnder(legacyHomes)).toEqual([`./${botId}`]);
+				expect(await pathsUnder(Computers.BOTS_DIRECTORY)).toEqual([
+					`./${botId}`,
+					`./${botId}/notes`,
+				]);
+			},
+			SLOW,
+		);
 
 		it(
 			"removes finished chats' folders, and leaves open chats' alone",

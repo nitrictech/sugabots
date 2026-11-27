@@ -4,8 +4,8 @@ import type { Place } from "./tools.ts";
 
 export function prepareFoldersCommand(place: Place): string {
 	const { shellQuoted } = Computers;
-	const oldChat = posix.join("/workspace/threads", posix.basename(place.folder));
-	const oldHome = posix.join("/workspace/agents", posix.basename(place.home));
+	const oldChat = posix.join(Computers.LEGACY_CHATS_DIRECTORY, posix.basename(place.folder));
+	const oldHome = posix.join(Computers.LEGACY_BOTS_DIRECTORY, posix.basename(place.home));
 	return `
 move_folder_contents() (
 	[ ! -L "$2" ] && mkdir -p -- "$2" || exit 1

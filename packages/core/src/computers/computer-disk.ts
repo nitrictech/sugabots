@@ -42,8 +42,10 @@ export function measureDisk(
 		}
 		// Run as the bots' user, du skips what it may not read, such as
 		// root's files in /tmp; everything under the work directory is theirs.
+		const homes = Computers.BOT_DIRECTORIES.map((root) => `${root}/*`);
+		const paths = [...homes, ...Computers.CHAT_DIRECTORIES, TEMPORARY_DIRECTORY].join(" ");
 		const sized = yield* computer.exec(
-			`shopt -s nullglob; du -sxB1 -- ${Computers.BOTS_DIRECTORY}/* ${Computers.CHATS_DIRECTORY} ${TEMPORARY_DIRECTORY} 2>/dev/null; exit 0`,
+			`shopt -s nullglob; du -sxB1 -- ${paths} 2>/dev/null; exit 0`,
 			FOLDERS_OPTIONS,
 		);
 		const timedOut = sized.exitCode === null;
@@ -88,16 +90,20 @@ function fullestOf(listing: string) {
 
 /** The folders `du -sB1` sized, as `<bytes>\t<path>` lines, largest first. */
 function foldersOf(listing: string): ComputerDiskFolder[] {
-	return listing
-		.split("\n")
-		.flatMap((line): ComputerDiskFolder[] => {
-			const [size = "", path = ""] = line.split("\t");
-			const bytes = Number(size);
-			if (size === "" || !Number.isSafeInteger(bytes)) return [];
-			if (path === Computers.CHATS_DIRECTORY) return [{ kind: "chats", bytes }];
-			if (path === TEMPORARY_DIRECTORY) return [{ kind: "temporary", bytes }];
-			const botId = Computers.HOME_FOLDER.exec(path)?.[1];
-			return botId ? [{ kind: "home", botId, bytes }] : [];
-		})
-		.toSorted((a, b) => b.bytes - a.bytes);
+	const folders = listing.split("\n").flatMap((line): ComputerDiskFolder[] => {
+		const [size = "", path = ""] = line.split("\t");
+		const bytes = Number(size);
+		if (size === "" || !Number.isSafeInteger(bytes)) return [];
+		if (Computers.CHAT_DIRECTORIES.some((root) => root === path)) return [{ kind: "chats", bytes }];
+		if (path === TEMPORARY_DIRECTORY) return [{ kind: "temporary", bytes }];
+		const botId = Computers.HOME_FOLDER.exec(path)?.[1];
+		return botId ? [{ kind: "home", botId, bytes }] : [];
+	});
+	const combined = new Map<string, ComputerDiskFolder>();
+	for (const folder of folders) {
+		const key = folder.kind === "home" ? folder.botId : folder.kind;
+		const bytes = (combined.get(key)?.bytes ?? 0) + folder.bytes;
+		combined.set(key, { ...folder, bytes });
+	}
+	return [...combined.values()].sort((a, b) => b.bytes - a.bytes);
 }

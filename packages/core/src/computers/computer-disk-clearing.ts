@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import type { RunState } from "@sugabots/contracts";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -28,10 +29,9 @@ export interface Clearing {
 	readonly stoppedAtTimeout: boolean;
 }
 
-/** Ids of the chat folders and home folders in a computer. */
 interface WorkFolders {
-	readonly chatIds: readonly string[];
-	readonly botIds: readonly string[];
+	readonly chats: ReadonlyMap<string, readonly string[]>;
+	readonly homes: ReadonlyMap<string, readonly string[]>;
 }
 
 /**
@@ -52,17 +52,35 @@ export function prepareDiskClearing(
 	belowShare: number,
 ) {
 	return Effect.gen(function* () {
-		const clearable = yield* clearingOrder(workspaceId, yield* workFoldersIn(computer));
-		const order = clearable.slice(0, MAX_FOLDERS_CLEARED_AT_ONCE);
-		return computer.exec(clearingScript(order, belowShare), CLEARING_OPTIONS).pipe(
-			Effect.map((clearing): Clearing => {
-				const cleared = new Set(clearing.stdout.text.split("\n"));
-				return {
-					cleared: order.filter((folder) => cleared.has(pathOf(folder))),
-					stoppedAtTimeout: clearing.exitCode === null,
-				};
-			}),
-		);
+		const folders = yield* workFoldersIn(computer);
+		const clearable = yield* clearingOrder(workspaceId, folders);
+		const order = clearable
+			.flatMap((folder) => {
+				const paths =
+					"chatId" in folder ? folders.chats.get(folder.chatId) : folders.homes.get(folder.botId);
+				return (paths ?? []).map((path) => ({
+					folder,
+					path: folder.reason === "bot_cache" ? `${path}/${folder.cache}` : path,
+				}));
+			})
+			.slice(0, MAX_FOLDERS_CLEARED_AT_ONCE);
+		return computer
+			.exec(
+				clearingScript(
+					order.map(({ path }) => path),
+					belowShare,
+				),
+				CLEARING_OPTIONS,
+			)
+			.pipe(
+				Effect.map((clearing): Clearing => {
+					const cleared = new Set(clearing.stdout.text.split("\n"));
+					return {
+						cleared: order.flatMap(({ folder, path }) => (cleared.has(path) ? [folder] : [])),
+						stoppedAtTimeout: clearing.exitCode === null,
+					};
+				}),
+			);
 	});
 }
 
@@ -77,8 +95,8 @@ function clearingOrder(
 	folders: WorkFolders,
 ): Effect.Effect<readonly Clearable[], never, Database> {
 	return Effect.gen(function* () {
-		const chats = yield* clearableChats(workspaceId, folders.chatIds);
-		const bots = yield* clearableBotFolders(workspaceId, folders.botIds);
+		const chats = yield* clearableChats(workspaceId, [...folders.chats.keys()]);
+		const bots = yield* clearableBotFolders(workspaceId, [...folders.homes.keys()]);
 		// Stable, keeping chats oldest first within each reason.
 		return [...chats, ...bots].toSorted((a, b) => REASON_ORDER[a.reason] - REASON_ORDER[b.reason]);
 	});
@@ -156,19 +174,6 @@ function clearableBotFolders(workspaceId: string, botIds: readonly string[]) {
 	});
 }
 
-function pathOf(clearable: Clearable) {
-	switch (clearable.reason) {
-		case "chat_deleted":
-		case "automation_run_ended":
-		case "chat_resolved":
-			return `${Computers.CHATS_DIRECTORY}/${clearable.chatId}`;
-		case "bot_deleted":
-			return `${Computers.BOTS_DIRECTORY}/${clearable.botId}`;
-		case "bot_cache":
-			return `${Computers.BOTS_DIRECTORY}/${clearable.botId}/${clearable.cache}`;
-	}
-}
-
 const LISTING_OPTIONS = { timeout: "30 seconds", maxOutputCharacters: 200_000 } as const;
 /** Generous, since deleting dependency trees unlinks every file. */
 const CLEARING_OPTIONS = { timeout: "2 minutes", maxOutputCharacters: 100_000 } as const;
@@ -178,20 +183,24 @@ const CLEARING_OPTIONS = { timeout: "2 minutes", maxOutputCharacters: 100_000 } 
  */
 const STOP_REMOVING_AFTER_SECONDS = 90;
 
-const ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const CHAT_FOLDER = new RegExp(`^${Computers.CHATS_DIRECTORY}/(${ID})$`);
-
 function workFoldersIn(computer: Pick<Computers.Computer, "exec">) {
+	const roots = [...Computers.CHAT_DIRECTORIES, ...Computers.BOT_DIRECTORIES].join(" ");
 	return Effect.map(
 		computer.exec(
-			`find ${Computers.CHATS_DIRECTORY} ${Computers.BOTS_DIRECTORY} -mindepth 1 -maxdepth 1 -type d 2>/dev/null; exit 0`,
+			`find ${roots} -mindepth 1 -maxdepth 1 -type d 2>/dev/null; exit 0`,
 			LISTING_OPTIONS,
 		),
 		(listing): WorkFolders => {
 			const paths = listing.stdout.text.split("\n");
 			return {
-				chatIds: paths.flatMap((path) => CHAT_FOLDER.exec(path)?.[1] ?? []),
-				botIds: paths.flatMap((path) => Computers.HOME_FOLDER.exec(path)?.[1] ?? []),
+				chats: Map.groupBy(
+					paths.filter((path) => Computers.CHAT_FOLDER.test(path)),
+					(path) => posix.basename(path),
+				),
+				homes: Map.groupBy(
+					paths.filter((path) => Computers.HOME_FOLDER.test(path)),
+					(path) => posix.basename(path),
+				),
 			};
 		},
 	);
@@ -210,7 +219,7 @@ export const SET_ASIDE_DIRECTORY = `${Computers.WORK_DIRECTORY}/.sugabots-cleari
  * Missing paths are skipped, and one that can't be set aside is deleted in
  * place. Stops if `df` fails or after {@link STOP_REMOVING_AFTER_SECONDS}.
  */
-function clearingScript(clearables: readonly Clearable[], belowShare: number) {
+function clearingScript(paths: readonly string[], belowShare: number) {
 	return [
 		// Read-only folders, like Go's module cache, need write permission to be emptied.
 		`delete() { rm -rf -- "$1" 2>/dev/null || { chmod -R u+w -- "$1" && rm -rf -- "$1"; }; }`,
@@ -224,6 +233,6 @@ function clearingScript(clearables: readonly Clearable[], belowShare: number) {
 			`if [ -n "$set_aside" ] && mv -T -- "$1" "$set_aside/$n"; then delete "$set_aside/$n"; else delete "$1"; fi`,
 			`&& printf '%s\\n' "$1"; }`,
 		].join(" "),
-		...clearables.map((clearable) => `remove ${pathOf(clearable)}`),
+		...paths.map((path) => `remove ${path}`),
 	].join("\n");
 }
