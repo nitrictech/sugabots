@@ -32,6 +32,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Usage } from "../accounting/usage.ts";
 import { SessionAuthentication } from "../authentication/session.ts";
+import { webhookCallForTests } from "../authentication/testing.ts";
 import { TurnAuthentication } from "../authentication/turn.ts";
 import { askerColumns } from "../authentication/turn-facts.ts";
 import { WebhookAuthentication, WebhookRefused } from "../authentication/webhook.ts";
@@ -58,7 +59,7 @@ import { viewDesktop } from "../operations/computers/view-desktop.ts";
 import { update as updateConnector } from "../operations/connectors/update.ts";
 import { servedOperations } from "../operations/testing.ts";
 import { usageMonth } from "../operations/workspace/usage-month.ts";
-import { authenticated, type Principal } from "../principal.ts";
+import type { Principal } from "../principal.ts";
 import { proveCanReachConnector } from "../proofs/can-use-connector.ts";
 import { proveCanRunAutomations } from "../proofs/project-permissions.ts";
 import { named } from "../proofs/proof.ts";
@@ -211,7 +212,8 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					select workspace_id, id, settings, next_scheduled_at from added
 					cross join (values
 						($2::jsonb, null::timestamptz),
-						('{"kind":"cron","cron":"0 9 * * *","timezone":"UTC"}'::jsonb, '2026-12-01 09:00Z'::timestamptz)
+						('{"kind":"cron","schedule":{"repeat":"cron","expression":"0 9 * * *"},"timezone":"UTC"}'::jsonb,
+							'2026-12-01 09:00Z'::timestamptz)
 					) as triggers(settings, next_scheduled_at)`,
 					[
 						[legacy.bots.planner, legacy.bots.budget],
@@ -474,13 +476,19 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			]);
 			expect(
 				await upgraded.rows(
-					`select next_scheduled_at from automation_trigger
+					`select next_scheduled_at, settings->'schedule' as schedule from automation_trigger
 					 join automation on automation.id = automation_trigger.automation_id
 					 where automation.name = 'Triage issues' and automation_trigger.kind = 'routine'`,
 				),
 			).toEqual([
-				{ next_scheduled_at: new Date("2026-12-01T09:00:00Z") },
-				{ next_scheduled_at: new Date("2026-12-01T09:00:00Z") },
+				{
+					next_scheduled_at: new Date("2026-12-01T09:00:00Z"),
+					schedule: { repeat: "cron", expression: "0 9 * * *" },
+				},
+				{
+					next_scheduled_at: new Date("2026-12-01T09:00:00Z"),
+					schedule: { repeat: "cron", expression: "0 9 * * *" },
+				},
 			]);
 
 			const body = JSON.stringify({
@@ -491,7 +499,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			});
 			const connectorId = legacy.familyGitHubConnector;
 			const deliveryId = "new-issue-after-upgrade";
-			const principal = authenticated.webhookCall({
+			const principal = webhookCallForTests({
 				workspace: legacy.workspace,
 				source: { kind: "github", connector: connectorId, project: legacy.pods.family },
 			});
