@@ -1156,7 +1156,7 @@
 			"query": {},
 			"body": {
 				"on": "boolean",
-				"addressRevision": "integer"
+				"addressRevision": "optional integer | null"
 			},
 			"errors": {
 				"ActionForbidden": 403,
