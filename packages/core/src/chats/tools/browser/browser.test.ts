@@ -10,6 +10,8 @@ import { effectRunner } from "../../../database/database.ts";
 import { placeOf } from "../computer/tools.ts";
 import { browserSession, type CachedBrowserSession, startDesktop } from "./browser.ts";
 
+const LINUX_MAX_ARGUMENT_BYTES = 128 * 1024;
+
 it("moves legacy work before opening a desktop, preserving files already in place", async () => {
 	const workspace = await mkdtemp(join(tmpdir(), "desktop-work-"));
 	try {
@@ -17,7 +19,7 @@ it("moves legacy work before opening a desktop, preserving files already in plac
 		const lastChat = randomUUID();
 		const place = {
 			...placeOf(bot),
-			previousChatIds: ["budget", ...Array.from({ length: 1_000 }, () => randomUUID()), lastChat],
+			previousChatIds: ["budget", ...Array.from({ length: 4_000 }, () => randomUUID()), lastChat],
 		};
 		const localPath = (path: string) => path.replace("/workspace", workspace);
 		const oldHome = localPath("/workspace/agents/planner");
@@ -54,6 +56,9 @@ it("moves legacy work before opening a desktop, preserving files already in plac
 			id: Computers.ComputerId("desktop-test"),
 			exec: (command) =>
 				Effect.sync(() => {
+					// Linux refuses a single argument longer than this (MAX_ARG_STRLEN), so
+					// every command the desktop runs must stay under it.
+					expect(Buffer.byteLength(command)).toBeLessThan(LINUX_MAX_ARGUMENT_BYTES);
 					const ran = spawnSync("bash", ["-c", command.replaceAll("/workspace", workspace)], {
 						encoding: "utf8",
 						env: { ...process.env, PATH: `${workspace}:${process.env.PATH}` },
