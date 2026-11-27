@@ -15564,6 +15564,24 @@
       "sharedWrites": [
         "e|uniqueness|public.event_retention.singleton"
       ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "connector",
+        "tool_definitions_fingerprint"
+      ],
+      "writes": [
+        "s|col|public.connector.tool_definitions_fingerprint",
+        "n|col|public.connector.tool_definitions_fingerprint",
+        "e|col|public.connector.tool_definitions_fingerprint"
+      ],
+      "reads": [
+        "n|tbl|public.connector",
+        "n|sch|public"
+      ]
     }
   ],
   "deltas": [
@@ -25899,6 +25917,22 @@
         "columns": [
           "stream"
         ]
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "connector",
+        "name": "tool_definitions_fingerprint",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
       }
     }
   ]

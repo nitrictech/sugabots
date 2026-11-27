@@ -255,7 +255,7 @@ export const make = Effect.gen(function* () {
 				at.workspaceId,
 				at.connectorId,
 				target.configurationUpdatedAt,
-				found.ok ? { tools: found.tools } : { error: found.reason },
+				found.ok ? found : { error: found.reason },
 			);
 			return result;
 		});

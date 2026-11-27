@@ -120,6 +120,7 @@
 		"drizzle-orm": "catalog:",
 		"e2b": "2.64.0",
 		"effect": "catalog:",
+		"fast-json-stable-stringify": "2.1.0",
 		"linkedom": "^0.18.15",
 		"mime-types": "^3.0.2",
 		"minisearch": "^7.2.0",

@@ -410,6 +410,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				(request.step === 0
 					? connectors.recordTest(workspaceId, connectorId, target.configurationUpdatedAt, {
 							tools: [{ ...listed, readOnly: false, destructive: true }],
+							definitions: [
+								{
+									name: listed.name,
+									description: listed.description,
+									inputSchema: { type: "object" },
+									annotations: { readOnlyHint: false, destructiveHint: true },
+								},
+							],
 						})
 					: Effect.void
 				).pipe(Effect.andThen(model.stream(request))),

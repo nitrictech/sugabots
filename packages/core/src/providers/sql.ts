@@ -229,6 +229,7 @@ export const connector = pgTable(
 		addressRevision: integer("address_revision").notNull().default(1),
 		/** The tools the server listed when last asked, as it described them; for GitHub, Sugabots' own. */
 		tools: jsonb("tools").$type<ConnectorTool[]>().notNull().default([]),
+		toolDefinitionsFingerprint: text("tool_definitions_fingerprint"),
 		/**
 		 * What somebody chose for the bot to do with each tool, by the
 		 * server's name for it; see `connectorAccesses`. A tool with no choice

@@ -13,6 +13,7 @@ import {
 import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
+import stringify from "fast-json-stable-stringify";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
 import {
@@ -33,6 +34,7 @@ import { type AugmentationTool, augmentConnectorTools } from "./augmentations.ts
 import type { ConnectorTarget } from "./connector-target.ts";
 import { GITHUB_CONNECTOR_TOOLS } from "./github/github-tools.ts";
 import { HTTP_CONNECTOR_TOOLS } from "./http-tools.ts";
+import type { ServerToolDefinitions } from "./mcp.ts";
 import type { OAuthRecord } from "./oauth.ts";
 import { toolAccessOf } from "./tool-access.ts";
 
@@ -575,19 +577,23 @@ export const make = Effect.gen(function* () {
 				"recordTest",
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
-					const tools = "tools" in outcome ? outcome.tools : undefined;
+					const listing = "definitions" in outcome ? outcome : undefined;
+					const fingerprint =
+						listing && createHash("sha256").update(stringify(listing.definitions)).digest("hex");
 					yield* query((db) =>
 						db
 							.update(connector)
 							.set({
 								lastTestedAt: now,
 								lastTestError: "error" in outcome ? outcome.error : null,
-								tools,
+								tools: listing?.tools,
+								toolDefinitionsFingerprint: fingerprint,
 								configurationRevision:
-									tools === undefined
+									fingerprint === undefined
 										? undefined
-										: sql`case when ${connector.tools} is distinct from ${JSON.stringify(tools)}::jsonb
-										then ${connector.configurationRevision} + 1 else ${connector.configurationRevision} end`,
+										: sql`case
+											when ${connector.toolDefinitionsFingerprint} is distinct from ${fingerprint}
+											then ${connector.configurationRevision} + 1 else ${connector.configurationRevision} end`,
 							})
 							.where(
 								and(
@@ -914,7 +920,9 @@ interface ProjectTargets {
  * What a test found: the server's tools, absent for a connector whose tools
  * are Sugabots' own, or why it could not be asked.
  */
-type TestOutcome = { tools?: ConnectorTool[] } | { error: UserText };
+type TestOutcome =
+	| { tools: ConnectorTool[]; definitions: ServerToolDefinitions }
+	| { error?: UserText };
 
 /** A GitHub connector's address until its app is installed on an account: the app's own page. */
 function gitHubAppUrl(slug: string) {

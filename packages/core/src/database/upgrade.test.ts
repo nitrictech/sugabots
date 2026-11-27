@@ -863,6 +863,14 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await upgraded.rows("select id from turn where admission is not null")).toEqual([]);
 		});
 
+		it("leaves legacy connectors' tool fingerprints unset until a test lists their tools", async () => {
+			expect(
+				await upgraded.rows(
+					"select id from connector where tool_definitions_fingerprint is not null",
+				),
+			).toEqual([]);
+		});
+
 		it("keeps a failed turn with main's fallback message when it had no error", async () => {
 			expect(
 				await upgraded.rows("select status, error from turn where id = $1", [FAILED_TURN]),

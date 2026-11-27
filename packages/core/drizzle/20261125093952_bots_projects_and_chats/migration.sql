@@ -3422,3 +3422,5 @@ ALTER TABLE "event_retention" DROP CONSTRAINT "event_retention_singleton";--> st
 ALTER TABLE "event_retention" ADD COLUMN "stream" text;--> statement-breakpoint
 ALTER TABLE "event_retention" DROP COLUMN "singleton";--> statement-breakpoint
 ALTER TABLE "event_retention" ADD PRIMARY KEY ("stream");
+--> statement-breakpoint
+ALTER TABLE "connector" ADD COLUMN "tool_definitions_fingerprint" text;

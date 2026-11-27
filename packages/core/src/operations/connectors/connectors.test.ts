@@ -1,4 +1,7 @@
 import { createHmac } from "node:crypto";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -137,6 +140,56 @@ describe("the connectors operations, beyond who may call them", () => {
 				).toBe("ResourceHidden");
 			}
 		});
+	});
+
+	it("raises the configuration revision when only a connector tool's input schema changes", async () => {
+		const text = { type: "string" };
+		const count = { type: "number" };
+		let properties = { query: text, limit: count };
+		const fetchListing: typeof fetch = async (input, init) => {
+			const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+			const server = new Server(
+				{ name: "project-wiki", version: "1.0.0" },
+				{ capabilities: { tools: {} } },
+			);
+			server.setRequestHandler(ListToolsRequestSchema, () => ({
+				tools: [
+					{
+						name: "lookup",
+						description: "Looks up an entry.",
+						inputSchema: { type: "object", properties },
+					},
+				],
+			}));
+			await server.connect(transport);
+			try {
+				return await transport.handleRequest(new Request(input, init));
+			} finally {
+				await server.close();
+			}
+		};
+		const callWithListing = await servedOperations({
+			egress: unimplemented(Egress.Service, { providers: { for: () => fetchListing } }),
+		});
+		const projectId = a.project;
+		const connectorId = await seedConnector(a.workspace, projectId);
+		const address = { projectId, connectorId };
+		const retest = async () => {
+			await expect(callWithListing(who.admin, "connectors.test", address)).resolves.toMatchObject({
+				reachable: true,
+				tools: 1,
+			});
+			const { configurationRevision } = await call(who.admin, "connectors.get", address);
+			if (configurationRevision === undefined) throw new Error("Expected a configuration revision");
+			return configurationRevision;
+		};
+
+		const before = await retest();
+		properties = { limit: count, query: text };
+		expect(await retest()).toBe(before);
+
+		properties = { limit: count, query: count };
+		expect(await retest()).toBe(before + 1);
 	});
 
 	it("lets a public bot's creator manage its HTTP connector and shows the changes to a viewer", async () => {

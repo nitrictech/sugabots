@@ -80,7 +80,7 @@ describe("listing a server's tools", () => {
 			fetch,
 		);
 
-		expect(found).toEqual({
+		expect(found).toMatchObject({
 			ok: true,
 			tools: [
 				{ name: "lookup", description: "Looks a thing up.", readOnly: true, destructive: false },

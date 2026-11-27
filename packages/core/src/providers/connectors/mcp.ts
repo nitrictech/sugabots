@@ -19,8 +19,10 @@ import { needsSignIn, type OAuthClient } from "./oauth.ts";
  * sentence; `cause` is what went wrong, for the logs.
  */
 
+export type ServerToolDefinitions = ListToolsResult["tools"];
+
 type ServerTools =
-	| { ok: true; tools: ConnectorTool[] }
+	| { ok: true; tools: ConnectorTool[]; definitions: ServerToolDefinitions }
 	| { ok: false; reason: UserText; cause: unknown };
 
 interface ServerTarget {
@@ -144,8 +146,12 @@ export async function listServerTools(
 	try {
 		const session = await connectServer(target, fetch);
 		try {
-			const { tools } = await session.list();
-			return { ok: true, tools: tools.map((tool) => tool.described) };
+			const { tools, definitions } = await session.list();
+			return {
+				ok: true,
+				tools: tools.map((tool) => tool.described),
+				definitions: definitions.tools,
+			};
 		} finally {
 			await session.close();
 		}

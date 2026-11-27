@@ -120,6 +120,15 @@ describe.skipIf(!process.env.DATABASE_URL)("connectors, against Postgres", () =>
 		if (!target) throw new Error("no target");
 		await connectors.recordTest(workspaceId, connectorId, target.configurationUpdatedAt, {
 			tools,
+			definitions: tools.map(({ name, description, readOnly, destructive }) => ({
+				name,
+				description: description ?? undefined,
+				inputSchema: { type: "object" },
+				annotations: {
+					readOnlyHint: readOnly ?? undefined,
+					destructiveHint: destructive ?? undefined,
+				},
+			})),
 		});
 	}
 
