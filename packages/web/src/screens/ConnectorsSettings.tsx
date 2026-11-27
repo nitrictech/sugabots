@@ -10,9 +10,10 @@ import {
 	type ProjectBotConnector,
 	type UnsavedConnector,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import { cn } from "cn";
 import { ArrowUpRight, ChevronDown, ChevronRight, Code, Globe, Info } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useId, useState } from "react";
 import {
 	bearerAuthorization,
 	connectorNeedsAttention,
@@ -52,6 +53,7 @@ import {
 	SettingsGroup,
 	SettingsRow,
 	SettingsRowIcon,
+	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { SpacedText } from "@/ui/spaced-text.tsx";
 import { Switch } from "@/ui/switch.tsx";
@@ -133,7 +135,8 @@ export function ProjectBotsConnectors({ project }: { project: Project }) {
 	const canManage = resourcePermissions({ project }).manageConnectors;
 	const bots = useProjectBots(project.id);
 	const connectors = useProjectBotConnectors(project.id);
-	if (connectors.isError) return <Alert>{failureMessage(connectors.error)}</Alert>;
+	const failed = bots.error ?? connectors.error;
+	if (failed) return <Alert>{failureMessage(failed)}</Alert>;
 	if (!bots.data || !connectors.data) return null;
 	const listed = connectors.data;
 	const withConnectors = bots.data.filter((bot) => listed.some((one) => one.botId === bot.id));
@@ -142,7 +145,7 @@ export function ProjectBotsConnectors({ project }: { project: Project }) {
 		<SettingsGroup
 			label="Its bots' own"
 			headingLevel={2}
-			note={`A bot's own connectors stay off in ${project.name} until a manager turns them on here. While one is on, the bot can send it what it reads in ${project.name}'s chats. If its address changes, it turns off again until someone turns it back on.`}
+			note={`A bot's own connectors stay off in ${project.name} until a manager turns them on here. While one is on, the bot can send it what it reads in ${project.name}'s chats. If its address changes, it turns off again until a manager turns it back on.`}
 		>
 			<Accordion.Root multiple>
 				{withConnectors.map((bot) => (
@@ -205,50 +208,27 @@ function BotConnectors({
 			</Accordion.Header>
 			<Accordion.Panel className="h-(--accordion-panel-height) overflow-hidden transition-height duration-200 ease-out data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none">
 				<div className="flex flex-col gap-1 pr-4 pb-3 pl-16">
-					{setOn.error && <Alert>{failureMessage(setOn.error)}</Alert>}
 					{connectors.map((connector) => (
-						<div key={connector.id} className="flex min-w-0 items-center gap-3 py-1.5">
-							<ConnectorMark markId={connectorMarkFor(connector)} name={connector.name} size="md" />
-							<span className="flex min-w-0 flex-1 flex-col leading-snug">
-								<span className="truncate text-sm text-foreground">{connector.name}</span>
-								{(connector.url !== null || connector.addressChanged) && (
-									<span
-										className={cn(
-											"truncate text-xs",
-											connector.addressChanged ? "text-destructive-text" : "text-subtle-foreground",
-										)}
-									>
-										{botConnectorLine(connector)}
-									</span>
-								)}
-							</span>
-							<Tooltip
-								label={
-									canManage
-										? connector.on
-											? `Stop ${bot.name} using ${connector.name} in ${project.name}`
-											: `Let ${bot.name} use ${connector.name} in ${project.name}`
-										: `Only ${project.name}'s managers can turn this on or off`
-								}
-								side="top"
-							>
-								{/* On a wrapper, as a disabled switch receives no pointer events. */}
-								<span className="inline-flex shrink-0">
-									<Switch
-										checked={connector.on}
-										disabled={!canManage || setOn.isPending}
-										aria-label={`${connector.name} in ${project.name}`}
-										onCheckedChange={(checked) =>
-											setOn.mutate({
-												connectorId: connector.id,
-												on: checked,
-												addressRevision: connector.addressRevision,
-											})
-										}
-									/>
-								</span>
-							</Tooltip>
-						</div>
+						<BotConnectorRow
+							key={connector.id}
+							bot={bot}
+							project={project}
+							connector={connector}
+							canManage={canManage}
+							pending={setOn.isPending}
+							refusal={
+								setOn.error && setOn.variables?.connectorId === connector.id
+									? refusalLine(setOn.error, setOn.variables.addressRevision, connector)
+									: undefined
+							}
+							onChange={(on) =>
+								setOn.mutate({
+									connectorId: connector.id,
+									on,
+									addressRevision: connector.addressRevision,
+								})
+							}
+						/>
 					))}
 					{bot.permissions.resources.manageConnectors && (
 						<OwnerLink
@@ -269,16 +249,104 @@ function BotConnectors({
 }
 
 /**
- * What a bot's own connector's line says under its name: where it sends data
- * now, to those who may see that, and whether its address changed since it
- * was turned on here.
+ * One of a bot's own connectors in the project: where it sends data, and its
+ * switch, or whether it is on for someone who can't change it. Why turning it
+ * on or off just failed takes the place of its line.
  */
-function botConnectorLine(connector: ProjectBotConnector): string {
-	if (connector.url === null)
-		return "Its address changed, so it is off until a manager turns it on again";
-	return connector.addressChanged
-		? `Now sends data to ${connector.url}, so it is off until someone turns it on again`
-		: `Sends data to ${connector.url}`;
+function BotConnectorRow({
+	bot,
+	project,
+	connector,
+	canManage,
+	pending,
+	refusal,
+	onChange,
+}: {
+	bot: Bot;
+	project: Project;
+	connector: ProjectBotConnector;
+	canManage: boolean;
+	pending: boolean;
+	refusal: string | undefined;
+	onChange: (on: boolean) => void;
+}) {
+	const lineId = useId();
+	const line = refusal ?? botConnectorLine(connector, canManage);
+	return (
+		<div className="flex min-w-0 items-center gap-3 py-1.5">
+			<ConnectorMark markId={connectorMarkFor(connector)} name={connector.name} size="md" />
+			<span className="flex min-w-0 flex-1 flex-col leading-snug">
+				<span className="truncate text-sm text-foreground">{connector.name}</span>
+				{line !== undefined && (
+					<span
+						id={lineId}
+						className={cn(
+							"text-pretty text-xs",
+							refusal !== undefined || connector.addressChanged
+								? "text-destructive-text"
+								: "text-subtle-foreground",
+						)}
+					>
+						{line}
+					</span>
+				)}
+			</span>
+			{canManage ? (
+				<Tooltip
+					label={
+						connector.on
+							? `Stop ${bot.name} using ${connector.name} in ${project.name}`
+							: `Let ${bot.name} use ${connector.name} in ${project.name}`
+					}
+					side="top"
+				>
+					{/* On a wrapper, as a disabled switch receives no pointer events. */}
+					<span className="inline-flex shrink-0">
+						<Switch
+							checked={connector.on}
+							disabled={pending}
+							aria-label={`${bot.name}'s ${connector.name}`}
+							aria-describedby={line !== undefined ? lineId : undefined}
+							onCheckedChange={onChange}
+						/>
+					</span>
+				</Tooltip>
+			) : (
+				<SettingsValue>{connector.on ? "On" : "Off"}</SettingsValue>
+			)}
+		</div>
+	);
+}
+
+/**
+ * What a bot's own connector's line says under its name: whether its address
+ * changed since it was turned on here, where it sends data, to those who may
+ * see that, and, to those who can't turn it on or off, who can.
+ */
+function botConnectorLine(connector: ProjectBotConnector, canManage: boolean): string | undefined {
+	if (connector.addressChanged)
+		return connector.url === null
+			? "Its address changed. It's off until a manager turns it on again"
+			: `Its address changed to ${connector.url}. It's off until a manager turns it on again`;
+	const sendsTo = connector.url === null ? undefined : `Sends data to ${connector.url}`;
+	if (canManage) return sendsTo;
+	return sendsTo ? `${sendsTo}. Only managers can change this` : "Only managers can change this";
+}
+
+/**
+ * Why turning `connector` on or off failed. When its address changed after
+ * the revision `triedRevision` was shown, the list is read again; once it
+ * has its new address, that is what the line says.
+ */
+function refusalLine(
+	failure: unknown,
+	triedRevision: number,
+	connector: ProjectBotConnector,
+): string {
+	const addressChanged = isApiFailure(failure) && failure.error?._tag === "ConnectorAddressChanged";
+	if (!addressChanged || connector.addressRevision === triedRevision || connector.url === null)
+		return failureMessage(failure);
+	return `Its address is now ${connector.url}. Check it, then turn it on again`;
 }
 
 /** How many of a bot's connectors its row shows the marks of. */

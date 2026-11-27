@@ -1,7 +1,7 @@
 import type { ProjectBotConnector } from "@sugabots/contracts";
 import type { TestConnector } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
-import { expect, screen, userEvent, within } from "storybook/test";
+import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { accountManager, growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
 import {
@@ -267,28 +267,28 @@ export const Empty = meta.story({
 	},
 });
 
+/** The story projects as an editor sees them, managing neither them nor their connectors. */
+const editorProjects = storyProjects.map((project) => ({
+	...project,
+	permissions: {
+		...project.permissions,
+		rename: false,
+		manageMembers: false,
+		resources: {
+			...project.permissions.resources,
+			manageConnectors: false,
+			manageComputer: false,
+		},
+	},
+}));
+
 /** An editor, who may not manage the project's connectors: each one's access stated, nothing to change. */
 export const Editor = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
 			// Before the defaults, whose own answer here is no connectors.
 			...connectorHandlers(connectors),
-			...appHandlers({
-				role: "editor",
-				projects: storyProjects.map((project) => ({
-					...project,
-					permissions: {
-						...project.permissions,
-						rename: false,
-						manageMembers: false,
-						resources: {
-							...project.permissions.resources,
-							manageConnectors: false,
-							manageComputer: false,
-						},
-					},
-				})),
-			}),
+			...appHandlers({ role: "editor", projects: editorProjects }),
 		);
 	},
 	play: async ({ canvas }) => {
@@ -352,37 +352,100 @@ const botsOwn: ProjectBotConnector[] = [
  */
 export const BotsOwnConnectors = meta.story({
 	beforeEach({ msw }) {
-		let rows = botsOwn;
-		msw.use(
-			http.get(`${API}/projects/:projectId/bot-connectors`, () => HttpResponse.json(rows)),
-			http.put(
-				`${API}/projects/:projectId/bot-connectors/:connectorId`,
-				async ({ params, request }) => {
-					const { on, addressRevision } = (await request.json()) as {
-						on: boolean;
-						addressRevision: number;
-					};
-					rows = rows.map((row) =>
-						row.id === params.connectorId && row.addressRevision === addressRevision
-							? { ...row, on, addressChanged: false }
-							: row,
-					);
-					return HttpResponse.json(rows.find((row) => row.id === params.connectorId));
-				},
-			),
-		);
+		msw.use(...botConnectorHandlers(botsOwn));
 	},
 	play: async ({ canvas }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: /Growth Desk/ }));
 		await expect(canvas.getByText("1 of 2 on here")).toBeInTheDocument();
-		const billing = await canvas.findByRole("switch", { name: `Billing API in ${revenue.name}` });
+		const billing = await canvas.findByRole("switch", { name: "Growth Desk's Billing API" });
 		await expect(billing).toHaveAttribute("aria-checked", "false");
+		await expect(billing).toHaveAccessibleDescription(
+			"Sends data to https://billing.example.com/v1",
+		);
 		await userEvent.click(billing);
 		await expect(
-			await canvas.findByRole("switch", { name: `Billing API in ${revenue.name}`, checked: true }),
+			await canvas.findByRole("switch", { name: "Growth Desk's Billing API", checked: true }),
 		).toBeInTheDocument();
 	},
 });
+
+/**
+ * A bot's connector whose address changed after the page showed it: turning
+ * it on is refused, and its row says where it sends data now, from the list
+ * read again.
+ */
+export const BotsOwnConnectorRefused = meta.story({
+	beforeEach({ msw }) {
+		const moved = botsOwn.map((row) =>
+			row.name === "Billing API"
+				? { ...row, url: "https://billing-v2.example.com/v1", addressRevision: 2 }
+				: row,
+		);
+		msw.use(...botConnectorHandlers(moved, botsOwn));
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: /Growth Desk/ }));
+		const billing = await canvas.findByRole("switch", { name: "Growth Desk's Billing API" });
+		await userEvent.click(billing);
+		await waitFor(() =>
+			expect(
+				canvas.getByRole("switch", { name: "Growth Desk's Billing API", checked: false }),
+			).toHaveAccessibleDescription(
+				"Its address is now https://billing-v2.example.com/v1. Check it, then turn it on again",
+			),
+		);
+		await expect(
+			canvas.getByRole("switch", { name: "Growth Desk's Notion" }),
+		).toHaveAccessibleDescription("Sends data to https://mcp.notion.com/mcp");
+	},
+});
+
+/**
+ * The bots' own connectors endpoints over `rows`, as the server holds them.
+ * The first read answers `firstShown` instead, if given, as the page saw them
+ * before an address changed. Turning one on for an address revision it no
+ * longer has is refused, as the server refuses it.
+ */
+function botConnectorHandlers(
+	rows: readonly ProjectBotConnector[],
+	firstShown?: readonly ProjectBotConnector[],
+) {
+	let current = rows;
+	let shown = firstShown;
+	return [
+		http.get(`${API}/projects/:projectId/bot-connectors`, () => {
+			const answer = shown ?? current;
+			shown = undefined;
+			return HttpResponse.json(answer);
+		}),
+		http.put(
+			`${API}/projects/:projectId/bot-connectors/:connectorId`,
+			async ({ params, request }) => {
+				const { on, addressRevision } = (await request.json()) as {
+					on: boolean;
+					addressRevision: number;
+				};
+				const row = current.find((one) => one.id === params.connectorId);
+				if (row && row.addressRevision !== addressRevision) {
+					const refusal =
+						"This connector's address changed since you opened this page. Check where it sends data now, then turn it on again.";
+					return HttpResponse.json(
+						{
+							_tag: "Conflict",
+							message: refusal,
+							error: { _tag: "ConnectorAddressChanged", userMessage: refusal, isRetryable: false },
+						},
+						{ status: 409 },
+					);
+				}
+				current = current.map((one) =>
+					one.id === params.connectorId ? { ...one, on, addressChanged: false } : one,
+				);
+				return HttpResponse.json(current.find((one) => one.id === params.connectorId));
+			},
+		),
+	];
+}
 
 /** A bot's connector whose address changed since it was turned on, which turned it off. */
 export const BotsOwnConnectorMoved = meta.story({
@@ -395,7 +458,7 @@ export const BotsOwnConnectorMoved = meta.story({
 		await userEvent.click(await canvas.findByRole("button", { name: /Account Manager/ }));
 		await expect(
 			await canvas.findByText(
-				"Now sends data to https://crm.example.com/api, so it is off until someone turns it on again",
+				"Its address changed to https://crm.example.com/api. It's off until a manager turns it on again",
 			),
 		).toBeInTheDocument();
 	},
@@ -403,7 +466,8 @@ export const BotsOwnConnectorMoved = meta.story({
 
 /**
  * To a member who neither manages the project nor sees the bots' own
- * connectors: whether each is on, without where it sends data.
+ * connectors: whether each is on, without where it sends data, and who can
+ * turn them on.
  */
 export const BotsOwnConnectorsWithoutAddresses = meta.story({
 	beforeEach({ msw }) {
@@ -411,15 +475,38 @@ export const BotsOwnConnectorsWithoutAddresses = meta.story({
 			http.get(`${API}/projects/:projectId/bot-connectors`, () =>
 				HttpResponse.json(botsOwn.map((row) => ({ ...row, url: null }))),
 			),
+			...appHandlers({ role: "editor", projects: editorProjects }),
 		);
 	},
 	play: async ({ canvas }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: /Account Manager/ }));
 		await expect(
-			await canvas.findByText(
-				"Its address changed, so it is off until a manager turns it on again",
-			),
+			await canvas.findByText("Its address changed. It's off until a manager turns it on again"),
 		).toBeInTheDocument();
 		await expect(canvas.queryByText(/crm\.example\.com/)).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: /Growth Desk/ }));
+		await expect(await canvas.findAllByText("Only managers can change this")).toHaveLength(2);
+		await expect(canvas.queryByRole("switch")).toBeNull();
+	},
+});
+
+/** The project's bots could not be read: why is said where their connectors would be. */
+export const BotsOwnConnectorsFailed = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/projects/:projectId/bot-connectors`, () => HttpResponse.json(botsOwn)),
+			http.get(`${API}/projects/:projectId/bots`, () =>
+				HttpResponse.json(
+					{ _tag: "InternalServerError", message: "Something went wrong on our side" },
+					{ status: 500 },
+				),
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		// A server failure is asked once more before it is shown.
+		await expect(
+			await canvas.findByText("Something went wrong on our side", {}, { timeout: 5000 }),
+		).toBeVisible();
 	},
 });
