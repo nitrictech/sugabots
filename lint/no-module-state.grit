@@ -2,7 +2,8 @@ language js(typescript)
 
 // A module's top level runs once per process, so whatever it holds is shared by every
 // workspace and request. Constants and filled lookup tables are fine; a `let` or an empty
-// collection is state, filled by whoever comes first. `JsVariableDeclarationClause` is
+// collection (a Map, a Set, an object or an array) is state, filled by whoever comes first.
+// An empty collection typed as readonly is a constant. `JsVariableDeclarationClause` is
 // the declaration in an `export`.
 or {
 	JsVariableStatement(),
@@ -14,7 +15,9 @@ or {
 	} ,
 	$state <: or {
 		r"^let\s[\s\S]*",
-		r"^(?:const|let|var)\s+[\w$]+(?:\s*:[^=]+)?\s*=\s*new\s+(?:Map|Set|WeakMap|WeakSet)\s*(?:<[\s\S]*>)?\s*\(\s*\)\s*;?$"
+		r"^(?:const|let|var)\s+[\w$]+(?:\s*:[^=]+)?\s*=\s*new\s+(?:Map|Set|WeakMap|WeakSet)\s*(?:<[\s\S]*>)?\s*\(\s*(?:\[\s*\])?\s*\)\s*;?$",
+		r"^(?:const|let|var)\s+[\w$]+(?:\s*:[^=]+)?\s*=\s*(?:\{\s*\}|\[\s*\])\s*;?$"
 	},
+	not $state <: r"^const\s+[\w$]+\s*:\s*(?:readonly\s|Readonly)[\s\S]*",
 	register_diagnostic(span=$state, message="State at a module's top level lives for the whole process and is shared by every workspace and request. Keep it in a service, keyed by what it belongs to, or pass it as an argument.")
 }
