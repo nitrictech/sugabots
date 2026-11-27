@@ -15,7 +15,7 @@ export * as RunningTurn from "./running-turn.ts";
 
 import type { BotCannotReach, ResourceHidden, TurnEnded } from "@sugabots/contracts/errors/proofs";
 import type { TurnExecutionSuperseded } from "@sugabots/contracts/errors/turns";
-import { Context, Effect, Layer, type Scope } from "effect";
+import { Context, Effect, Layer, Scope } from "effect";
 import { Turns, WorkAdmission } from "../chats/turns/turns.ts";
 import type { BotPrincipal } from "../principal.ts";
 import { proveEndsTurn } from "../proofs/ends-turn.ts";
@@ -91,8 +91,12 @@ export const make = Effect.gen(function* () {
 	const records = yield* Turns.Records.Service;
 	const tools = yield* Turns.Tools.Service;
 	const operations = yield* Operations.Service;
-	// What proving and parking need: the database, the work admission and the records.
-	const context = yield* Effect.context<Effect.Services<ReturnType<typeof askForApprovals>>>();
+	// What proving and parking need: the database, the work admission and the
+	// records. Without the scope the service is built in, so what a step opens
+	// is released when the caller's scope closes, at the end of the step.
+	const context = Context.omit(Scope.Scope)(
+		yield* Effect.context<Effect.Services<ReturnType<typeof askForApprovals>>>(),
+	);
 	const proving = <A, E, R>(
 		principal: BotPrincipal,
 		use: <P, T>(runsTurn: RunsTurn<P, T>) => Effect.Effect<A, E, R>,
