@@ -17,6 +17,7 @@ import {
 	storyChatDetails,
 	storyChatFor,
 	storyMember,
+	storyMessage,
 	storyProjectChatDetails,
 	storyProjectChatFor,
 	storyWorkspace,
@@ -30,27 +31,13 @@ import { expiredConnector, expiredLinear } from "./ConnectorsNotice.test-support
  */
 
 function said(id: string, by: "you" | "bot", text: string, at: string): Message {
-	const chat = storyChatFor(growthDesk).id;
-	return {
-		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
-		chatId: chat,
-		author:
-			by === "you"
-				? testMember({ id: storyMember.id, name: storyMember.name })
-				: {
-						kind: "bot",
-						id: growthDesk.id,
-						name: growthDesk.name,
-						handle: growthDesk.handle,
-						color: growthDesk.color,
-						eyes: growthDesk.eyes,
-						shape: growthDesk.shape,
-					},
-		status: "complete",
-		parts: [{ type: "text", text }],
-		content: text,
-		createdAt: at,
-	};
+	return storyMessage({
+		id,
+		chatId: storyChatFor(growthDesk).id,
+		by: by === "you" ? "you" : growthDesk,
+		text,
+		at,
+	});
 }
 
 const saidInChat: Message[] = [

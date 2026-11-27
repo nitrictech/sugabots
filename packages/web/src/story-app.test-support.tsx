@@ -187,6 +187,45 @@ export function storyChatDetails(bot: Bot, messages: Message[] = []): ChatDetail
 	};
 }
 
+/**
+ * A finished message by the viewer or a bot, in the chat with `chatId`. `id` is
+ * two hex digits, which end the message's id.
+ */
+export function storyMessage({
+	id,
+	chatId,
+	by,
+	text,
+	at,
+}: {
+	id: string;
+	chatId: string;
+	by: Bot | "you";
+	text: string;
+	at: string;
+}): Message {
+	return {
+		id: `0199a3a0-0000-7000-8000-0000000005${id}`,
+		chatId,
+		author:
+			by === "you"
+				? testMember({ id: storyMember.id, name: storyMember.name })
+				: {
+						kind: "bot",
+						id: by.id,
+						name: by.name,
+						handle: by.handle,
+						color: by.color,
+						eyes: by.eyes,
+						shape: by.shape,
+					},
+		status: "complete",
+		parts: [{ type: "text", text }],
+		content: text,
+		createdAt: at,
+	};
+}
+
 /** A project's one chat in the stories, Planning, by the project's id. */
 export function storyProjectChatFor(project: Project): ProjectChat {
 	return {
