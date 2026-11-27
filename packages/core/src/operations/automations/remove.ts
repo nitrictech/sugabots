@@ -4,6 +4,8 @@ import { ProjectAutomations } from "../../chats/automations/project-automations.
 import { proveCanManageProject } from "../../proofs/project-permissions.ts";
 import { named } from "../../proofs/proof.ts";
 import { proveReachesProjectAutomation } from "../../proofs/reaches-project-automation.ts";
+import { writingUnderWorkspaceShare } from "../../proofs/workspace-lock.ts";
+import { workspaceOfProject } from "../../workspaces/workspace-reference.ts";
 import { defineOperation } from "../operation.ts";
 
 export const remove = defineOperation(
@@ -11,11 +13,11 @@ export const remove = defineOperation(
 	(principal, input) =>
 		Effect.gen(function* () {
 			const automations = yield* ProjectAutomations.Service;
-			return yield* named(
-				principal,
-				input.projectId,
-				input.automationId,
-				(principal, project, automation) =>
+			// Proved in the write's transaction, under the workspace's lock shared.
+			return yield* writingUnderWorkspaceShare(
+				workspaceOfProject(input.projectId),
+				"project",
+				named(principal, input.projectId, input.automationId, (principal, project, automation) =>
 					Effect.gen(function* () {
 						const { reach, target } = yield* proveReachesProjectAutomation(
 							principal,
@@ -25,6 +27,7 @@ export const remove = defineOperation(
 						const canManage = yield* proveCanManageProject(reach);
 						return yield* automations.remove(canManage, automation, target);
 					}),
+				),
 			);
 		}),
 );

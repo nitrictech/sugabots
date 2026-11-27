@@ -10,6 +10,8 @@ import {
 	proveReachesProjectAutomation,
 	proveRestrictableAutomation,
 } from "../../proofs/reaches-project-automation.ts";
+import { writingUnderWorkspaceShare } from "../../proofs/workspace-lock.ts";
+import { workspaceOfProject } from "../../workspaces/workspace-reference.ts";
 import { defineOperation } from "../operation.ts";
 
 export const update = defineOperation(
@@ -18,11 +20,11 @@ export const update = defineOperation(
 		Effect.gen(function* () {
 			const automations = yield* ProjectAutomations.Service;
 			const { changes } = input;
-			return yield* named(
-				principal,
-				input.projectId,
-				input.automationId,
-				(principal, project, automation) =>
+			// Proved in the write's transaction, under the workspace's lock shared.
+			return yield* writingUnderWorkspaceShare(
+				workspaceOfProject(input.projectId),
+				"project",
+				named(principal, input.projectId, input.automationId, (principal, project, automation) =>
 					Effect.gen(function* () {
 						const { reach, target } = yield* proveReachesProjectAutomation(
 							principal,
@@ -43,6 +45,7 @@ export const update = defineOperation(
 							}).pipe(Effect.mapError(() => hidden));
 						}),
 					),
+				),
 			);
 		}),
 );
