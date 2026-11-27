@@ -756,9 +756,9 @@ export const LongCodeBlock = meta.story({
 		if (!body) throw new Error("No code block body");
 		await expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
 		await userEvent.click(canvas.getByRole("button", { name: "Show more" }));
-		await expect(body.scrollHeight).toBe(body.clientHeight);
+		await waitFor(() => expect(body.scrollHeight).toBe(body.clientHeight));
 		await userEvent.click(canvas.getByRole("button", { name: "Show less" }));
-		await expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
+		await waitFor(() => expect(body.scrollHeight).toBeGreaterThan(body.clientHeight));
 	},
 	args: {
 		messages: [
