@@ -216,9 +216,9 @@ for (const { name, skip, make, backdate } of stores) {
 			expect(page?.map(({ seq }) => seq)).toEqual([first, second]);
 		});
 
-		it.skipIf(name !== "postgres")(
-			"does not scan unrelated events to fill a sparse replay page",
-			async () => {
+		it.skipIf(name !== "postgres").each(["replay", "following"] as const)(
+			"does not scan unrelated events when reading sparse feeds through %s",
+			async (read) => {
 				const control: EventStream = `workspace:${crypto.randomUUID()}`;
 				const noise: EventStream = `workspace:${crypto.randomUUID()}`;
 				const cursor = await append(stream, rawEvent("message.created"));
@@ -241,18 +241,13 @@ for (const { name, skip, make, backdate } of stores) {
 					transaction(
 						Effect.gen(function* () {
 							const inTransaction = yield* EventStore.make;
+							const controls = [
+								{ stream: control, since: cursor, types: ["reach.changed", "session.ended"] },
+							] as const;
 							const page = yield* Effect.promise((signal) =>
-								inTransaction.replayPage(
-									{
-										stream,
-										cursor,
-										controls: [
-											{ stream: control, since: cursor, types: ["reach.changed", "session.ended"] },
-										],
-									},
-									100,
-									signal,
-								),
+								read === "replay"
+									? inTransaction.replayPage({ stream, cursor, controls }, 100, signal)
+									: inTransaction.following([{ stream, since: cursor }, ...controls], 100, signal),
 							);
 							const [stats] = yield* query((db) =>
 								db.execute<{ fetched: string }>(

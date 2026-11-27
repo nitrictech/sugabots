@@ -3,7 +3,7 @@ export * as EventStore from "./store.ts";
 import { createHash } from "node:crypto";
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
 import type { StreamCursor } from "@sugabots/contracts/operations/events";
-import { and, asc, eq, gt, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, gt, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
 import {
@@ -63,28 +63,22 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 		statement: (db: Executor) => Effect.Effect<A, QueryFailure>,
 		signal?: AbortSignal,
 	) => runPromise(query(statement), { signal });
+	const following: Interface["following"] = async (feeds, limit, signal) => {
+		if (feeds.length === 0) return [];
+		const rows = await run(
+			(db) => db.execute<EventRow>(selectFeedRows(db, feeds, limit), "objects"),
+			signal,
+		);
+		return rows.map(({ seq, stream, payload }) => ({ seq: Number(seq), stream, event: payload }));
+	};
 
 	return {
 		async replay(stream, since, limit, signal) {
-			const rows = await run(
-				(db) =>
-					db
-						.select({ seq: event.seq, payload: event.payload })
-						.from(event)
-						.where(and(eq(event.stream, stream), gt(event.seq, since)))
-						.orderBy(asc(event.seq))
-						.limit(limit),
-				signal,
-			);
-
-			return rows.map((row) => ({ seq: row.seq, event: row.payload }));
+			const rows = await following([{ stream, since }], limit, signal);
+			return rows.map(({ seq, event }) => ({ seq, event }));
 		},
 
-		async following(feeds, limit, signal) {
-			if (feeds.length === 0) return [];
-			const rows = await run((db) => followingRows(db, feeds, limit), signal);
-			return rows.map(({ seq, stream, payload }) => ({ seq, stream, event: payload }));
-		},
+		following,
 
 		async latest(streams, signal) {
 			if (streams.length === 0) return new Map();
@@ -143,13 +137,8 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 
 			const retained = sql`${feed.since} >= (${retentionBoundary}) and ${validReplayPosition(page)}`;
 			const rows = await run((db) => {
-				const batch = replayRows(db, [feed, ...page.controls], limit);
-				return db.execute<{
-					retained: boolean;
-					seq: string | null;
-					stream: EventStream;
-					payload: StreamEvent;
-				}>(
+				const batch = selectFeedRows(db, [feed, ...page.controls], limit);
+				return db.execute<Omit<EventRow, "seq"> & { retained: boolean; seq: string | null }>(
 					sql`select retained, batch.* from (select ${retained} as retained) as replay
 						left join lateral (${batch}) as batch on retained order by batch.seq`,
 					"objects",
@@ -213,16 +202,13 @@ const eventSelection = {
 	payload: event.payload,
 };
 
-function followingRows(db: Executor, feeds: readonly Feed[], limit: number) {
-	return db
-		.select(eventSelection)
-		.from(event)
-		.where(or(...feeds.map((feed) => and(eq(event.stream, feed.stream), matchesFeed(feed)))))
-		.orderBy(asc(event.seq))
-		.limit(limit);
+interface EventRow {
+	seq: string;
+	stream: EventStream;
+	payload: StreamEvent;
 }
 
-function replayRows(db: Executor, feeds: readonly Feed[], limit: number) {
+function selectFeedRows(db: Executor, feeds: readonly Feed[], limit: number) {
 	// Overlapping feeds on the same stream must still return each event once.
 	const batches = [...Map.groupBy(feeds, (feed) => feed.stream)].map(([stream, sameStream]) => {
 		const batch = db
