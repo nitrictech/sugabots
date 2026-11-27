@@ -19,7 +19,7 @@ export const legacy = {
 		sam: "0000000b-0000-4000-8000-000000000001",
 		/** In the Family and Notes pods. */
 		pat: "0000000b-0000-4000-8000-000000000002",
-		/** In no shared pod. */
+		/** In no shared pod, though she made Budget in Family before she left it. */
 		ana: "0000000b-0000-4000-8000-000000000003",
 	},
 	provider: "0000000e-0000-4000-8000-000000000000",
@@ -31,7 +31,10 @@ export const legacy = {
 	},
 	bots: {
 		planner: "0000000c-0000-4000-8000-000000000001",
+		/** Made by Ana, who has left the Family pod since. */
 		budget: "0000000c-0000-4000-8000-000000000002",
+		/** Pat's Personal Assistant, in their personal pod. */
+		patsAssistant: "0000000c-0000-4000-8000-000000000003",
 		/** Pat's bot, in their personal pod beside their Personal Assistant. */
 		helper: "0000000c-0000-4000-8000-000000000004",
 	},
@@ -203,7 +206,7 @@ INSERT INTO "pod_member" ("workspace_id", "pod_id", "user_id") VALUES
 ON CONFLICT DO NOTHING;
 INSERT INTO "agent" ("id", "workspace_id", "pod_id", "name", "handle", "provisioned_key", "color", "face", "model", "created_by_id", "created_at") VALUES
  ('0000000c-0000-4000-8000-000000000001', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'Planner', 'planner', NULL, 'rose', 'pill', 'm', '0000000b-0000-4000-8000-000000000001', '2026-10-01 09:01'),
- ('0000000c-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'Budget', 'budget', NULL, 'sky', 'dot', 'm', '0000000b-0000-4000-8000-000000000001', '2026-10-01 09:02'),
+ ('0000000c-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'Budget', 'budget', NULL, 'sky', 'dot', 'm', '0000000b-0000-4000-8000-000000000003', '2026-10-01 09:02'),
  ('0000000c-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000003', 'Personal Assistant', 'personal-assistant', 'personal-assistant', 'teal', 'arc', 'm', '0000000b-0000-4000-8000-000000000002', '2026-10-03 09:01'),
  ('0000000c-0000-4000-8000-000000000004', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000003', 'Helper', 'helper', NULL, 'lime', 'wink', 'm', '0000000b-0000-4000-8000-000000000002', '2026-10-03 09:02');
 INSERT INTO "agent" ("id", "workspace_id", "name", "handle", "system_agent_key", "color", "face") VALUES
@@ -474,4 +477,17 @@ INSERT INTO "notification_override" ("user_id", "pod_id", "level") VALUES
  ('0000000b-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'mentions');
 INSERT INTO "notification_settings" ("user_id", "level", "routine_runs") VALUES
  ('0000000b-0000-4000-8000-000000000001', 'all', 'all');
+`;
+
+/** The token of the session main gave `memberId`, in {@link legacySessions}. */
+export function legacySessionToken(memberId: string): string {
+	return `session-${memberId}`;
+}
+
+/** A session for each member, signed in on main, which the upgrade keeps. */
+export const legacySessions = `
+INSERT INTO "session" ("token", "user_id", "expires_at") VALUES
+${Object.values(legacy.members)
+	.map((member) => ` ('${legacySessionToken(member)}', '${member}', now() + interval '1 day')`)
+	.join(",\n")};
 `;

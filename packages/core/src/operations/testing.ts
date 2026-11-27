@@ -10,6 +10,7 @@ import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Queue, Scope, Str
 import { Accounts } from "../accounts/accounts.ts";
 import { chatServicesForTests } from "../chats/testing.ts";
 import { noComputers } from "../computers/testing.ts";
+import type { RunEffect } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventStore } from "../database/events/store.ts";
 import { inMemoryEventStore } from "../database/events/testing.ts";
@@ -100,6 +101,8 @@ export interface ServedOver {
 	 */
 	readonly streamsTiming?: Streams.TimingInterface;
 	readonly clock?: Clock.Clock;
+	/** The database the operations run on; by default the test database. */
+	readonly runOn?: RunEffect<TestInfrastructure>;
 }
 
 /** Email that goes nowhere, for cases that send some but read none. */
@@ -162,17 +165,18 @@ export async function servedRegistry(over: ServedOver = {}): Promise<{
 }> {
 	const withClock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		over.clock ? Effect.provideService(effect, Clock.Clock, over.clock) : effect;
+	const runOn = over.runOn ?? runOnPostgres;
 	const built = await buildOperationRegistries(over);
 	const operations = Context.get(built, Operations.Service);
 	const longRunning = Context.get(built, Operations.LongRunning);
 	return {
 		longRunning,
 		call: (principal, name, input) =>
-			runOnPostgres(
+			runOn(
 				withClock(operations[name](principal, input, { kind: "request", request: randomUUID() })),
 			),
 		follow: (principal, name, input) =>
-			runOnPostgres(
+			runOn(
 				Effect.gen(function* () {
 					const scope = yield* Scope.make();
 					const started = yield* Effect.exit(
@@ -222,7 +226,8 @@ export async function operationsForTests(over: ServedOver = {}): Promise<Operati
 
 async function buildOperationRegistries(over: ServedOver) {
 	const bus = EventBus.inProcess({ store: inMemoryEventStore() });
-	const chats = over.chats ?? (await chatServicesForTests(bus));
+	const runOn = over.runOn ?? runOnPostgres;
+	const chats = over.chats ?? (await chatServicesForTests(bus, undefined, runOn));
 	const outside = Layer.mergeAll(
 		noComputers,
 		Layer.succeedContext(chats),
@@ -236,7 +241,7 @@ async function buildOperationRegistries(over: ServedOver) {
 		EventStore.layer,
 		over.streamsTiming ? Layer.succeed(Streams.Timing, over.streamsTiming) : Layer.empty,
 	);
-	return runOnPostgres(
+	return runOn(
 		Effect.gen(function* () {
 			return yield* Layer.buildWithScope(layer.pipe(Layer.provide(outside)), yield* Scope.make());
 		}),

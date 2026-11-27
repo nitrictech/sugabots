@@ -1,9 +1,10 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import { noComputers } from "../computers/testing.ts";
+import type { RunEffect } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
-import { runOnPostgres } from "../database/testing.ts";
+import { runOnPostgres, type TestInfrastructure } from "../database/testing.ts";
 import { Notifications } from "../notifications/notifications.ts";
 import { unimplemented } from "../testing.ts";
 import { Lanes } from "../workflows/lanes.ts";
@@ -97,9 +98,8 @@ export const chatServicesLayerForTests = (
 export const chatServicesForTests = (
 	bus: Pick<EventBus.Interface, "publishCommitted">,
 	signals?: Turns.TurnSignals.Interface,
+	runOn: RunEffect<TestInfrastructure> = runOnPostgres,
 ) => {
 	const services = chatServicesLayerForTests(bus, signals);
-	return runOnPostgres(
-		Effect.context<Layer.Success<typeof services>>().pipe(Effect.provide(services)),
-	);
+	return runOn(Effect.context<Layer.Success<typeof services>>().pipe(Effect.provide(services)));
 };

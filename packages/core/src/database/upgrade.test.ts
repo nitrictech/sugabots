@@ -23,6 +23,7 @@ import {
 import { DurableDeferred, Workflow } from "effect/unstable/workflow";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SessionAuthentication } from "../authentication/session.ts";
 import { WebhookAuthentication, WebhookRefused } from "../authentication/webhook.ts";
 import { reachesBotFor, reachesChatFor, reachesProjectFor } from "../authorization/access.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
@@ -33,9 +34,12 @@ import { TurnRequests } from "../chats/turns/turns.ts";
 import { ChatFileStore } from "../files/chat-file-store.ts";
 import { Files } from "../files/files.ts";
 import { Ids } from "../ids/ids.ts";
+import { requestOutcome, servedOperations } from "../operations/testing.ts";
+import type { Principal } from "../principal.ts";
 import { Secrets } from "../secrets/secrets.ts";
-import { type Database, layer as databaseLayer, query, transaction } from "./database.ts";
+import { effectRunner, query, type RunEffect, transaction } from "./database.ts";
 import { applyMigrations } from "./migrations.ts";
+import { type TestInfrastructure, testInfrastructure } from "./testing.ts";
 import {
 	bytesQueuedForDeletion,
 	LAST_MAIN_MIGRATION,
@@ -45,6 +49,8 @@ import {
 	legacyFiles,
 	legacyKeyOf,
 	legacyRows,
+	legacySessions,
+	legacySessionToken,
 	legacySummaryRequest,
 } from "./upgrade.test-support.ts";
 
@@ -77,6 +83,8 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 		let submitted: SubmittedToMainsEngine;
 		/** The folders queued for deletion as the upgrade left them, before any case works the queue. */
 		let queuedByTheUpgrade: string[];
+		/** What each member reached on main, before the upgrade. */
+		let reachedOnMain: Reached[];
 
 		beforeAll(async () => {
 			root = await mkdtemp(join(tmpdir(), "upgrade-blobs-"));
@@ -85,6 +93,8 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			await withClient(url, async (client) => {
 				await client.query(legacyRows);
 				await client.query(legacySummaryRequest);
+				await client.query(legacySessions);
+				reachedOnMain = (await client.query<Reached>(REACHED_ON_MAIN)).rows;
 			});
 			await storeLegacyBytes(url, store, root);
 			submitted = await submitToMainsEngine(url);
@@ -182,7 +192,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			]);
 		});
 
-		it("keeps a shared pod's bots, chats, files, connectors and computer to its members", async () => {
+		it("keeps a shared pod's bots, chats, files, connectors, automations and computer to its members", async () => {
 			const { family } = legacy.pods;
 			const { planner, budget } = legacy.bots;
 			/** Everything that was the Family pod's, with whether `memberId` reaches each. */
@@ -213,6 +223,9 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 							union all
 							select 'computer', m.id::text, ${reachesProjectFor(sql`m.project_id`, memberId)}
 								from computer m where m.project_id in (select id from pod_project)
+							union all
+							select 'automation', a.id::text, ${reachesProjectFor(sql`a.project_id`, memberId)}
+								from automation a where a.project_id in (select id from pod_project)
 							order by 1, 2
 						`,
 							"objects",
@@ -223,7 +236,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			const kinds = new Set(reachedByAna.map(({ kind }) => kind));
 
 			expect([...kinds].sort()).toEqual(
-				["bot", "chat", "computer", "connector", "file", "project"].sort(),
+				["automation", "bot", "chat", "computer", "connector", "file", "project"].sort(),
 			);
 			expect(reachedByAna.filter(({ reached }) => reached)).toEqual([]);
 			for (const podMember of [legacy.members.sam, legacy.members.pat]) {
@@ -272,6 +285,47 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await reachedBy(legacy.members.ana)).toBe(true);
 			expect(await reachedBy(legacy.members.sam)).toBe(false);
 			expect(await reachedBy(legacy.members.pat)).toBe(false);
+		});
+
+		it("leaves each member reaching, through the operations, what they reached on main, but for admins seeing personal bots", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const legacyIds = new Set(reachedOnMain.map(({ id }) => id));
+			const chats = [
+				...new Set(reachedOnMain.filter(({ kind }) => kind === "chat").map(({ id }) => id)),
+			];
+			const automationProjects = await upgraded.rows<{ project_id: string }>(
+				`select distinct project_id from automation`,
+			);
+			const reachedNow: Reached[] = [];
+			for (const member of Object.values(legacy.members)) {
+				const principal = await upgraded.signIn(member);
+				const workspace = legacy.workspace;
+				for (const bot of await call(principal, "bots.list", { workspace })) {
+					reachedNow.push({ member, kind: "bot", id: bot.id });
+				}
+				for (const project of await call(principal, "projects.list", { workspace })) {
+					reachedNow.push({ member, kind: "project", id: project.id });
+				}
+				for (const { project_id: projectId } of automationProjects) {
+					const listed = await call(principal, "automations.list", { projectId }).catch(() => []);
+					for (const automation of listed) {
+						reachedNow.push({ member, kind: "automation", id: automation.id });
+					}
+				}
+				for (const chatId of chats) {
+					const read = await requestOutcome(call(principal, "chats.get", { chatId, limit: 1 }));
+					if (read === "ok") reachedNow.push({ member, kind: "chat", id: chatId });
+				}
+			}
+
+			expect(sortedReach(reachedNow.filter(({ id }) => legacyIds.has(id)))).toEqual(
+				sortedReach([
+					...reachedOnMain,
+					// Admins know which personal bots there are, without reaching their chats.
+					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.patsAssistant },
+					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.helper },
+				]),
+			);
 		});
 
 		it("makes a shared pod a private project, and its bots private, with its members as theirs", async () => {
@@ -515,6 +569,42 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 	},
 );
 
+/** Something a member reaches: a bot, a project (on main, a `shared` `pod`), a chat or an automation. */
+interface Reached {
+	member: string;
+	kind: "bot" | "project" | "chat" | "automation";
+	id: string;
+}
+
+/**
+ * What each member reached on main, read from main's own tables: the bots,
+ * threads, routines and `shared` `pod`s of each `pod` they were in or owned,
+ * as main's access rules read them. Direct messages, which the upgrade deletes, are in
+ * no `pod`.
+ */
+const REACHED_ON_MAIN = `
+	with reach as (
+		select pod_id, user_id from pod_member
+		union select id, owner_id from pod where owner_id is not null
+	)
+	select reach.user_id::text as member, 'bot' as kind, agent.id::text as id
+		from agent join reach on reach.pod_id = agent.pod_id
+	union all
+	select reach.user_id::text, 'project', pod.id::text
+		from pod join reach on reach.pod_id = pod.id where pod.kind = 'shared'
+	union all
+	select reach.user_id::text, 'chat', thread.id::text
+		from thread join reach on reach.pod_id = thread.pod_id
+	union all
+	select reach.user_id::text, 'automation', routine.id::text
+		from routine join agent on agent.id = routine.agent_id
+		join reach on reach.pod_id = agent.pod_id
+		where routine.deleted_at is null`;
+
+function sortedReach(reached: readonly Reached[]): string[] {
+	return reached.map(({ member, kind, id }) => `${member} ${kind} ${id}`).sort();
+}
+
 /** Pauses work main's engine was carrying out, until the test resumes it. */
 const Paused = DurableDeferred.make("upgrade/paused");
 
@@ -661,7 +751,9 @@ interface Upgraded {
 	read: (key: BlobStore.Key) => Promise<string>;
 	deleteQueuedBlobs: () => Promise<void>;
 	/** Runs `effect` against the upgraded database, as the server's code would. */
-	run: <A, E>(effect: Effect.Effect<A, E, Database>) => Promise<A>;
+	run: RunEffect<TestInfrastructure>;
+	/** `memberId`, signed in with the session main gave them in {@link legacySessions}. */
+	signIn: (memberId: string) => Promise<Principal>;
 	dispose: () => Promise<void>;
 }
 
@@ -669,11 +761,9 @@ interface Upgraded {
 function startServer(url: string, store: Store, root: string): Upgraded {
 	const env = { DATABASE_URL: url, BLOB_STORE_PROVIDER: store, BLOB_STORE_FILESYSTEM_ROOT: root };
 	const runtime = ManagedRuntime.make(
-		BlobStore.layer.pipe(
-			Layer.provideMerge(Layer.mergeAll(databaseLayer, Ids.layer)),
-			Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
-		),
+		testInfrastructure.pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
 	);
+	const run = effectRunner(runtime);
 	return {
 		rows: (sql, params = []) =>
 			withClient(url, async (client) => (await client.query(sql, params)).rows),
@@ -686,7 +776,20 @@ function startServer(url: string, store: Store, root: string): Upgraded {
 				}),
 			),
 		deleteQueuedBlobs: () => runtime.runPromise(BlobDeletions.deleteQueued),
-		run: (effect) => runtime.runPromise(effect),
+		run,
+		signIn: (memberId) =>
+			run(
+				Effect.gen(function* () {
+					const sessions = yield* SessionAuthentication.Service;
+					return yield* sessions
+						.authenticate(new Headers({ authorization: `Bearer ${legacySessionToken(memberId)}` }))
+						.pipe(
+							Effect.provideService(SessionAuthentication.Cookies, {
+								read: () => Effect.succeed(undefined),
+							}),
+						);
+				}).pipe(Effect.provide(SessionAuthentication.layer)),
+			),
 		dispose: () => runtime.dispose(),
 	};
 }

@@ -20,9 +20,14 @@ update so far, so plan for it.
 ## What changes
 
 - **Shared pods become private projects** with the same members. Each bot of
-  a shared pod becomes a private bot that those members can reach, and stays in
-  the project, still leading it if it led the pod. Nobody gains access to
-  anything they couldn't reach before.
+  a shared pod becomes a private bot whose members are exactly the pod's
+  members, and stays in the project, still leading it if it led the pod. A
+  bot's creator who had left the pod isn't one of its members. Nobody gains
+  access to anything they couldn't reach before.
+- **Admins see which personal bots there are.** Each member's personal bots,
+  such as their Personal Assistant and the bots of their personal pod, show in
+  owners' and admins' lists of bots. Admins still can't talk to them or read
+  their chats and files.
 - **Each bot gets its own connectors.** A pod's connectors are copied to each
   of its bots. A shared pod with no bots keeps its connectors in the project it
   becomes. Sign-ins can't be shared between copies, so **every OAuth

@@ -3394,11 +3394,12 @@ CREATE TRIGGER administrator_private_bots
 AFTER INSERT OR UPDATE OF "role" ON "membership"
 FOR EACH ROW WHEN (NEW."role" IN ('owner', 'admin') AND NOT NEW."leaving")
 EXECUTE FUNCTION add_new_administrator_to_private_bots();--> statement-breakpoint
--- A `shared` `pod`'s bots become private, its people their members (the
--- trigger above adds the owner and admins), with each bot's creator while
--- they are in the workspace. Each stays in the private project its `pod`
--- became, so its own chats, files, connectors and automations, in its default
--- project, are reached by those who reached them before, and nobody else.
+-- A `shared` `pod`'s bots become private, its people their members, and
+-- nobody else: a creator who had left the `pod` stays out (the trigger above
+-- adds the owner and admins, who were in every `shared` `pod`). Each stays in
+-- the private project its `pod` became, so its own chats, files, connectors
+-- and automations, in its default project, are reached by those who reached
+-- them before, and nobody else.
 UPDATE "bot" SET "visibility" = 'private' WHERE "in_shared_pod";--> statement-breakpoint
 INSERT INTO "bot_member" ("workspace_id", "bot_id", "member_id")
 SELECT b."workspace_id", b."id", pm."member_id"
@@ -3406,13 +3407,6 @@ FROM "bot" b
 INNER JOIN "project_bot" pb ON pb."bot_id" = b."id"
 INNER JOIN "project" p ON p."id" = pb."project_id" AND p."default_of_bot_id" IS NULL
 INNER JOIN "project_member" pm ON pm."project_id" = p."id"
-WHERE b."in_shared_pod"
-ON CONFLICT ("bot_id", "member_id") DO NOTHING;--> statement-breakpoint
-INSERT INTO "bot_member" ("workspace_id", "bot_id", "member_id")
-SELECT b."workspace_id", b."id", b."created_by_id"
-FROM "bot" b
-INNER JOIN "membership" m ON m."workspace_id" = b."workspace_id"
-	AND m."member_id" = b."created_by_id" AND NOT m."leaving"
 WHERE b."in_shared_pod"
 ON CONFLICT ("bot_id", "member_id") DO NOTHING;--> statement-breakpoint
 -- A bot's own connectors stay off in each project but its default one until
