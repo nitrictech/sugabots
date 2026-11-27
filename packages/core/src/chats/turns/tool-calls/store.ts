@@ -746,8 +746,22 @@ type BeganExecution =
  * cannot carry; the cut keeps the start, which is where a page's title and a
  * result list's first entries are.
  */
+/**
+ * Whether a call's input is stored, and so shown on its approval card, in
+ * full. A call whose input isn't can't be put to an approver, who would allow
+ * what they can't see.
+ */
+export function inputShownInFull(input: unknown): boolean {
+	return storedJsonText(input).length <= MAX_STORED_JSON_CHARACTERS;
+}
+
+/** The JSON a stored input or output is cut from. */
+function storedJsonText(value: unknown): string {
+	return JSON.stringify(value ?? null) ?? "null";
+}
+
 function boundedJson(value: unknown): JsonValue {
-	const text = JSON.stringify(value ?? null) ?? "null";
+	const text = storedJsonText(value);
 	if (text.length <= MAX_STORED_JSON_CHARACTERS) {
 		return JSON.parse(text);
 	}

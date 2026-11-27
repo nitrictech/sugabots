@@ -198,7 +198,7 @@ export const wikiWipe = (
 					wiki__wipe: {
 						described: { name: "wipe", readOnly: false, destructive: null },
 						tool: tool({
-							inputSchema: Schema.Struct({}).pipe(
+							inputSchema: Schema.Struct({ reason: Schema.optional(Schema.String) }).pipe(
 								Schema.toStandardSchemaV1,
 								Schema.toStandardJSONSchemaV1,
 							),

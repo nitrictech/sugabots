@@ -6,7 +6,18 @@ import { RunningTurn } from "@sugabots/core/operations/running-turn";
 import type { BotPrincipal } from "@sugabots/core/principal";
 import { processLayer } from "@sugabots/core/tiers";
 import { type UserText, userText } from "@sugabots/errors";
-import { DateTime, Duration, Effect, Exit, Layer, Option, Ref, Schedule } from "effect";
+import {
+	Array as Arr,
+	DateTime,
+	Duration,
+	Effect,
+	Exit,
+	Layer,
+	Option,
+	Ref,
+	Result,
+	Schedule,
+} from "effect";
 import {
 	type StepOutcome,
 	type StepPlace,
@@ -356,13 +367,27 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 										asks.push({ toolCallId: result.toolCallId, ...result.output.asked });
 										return [];
 									});
+									// An approver must see the whole input they allow, so a call whose
+									// input the approval card can't show in full is refused, not asked.
+									const [tooLarge, shown] = Arr.partition(asks, (ask) =>
+										Turns.inputShownInFull(ask.input) ? Result.succeed(ask) : Result.fail(ask),
+									);
+									yield* Effect.forEach(tooLarge, ({ reopenCallId }) =>
+										reopenCallId === undefined
+											? Effect.void
+											: recorder.close(reopenCallId, { error: TOO_LARGE_TO_APPROVE }),
+									);
 									yield* recordResults([
 										...completed,
 										...denied.map((toolCallId) => ({ toolCallId, output: deniedOutput })),
 										...withdrawn.map((toolCallId) => ({ toolCallId, output: withdrawnOutput })),
+										...tooLarge.map(({ toolCallId }) => ({
+											toolCallId,
+											output: errorOutput(TOO_LARGE_TO_APPROVE),
+										})),
 									]);
-									if (asks.length === 0) return undefined;
-									const waiting = yield* runningTurn.askForApprovals(principal, callsStep, asks);
+									if (shown.length === 0) return undefined;
+									const waiting = yield* runningTurn.askForApprovals(principal, callsStep, shown);
 									if (waiting._tag === "NotWaiting") return yield* endAs(principal, "cancelled");
 									return {
 										_tag: "Waiting",
@@ -529,6 +554,12 @@ export const layer = layerWith(timing);
 function errorOutput(text: string): Turns.ToolResultOutput {
 	return { type: "error-text", value: text } as Turns.ToolResultOutput;
 }
+
+/**
+ * Why a call that needs approval wasn't made: its input is too large for its
+ * approval card to show in full.
+ */
+const TOO_LARGE_TO_APPROVE = userText`Not run: this call needs approval, and its input is too large for an approver to see in full. Send a smaller request, such as by splitting the work into several calls.`;
 
 /** A call sent at once. */
 const dispatch: Turns.CallPlan = { _tag: "Dispatch" };

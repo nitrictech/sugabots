@@ -128,6 +128,70 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			});
 		});
 
+		it("refuses a call that needs approval when its input is too large to show in full", async () => {
+			const execute = vi.fn(async () => ({ removed: true }));
+			const { model, requests } = scriptedSteps(
+				{
+					calls: [
+						{
+							toolCallId: "wipe",
+							toolName: CALL_TOOL,
+							input: { tool: "wiki__wipe", arguments: { reason: "x".repeat(70_000) } },
+						},
+					],
+				},
+				{ text: ["I'll send less."] },
+			);
+
+			const ran = await loop.runTurn(chatId, { model, connectorTools: wiki("ask", execute) });
+
+			expect(ran.outcomes).not.toContainEqual(expect.objectContaining({ _tag: "Waiting" }));
+			expect(execute).not.toHaveBeenCalled();
+			expect(await callsOf(ran.turnId)).toEqual([]);
+			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(
+				"too large for an approver to see in full",
+			);
+		});
+
+		it("ends a recorded call that comes to need approval when its input is too large to show in full", async () => {
+			let switched = false;
+			const execute = vi.fn(async () => ({ removed: true }));
+			afterCommit = async (events) => {
+				const started = events.some(({ event }) => event.type === "tool_call.started");
+				if (!started || switched) return;
+				switched = true;
+				await onDatabase((db) =>
+					db
+						.update(connector)
+						.set({ toolAccess: { wipe: "ask" } })
+						.where(eq(connector.id, connectorId)),
+				);
+			};
+			const { model, requests } = scriptedSteps(
+				{
+					calls: [
+						{
+							toolCallId: "wipe",
+							toolName: CALL_TOOL,
+							input: { tool: "wiki__wipe", arguments: { reason: "x".repeat(70_000) } },
+						},
+					],
+				},
+				{ text: ["I'll send less."] },
+			);
+
+			const ran = await loop.runTurn(chatId, { model, connectorTools: wiki("allow", execute) });
+
+			expect(switched).toBe(true);
+			expect(execute).not.toHaveBeenCalled();
+			expect(await callsOf(ran.turnId)).toMatchObject([
+				{ tool: "wiki__wipe", status: "failed", approvalStatus: null },
+			]);
+			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(
+				"too large for an approver to see in full",
+			);
+		});
+
 		it.each(["disabled", "off", "ask"] as const)(
 			"uses the connector's live access when it changes to %s after the model sees it",
 			async (access) => {

@@ -203,7 +203,7 @@ export {
 	DENIED_OUTPUT,
 	DecidedApproval,
 } from "./tool-calls/lifecycle.ts";
-export { commitWrittenFile, replayWrittenFile } from "./tool-calls/store.ts";
+export { commitWrittenFile, inputShownInFull, replayWrittenFile } from "./tool-calls/store.ts";
 export { TurnTools as Tools } from "./tools.ts";
 export { WorkAdmission } from "./work-admission.ts";
 
