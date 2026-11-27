@@ -13,7 +13,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { LetterTile } from "@/ui/letter-tile.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 
 /*
@@ -431,13 +431,23 @@ export function SettingsChoiceRow<Value extends string>({
 	return (
 		<div className={cn(SETTINGS_ROW, "py-2.5 max-sm:flex-col max-sm:items-stretch max-sm:gap-2")}>
 			<SettingsFieldLabel>{label}</SettingsFieldLabel>
-			<SegmentedControl
-				label={label}
-				options={options}
-				value={value}
-				onChange={onChange}
-				className="sm:ml-auto max-sm:w-full max-sm:[&>label]:flex-1 max-sm:[&>label]:text-center"
-			/>
+			<RadioGroup
+				aria-label={label}
+				// Null, not undefined, keeps the group controlled while no option is chosen.
+				value={value ?? null}
+				onValueChange={(next) => next !== null && onChange(next)}
+				className="sm:ml-auto max-sm:w-full"
+			>
+				{options.map((option) => (
+					<RadioGroupItem
+						key={option.value}
+						value={option.value}
+						className="max-sm:flex-1 max-sm:text-center"
+					>
+						{option.label}
+					</RadioGroupItem>
+				))}
+			</RadioGroup>
 		</div>
 	);
 }

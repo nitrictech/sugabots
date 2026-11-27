@@ -20,7 +20,7 @@ import {
 	SettingsRow,
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
 
 /*
@@ -89,12 +89,11 @@ function WebSearchGroups({ provider }: { provider: SearchProvider | null }) {
 					label="Bots can use the web"
 					sub="Search the web and read web pages"
 					trailing={
-						<Toggle
+						<Switch
 							checked={enabled}
 							disabled={needsKey || pending}
-							label="Bots can use the web"
-							tooltip={needsKey ? `${builtIn.name} requires an API key` : undefined}
-							onChange={(next) => configure({ enabled: next })}
+							aria-label="Bots can use the web"
+							onCheckedChange={(next) => configure({ enabled: next })}
 						/>
 					}
 				/>

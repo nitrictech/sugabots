@@ -867,7 +867,9 @@ describe("a bot's automations", () => {
 		const routine = await openTrigger(/^Custom schedule/);
 
 		within(routine).getByText("15 */2 * * *");
-		expect(within(routine).getByRole("radio", { name: "Daily" })).toHaveProperty("checked", false);
+		expect(within(routine).getByRole("radio", { name: "Daily" }).getAttribute("aria-checked")).toBe(
+			"false",
+		);
 		fireEvent.click(within(routine).getByRole("radio", { name: "Daily" }));
 		fireEvent.click(within(routine).getByRole("button", { name: "Save" }));
 

@@ -6,6 +6,7 @@ import { useId } from "react";
  * is a native radio button, so arrow keys move the choice and only the chosen
  * one is in the tab order.
  */
+/** @deprecated Use `RadioGroup` and `RadioGroupItem` from `@/ui/radio-group.tsx`. */
 export function SegmentedControl<Value extends string>({
 	label,
 	options,

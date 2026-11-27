@@ -57,7 +57,7 @@ export const NothingChosen = meta.story({
 	},
 	render: page,
 	play: async ({ canvas }) => {
-		const level = await canvas.findByRole("group", { name: "Notify me about" });
+		const level = await canvas.findByRole("radiogroup", { name: "Notify me about" });
 		await expect(within(level).getByRole("radio", { name: "Mentions and replies" })).toBeChecked();
 		await expect(canvas.getByText(/replies in chats you're part of/)).toBeInTheDocument();
 		if (firstProject) {
@@ -75,7 +75,7 @@ export const ChoosingEverything = meta.story({
 	},
 	render: page,
 	play: async ({ canvas }) => {
-		const level = await canvas.findByRole("group", { name: "Notify me about" });
+		const level = await canvas.findByRole("radiogroup", { name: "Notify me about" });
 		await userEvent.click(within(level).getByRole("radio", { name: "Everything" }));
 		await expect(
 			await canvas.findByText(/Every new message in the chats you can see/),
@@ -134,7 +134,7 @@ export const ChoosingWhatElseNotifies = meta.story({
 		await userEvent.click(failedReplies);
 		await waitFor(() => expect(failedReplies).not.toBeChecked());
 
-		const automationRuns = canvas.getByRole("group", { name: "My automations run" });
+		const automationRuns = canvas.getByRole("radiogroup", { name: "My automations run" });
 		await expect(within(automationRuns).getByRole("radio", { name: "Failed" })).toBeChecked();
 		await userEvent.click(within(automationRuns).getByRole("radio", { name: "Every run" }));
 		await waitFor(() =>

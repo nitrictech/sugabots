@@ -74,8 +74,8 @@ import {
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { LetterTile } from "@/ui/letter-tile.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import { SearchField } from "@/ui/search-field.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	PageBackLink,
 	SettingsAddRow,
@@ -88,8 +88,8 @@ import {
 	SettingsTestOutcome,
 } from "@/ui/settings-page.tsx";
 import { SpacedText } from "@/ui/spaced-text.tsx";
+import { Switch } from "@/ui/switch.tsx";
 import { TitleTag } from "@/ui/title-tag.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ModelChoiceList } from "./ModelChoiceList.tsx";
 import { ProviderSignInRow } from "./ProviderSignIn.tsx";
@@ -454,7 +454,7 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 				<SettingsRow
 					label={provider.active ? "On" : "Off"}
 					trailing={
-						<Toggle
+						<Switch
 							checked={provider.active}
 							disabled={
 								actions.update.isPending ||
@@ -462,8 +462,8 @@ function ProviderPage({ provider }: { provider: ModelProvider }) {
 								// Until usage is known, switching off could leave bots on its models unasked.
 								(provider.active && !usage.known)
 							}
-							label={`Use ${provider.name}`}
-							onChange={(active) =>
+							aria-label={`Use ${provider.name}`}
+							onCheckedChange={(active) =>
 								active
 									? actions.update.mutate({ providerId: provider.id, json: { active } })
 									: switchOff()
@@ -593,14 +593,19 @@ function ProviderAccessGroup({ provider, local }: { provider: ModelProvider; loc
 				<ProviderFieldRow
 					label="Format"
 					action={
-						<SegmentedControl
-							label="API format"
-							options={API_FORMATS}
+						<RadioGroup
+							aria-label="API format"
 							value={provider.apiFormat}
-							onChange={(apiFormat) =>
+							onValueChange={(apiFormat) =>
 								actions.update.mutate({ providerId: provider.id, json: { apiFormat } })
 							}
-						/>
+						>
+							{API_FORMATS.map((option) => (
+								<RadioGroupItem key={option.value} value={option.value}>
+									{option.label}
+								</RadioGroupItem>
+							))}
+						</RadioGroup>
 					}
 				/>
 			)}
@@ -1297,7 +1302,7 @@ function Models({ provider }: { provider: ModelProvider }) {
 								<>
 									<BotFaces bots={bots} />
 									{custom && <EditCapabilities provider={provider} model={model} />}
-									<Toggle
+									<Switch
 										checked={model.enabled}
 										disabled={
 											!provider.active ||
@@ -1306,8 +1311,8 @@ function Models({ provider }: { provider: ModelProvider }) {
 											// Until usage is known, switching off could leave bots on it unasked.
 											(model.enabled && !usage.known)
 										}
-										label={`Bots can use ${modelName(model)}`}
-										onChange={(enabled) =>
+										aria-label={`Bots can use ${modelName(model)}`}
+										onCheckedChange={(enabled) =>
 											enabled
 												? actions.setModel.mutate({
 														providerId: provider.id,
@@ -1571,10 +1576,10 @@ function CapabilitiesDialog({
 									label={entry.name}
 									sub={entry.description}
 									trailing={
-										<Toggle
+										<Switch
 											checked={on}
-											label={entry.name}
-											onChange={(next) =>
+											aria-label={entry.name}
+											onCheckedChange={(next) =>
 												setChosen(
 													next
 														? [...chosen, entry.key]

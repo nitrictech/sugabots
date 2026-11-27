@@ -35,7 +35,8 @@ import { InstructionsField } from "@/ui/instructions-field.tsx";
 import { MoreMenu } from "@/ui/more-menu.tsx";
 import { NameDialog } from "@/ui/name-dialog.tsx";
 import { SETTINGS_CARD, SettingsGroup } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import {
 	copyOf,
@@ -158,13 +159,17 @@ export function AutomationPanel({
 	);
 
 	const stateSwitch = (
-		<Toggle
-			label="Automation on"
-			tooltip={active ? "Pause automation" : "Resume automation"}
-			checked={active}
-			disabled={!mayToggle || controls.pending}
-			onChange={(on) => void control(() => controls.setPaused(!on))}
-		/>
+		<Tooltip label={active ? "Pause automation" : "Resume automation"} side="top">
+			{/* On a wrapper, because a disabled switch receives no pointer events. */}
+			<span className="inline-flex shrink-0">
+				<Switch
+					aria-label="Automation on"
+					checked={active}
+					disabled={!mayToggle || controls.pending}
+					onCheckedChange={(on) => void control(() => controls.setPaused(!on))}
+				/>
+			</span>
+		</Tooltip>
 	);
 
 	// On a phone, across from Back at the top, as a phone's page has its actions; else beside the name.

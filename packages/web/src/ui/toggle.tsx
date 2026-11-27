@@ -1,5 +1,6 @@
 import { Tooltip } from "./tooltip.tsx";
 
+/** @deprecated Use `Switch` from `@/ui/switch.tsx`. */
 export function Toggle({
 	checked,
 	disabled,

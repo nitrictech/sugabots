@@ -31,7 +31,7 @@ import { Alert } from "@/ui/alert.tsx";
 import { MemberAvatar } from "@/ui/avatar.tsx";
 import { Button } from "@/ui/button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import {
 	SettingsControlRow,
 	SettingsDanger,
@@ -255,7 +255,15 @@ const themes: readonly { value: Theme; label: string }[] = [
 
 function ThemeChoice() {
 	const [theme, setTheme] = useTheme();
-	return <SegmentedControl label="Theme" options={themes} value={theme} onChange={setTheme} />;
+	return (
+		<RadioGroup aria-label="Theme" value={theme} onValueChange={setTheme}>
+			{themes.map((option) => (
+				<RadioGroupItem key={option.value} value={option.value}>
+					{option.label}
+				</RadioGroupItem>
+			))}
+		</RadioGroup>
+	);
 }
 
 /** What each level is called in settings; every level must have a name, so a new one can't be left out. */
@@ -272,12 +280,13 @@ const livelinessOptions = livelinessLevels.map((level) => ({
 function LivelinessChoice() {
 	const [liveliness, setLiveliness] = useLivelinessChoice();
 	return (
-		<SegmentedControl
-			label="Animations"
-			options={livelinessOptions}
-			value={liveliness}
-			onChange={setLiveliness}
-		/>
+		<RadioGroup aria-label="Animations" value={liveliness} onValueChange={setLiveliness}>
+			{livelinessOptions.map((option) => (
+				<RadioGroupItem key={option.value} value={option.value}>
+					{option.label}
+				</RadioGroupItem>
+			))}
+		</RadioGroup>
 	);
 }
 

@@ -25,7 +25,7 @@ import {
 	DialogFormFooter,
 	DialogFormHeader,
 } from "@/ui/dialog-form.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import { SettingsControlRow, SettingsFieldRow, SettingsGroup } from "@/ui/settings-page.tsx";
 
 /**
@@ -106,14 +106,10 @@ export function NewProjectDialog({
 						/>
 					</SettingsControlRow>
 					<SettingsControlRow label="Who can join">
-						<SegmentedControl
-							label="Who can join"
-							options={[
-								{ value: "public", label: "Anyone" },
-								{ value: "private", label: "Invited only" },
-							]}
+						<RadioGroup
+							aria-label="Who can join"
 							value={visibility}
-							onChange={(chosen) => {
+							onValueChange={(chosen) => {
 								setVisibility(chosen);
 								// A private bot leads only a private project.
 								const lead = bots?.find((bot) => bot.id === leadBotId);
@@ -121,7 +117,16 @@ export function NewProjectDialog({
 									setLeadBotId(null);
 								}
 							}}
-						/>
+						>
+							{[
+								{ value: "public", label: "Anyone" },
+								{ value: "private", label: "Invited only" },
+							].map((option) => (
+								<RadioGroupItem key={option.value} value={option.value}>
+									{option.label}
+								</RadioGroupItem>
+							))}
+						</RadioGroup>
 					</SettingsControlRow>
 					<SettingsControlRow label="Colour">
 						<ProjectColourPicker value={color} onChange={setChosenColor} />

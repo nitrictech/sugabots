@@ -42,8 +42,8 @@ import {
 	DialogFormScroll,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	SettingsFieldRow,
 	SettingsGroup,
@@ -619,16 +619,20 @@ function ByUrlStep({
 					<SettingsRow
 						label="Sign in with"
 						trailing={
-							<SegmentedControl
-								label="How to sign in to the server"
-								options={
-									isEndpoint
-										? signInMethodOptions.filter((option) => option.value !== "oauth")
-										: signInMethodOptions
-								}
+							<RadioGroup
+								aria-label="How to sign in to the server"
 								value={method}
-								onChange={clearingOutcome(setMethod)}
-							/>
+								onValueChange={clearingOutcome(setMethod)}
+							>
+								{(isEndpoint
+									? signInMethodOptions.filter((option) => option.value !== "oauth")
+									: signInMethodOptions
+								).map((option) => (
+									<RadioGroupItem key={option.value} value={option.value}>
+										{option.label}
+									</RadioGroupItem>
+								))}
+							</RadioGroup>
 						}
 					/>
 					{method === "token" && (

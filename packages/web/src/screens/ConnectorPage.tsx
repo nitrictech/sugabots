@@ -44,7 +44,7 @@ import {
 	SettingsTestOutcome,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 import { GitHubRepositoriesGroup } from "./GitHubConnect.tsx";
 import { AccessToggle } from "./tool-access.tsx";
 
@@ -158,11 +158,11 @@ function ConnectorCard({
 					<SettingsRow
 						label="Connector on"
 						trailing={
-							<Toggle
-								label="Connector on"
+							<Switch
+								aria-label="Connector on"
 								checked={connector.enabled !== false}
 								disabled={actions.update.isPending}
-								onChange={(enabled) =>
+								onCheckedChange={(enabled) =>
 									actions.update.mutate({ connectorId: connector.id, json: { enabled } })
 								}
 							/>

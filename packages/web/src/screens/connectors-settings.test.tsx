@@ -333,7 +333,8 @@ describe("a bot's Connectors page", () => {
 		const reading = screen.getByRole("region", { name: "Tools that read" });
 		within(reading).getByText("All 1 read tool");
 		expect(
-			(within(reading).getByRole("radio", { name: "Allowed" }) as HTMLInputElement).checked,
+			within(reading).getByRole("radio", { name: "Allowed" }).getAttribute("aria-checked") ===
+				"true",
 		).toBe(true);
 		const changes = screen.getByRole("region", { name: "Tools that make changes" });
 		within(changes).getByText("All 1 change tool");
@@ -369,7 +370,7 @@ describe("a bot's Connectors page", () => {
 		await openedWiki();
 
 		await openIndividualTools();
-		const wipe = screen.getByRole("group", { name: "wipe" });
+		const wipe = screen.getByRole("radiogroup", { name: "wipe" });
 		fireEvent.click(within(wipe).getByRole("radio", { name: "Off" }));
 
 		await waitFor(() =>
@@ -380,11 +381,11 @@ describe("a bot's Connectors page", () => {
 		);
 		await waitFor(() =>
 			expect(
-				(
-					within(screen.getByRole("group", { name: "wipe" })).getByRole("radio", {
+				within(screen.getByRole("radiogroup", { name: "wipe" }))
+					.getByRole("radio", {
 						name: "Off",
-					}) as HTMLInputElement
-				).checked,
+					})
+					.getAttribute("aria-checked") === "true",
 			).toBe(true),
 		);
 	});
@@ -397,16 +398,16 @@ describe("a bot's Connectors page", () => {
 
 		await openIndividualTools();
 		fireEvent.click(
-			within(screen.getByRole("group", { name: "wipe" })).getByRole("radio", { name: "Off" }),
+			within(screen.getByRole("radiogroup", { name: "wipe" })).getByRole("radio", { name: "Off" }),
 		);
 
 		await screen.findByText("Nope");
 		expect(
-			(
-				within(screen.getByRole("group", { name: "wipe" })).getByRole("radio", {
+			within(screen.getByRole("radiogroup", { name: "wipe" }))
+				.getByRole("radio", {
 					name: "Ask first",
-				}) as HTMLInputElement
-			).checked,
+				})
+				.getAttribute("aria-checked") === "true",
 		).toBe(true);
 	});
 
@@ -429,7 +430,8 @@ describe("a bot's Connectors page", () => {
 		// Most of the changes ask first, so that is the kind's setting; wipe_all is set apart from it.
 		const changes = screen.getByRole("region", { name: "Tools that make changes" });
 		expect(
-			(within(changes).getByRole("radio", { name: "Ask first" }) as HTMLInputElement).checked,
+			within(changes).getByRole("radio", { name: "Ask first" }).getAttribute("aria-checked") ===
+				"true",
 		).toBe(true);
 		screen.getByText("1 changed");
 		fireEvent.click(within(changes).getByRole("radio", { name: "Allowed" }));
@@ -462,7 +464,7 @@ describe("a bot's Connectors page", () => {
 
 		await openIndividualTools();
 		const changed = screen.getByRole("region", { name: "Changed (1)" });
-		within(changed).getByRole("group", { name: "wipe_all" });
+		within(changed).getByRole("radiogroup", { name: "wipe_all" });
 		within(changed).getByText("Default: ask first");
 		screen.getByRole("region", { name: "Tools that make changes" });
 
@@ -471,7 +473,7 @@ describe("a bot's Connectors page", () => {
 			target: { value: "more" },
 		});
 		await waitFor(() => expect(screen.queryByRole("region", { name: "Changed (1)" })).toBeNull());
-		screen.getByRole("group", { name: "wipe_more" });
+		screen.getByRole("radiogroup", { name: "wipe_more" });
 		fireEvent.change(screen.getByRole("searchbox", { name: "Search tools" }), {
 			target: { value: "" },
 		});

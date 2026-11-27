@@ -35,7 +35,7 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 import { NotificationLevelPicker } from "./NotificationLevelMenu.tsx";
 
 /** What Sugabots notifies the member about, where, and when not. */
@@ -82,11 +82,11 @@ function ThisBrowser() {
 				sub="Each browser and device is turned on by itself, and notifies you while Sugabots is open in it."
 				trailing={
 					on || status.state === "off" ? (
-						<Toggle
-							label="Notifications in this browser"
+						<Switch
+							aria-label="Notifications in this browser"
 							checked={on}
 							disabled={enable.isPending || disable.isPending}
-							onChange={(on) => (on ? enable.mutate() : disable.mutate())}
+							onCheckedChange={(on) => (on ? enable.mutate() : disable.mutate())}
 						/>
 					) : (
 						<SettingsValue>{status.state === "denied" ? "Blocked" : "Not available"}</SettingsValue>
@@ -187,10 +187,10 @@ function AlsoNotifyAbout({ settings }: { settings: NotificationSettings }) {
 			<SettingsRow
 				label="A bot can't finish its reply to me"
 				trailing={
-					<Toggle
-						label="A bot can't finish its reply to me"
+					<Switch
+						aria-label="A bot can't finish its reply to me"
 						checked={settings.turnFailures}
-						onChange={(turnFailures) => change({ turnFailures })}
+						onCheckedChange={(turnFailures) => change({ turnFailures })}
 					/>
 				}
 			/>
@@ -224,10 +224,10 @@ function QuietHoursSettings({ settings }: { settings: NotificationSettings }) {
 			<SettingsRow
 				label="Quiet hours"
 				trailing={
-					<Toggle
-						label="Quiet hours"
+					<Switch
+						aria-label="Quiet hours"
 						checked={quietHours !== null}
-						onChange={(on) =>
+						onCheckedChange={(on) =>
 							save(on ? { ...DEFAULT_QUIET_HOURS, timeZone: thisDevicesTimeZone } : null)
 						}
 					/>

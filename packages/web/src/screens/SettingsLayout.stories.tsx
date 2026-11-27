@@ -74,7 +74,7 @@ export const Account = meta.story({
 			}),
 		).toHaveAttribute("aria-current", "page");
 		await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(storyMember.name);
-		await expect(canvas.getByRole("group", { name: "Theme" })).toBeInTheDocument();
+		await expect(canvas.getByRole("radiogroup", { name: "Theme" })).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
 	},
 });

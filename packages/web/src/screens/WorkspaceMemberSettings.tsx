@@ -44,7 +44,7 @@ import {
 } from "@/ui/dialog-form.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import {
 	PageBackLink,
 	SettingsAddButton,
@@ -55,7 +55,7 @@ import {
 	SettingsRowAlert,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 
 /**
  * The members in a workspace and the invitations still out, each member a
@@ -365,12 +365,19 @@ function MemberPage({
 					label="Role"
 					trailing={
 						mayManageThem ? (
-							<SegmentedControl
-								label={`Role for ${membership.member.name}`}
-								options={roleOptions(canManageAdmins)}
+							<RadioGroup
+								aria-label={`Role for ${membership.member.name}`}
 								value={role}
-								onChange={(next) => updateRole.mutate({ membershipId: membership.id, role: next })}
-							/>
+								onValueChange={(next) =>
+									updateRole.mutate({ membershipId: membership.id, role: next })
+								}
+							>
+								{roleOptions(canManageAdmins).map((option) => (
+									<RadioGroupItem key={option.value} value={option.value}>
+										{option.label}
+									</RadioGroupItem>
+								))}
+							</RadioGroup>
 						) : (
 							<SettingsValue>{workspaceRoleLabel(role)}</SettingsValue>
 						)
@@ -488,11 +495,11 @@ function ProjectMembershipRow({
 			label={project.name}
 			sub={place.error ? failureMessage(place.error) : headcount}
 			trailing={
-				<Toggle
-					label={`${name} is in ${project.name}`}
+				<Switch
+					aria-label={`${name} is in ${project.name}`}
 					checked={inProject}
 					disabled={!canManage || members.isPending || place.isPending}
-					onChange={(member) => place.mutate({ memberId, member })}
+					onCheckedChange={(member) => place.mutate({ memberId, member })}
 				/>
 			}
 		/>
@@ -553,12 +560,13 @@ function InviteMembersDialog({
 					<SettingsRow
 						label="Role"
 						trailing={
-							<SegmentedControl
-								label="Role"
-								options={roleOptions(canManageAdmins)}
-								value={role}
-								onChange={setRole}
-							/>
+							<RadioGroup aria-label="Role" value={role} onValueChange={setRole}>
+								{roleOptions(canManageAdmins).map((option) => (
+									<RadioGroupItem key={option.value} value={option.value}>
+										{option.label}
+									</RadioGroupItem>
+								))}
+							</RadioGroup>
 						}
 					/>
 				</SettingsGroup>

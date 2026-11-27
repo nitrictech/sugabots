@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { expect } from "storybook/test";
 import preview from "#storybook/preview";
 import { Button } from "@/ui/button.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import { BotAvatar } from "./Bot.tsx";
 
 const meta = preview.meta({
@@ -141,7 +141,13 @@ export const Lively = meta.story({
 					>
 						Hop
 					</Button>
-					<SegmentedControl label="Mood" options={moodOptions} value={mood} onChange={setMood} />
+					<RadioGroup aria-label="Mood" value={mood} onValueChange={setMood}>
+						{moodOptions.map((option) => (
+							<RadioGroupItem key={option.value} value={option.value}>
+								{option.label}
+							</RadioGroupItem>
+						))}
+					</RadioGroup>
 				</div>
 				<div className="grid w-fit grid-cols-7 gap-6">
 					{botShapes.map((shape, index) => (

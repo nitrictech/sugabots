@@ -1,6 +1,6 @@
 import type { ConnectorAccess, ToolAccessCounts } from "@sugabots/contracts";
 import { TOOL_ACCESS_LABELS } from "@/lib/tool-access-labels.ts";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 
 /*
  * Allowed, Ask first and Off as a connector's settings show them: a line
@@ -56,5 +56,13 @@ export function AccessToggle({
 			<span className="shrink-0 text-xs text-muted-foreground">{TOOL_ACCESS_LABELS[value]}</span>
 		);
 	}
-	return <SegmentedControl label={label} options={toolOptions} value={value} onChange={onChange} />;
+	return (
+		<RadioGroup aria-label={label} value={value} onValueChange={onChange}>
+			{toolOptions.map((option) => (
+				<RadioGroupItem key={option.value} value={option.value}>
+					{option.label}
+				</RadioGroupItem>
+			))}
+		</RadioGroup>
+	);
 }

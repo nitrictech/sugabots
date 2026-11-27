@@ -7,7 +7,7 @@ import { useConnectorRepositories } from "@/lib/github-connectors.ts";
 import { Alert } from "@/ui/alert.tsx";
 import { Note } from "@/ui/note.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 
 /*
  * What a repository automation runs on: one of the repositories its project's
@@ -106,10 +106,10 @@ export function RepositoryGroups({
 						key={event}
 						label={REPOSITORY_EVENT_LABELS[event]}
 						trailing={
-							<Toggle
-								label={REPOSITORY_EVENT_LABELS[event]}
+							<Switch
+								aria-label={REPOSITORY_EVENT_LABELS[event]}
 								checked={draft.events.includes(event)}
-								onChange={(on) =>
+								onCheckedChange={(on) =>
 									onChange({
 										...draft,
 										events: on

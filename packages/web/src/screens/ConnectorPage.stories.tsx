@@ -257,7 +257,7 @@ export const SettingAKind = meta.story({
 		await openIndividualTools();
 		const changed = canvas.getByRole("region", { name: "Changed (1)" });
 		await expect(
-			within(within(changed).getByRole("group", { name: "delete_issue" })).getByRole("radio", {
+			within(within(changed).getByRole("radiogroup", { name: "delete_issue" })).getByRole("radio", {
 				name: "Off",
 			}),
 		).toBeChecked();
@@ -274,7 +274,9 @@ export const IndividualTools = meta.story({
 		await openIndividualTools();
 		await expect(canvas.getByRole("button", { name: "Linear" })).toBeInTheDocument();
 		const changed = canvas.getByRole("region", { name: "Changed (1)" });
-		await expect(within(changed).getByRole("group", { name: "delete_issue" })).toBeInTheDocument();
+		await expect(
+			within(changed).getByRole("radiogroup", { name: "delete_issue" }),
+		).toBeInTheDocument();
 		await expect(within(changed).getByText("Default: ask first")).toBeInTheDocument();
 		await expect(within(changed).getByRole("button", { name: "Reset all" })).toBeInTheDocument();
 		await expect(canvas.getByRole("region", { name: "Tools that read" })).toBeInTheDocument();
@@ -432,8 +434,8 @@ export const SearchingTools = meta.story({
 		await openIndividualTools();
 		await userEvent.type(canvas.getByRole("searchbox", { name: "Search tools" }), "12");
 		const changes = canvas.getByRole("region", { name: "Tools that make changes" });
-		await expect(within(changes).getByRole("group", { name: "tool_12" })).toBeInTheDocument();
-		await expect(canvas.queryByRole("group", { name: "tool_3" })).toBeNull();
+		await expect(within(changes).getByRole("radiogroup", { name: "tool_12" })).toBeInTheDocument();
+		await expect(canvas.queryByRole("radiogroup", { name: "tool_3" })).toBeNull();
 		await expect(canvas.queryByRole("region", { name: /^Reads/ })).toBeNull();
 	},
 });
@@ -447,7 +449,7 @@ export const HundredsOfTools = meta.story({
 	play: async ({ canvas, canvasElement }) => {
 		await expect(await canvas.findByText("All 300 read tools")).toBeInTheDocument();
 		await openIndividualTools();
-		await expect(canvas.getByRole("group", { name: "query_300" })).toBeInTheDocument();
+		await expect(canvas.getByRole("radiogroup", { name: "query_300" })).toBeInTheDocument();
 		const window = document.documentElement;
 		await expect(window.scrollHeight).toBeLessThanOrEqual(window.clientHeight);
 		// Rows scrolled out of the card's view add nothing below it: what the

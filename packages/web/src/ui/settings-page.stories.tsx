@@ -2,7 +2,7 @@ import { Repeat } from "lucide-react";
 import { useState } from "react";
 import { expect, fn } from "storybook/test";
 import preview from "#storybook/preview";
-import { SegmentedControl } from "./segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import {
 	PageBackLink,
 	SettingsDanger,
@@ -14,27 +14,28 @@ import {
 	SettingsRowIcon,
 	SettingsValue,
 } from "./settings-page.tsx";
-import { Toggle } from "./toggle.tsx";
+import { Switch } from "./switch.tsx";
 
 function Theme() {
 	const [theme, setTheme] = useState<"dark" | "light" | "system">("dark");
 	return (
-		<SegmentedControl
-			label="Theme"
-			options={[
+		<RadioGroup aria-label="Theme" value={theme} onValueChange={setTheme}>
+			{[
 				{ value: "dark", label: "Dark" },
 				{ value: "light", label: "Light" },
 				{ value: "system", label: "System" },
-			]}
-			value={theme}
-			onChange={setTheme}
-		/>
+			].map((option) => (
+				<RadioGroupItem key={option.value} value={option.value}>
+					{option.label}
+				</RadioGroupItem>
+			))}
+		</RadioGroup>
 	);
 }
 
-function Switch() {
+function AdvancedSwitch() {
 	const [on, setOn] = useState(true);
-	return <Toggle label="Advanced" checked={on} onChange={setOn} />;
+	return <Switch aria-label="Advanced" checked={on} onCheckedChange={setOn} />;
 }
 
 const meta = preview.meta({
@@ -101,7 +102,7 @@ export const Listing = meta.story({
 				<SettingsRow
 					label="Advanced"
 					sub="Choose a provider for web search"
-					trailing={<Switch />}
+					trailing={<AdvancedSwitch />}
 				/>
 			</SettingsGroup>
 		</SettingsPage>

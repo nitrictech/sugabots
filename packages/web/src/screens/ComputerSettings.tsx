@@ -33,7 +33,7 @@ import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import { Note } from "@/ui/note.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import {
 	SETTINGS_CARD,
 	SettingsGroup,
@@ -41,7 +41,7 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 import { DiskMeter, DiskPercent, diskSummary } from "./ComputerDisk.tsx";
 import { ComputerNetworkSection } from "./ComputerNetworkSettings.tsx";
 import { TextEntryRow } from "./text-entry-row.tsx";
@@ -126,11 +126,11 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 							: `${builtIn.name} needs an API key first. Add it below.`
 					}
 					trailing={
-						<Toggle
+						<Switch
 							checked={enabled?.builtIn === chosen}
 							disabled={!ready || pending}
-							label="Bots can use a computer"
-							onChange={(next) => void switchTo(next)}
+							aria-label="Bots can use a computer"
+							onCheckedChange={(next) => void switchTo(next)}
 						/>
 					}
 				/>
@@ -178,15 +178,20 @@ function ComputerGroups({ providers }: { providers: readonly ComputerProvider[] 
 						}
 						sub={networkSummary(settings)}
 						trailing={
-							<SegmentedControl
-								label="Network"
-								options={networkModes}
+							<RadioGroup
+								aria-label="Network"
 								value={settings.networkMode ?? COMPUTER_NETWORK_MODE_DEFAULT}
-								disabled={pending}
-								onChange={(networkMode) =>
+								onValueChange={(networkMode) =>
 									void configure({ settings: { ...settings, networkMode } })
 								}
-							/>
+								disabled={pending}
+							>
+								{networkModes.map((option) => (
+									<RadioGroupItem key={option.value} value={option.value}>
+										{option.label}
+									</RadioGroupItem>
+								))}
+							</RadioGroup>
 						}
 					/>
 				}

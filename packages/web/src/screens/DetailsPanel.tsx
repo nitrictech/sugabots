@@ -27,7 +27,7 @@ import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { SpacedText } from "@/ui/spaced-text.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
 import { ContextMeter, usedPercentOf } from "./ContextMeter.tsx";
 import { LiveDesktopCard } from "./DesktopViewer.tsx";
@@ -339,15 +339,15 @@ function Automations({
 								</span>
 							)}
 						</button>
-						<Toggle
-							label={`${automation.name} on`}
+						<Switch
+							aria-label={`${automation.name} on`}
 							checked={automation.state === "enabled"}
 							disabled={
 								!bot.permissions.resources.manageAutomations ||
 								(actions.update.isPending &&
 									actions.update.variables?.automationId === automation.id)
 							}
-							onChange={(on) =>
+							onCheckedChange={(on) =>
 								actions.update.mutate({
 									projectId: automation.projectId,
 									automationId: automation.id,

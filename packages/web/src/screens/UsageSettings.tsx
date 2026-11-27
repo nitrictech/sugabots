@@ -31,7 +31,7 @@ import { BotAvatar } from "@/shell/Bot.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { LetterTile } from "@/ui/letter-tile.tsx";
-import { SegmentedControl } from "@/ui/segmented-control.tsx";
+import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import { SETTINGS_CARD, SettingsGroup, SettingsPage } from "@/ui/settings-page.tsx";
 import { Tooltip } from "@/ui/tooltip.tsx";
 import { ProviderTile } from "./ProviderSettings.tsx";
@@ -269,12 +269,13 @@ function Breakdown({ usage, stale }: { usage: WorkspaceUsage; stale: boolean }) 
 		<SettingsGroup
 			label="Breakdown"
 			action={
-				<SegmentedControl
-					label="Break the month down by"
-					options={breakdownViews}
-					value={view}
-					onChange={setView}
-				/>
+				<RadioGroup aria-label="Break the month down by" value={view} onValueChange={setView}>
+					{breakdownViews.map((option) => (
+						<RadioGroupItem key={option.value} value={option.value}>
+							{option.label}
+						</RadioGroupItem>
+					))}
+				</RadioGroup>
 			}
 			note={footnote(usage.unknownCostRequests)}
 		>

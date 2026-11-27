@@ -2612,10 +2612,10 @@ describe("the theme", () => {
 		onWideScreen();
 		mount("/suga/settings/account");
 
-		const theme = await screen.findByRole("group", { name: "Theme" });
-		expect((within(theme).getByRole("radio", { name: "Dark" }) as HTMLInputElement).checked).toBe(
-			true,
-		);
+		const theme = await screen.findByRole("radiogroup", { name: "Theme" });
+		expect(
+			within(theme).getByRole("radio", { name: "Dark" }).getAttribute("aria-checked") === "true",
+		).toBe(true);
 		expect(document.documentElement.dataset.theme).toBeUndefined();
 	});
 

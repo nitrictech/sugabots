@@ -47,7 +47,7 @@ import {
 	SettingsRow,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
-import { Toggle } from "@/ui/toggle.tsx";
+import { Switch } from "@/ui/switch.tsx";
 import { AddMembersMenu, MemberRows } from "./MemberList.tsx";
 
 /** Which of a project's settings pages is open: its own, its members, or its bots. */
@@ -209,11 +209,11 @@ function ProjectDetails({ project }: { project: Project }) {
 								: "Only members added to it can see it"
 						}
 						trailing={
-							<Toggle
+							<Switch
 								checked={project.visibility === "public"}
 								disabled={updateDetails.isPending}
-								label={project.visibility === "public" ? "Make private" : "Make public"}
-								onChange={(on) =>
+								aria-label={project.visibility === "public" ? "Make private" : "Make public"}
+								onCheckedChange={(on) =>
 									void updateDetails
 										.mutateAsync({ visibility: on ? "public" : "private" })
 										.catch(() => {})
