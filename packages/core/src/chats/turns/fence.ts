@@ -67,7 +67,11 @@ export const holdRunningTurn = (runsTurn: FencedProof, lock: "update" | "share")
 	});
 
 /** holdTurnForToolWrite also refuses writes once the turn has been asked to end. */
-export const holdTurnForToolWrite = (proof: FencedProof, status?: "running") =>
+export const holdTurnForToolWrite = (
+	proof: FencedProof,
+	status?: "running",
+	lock: "share" | "update" = "share",
+) =>
 	Effect.gen(function* () {
 		const [held] = yield* query((db) =>
 			db
@@ -75,12 +79,16 @@ export const holdTurnForToolWrite = (proof: FencedProof, status?: "running") =>
 				.from(turn)
 				.where(and(fenced(proof), isNull(turn.endRequested), status && eq(turn.status, status)))
 				.limit(1)
-				.for("share"),
+				.for(lock),
 		);
 		if (!held) return yield* Effect.fail(yield* fenceRefusal(proof));
 	});
 
-export const holdTurnOf = (principal: Principal) =>
+export const holdTurnOf = (principal: Principal, lock: "share" | "update" = "share") =>
 	principal._tag === "BotForAsker" || principal._tag === "AutomationRun"
-		? holdTurnForToolWrite(executionFence(principal.turn, principal.executionNumber))
+		? holdTurnForToolWrite(
+				executionFence(principal.turn, principal.executionNumber),
+				undefined,
+				lock,
+			)
 		: Effect.void;

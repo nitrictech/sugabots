@@ -24,7 +24,7 @@ import {
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
-import { type FenceRefusal, holdTurnOf } from "../../chats/turns/turns.ts";
+import { type FenceRefusal, holdTurnOf, recordTurnProjectGrant } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations, Transaction } from "../../database/database.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
@@ -205,7 +205,7 @@ export const make = Effect.gen(function* () {
 				"create",
 				Effect.gen(function* () {
 					yield* Transaction;
-					yield* holdTurnOf(lock.principal.value);
+					yield* holdTurnOf(lock.principal.value, "update");
 					// The project's workspace and lead are the proved ones, not the input's.
 					const { workspace: _workspace, leadBotId: _leadBotId, ...input } = approved.input;
 					const workspaceId = lock.workspace.value;
@@ -217,6 +217,7 @@ export const make = Effect.gen(function* () {
 						creatorId: canCreate.actor.memberId,
 						leadBotId: lead.bot.value,
 					});
+					yield* recordTurnProjectGrant(lock.principal.value, row);
 					yield* outbox.publish([
 						reachChanged(workspaceId, { kind: "project", projectId: row.id }),
 					]);
@@ -308,7 +309,7 @@ export const make = Effect.gen(function* () {
 				"join",
 				Effect.gen(function* () {
 					yield* Transaction;
-					yield* holdTurnOf(lock.principal.value);
+					yield* holdTurnOf(lock.principal.value, "update");
 					const { member } = canJoin;
 					const joined = yield* store.join(
 						canJoin.workspace,
@@ -316,6 +317,7 @@ export const make = Effect.gen(function* () {
 						member.actor.memberId,
 					);
 					if (!joined) return yield* new ResourceHidden({ resource: "project" });
+					yield* recordTurnProjectGrant(lock.principal.value, joined);
 					yield* outbox.publish([
 						reachChanged(canJoin.workspace, {
 							kind: "project",

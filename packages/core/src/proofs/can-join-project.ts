@@ -3,12 +3,12 @@ import { Effect } from "effect";
 import { query } from "../database/database.ts";
 import type { Principal } from "../principal.ts";
 import {
+	actorOf,
 	decideReach,
 	type MemberPlace,
 	type ProjectFacts,
 	type ReachFacts,
 	reachFacts,
-	useTurnAdmission,
 	whoActs,
 } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
@@ -38,12 +38,18 @@ const hidden = new ResourceHidden({ resource: "project" });
 
 /** The member who would join: a member signed in, or a bot's asker in member bounds. */
 function joiner(principal: Principal, facts: ReachFacts): MemberPlace | undefined {
-	const joinsForThemselves =
-		principal._tag === "MemberSession" ||
-		(principal._tag === "BotForAsker" &&
-			principal.bounds.kind === "member" &&
-			principal.workspace === facts.project.workspace);
-	return joinsForThemselves ? useTurnAdmission(principal, facts).member : undefined;
+	if (principal._tag === "MemberSession") return facts.member;
+	if (
+		principal._tag !== "BotForAsker" ||
+		principal.bounds.kind !== "member" ||
+		principal.workspace !== facts.project.workspace
+	)
+		return undefined;
+	if (!principal.admission) return facts.member;
+	return {
+		actor: actorOf(principal.asker, principal.admission.role ?? undefined),
+		inProject: principal.admission.projects[facts.project.id]?.inProject ?? false,
+	};
 }
 
 /** Whether `member` may join the project `facts` describes, or is in it already. */

@@ -326,6 +326,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					}),
 				);
 				expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(made?.id);
+				if (!made) throw new Error("The turn did not create the project");
+				await chatsAs(adminId).startProjectChat({
+					projectId: made.id,
+					retryKey: crypto.randomUUID(),
+					message: "Launch is ready for dispatch.",
+				});
+				const resumed = await ran.authentication.authenticate(ran.turnId);
+				await expect(
+					loop.call(resumed, "chats.searchHistory", { chat: "all", query: "dispatch" }),
+				).resolves.toMatchObject({
+					messages: [expect.objectContaining({ text: "Launch is ready for dispatch." })],
+				});
 			});
 
 			it("joins a public project and adds a bot to one for its member, each once approved", async () => {
@@ -371,6 +383,74 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, other.id))),
 					),
 				).toHaveLength(1);
+			});
+
+			it("searches a project joined by this turn, including after the turn resumes", async () => {
+				const editor = await seedMember(workspaceId, "editor");
+				const assistant = await seedBot(workspaceId, {
+					assistantOf: editor,
+					visibility: "personal",
+				});
+				await onDatabase((db) =>
+					db.update(bot).set({ model: "m" }).where(eq(bot.id, assistant.id)),
+				);
+				const projectId = await seedProject(workspaceId, {
+					leadBotId: botId,
+					visibility: "public",
+				});
+				const { chat: target } = await chatsAs(adminId).startProjectChat({
+					projectId,
+					retryKey: crypto.randomUUID(),
+					message: "The shipping deadline is Friday.",
+				});
+				const { chat: source } = await chatsAs(editor).startProjectChat({
+					projectId: assistant.defaultProject,
+					retryKey: crypto.randomUUID(),
+					message: "Join the project and find the shipping deadline.",
+				});
+				const { model } = scriptedSteps(
+					{ calls: [{ toolCallId: "join", toolName: "join_project", input: { projectId } }] },
+					{
+						calls: [
+							{
+								toolCallId: "point",
+								toolName: "search_history",
+								input: { chat: target.id, query: "shipping" },
+							},
+							{
+								toolCallId: "list",
+								toolName: "search_history",
+								input: { chat: "all", query: "shipping" },
+							},
+						],
+					},
+					{ text: ["Found the deadline."] },
+				);
+				const ran = await loop.runTurn(source.id, { model });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No call parked");
+				await chatsAs(editor).decide({ toolCallId: parked.id, decision: "allow_once" });
+				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Continue" });
+				const hasDeadline = {
+					messages: [expect.objectContaining({ text: "The shipping deadline is Friday." })],
+				};
+				expect(await callsOf(ran.turnId)).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({
+							sdkToolCallId: "point",
+							output: expect.objectContaining(hasDeadline),
+						}),
+						expect.objectContaining({
+							sdkToolCallId: "list",
+							output: expect.objectContaining(hasDeadline),
+						}),
+					]),
+				);
+				const resumed = await ran.authentication.authenticate(ran.turnId);
+				await expect(
+					loop.call(resumed, "chats.searchHistory", { chat: target.id, query: "shipping" }),
+				).resolves.toMatchObject(hasDeadline);
+				expect(await resumeAt(ran, 2)).toEqual({ _tag: "Finished" });
 			});
 
 			it.each([

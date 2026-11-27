@@ -196,6 +196,7 @@ export { TurnRequests } from "./requests.ts";
 export { TurnRuns as Runs } from "./runs.ts";
 export { TurnSignals } from "./signals.ts";
 export type { NotRunnable } from "./store.ts";
+export { recordTurnProjectGrant } from "./store.ts";
 export {
 	ApprovalDecision,
 	DENIED_OUTPUT,

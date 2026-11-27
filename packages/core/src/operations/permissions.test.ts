@@ -262,6 +262,7 @@ interface Row<Name extends RequestOperationName> {
 	readonly input: (fixture: Fixture) => Promise<InputOf<Name>> | InputOf<Name>;
 	readonly outcomes: Rule;
 	readonly postProofFailure?: FailureOf<Name>["_tag"];
+	readonly admitAfterInput?: boolean;
 }
 
 /** An operation exercised outside the table, with its coverage recorded here. */
@@ -832,6 +833,7 @@ const rows: {
 	},
 	"projects.leave": {
 		input: freshProject,
+		admitAfterInput: true,
 		// Anyone in it but an administrator, who is in every project.
 		outcomes: onAnotherProject({
 			...changesWhoIsInJ,
@@ -853,8 +855,16 @@ const rows: {
 	},
 	"projectComputer.addHost": { input: onAHostOfJ, outcomes: managesJInMemberBounds },
 	"projectComputer.removeHost": { input: onAHostOfJ, outcomes: managesJInMemberBounds },
-	"projects.remove": { input: freshProject, outcomes: onAnotherProject(managesJ) },
-	"projectComputer.reset": { input: freshProject, outcomes: onAnotherProject(managesJ) },
+	"projects.remove": {
+		input: freshProject,
+		admitAfterInput: true,
+		outcomes: onAnotherProject(managesJ),
+	},
+	"projectComputer.reset": {
+		input: freshProject,
+		admitAfterInput: true,
+		outcomes: onAnotherProject(managesJ),
+	},
 	"projectComputer.upgrade": {
 		input: inJ,
 		postProofFailure: "NoComputerProvider",
@@ -1168,6 +1178,7 @@ const tabled = (Object.entries(rows) as [RequestOperationName, Row<never> | Test
 describe("who may call each operation", () => {
 	let fixture: Fixture;
 	let callers: Record<Caller, Principal>;
+	let signedIn: ReturnType<typeof principals>;
 
 	beforeAll(async () => {
 		const world = await buildWorld();
@@ -1187,7 +1198,8 @@ describe("who may call each operation", () => {
 				webFetch: async () => new Response(null, { status: 503 }),
 			}),
 		});
-		const who = await everyKindOfPrincipal(world, principals(await authenticators()));
+		signedIn = principals(await authenticators());
+		const who = await everyKindOfPrincipal(world, signedIn);
 		const gitHubConnector = await seedConnector(a.workspace, a.project, {
 			github: { appCredentialEncrypted: "test credential" },
 		});
@@ -1246,10 +1258,18 @@ describe("who may call each operation", () => {
 		await closeDatabase();
 	});
 
-	it.each(tabled)("$name", async ({ name, input, outcomes, postProofFailure }) => {
+	it.each(tabled)("$name", async ({ name, input, outcomes, postProofFailure, admitAfterInput }) => {
 		// One at a time, so no principal's change races another's.
 		for (const caller of PRINCIPALS) {
-			const tag = await operationOutcome(fixture.call, callers[caller], name, await input(fixture));
+			const target = await input(fixture);
+			const callerPrincipal = callers[caller];
+			const principal =
+				admitAfterInput &&
+				callerPrincipal._tag === "BotForAsker" &&
+				callerPrincipal.bounds.kind === "member"
+					? await signedIn.botFor(callerPrincipal.asker, callerPrincipal.bot, callerPrincipal.chat)
+					: callerPrincipal;
+			const tag = await operationOutcome(fixture.call, principal, name, target);
 			expect(tag === postProofFailure ? "ok" : tag, caller).toBe(outcomes[caller]);
 		}
 	});

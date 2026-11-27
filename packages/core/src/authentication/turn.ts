@@ -14,6 +14,7 @@ import {
 } from "../principal.ts";
 import { captureTurnAdmission } from "../proofs/facts.ts";
 import { processLayer, Tier } from "../tiers.ts";
+import { freezeAdmission } from "./turn-admission.ts";
 import { askerOf, hasMemberBounds, type TurnFacts, turnFacts } from "./turn-facts.ts";
 
 /**
@@ -119,22 +120,6 @@ const newExecution = (turnId: string, admission: TurnAdmission) =>
 				? Effect.succeed({ ...raised, admission: freezeAdmission(raised.admission) })
 				: Effect.die(new Error("A turn is gone")),
 	);
-
-function freezeAdmission(admission: TurnAdmission | null): TurnAdmission | null {
-	if (!admission) return null;
-	for (const place of Object.values(admission.projects)) {
-		const bot = place.project.defaultOf;
-		if (bot) {
-			if ("memberIds" in bot) Object.freeze(bot.memberIds);
-			Object.freeze(bot);
-		}
-		Object.freeze(place.project);
-		Object.freeze(place);
-	}
-	Object.freeze(admission.projects);
-	Object.freeze(admission.chatProjectBotIds);
-	return Object.freeze(admission);
-}
 
 export const layer = layerNoDeps;
 

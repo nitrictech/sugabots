@@ -17,7 +17,7 @@ import {
 	type Database,
 	query,
 	serviceOperations,
-	type Transaction,
+	Transaction,
 	transaction,
 	writtenRow,
 } from "../../database/database.ts";
@@ -26,6 +26,7 @@ import {
 	chat,
 	message,
 	messageReaction,
+	type ProjectRow,
 	type StoredMessagePart,
 	type TurnEndRequest,
 	type TurnReason,
@@ -33,6 +34,7 @@ import {
 	turn,
 } from "../../database/schema.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
+import type { AdmittedProject, Principal } from "../../principal.ts";
 import type { EndsTurn } from "../../proofs/ends-turn.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
 import { processLayer, Tier } from "../../tiers.ts";
@@ -2030,3 +2032,36 @@ function replyParts(reply: ReplyDraft): StoredMessagePart[] {
 		...(reply.thinking ?? []).map((part) => ({ ...part, type: "thinking" as const })),
 	];
 }
+
+/** Records a project membership granted by the turn, inside the transaction that grants it. */
+export const recordTurnProjectGrant = (principal: Principal, project: ProjectRow) =>
+	Effect.gen(function* () {
+		if (
+			principal._tag !== "BotForAsker" ||
+			principal.bounds.kind !== "member" ||
+			!principal.admission
+		)
+			return;
+		yield* Transaction;
+		const admitted: AdmittedProject = {
+			project: {
+				id: project.id,
+				workspace: project.workspaceId,
+				leadBot: project.leadBotId,
+				visibility: project.visibility,
+				defaultOf: null,
+			},
+			inProject: true,
+			memberReaches: true,
+			botReaches: true,
+		};
+		yield* query((db) =>
+			db
+				.update(turn)
+				.set({
+					admission: sql`jsonb_set(${turn.admission}, array['projects', ${project.id}]::text[],
+						${JSON.stringify(admitted)}::jsonb)`,
+				})
+				.where(fenced(executionFence(principal.turn, principal.executionNumber))),
+		);
+	});

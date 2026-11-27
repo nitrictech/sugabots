@@ -8,7 +8,7 @@ import {
 import { bot, project, projectBot } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import type { BotPrincipal, Principal } from "../principal.ts";
-import { botRemovalStarted } from "./facts.ts";
+import { admittedProjectReach, botRemovalStarted } from "./facts.ts";
 import type { InWorkspace } from "./in-workspace.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 import { webhookReachesChat } from "./webhook-chats.ts";
@@ -99,14 +99,9 @@ function admittedPredicates(
 ) {
 	const { bounds } = principal;
 	const projects = Object.values(admission.projects);
-	const reachedProjects = projects
-		.filter(
-			({ project, memberReaches, botReaches }) =>
-				(bounds.kind === "member" || bounds.project === project.id) &&
-				botReaches &&
-				(principal._tag === "AutomationRun" || memberReaches),
-		)
-		.map(({ project }) => project.id);
+	const reachedProjects = Object.keys(admission.projects).filter(
+		(projectId) => admittedProjectReach(principal, projectId) === "reaches",
+	);
 	const reachedBots = projects.flatMap(({ project, memberReaches }) =>
 		project.defaultOf && (memberReaches || principal._tag === "AutomationRun")
 			? [project.defaultOf.id]

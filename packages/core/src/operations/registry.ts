@@ -11,6 +11,7 @@ import type {
 } from "@sugabots/contracts/operations";
 import type { DomainError } from "@sugabots/errors";
 import { Context, Effect, Layer, Scope } from "effect";
+import { refreshTurnAdmission } from "../authentication/turn-admission.ts";
 import type { Principal } from "../principal.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { approvalsOperations } from "./approvals/index.ts";
@@ -126,9 +127,11 @@ export const make = Effect.gen(function* () {
 			.map(([name, operation]) => [
 				name,
 				(principal: Principal, input: never, call: Call) =>
-					operation
-						.run(principal, input, call)
-						.pipe(Effect.provideContext(context), Effect.withSpan(name)),
+					refreshTurnAdmission(principal).pipe(
+						Effect.flatMap((acting) => operation.run(acting, input, call)),
+						Effect.provideContext(context),
+						Effect.withSpan(name),
+					),
 			]);
 	return Context.make(Service, Object.fromEntries(entriesOf("request")) as Interface).pipe(
 		Context.add(LongRunning, Object.fromEntries(entriesOf("longRunning")) as LongRunningInterface),

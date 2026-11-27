@@ -458,11 +458,9 @@ export function decideReach(
 				? { kind: "reaches", as: { kind: "member", place: facts.member } }
 				: hidden;
 		case "BotForAsker": {
-			if (principal.workspace !== project.workspace) return hidden;
-			if (principal.bounds.kind === "chat" && principal.bounds.project !== project.id)
-				return hidden;
-			if (!member || !memberReaches(member, project)) return hidden;
-			if (!admittedBotReaches(principal, facts, member)) return { kind: "botCannotReach" };
+			const reach = decideTurnProjectReach(principal, facts, member);
+			if (!member || reach === "hidden") return hidden;
+			if (reach === "botCannotReach") return { kind: reach };
 			return {
 				kind: "reaches",
 				as: {
@@ -474,11 +472,11 @@ export function decideReach(
 				},
 			};
 		}
-		case "AutomationRun":
-			if (principal.workspace !== project.workspace) return hidden;
-			if (principal.bounds.project !== project.id) return hidden;
-			if (!admittedBotReaches(principal, facts, undefined)) return { kind: "botCannotReach" };
+		case "AutomationRun": {
+			const reach = decideTurnProjectReach(principal, facts, undefined);
+			if (reach !== "reaches") return { kind: reach };
 			return { kind: "reaches", as: { kind: "run", bot: principal.bot, turn: principal.turn } };
+		}
 		case "WebhookCall":
 			return hidden;
 		case "SystemWork":
@@ -500,7 +498,7 @@ export function useTurnAdmission(principal: Principal, facts: ReachFacts): Reach
 	)
 		return facts;
 	const admitted = principal.admission.projects[facts.project.id];
-	if (!admitted) return facts;
+	if (!admitted) return { ...facts, member: undefined };
 	return {
 		...facts,
 		project: { ...facts.project, defaultOf: admitted.project.defaultOf },
@@ -519,13 +517,28 @@ export function botAtAdmission(principal: Principal, record: BotRecord): BotReco
 	return saved ? { ...record, ...saved } : record;
 }
 
-function admittedBotReaches(
+function decideTurnProjectReach(
 	principal: BotPrincipal,
-	facts: ReachFacts,
+	{ project, bot }: ReachFacts,
 	member: MemberPlace | undefined,
-) {
-	const admitted = principal.admission?.projects[facts.project.id];
-	return admitted?.botReaches ?? botReaches(facts.bot, facts.project, member);
+): ReachDecision["kind"] {
+	if (principal.workspace !== project.workspace) return "hidden";
+	const admitted = admittedProjectReach(principal, project.id);
+	if (admitted !== undefined) return admitted;
+	if (principal.bounds.kind === "chat" && principal.bounds.project !== project.id) return "hidden";
+	if (principal._tag === "BotForAsker" && !memberReaches(member, project)) return "hidden";
+	return botReaches(bot, project, member) ? "reaches" : "botCannotReach";
+}
+
+export function admittedProjectReach(
+	principal: BotPrincipal,
+	projectId: string,
+): ReachDecision["kind"] | undefined {
+	if (!principal.admission) return undefined;
+	if (principal.bounds.kind === "chat" && principal.bounds.project !== projectId) return "hidden";
+	const admitted = principal.admission.projects[projectId];
+	if (!admitted || (principal._tag === "BotForAsker" && !admitted.memberReaches)) return "hidden";
+	return admitted.botReaches ? "reaches" : "botCannotReach";
 }
 
 export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
