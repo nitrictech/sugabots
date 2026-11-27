@@ -425,6 +425,7 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 			return HttpResponse.json(bots.filter((bot) => inProject.some((one) => one.id === bot.id)));
 		}),
 		http.get(api("/projects/:projectId/connectors"), () => HttpResponse.json([])),
+		http.get(api("/projects/:projectId/bot-connectors"), () => HttpResponse.json([])),
 		// No computers in the example workspace.
 		http.get(api("/projects/:projectId/computer"), () =>
 			HttpResponse.json({ computer: { kind: "none" }, providerEnabled: false }),

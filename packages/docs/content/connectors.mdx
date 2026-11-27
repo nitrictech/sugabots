@@ -16,11 +16,27 @@ connectors just as a project does.
 
 ## Which connectors a bot uses
 
-A bot working in a project's chat uses the project's connectors and its
-own. When both have a connector with the same name, the project's is the one
-it uses. In its own chats, a bot uses just its own. When a bot
-[asks another for help](/docs/chats#bots-asking-bots), the other bot
-answers in the same chat, with the project's connectors and its own.
+In its own chats, a bot uses its own connectors. In a project's chat, it uses
+the project's connectors, and those of its own that the project has turned
+on. When both have a connector with the same name, the project's is the one
+it uses. When a bot [asks another for help](/docs/chats#bots-asking-bots),
+the other bot answers in the same chat, with the project's connectors and
+those of its own the project has turned on.
+
+## A bot's own connectors in a project
+
+A bot's own connectors are off in every project it's added to until someone
+who manages that project turns them on there. While one is on, the bot can
+send that connector what it reads in the project's chats, so whoever manages
+the project decides where its work may go, not whoever set the bot up.
+
+Open the project's **Connectors**. Under **Its bots' own**, each bot lists its
+connectors with the address each sends data to. Turn one on to let the bot
+use it in the project's chats, or off to stop it.
+
+If someone changes a connector's address, it turns off in every project until
+someone who manages each project turns it on again, so a connector never
+starts sending a project's work somewhere new without the project's say.
 
 ## Who manages them
 

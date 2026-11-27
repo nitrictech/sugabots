@@ -15047,6 +15047,25 @@
       "sqlHash": "82dae31a68ce1df2"
     },
     {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_bot_connector"
+      ],
+      "writes": [
+        "s|tbl|public.project_bot_connector",
+        "n|tbl|public.project_bot_connector",
+        "e|tbl|public.project_bot_connector",
+        "n|rel|public.project_bot_connector",
+        "n|type|public.project_bot_connector",
+        "n|rel|public.project_bot_connector_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
       "statementType": "add_column",
       "statementTarget": [
         "column",
@@ -15062,6 +15081,99 @@
       "reads": [
         "n|tbl|public.tool_call",
         "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "project_bot_connector",
+        "project_bot_connector_connector_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.project_bot_connector_connector_id_idx",
+        "n|idx|public.project_bot_connector_connector_id_idx",
+        "e|idx|public.project_bot_connector_connector_id_idx",
+        "n|rel|public.project_bot_connector_connector_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.project_bot_connector",
+        "n|sch|public",
+        "n|col|public.project_bot_connector.connector_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_bot_connector"
+      ],
+      "writes": [
+        "s|fk|public.project_bot_connector.project_bot_connector_turned_on_by_id_member_id_fkey",
+        "n|fk|public.project_bot_connector.project_bot_connector_turned_on_by_id_member_id_fkey",
+        "e|fk|public.project_bot_connector.project_bot_connector_turned_on_by_id_member_id_fkey",
+        "n|con|public.project_bot_connector.project_bot_connector_turned_on_by_id_member_id_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.project_bot_connector",
+        "n|sch|public",
+        "n|tbl|public.member",
+        "n|sch|public",
+        "n|col|public.project_bot_connector.turned_on_by_id",
+        "n|col|public.member.id",
+        "e|uniqueness|public.member.id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_bot_connector"
+      ],
+      "writes": [
+        "s|fk|public.project_bot_connector.project_bot_connector_project_bot_fkey",
+        "n|fk|public.project_bot_connector.project_bot_connector_project_bot_fkey",
+        "e|fk|public.project_bot_connector.project_bot_connector_project_bot_fkey",
+        "n|con|public.project_bot_connector.project_bot_connector_project_bot_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.project_bot_connector",
+        "n|sch|public",
+        "n|tbl|public.project_bot",
+        "n|sch|public",
+        "n|col|public.project_bot_connector.project_id",
+        "n|col|public.project_bot_connector.bot_id",
+        "n|col|public.project_bot.project_id",
+        "n|col|public.project_bot.bot_id",
+        "e|uniqueness|public.project_bot.bot_id.project_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "project_bot_connector"
+      ],
+      "writes": [
+        "s|fk|public.project_bot_connector.project_bot_connector_connector_workspace_fkey",
+        "n|fk|public.project_bot_connector.project_bot_connector_connector_workspace_fkey",
+        "e|fk|public.project_bot_connector.project_bot_connector_connector_workspace_fkey",
+        "n|con|public.project_bot_connector.project_bot_connector_connector_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.project_bot_connector",
+        "n|sch|public",
+        "n|tbl|public.connector",
+        "n|sch|public",
+        "n|col|public.project_bot_connector.connector_id",
+        "n|col|public.project_bot_connector.workspace_id",
+        "n|col|public.connector.id",
+        "n|col|public.connector.workspace_id",
+        "e|uniqueness|public.connector.id.workspace_id"
       ]
     }
   ],
@@ -24695,6 +24807,15 @@
       "op": "create",
       "row": {
         "schema": "public",
+        "name": "project_bot_connector",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
         "table": "tool_call",
         "name": "approval_resolved_targets",
         "type": "jsonb",
@@ -24705,6 +24826,220 @@
         "generated": null,
         "identity": null,
         "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "workspace_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "project_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "bot_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "connector_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "address",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "turned_on_by_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "project_bot_connector_connector_id_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "connector_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "project_bot_connector_turned_on_by_id_member_id_fkey",
+        "nameExplicit": false,
+        "columns": [
+          "turned_on_by_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "member",
+        "columnsTo": [
+          "id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "SET NULL",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "project_bot_connector_project_bot_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "project_id",
+          "bot_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "project_bot",
+        "columnsTo": [
+          "project_id",
+          "bot_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "project_bot_connector_connector_workspace_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "connector_id",
+          "workspace_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "connector",
+        "columnsTo": [
+          "id",
+          "workspace_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "project_bot_connector",
+        "name": "project_bot_connector_pkey",
+        "columns": [
+          "project_id",
+          "connector_id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
       }
     }
   ]

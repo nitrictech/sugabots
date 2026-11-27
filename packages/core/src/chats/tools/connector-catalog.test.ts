@@ -3,6 +3,8 @@ import { afterAll, expect, it } from "vitest";
 import {
 	seedBot,
 	seedMember,
+	seedProject,
+	seedProjectBotConnector,
 	seedProjectChat,
 	seedWorkspace,
 } from "../../authentication/seed.test-support.ts";
@@ -83,4 +85,59 @@ it("excludes a switched-off built-in connector from a turn’s tools and addable
 	} finally {
 		await after.close();
 	}
+});
+
+it("offers a bot's own connector in another project only once it is turned on there, for its address", async () => {
+	const workspaceId = await seedWorkspace();
+	const admin = await seedMember(workspaceId, "admin");
+	const bot = await seedBot(workspaceId, { createdById: admin });
+	const projectId = await seedProject(workspaceId, { leadBotId: bot.id, members: [admin] });
+	const chatId = await seedProjectChat(workspaceId, projectId, admin);
+	const principal = await principals(await authenticators()).botFor(admin, bot.id, chatId);
+	const store = await servedOnPostgres(ConnectorStore.Service, ConnectorStore.layer);
+	const catalog = await runOnPostgres(
+		Effect.provide(
+			ConnectorCatalog.Service,
+			ConnectorCatalog.layer.pipe(
+				Layer.provide(
+					unimplemented(Egress.Service, {
+						providers: {
+							for: () => () => {
+								throw new Error("Catalog contacted a connector while listing tools");
+							},
+						},
+					}),
+				),
+			),
+		),
+	);
+	const offered = async () => {
+		const offer = await runOnPostgres(
+			catalog.forTurn(
+				workspaceId,
+				{ projectId, ownProjectId: bot.defaultProject },
+				{ ...NO_TURN, principal },
+			),
+		);
+		try {
+			return Object.values(offer.tools).map(({ connectorId }) => connectorId);
+		} finally {
+			await offer.close();
+		}
+	};
+	const own = await store.create(workspaceId, bot.defaultProject, admin, {
+		name: "Tracker",
+		url: "https://tracker.example.com/api",
+		kind: "http",
+	});
+
+	expect(await offered()).not.toContain(own.id);
+
+	await seedProjectBotConnector(workspaceId, projectId, bot.id, own.id);
+	expect(await offered()).toContain(own.id);
+
+	await store.update(workspaceId, bot.defaultProject, own.id, {
+		url: "https://other-tracker.example.com/api",
+	});
+	expect(await offered()).not.toContain(own.id);
 });

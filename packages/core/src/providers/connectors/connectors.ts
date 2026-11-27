@@ -7,6 +7,7 @@ import type {
 	ConnectorUpdate,
 	ConnectorWithTools,
 	NewConnector,
+	ProjectBotConnector,
 	RestrictableConnector,
 	UnsavedConnector,
 } from "@sugabots/contracts";
@@ -28,12 +29,21 @@ import type { CanRestrictBotsProject } from "../../proofs/can-restrict-bot.ts";
 import { proveIsMember } from "../../proofs/is-member.ts";
 import type { CanManageProject, CanReadConnectors } from "../../proofs/project-permissions.ts";
 import type { Named } from "../../proofs/proof.ts";
-import type { CanSwitchOffConnector, ReachesConnector } from "../../proofs/reaches-connector.ts";
+import type {
+	CanSetProjectBotConnector,
+	CanSwitchOffConnector,
+	ReachesConnector,
+} from "../../proofs/reaches-connector.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { Egress, type EgressHttpClient } from "../network/egress.ts";
 import { requireAllowedUrl } from "../tested-configuration.ts";
-import { connectorIn, connectorsIn, restrictableConnectorsIn } from "./connector-reads.ts";
+import {
+	connectorIn,
+	connectorsIn,
+	projectBotConnectorsIn,
+	restrictableConnectorsIn,
+} from "./connector-reads.ts";
 import { ConnectorSignIn } from "./connector-sign-in.ts";
 import { ConnectorStore } from "./connector-store.ts";
 import type { ConnectorTarget } from "./connector-target.ts";
@@ -51,6 +61,15 @@ import { signInStartFailure } from "./oauth.ts";
 export interface Interface {
 	/** The project's connectors, oldest first. */
 	readonly list: <P, J>(canRead: CanReadConnectors<P, J>) => Effect.Effect<Connector[]>;
+	/** The own connectors of the project's bots, each with whether it is on in the project. */
+	readonly listProjectBots: <P, J>(
+		canRead: CanReadConnectors<P, J>,
+	) => Effect.Effect<ProjectBotConnector[]>;
+	/** Turns a project bot's own connector on in the project, for the address it has now, or off. */
+	readonly setOnInProject: <P, J, K>(
+		canSet: CanSetProjectBotConnector<P, J, K>,
+		on: boolean,
+	) => Effect.Effect<ProjectBotConnector, ConnectorNotFound>;
 	readonly listForRestriction: <P, J>(
 		canRestrict: CanRestrictBotsProject<P, J>,
 	) => Effect.Effect<RestrictableConnector[]>;
@@ -293,6 +312,37 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		list: (canRead) =>
 			operation("list", connectorsIn(canRead.reach.workspace, canRead.reach.project.value, cipher)),
+
+		listProjectBots: (canRead) =>
+			operation(
+				"listProjectBots",
+				projectBotConnectorsIn(canRead.reach.workspace, canRead.reach.project.value),
+			),
+
+		setOnInProject: (canSet, on) =>
+			operation(
+				"setOnInProject",
+				Effect.gen(function* () {
+					const where = {
+						workspaceId: canSet.workspace,
+						projectId: canSet.project.value,
+						connectorId: canSet.connector.value,
+					};
+					yield* connectors.setOnInProject({
+						...where,
+						botId: canSet.bot,
+						memberId: canSet.member,
+						on,
+					});
+					const [shown] = yield* projectBotConnectorsIn(
+						where.workspaceId,
+						where.projectId,
+						where.connectorId,
+					);
+					if (!shown) return yield* new ConnectorNotFound();
+					return shown;
+				}),
+			),
 
 		listForRestriction: (canRestrict) =>
 			operation(

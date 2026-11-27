@@ -7,6 +7,7 @@ import {
 	type Connector,
 	connectorMarkFor,
 	type Project,
+	type ProjectBotConnector,
 	type UnsavedConnector,
 } from "@sugabots/contracts";
 import { cn } from "cn";
@@ -17,9 +18,10 @@ import {
 	connectorNeedsAttention,
 	useConnectorActions,
 	useConnectors,
+	useProjectBotConnectors,
+	useSetProjectBotConnectorOn,
 } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { listNames } from "@/lib/name-list.ts";
 import { useProjectBots } from "@/lib/projects.ts";
 import {
 	OwnerLink,
@@ -52,6 +54,8 @@ import {
 	SettingsRowIcon,
 } from "@/ui/settings-page.tsx";
 import { SpacedText } from "@/ui/spaced-text.tsx";
+import { Switch } from "@/ui/switch.tsx";
+import { Tooltip } from "@/ui/tooltip.tsx";
 import { GitHubConnectStep } from "./GitHubConnect.tsx";
 import { accessSummaryText } from "./tool-access.tsx";
 
@@ -120,32 +124,54 @@ export function ConnectorsSettings({
 }
 
 /**
- * The connectors of each of a project's bots, which a bot uses in the
- * project's chats beside the project's own: a row for each bot, naming its
- * own and marking any that needs attention, which opens in place to list them,
- * with Edit in the bot, its own Connectors, for whoever may change them.
+ * The own connectors of each of a project's bots, which live in the bot and
+ * stay off in the project until one of its managers turns each on there: a
+ * row for each bot that has any, saying how many are on, which opens in place
+ * to list them, each with where it sends data and a switch.
  */
 export function ProjectBotsConnectors({ project }: { project: Project }) {
+	const canManage = resourcePermissions({ project }).manageConnectors;
 	const bots = useProjectBots(project.id);
-	if (!bots.data?.length) return null;
+	const connectors = useProjectBotConnectors(project.id);
+	if (connectors.isError) return <Alert>{failureMessage(connectors.error)}</Alert>;
+	if (!bots.data || !connectors.data) return null;
+	const listed = connectors.data;
+	const withConnectors = bots.data.filter((bot) => listed.some((one) => one.botId === bot.id));
+	if (withConnectors.length === 0) return null;
 	return (
 		<SettingsGroup
 			label="Its bots' own"
 			headingLevel={2}
-			note={`Each bot also uses its own connectors when it works in ${project.name}.`}
+			note={`A bot's own connectors stay off in ${project.name} until a manager turns them on here. While one is on, the bot can send it what it reads in ${project.name}'s chats. If its address changes, it turns off again until someone turns it back on.`}
 		>
 			<Accordion.Root multiple>
-				{bots.data.map((bot) => (
-					<BotConnectors key={bot.id} bot={bot} />
+				{withConnectors.map((bot) => (
+					<BotConnectors
+						key={bot.id}
+						bot={bot}
+						project={project}
+						connectors={listed.filter((one) => one.botId === bot.id)}
+						canManage={canManage}
+					/>
 				))}
 			</Accordion.Root>
 		</SettingsGroup>
 	);
 }
 
-function BotConnectors({ bot }: { bot: Bot }) {
-	const connectors = useConnectors(bot.defaultProjectId);
-	const listed = connectors.data ?? [];
+function BotConnectors({
+	bot,
+	project,
+	connectors,
+	canManage,
+}: {
+	bot: Bot;
+	project: Project;
+	connectors: readonly ProjectBotConnector[];
+	canManage: boolean;
+}) {
+	const setOn = useSetProjectBotConnectorOn(project.id);
+	const on = connectors.filter((one) => one.on).length;
 	return (
 		<Accordion.Item className="border-border border-b last:border-b-0">
 			<Accordion.Header className="m-0">
@@ -154,17 +180,11 @@ function BotConnectors({ bot }: { bot: Bot }) {
 					className="border-b-0"
 					icon={<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={34} />}
 					label={bot.name}
-					sub={
-						connectors.isError
-							? "Its connectors could not be loaded"
-							: connectors.isPending
-								? "\u00a0"
-								: botConnectorsLine(listed)
-					}
+					sub={on === 0 ? "All off here" : `${on} of ${connectors.length} on here`}
 					trailing={
 						<>
 							<span aria-hidden className="flex shrink-0 gap-1">
-								{listed.slice(0, MARKS_SHOWN).map((one) => (
+								{connectors.slice(0, MARKS_SHOWN).map((one) => (
 									<ConnectorMark
 										key={one.id}
 										markId={connectorMarkFor(one)}
@@ -185,15 +205,45 @@ function BotConnectors({ bot }: { bot: Bot }) {
 			</Accordion.Header>
 			<Accordion.Panel className="h-(--accordion-panel-height) overflow-hidden transition-height duration-200 ease-out data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none">
 				<div className="flex flex-col gap-1 pr-4 pb-3 pl-16">
-					{listed.map((connector) => (
+					{setOn.error && <Alert>{failureMessage(setOn.error)}</Alert>}
+					{connectors.map((connector) => (
 						<div key={connector.id} className="flex min-w-0 items-center gap-3 py-1.5">
 							<ConnectorMark markId={connectorMarkFor(connector)} name={connector.name} size="md" />
-							<span className="flex min-w-0 flex-col leading-snug">
+							<span className="flex min-w-0 flex-1 flex-col leading-snug">
 								<span className="truncate text-sm text-foreground">{connector.name}</span>
-								<span className="text-pretty text-subtle-foreground text-xs">
-									<SpacedText parts={connectorLineParts(connector)} />
+								<span
+									className={cn(
+										"truncate text-xs",
+										connector.addressChanged ? "text-destructive-text" : "text-subtle-foreground",
+									)}
+								>
+									{connector.addressChanged
+										? "Its address changed, so it is off until someone turns it on again"
+										: `Sends data to ${connector.url}`}
 								</span>
 							</span>
+							<Tooltip
+								label={
+									canManage
+										? connector.on
+											? `Stop ${bot.name} using ${connector.name} in ${project.name}`
+											: `Let ${bot.name} use ${connector.name} in ${project.name}`
+										: `Only ${project.name}'s managers can turn this on or off`
+								}
+								side="top"
+							>
+								{/* On a wrapper, as a disabled switch receives no pointer events. */}
+								<span className="inline-flex shrink-0">
+									<Switch
+										checked={connector.on}
+										disabled={!canManage || setOn.isPending}
+										aria-label={`${connector.name} in ${project.name}`}
+										onCheckedChange={(checked) =>
+											setOn.mutate({ connectorId: connector.id, on: checked })
+										}
+									/>
+								</span>
+							</Tooltip>
 						</div>
 					))}
 					{bot.permissions.resources.manageConnectors && (
@@ -212,20 +262,6 @@ function BotConnectors({ bot }: { bot: Bot }) {
 			</Accordion.Panel>
 		</Accordion.Item>
 	);
-}
-
-/** A bot's row's line: its connectors by name, any needing attention in red. */
-function botConnectorsLine(connectors: readonly Connector[]): ReactNode {
-	if (connectors.length === 0) return "None of its own";
-	const failing = connectors.filter(connectorNeedsAttention);
-	const fine = connectors.filter((one) => !failing.includes(one));
-	const needs = failing.length > 0 && (
-		<span className="text-destructive-text">
-			{listNames(failing.map((one) => one.name))} {failing.length === 1 ? "needs" : "need"}{" "}
-			attention
-		</span>
-	);
-	return <SpacedText parts={[listNames(fine.map((one) => one.name)), needs]} />;
 }
 
 /** How many of a bot's connectors its row shows the marks of. */

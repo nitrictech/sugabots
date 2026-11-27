@@ -14,6 +14,7 @@ import {
 	bigint,
 	boolean,
 	check,
+	primaryKey as compositePrimaryKey,
 	foreignKey,
 	index,
 	integer,
@@ -25,7 +26,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
-import { member, project, workspace } from "../workspaces/sql.ts";
+import { member, project, projectBot, workspace } from "../workspaces/sql.ts";
 
 interface EncryptedProviderHeader {
 	name: string;
@@ -263,6 +264,43 @@ export const connector = pgTable(
 			"connector_app_credential_kind_check",
 			sql`(${table.kind} = 'github') = (${table.appCredentialEncrypted} is not null)`,
 		),
+	],
+);
+
+/**
+ * One of a bot's own connectors, which live in its default project, turned on
+ * in another project the bot is in, by one of that project's managers, for the
+ * address the connector had then. Without a row the connector is off there,
+ * and a row whose address is no longer the connector's leaves it off until
+ * somebody turns it on again, so moving a connector to another address turns
+ * it off in every project. Goes with the bot's place in the project.
+ */
+export const projectBotConnector = pgTable(
+	"project_bot_connector",
+	{
+		workspaceId: uuid("workspace_id").notNull(),
+		projectId: uuid("project_id").notNull(),
+		botId: uuid("bot_id").notNull(),
+		connectorId: uuid("connector_id").notNull(),
+		/** The connector's address when it was turned on; it stays on only while that is unchanged. */
+		address: text("address").notNull(),
+		/** Who turned it on; null once they have left, or when an upgrade did. */
+		turnedOnById: uuid("turned_on_by_id").references(() => member.id, { onDelete: "set null" }),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		compositePrimaryKey({ columns: [table.projectId, table.connectorId] }),
+		foreignKey({
+			columns: [table.projectId, table.botId],
+			foreignColumns: [projectBot.projectId, projectBot.botId],
+			name: "project_bot_connector_project_bot_fkey",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.connectorId, table.workspaceId],
+			foreignColumns: [connector.id, connector.workspaceId],
+			name: "project_bot_connector_connector_workspace_fkey",
+		}).onDelete("cascade"),
+		index("project_bot_connector_connector_id_idx").on(table.connectorId),
 	],
 );
 

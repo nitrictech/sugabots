@@ -310,6 +310,11 @@ const fresh = {
 		);
 		return { ...automation, triggerId };
 	},
+	/** One of Pub's own connectors, which live in its default project, for J to turn on. */
+	pubsOwnConnector: async ({ a }: Fixture) => ({
+		projectId: a.project,
+		connectorId: await seedConnector(a.workspace, a.pub.defaultProject),
+	}),
 	connector: async ({ a }: Fixture) => ({
 		projectId: a.project,
 		connectorId: await seedConnector(a.workspace, a.project),
@@ -677,6 +682,7 @@ const rows: {
 	"projectComputer.get": { input: inJ, outcomes: readsJ },
 	"projectComputer.network": { input: inJ, outcomes: readsJ },
 	"connectors.list": { input: inJ, outcomes: readsJ },
+	"connectors.listProjectBots": { input: inJ, outcomes: readsJ },
 	"connectors.get": { input: fresh.connector, outcomes: readsJ },
 	"gitHubConnectors.repositories": { input: inGitHubApp, outcomes: readsJ },
 	"chats.openAutomationFeed": {
@@ -896,6 +902,10 @@ const rows: {
 		outcomes: managesJ,
 	},
 	"connectors.remove": { input: fresh.connector, outcomes: managesJ },
+	"connectors.setOnInProject": {
+		input: async (fixture) => ({ ...(await fresh.pubsOwnConnector(fixture)), on: true }),
+		outcomes: managesJ,
+	},
 	"connectors.test": { input: fresh.connector, outcomes: managesJ },
 	"gitHubConnectors.start": {
 		input: ({ a }) => ({ projectId: a.project, organization: undefined }),

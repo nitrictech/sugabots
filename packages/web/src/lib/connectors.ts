@@ -6,6 +6,7 @@ import type {
 	ConnectorUpdate,
 	ConnectorWithTools,
 	NewConnector,
+	ProjectBotConnector,
 	UnsavedConnector,
 } from "@sugabots/contracts";
 import { connectorMarkFor, connectorSignInFailures, toolAccessCountsOf } from "@sugabots/contracts";
@@ -58,6 +59,40 @@ function connectorListQuery(projectId: string) {
 			Effect.runPromise(client.api.connectors.list({ params: { projectId } }), { signal }),
 	});
 }
+
+/**
+ * The own connectors of a project's bots, each with whether it is on in the
+ * project, where a bot uses one only while it is.
+ */
+export function useProjectBotConnectors(projectId: string) {
+	return useQuery({
+		queryKey: projectBotConnectorsKey(projectId),
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.connectors.listProjectBots({ params: { projectId } }), {
+				signal,
+			}),
+	});
+}
+
+/** Turns a project bot's own connector on or off in the project. */
+export function useSetProjectBotConnectorOn(projectId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ connectorId, on }: { connectorId: string; on: boolean }) =>
+			Effect.runPromise(
+				client.api.connectors.setOnInProject({
+					params: { projectId, connectorId },
+					payload: { on },
+				}),
+			),
+		onSuccess: (changed) =>
+			queryClient.setQueryData<ProjectBotConnector[]>(projectBotConnectorsKey(projectId), (rows) =>
+				rows?.map((row) => (row.id === changed.id ? changed : row)),
+			),
+	});
+}
+
+const projectBotConnectorsKey = (projectId: string) => ["projectBotConnectors", projectId];
 
 /** One connector with its tools, without the server's descriptions of them. */
 export function useConnectorWithTools(projectId: string, connectorId: string) {

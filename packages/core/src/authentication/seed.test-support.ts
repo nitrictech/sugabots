@@ -33,6 +33,7 @@ import {
 	message,
 	project,
 	projectBot,
+	projectBotConnector,
 	projectChat,
 	projectMember,
 	session,
@@ -480,6 +481,28 @@ export async function seedConnector(
 		),
 	);
 	return row.id;
+}
+
+/**
+ * Turns the bot `botId`'s own connector `connectorId` on in the project
+ * `projectId`, which the bot is in, for the address the connector has now.
+ */
+export async function seedProjectBotConnector(
+	workspaceId: string,
+	projectId: string,
+	botId: string,
+	connectorId: string,
+): Promise<void> {
+	const found = only(
+		await onDatabase((db) =>
+			db.select({ url: connector.url }).from(connector).where(eq(connector.id, connectorId)),
+		),
+	);
+	await onDatabase((db) =>
+		db
+			.insert(projectBotConnector)
+			.values({ workspaceId, projectId, botId, connectorId, address: found.url }),
+	);
 }
 
 /** The online computer of `projectId`, at a computer provider of its own. */

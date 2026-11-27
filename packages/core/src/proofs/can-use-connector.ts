@@ -4,12 +4,12 @@ import {
 	connectorToolWritesOrDeletes,
 } from "@sugabots/contracts";
 import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../database/database.ts";
-import { connector } from "../database/schema.ts";
+import { connector, placedChat, projectBotConnector } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import type { Principal } from "../principal.ts";
+import type { AutomationRun, BotForAsker, Principal } from "../principal.ts";
 import { toolsOf } from "../providers/connectors/connector-store.ts";
 import { toolAccessOf } from "../providers/connectors/tool-access.ts";
 import { decideReach, mayInProjectAs, memberReaches, reachFacts, whoActs } from "./facts.ts";
@@ -57,7 +57,7 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 				)
 			: [];
 		if (!row?.enabled) return yield* hidden;
-		const mayWrite = yield* connectorAccess(principal.value, id.value, row.projectId);
+		const mayWrite = yield* connectorAccess(principal.value, id.value, row);
 		const reach: ReachesEnabledConnector<P, K> = ReachesEnabledConnectorProof.prove(
 			[principal, id],
 			{
@@ -72,7 +72,11 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 		return { row, reach, mayWrite };
 	});
 
-const connectorAccess = (acting: Principal, id: string, projectId: string) =>
+const connectorAccess = (
+	acting: Principal,
+	id: string,
+	{ projectId, url }: { readonly projectId: string; readonly url: string },
+) =>
 	Effect.gen(function* () {
 		const hidden = new ResourceHidden({ resource: "connector" });
 		if (acting._tag === "WebhookCall") {
@@ -88,6 +92,7 @@ const connectorAccess = (acting: Principal, id: string, projectId: string) =>
 		if (botsOwn) {
 			if (acting._tag === "BotForAsker" && !memberReaches(facts.member, facts.project))
 				return yield* hidden;
+			if (!(yield* onWhereTurnWorks(acting, { id, projectId, url }))) return yield* hidden;
 		} else {
 			const decision = decideReach(acting, facts, undefined);
 			if (decision.kind === "hidden") return yield* hidden;
@@ -102,6 +107,46 @@ const connectorAccess = (acting: Principal, id: string, projectId: string) =>
 			acting._tag === "AutomationRun" ||
 			(member !== undefined && mayInProjectAs(member, facts.project, "project.change"))
 		);
+	});
+
+/**
+ * Whether the bot's own connector `connector` is on in the project its turn's
+ * chat is in: always in the bot's default project, where the connector lives;
+ * in any other, only once one of that project's managers turned it on there,
+ * for the address it still has. The row is shared until the transaction ends,
+ * so a call checked inside one can't run on after it is turned off.
+ */
+const onWhereTurnWorks = (
+	acting: BotForAsker | AutomationRun,
+	connector: { readonly id: string; readonly projectId: string; readonly url: string },
+) =>
+	Effect.gen(function* () {
+		const [working] = yield* query((db) =>
+			db
+				.select({ projectId: placedChat.projectId })
+				.from(placedChat)
+				.where(eq(placedChat.id, acting.chat))
+				.limit(1),
+		);
+		const workingProject = working?.projectId;
+		if (!workingProject) return false;
+		if (workingProject === connector.projectId) return true;
+		const [turnedOn] = yield* query((db) =>
+			db
+				.select({ connectorId: projectBotConnector.connectorId })
+				.from(projectBotConnector)
+				.where(
+					and(
+						eq(projectBotConnector.projectId, workingProject),
+						eq(projectBotConnector.connectorId, connector.id),
+						eq(projectBotConnector.botId, acting.bot),
+						eq(projectBotConnector.address, connector.url),
+					),
+				)
+				.limit(1)
+				.for("share"),
+		);
+		return turnedOn !== undefined;
 	});
 
 export const proveCanReachConnector = <P, K>(

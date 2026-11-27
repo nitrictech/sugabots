@@ -4,6 +4,7 @@ import {
 	type ConnectorToolSetting,
 	type ConnectorWithTools,
 	type NamedMember,
+	type ProjectBotConnector,
 	type RestrictableConnector,
 	toolAccessCountsOf,
 } from "@sugabots/contracts";
@@ -12,7 +13,16 @@ import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { namedMemberColumns } from "../../chats/store/participants.ts";
 import { query } from "../../database/database.ts";
-import { type ConnectorRow, connector, member, membership } from "../../database/schema.ts";
+import {
+	bot,
+	type ConnectorRow,
+	connector,
+	member,
+	membership,
+	project,
+	projectBot,
+	projectBotConnector,
+} from "../../database/schema.ts";
 import type { Secrets } from "../../secrets/secrets.ts";
 import { membershipOf } from "../../workspaces/membership/member-reads.ts";
 import { configurationStatus } from "../tested-configuration.ts";
@@ -45,6 +55,58 @@ export const connectorsIn = (workspaceId: string, projectId: string, cipher: Sec
 	listedRows(and(eq(connector.workspaceId, workspaceId), eq(connector.projectId, projectId))).pipe(
 		Effect.map((rows) =>
 			rows.map(({ row, ...members }) => toConnector(row, members, cipher).connector),
+		),
+	);
+
+/**
+ * The own connectors of the bots in the project `projectId`, by bot name and
+ * then connector name, each with whether it is on in the project: turned on
+ * there for the address it still has. Its own bot's, in a bot's default
+ * project, are the project's connectors, so they aren't among them.
+ */
+export const projectBotConnectorsIn = (
+	workspaceId: string,
+	projectId: string,
+	connectorId?: string,
+) =>
+	query((db) =>
+		db
+			.select({
+				id: connector.id,
+				name: connector.name,
+				kind: connector.kind,
+				url: connector.url,
+				botId: bot.id,
+				botName: bot.name,
+				turnedOnFor: projectBotConnector.address,
+			})
+			.from(projectBot)
+			.innerJoin(bot, eq(bot.id, projectBot.botId))
+			.innerJoin(project, eq(project.defaultOfBotId, bot.id))
+			.innerJoin(connector, eq(connector.projectId, project.id))
+			.leftJoin(
+				projectBotConnector,
+				and(
+					eq(projectBotConnector.projectId, projectBot.projectId),
+					eq(projectBotConnector.connectorId, connector.id),
+				),
+			)
+			.where(
+				and(
+					eq(projectBot.workspaceId, workspaceId),
+					eq(projectBot.projectId, projectId),
+					sql`${project.id} <> ${projectId}`,
+					connectorId === undefined ? undefined : eq(connector.id, connectorId),
+				),
+			)
+			.orderBy(asc(bot.name), asc(connector.name)),
+	).pipe(
+		Effect.map((rows): ProjectBotConnector[] =>
+			rows.map(({ turnedOnFor, ...row }) => ({
+				...row,
+				on: turnedOnFor === row.url,
+				addressChanged: turnedOnFor !== null && turnedOnFor !== row.url,
+			})),
 		),
 	);
 

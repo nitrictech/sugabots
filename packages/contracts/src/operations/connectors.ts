@@ -15,6 +15,7 @@ import {
 	connectorUpdateSchema,
 	connectorWithToolsSchema,
 	newConnectorSchema,
+	projectBotConnectorSchema,
 	unsavedConnectorSchema,
 } from "../connectors.ts";
 import {
@@ -136,6 +137,30 @@ export const connectorsContracts = {
 			reason:
 				"A bot is offered a connector's tools, not its settings; offering the list waits for tools to become operations.",
 		},
+	}),
+	"connectors.listProjectBots": OperationContract.make("connectors.listProjectBots", {
+		description:
+			"List the own connectors of the bots in a project, each with whether it is on in the project.",
+		input: aProject,
+		output: Schema.Array(projectBotConnectorSchema),
+		errors: refusals,
+		changes: false,
+		http: { kind: "offered", method: "GET", path: "/projects/:projectId/bot-connectors" },
+		botLoop: managedInTheWebApp,
+	}),
+	"connectors.setOnInProject": OperationContract.make("connectors.setOnInProject", {
+		description:
+			"Turn one of a project bot's own connectors on or off in the project, for the address it has now. A bot uses it in the project's chats only while it is on.",
+		input: Schema.Struct({ projectId: uuidSchema, connectorId: uuidSchema, on: Schema.Boolean }),
+		output: projectBotConnectorSchema,
+		errors: [...refusals, ConnectorNotFound],
+		changes: true,
+		http: {
+			kind: "offered",
+			method: "PUT",
+			path: "/projects/:projectId/bot-connectors/:connectorId",
+		},
+		botLoop: managedInTheWebApp,
 	}),
 	"connectors.create": OperationContract.make("connectors.create", {
 		description:

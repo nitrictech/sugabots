@@ -10,12 +10,14 @@ import {
 	seedConnector,
 	seedMessage,
 	seedPage,
+	seedProjectBotConnector,
 	seedProjectChat,
 	seedWorkspace,
 } from "../authentication/seed.test-support.ts";
 import {
 	bot,
 	computerProvider,
+	connector,
 	file,
 	modelProvider,
 	providerModel,
@@ -320,6 +322,7 @@ describe("resource proofs", () => {
 			const projects = await seedConnector(a.workspace, a.project, { tools });
 			const pubsOwn = await seedConnector(a.workspace, a.pub.defaultProject, { tools });
 			const elsewhere = await seedConnector(a.workspace, a.otherProject, { tools });
+			await seedProjectBotConnector(a.workspace, a.project, a.pub.id, pubsOwn);
 			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);
 			const visBot = await as.botFor(a.vi, a.pub.id, a.chat);
 			const helpersTurn = await as.botFor(a.ed, a.helper.id, a.chat);
@@ -335,10 +338,41 @@ describe("resource proofs", () => {
 			expect(await uses(helpersTurn, pubsOwn, "list_issues")).toBe("ResourceHidden");
 		});
 
+		it("keeps a bot's own connector off in another project until it is turned on there, for its address", async () => {
+			const { a } = world;
+			const pubsOwn = await seedConnector(a.workspace, a.pub.defaultProject, { tools });
+			const inProject = await as.botFor(a.ed, a.pub.id, a.chat);
+			const inOwnChat = await as.botFor(
+				a.ed,
+				a.pub.id,
+				await seedProjectChat(a.workspace, a.pub.defaultProject, a.ed),
+			);
+			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
+
+			expect(await uses(inOwnChat, pubsOwn, "list_issues")).toBe("ok");
+			expect(await uses(inProject, pubsOwn, "list_issues")).toBe("ResourceHidden");
+			expect(await uses(run, pubsOwn, "list_issues")).toBe("ResourceHidden");
+
+			await seedProjectBotConnector(a.workspace, a.project, a.pub.id, pubsOwn);
+			expect(await uses(inProject, pubsOwn, "list_issues")).toBe("ok");
+			expect(await uses(run, pubsOwn, "list_issues")).toBe("ok");
+
+			// Sending its data somewhere else turns it off again.
+			await onDatabase((db) =>
+				db
+					.update(connector)
+					.set({ url: "https://elsewhere.example.com/mcp" })
+					.where(eq(connector.id, pubsOwn)),
+			);
+			expect(await uses(inProject, pubsOwn, "list_issues")).toBe("ResourceHidden");
+			expect(await uses(inOwnChat, pubsOwn, "list_issues")).toBe("ok");
+		});
+
 		it("lets a run use its project's connectors and its bot's own, and members those they reach", async () => {
 			const { a, b } = world;
 			const projects = await seedConnector(a.workspace, a.project, { tools });
 			const pubsOwn = await seedConnector(a.workspace, a.pub.defaultProject, { tools });
+			await seedProjectBotConnector(a.workspace, a.project, a.pub.id, pubsOwn);
 			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
 			expect(await uses(run, projects, "create_issue")).toBe("ok");
 			expect(await uses(run, pubsOwn, "create_issue")).toBe("ok");

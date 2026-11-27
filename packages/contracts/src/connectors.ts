@@ -192,6 +192,25 @@ const restrictableConnectorSchema = Schema.Struct({
 export type RestrictableConnector = typeof restrictableConnectorSchema.Type;
 export const connectorListItemSchema = Schema.Union([connectorSchema, restrictableConnectorSchema]);
 
+/**
+ * One of a project bot's own connectors, as the project's settings show it:
+ * whether it is on in this project, where the bot may use it in the
+ * project's chats. It is off until one of the project's managers turns it on.
+ */
+export const projectBotConnectorSchema = Schema.Struct({
+	id: uuidSchema,
+	name: Schema.String,
+	kind: connectorKindSchema,
+	/** Where the connector sends what the bot gives it. */
+	url: Schema.String,
+	botId: uuidSchema,
+	botName: Schema.String,
+	on: Schema.Boolean,
+	/** Turned on before its address changed, which turned it off until it is turned on again. */
+	addressChanged: Schema.Boolean,
+});
+export type ProjectBotConnector = typeof projectBotConnectorSchema.Type;
+
 /** One connector with its tools, each with what bots may do with it. */
 export const connectorWithToolsSchema = Schema.Struct({
 	...connectorSchema.fields,

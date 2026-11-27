@@ -252,6 +252,27 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			]);
 		});
 
+		it("keeps a shared pod's bots' own connectors on in the private project it became", async () => {
+			const own = await upgraded.rows<{ bot_id: string; on: boolean }>(
+				`select project.default_of_bot_id as bot_id,
+					exists (
+						select 1 from project_bot_connector turned_on
+						where turned_on.project_id = $1 and turned_on.connector_id = connector.id
+							and turned_on.bot_id = project.default_of_bot_id
+							and turned_on.address = connector.url
+					) as on
+				 from connector
+				 join project on project.id = connector.project_id
+				 where project.default_of_bot_id in ($2, $3)
+				 order by 1`,
+				[legacy.pods.family, legacy.bots.planner, legacy.bots.budget],
+			);
+			expect(new Set(own.map(({ bot_id }) => bot_id))).toEqual(
+				new Set([legacy.bots.planner, legacy.bots.budget]),
+			);
+			expect(own.filter(({ on }) => !on)).toEqual([]);
+		});
+
 		it("records who started a chat nobody started as its project's creator", async () => {
 			expect(
 				await upgraded.rows(`select started_by_id from project_chat where chat_id = $1`, [

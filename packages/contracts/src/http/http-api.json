@@ -1108,6 +1108,22 @@
 				"ResourceHidden": 404
 			}
 		},
+		"connectors.listProjectBots": {
+			"route": "GET /projects/:projectId/bot-connectors",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ResourceHidden": 404
+			}
+		},
 		"connectors.remove": {
 			"route": "DELETE /projects/:projectId/connectors/:connectorId",
 			"answers": [
@@ -1119,6 +1135,26 @@
 			},
 			"query": {},
 			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"BotCannotReach": 403,
+				"ConnectorNotFound": 404,
+				"ResourceHidden": 404
+			}
+		},
+		"connectors.setOnInProject": {
+			"route": "PUT /projects/:projectId/bot-connectors/:connectorId",
+			"answers": [
+				200
+			],
+			"params": {
+				"projectId": "uuid",
+				"connectorId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"on": "boolean"
+			},
 			"errors": {
 				"ActionForbidden": 403,
 				"BotCannotReach": 403,

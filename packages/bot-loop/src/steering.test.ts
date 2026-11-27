@@ -6,6 +6,7 @@ import {
 	seedMember,
 	seedMessage,
 	seedProject,
+	seedProjectBotConnector,
 	seedProjectChat,
 	seedWorkspace,
 } from "@sugabots/core/authentication/seed.test-support";
@@ -91,6 +92,7 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 		handle = named.handle;
 		connectorId = await seedConnector(workspaceId, seeded.defaultProject);
 		projectId = await seedProject(workspaceId, { leadBotId: botId, members: [sam, vee] });
+		await seedProjectBotConnector(workspaceId, projectId, botId, connectorId);
 		chatId = await seedProjectChat(workspaceId, projectId, sam);
 		delivered.length = 0;
 		afterCommit = undefined;

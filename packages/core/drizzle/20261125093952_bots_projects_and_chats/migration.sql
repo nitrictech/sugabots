@@ -3371,4 +3371,32 @@ INNER JOIN "membership" m ON m."workspace_id" = b."workspace_id"
 	AND m."member_id" = b."created_by_id" AND NOT m."leaving"
 WHERE b."in_shared_pod"
 ON CONFLICT ("bot_id", "member_id") DO NOTHING;--> statement-breakpoint
+-- A bot's own connectors stay off in each project but its default one until
+-- one of that project's managers turns them on there, for the address each
+-- has then.
+CREATE TABLE "project_bot_connector" (
+	"workspace_id" uuid NOT NULL,
+	"project_id" uuid NOT NULL,
+	"bot_id" uuid NOT NULL,
+	"connector_id" uuid NOT NULL,
+	"address" text NOT NULL,
+	"turned_on_by_id" uuid,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "project_bot_connector_pkey" PRIMARY KEY("project_id","connector_id")
+);
+--> statement-breakpoint
+CREATE INDEX "project_bot_connector_connector_id_idx" ON "project_bot_connector" ("connector_id");--> statement-breakpoint
+ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_turned_on_by_id_member_id_fkey" FOREIGN KEY ("turned_on_by_id") REFERENCES "member"("id") ON DELETE SET NULL;--> statement-breakpoint
+ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_project_bot_fkey" FOREIGN KEY ("project_id","bot_id") REFERENCES "project_bot"("project_id","bot_id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_connector_workspace_fkey" FOREIGN KEY ("connector_id","workspace_id") REFERENCES "connector"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
+-- A `shared` `pod`'s bots used their own connectors in the `pod`, so each
+-- stays on in the private project the `pod` became.
+INSERT INTO "project_bot_connector" ("workspace_id", "project_id", "bot_id", "connector_id", "address")
+SELECT b."workspace_id", pb."project_id", b."id", c."id", c."url"
+FROM "bot" b
+INNER JOIN "project_bot" pb ON pb."bot_id" = b."id"
+INNER JOIN "project" p ON p."id" = pb."project_id" AND p."default_of_bot_id" IS NULL
+INNER JOIN "project" own ON own."default_of_bot_id" = b."id"
+INNER JOIN "connector" c ON c."project_id" = own."id"
+WHERE b."in_shared_pod";--> statement-breakpoint
 ALTER TABLE "bot" DROP COLUMN "in_shared_pod";

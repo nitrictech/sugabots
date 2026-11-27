@@ -1,8 +1,9 @@
+import type { ProjectBotConnector } from "@sugabots/contracts";
 import type { TestConnector } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
 import { expect, screen, userEvent, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { revenue } from "@/shell/story-fixtures.test-support.ts";
+import { accountManager, growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
 import {
 	appHandlers,
 	connectorHandlers,
@@ -304,5 +305,88 @@ export const Phone = meta.story({
 		const github = await canvas.findByRole("article", { name: "GitHub" });
 		await expect(within(github).getByText("Custom: 2 allowed, 1 ask first, 1 off")).toBeVisible();
 		await expect(within(github).queryByRole("button", { name: /all tools/ })).toBeNull();
+	},
+});
+
+/** Revenue's bots' own connectors: one on here, one off, and one whose address changed since it was turned on. */
+const botsOwn: ProjectBotConnector[] = [
+	{
+		id: "0199a3a0-0000-7000-8000-000000000901",
+		name: "Notion",
+		kind: "mcp",
+		url: "https://mcp.notion.com/mcp",
+		botId: growthDesk.id,
+		botName: growthDesk.name,
+		on: true,
+		addressChanged: false,
+	},
+	{
+		id: "0199a3a0-0000-7000-8000-000000000902",
+		name: "Billing API",
+		kind: "http",
+		url: "https://billing.example.com/v1",
+		botId: growthDesk.id,
+		botName: growthDesk.name,
+		on: false,
+		addressChanged: false,
+	},
+	{
+		id: "0199a3a0-0000-7000-8000-000000000903",
+		name: "CRM",
+		kind: "http",
+		url: "https://crm.example.com/api",
+		botId: accountManager.id,
+		botName: accountManager.name,
+		on: false,
+		addressChanged: true,
+	},
+];
+
+/**
+ * The project's bots' own connectors, each off here until a manager turns it
+ * on: one bot's row says how many are on and opens to list them, each with
+ * where it sends data and a switch.
+ */
+export const BotsOwnConnectors = meta.story({
+	beforeEach({ msw }) {
+		let rows = botsOwn;
+		msw.use(
+			http.get(`${API}/projects/:projectId/bot-connectors`, () => HttpResponse.json(rows)),
+			http.put(
+				`${API}/projects/:projectId/bot-connectors/:connectorId`,
+				async ({ params, request }) => {
+					const { on } = (await request.json()) as { on: boolean };
+					rows = rows.map((row) =>
+						row.id === params.connectorId ? { ...row, on, addressChanged: false } : row,
+					);
+					return HttpResponse.json(rows.find((row) => row.id === params.connectorId));
+				},
+			),
+		);
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: /Growth Desk/ }));
+		await expect(canvas.getByText("1 of 2 on here")).toBeInTheDocument();
+		const billing = await canvas.findByRole("switch", { name: `Billing API in ${revenue.name}` });
+		await expect(billing).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(billing);
+		await expect(
+			await canvas.findByRole("switch", { name: `Billing API in ${revenue.name}`, checked: true }),
+		).toBeInTheDocument();
+	},
+});
+
+/** A bot's connector whose address changed since it was turned on, which turned it off. */
+export const BotsOwnConnectorMoved = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/projects/:projectId/bot-connectors`, () => HttpResponse.json(botsOwn)),
+		);
+	},
+	play: async ({ canvas }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: /Account Manager/ }));
+		await expect(
+			await canvas.findByText("Its address changed, so it is off until someone turns it on again"),
+		).toBeInTheDocument();
 	},
 });

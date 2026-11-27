@@ -23,9 +23,11 @@ import { removeRepository } from "./github/remove-repository.ts";
 import { repositories } from "./github/repositories.ts";
 import { start } from "./github/start.ts";
 import { list } from "./list.ts";
+import { listProjectBots } from "./list-project-bots.ts";
 import { oauthCallback } from "./oauth-callback.ts";
 import { remove } from "./remove.ts";
 import { searchTools } from "./search-tools.ts";
+import { setOnInProject } from "./set-on-in-project.ts";
 import { startOAuth } from "./start-oauth.ts";
 import { test } from "./test.ts";
 import { testUnsaved } from "./test-unsaved.ts";
@@ -35,6 +37,8 @@ export const connectorsOperations = {
 	"connectors.callTool": callTool,
 	"connectors.searchTools": searchTools,
 	"connectors.list": list,
+	"connectors.listProjectBots": listProjectBots,
+	"connectors.setOnInProject": setOnInProject,
 	"connectors.create": create,
 	"connectors.testUnsaved": testUnsaved,
 	"connectors.get": get,

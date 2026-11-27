@@ -5,6 +5,7 @@ import {
 	seedConnector,
 	seedMessage,
 	seedProject,
+	seedProjectBotConnector,
 	seedProjectChat,
 	seedTurnAnswering,
 } from "@sugabots/core/authentication/seed.test-support";
@@ -365,52 +366,70 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
-		it("calls a helper’s own allowed connector in the asking chat", async () => {
-			const helper = await seedBot(workspaceId, { createdById: adminId });
-			await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, helper.id)));
-			const ownConnector = await seedConnector(workspaceId, helper.defaultProject);
-			const projectId = await seedProject(workspaceId, { leadBotId: botId, bots: [helper.id] });
-			const source = await seedProjectChat(workspaceId, projectId, adminId);
-			const parent = await seedTurnAnswering(
-				source,
-				botId,
-				{ member: adminId },
-				{ status: "done" },
-			);
-			const triggerMessageId = await seedMessage(source, { bot: botId, turn: parent });
-			await runOnPostgres(
-				Context.get(loop.services, Turns.Service).ask({
-					chatId: source,
-					botId: helper.id,
-					triggerMessageId,
-					reason: "collaboration",
-				}),
-			);
-			const execute = vi.fn(async () => ({ removed: true }));
-			const discovery: ConnectorCatalog.Interface = {
-				forTurn: (workspace, projects, side, sessions) => {
-					expect(projects).toEqual({ projectId, ownProjectId: helper.defaultProject });
-					return wiki("allow", execute, ownConnector).forTurn(workspace, projects, side, sessions);
-				},
-			};
-			const { model } = scriptedSteps(
-				{
-					calls: [
-						{
-							toolCallId: "wipe",
-							toolName: CALL_TOOL,
-							input: { tool: "wiki__wipe", arguments: {} },
-						},
-					],
-				},
-				{ text: ["Done."] },
-			);
-			const result = await loop.runTurn(source, { model, connectorTools: discovery });
-			expect(execute).toHaveBeenCalledOnce();
-			expect(await callsOf(result.turnId)).toMatchObject([
-				{ chatId: source, connectorId: ownConnector, approvalStatus: null, status: "completed" },
-			]);
-		}, 15_000);
+		it.each([
+			["once the asking project turned it on", true],
+			["not when the asking project hasn't turned it on, though the catalog offers it", false],
+		] as const)(
+			"calls a helper’s own allowed connector in the asking chat %s",
+			async (_case, on) => {
+				const helper = await seedBot(workspaceId, { createdById: adminId });
+				await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, helper.id)));
+				const ownConnector = await seedConnector(workspaceId, helper.defaultProject);
+				const projectId = await seedProject(workspaceId, { leadBotId: botId, bots: [helper.id] });
+				if (on) await seedProjectBotConnector(workspaceId, projectId, helper.id, ownConnector);
+				const source = await seedProjectChat(workspaceId, projectId, adminId);
+				const parent = await seedTurnAnswering(
+					source,
+					botId,
+					{ member: adminId },
+					{ status: "done" },
+				);
+				const triggerMessageId = await seedMessage(source, { bot: botId, turn: parent });
+				await runOnPostgres(
+					Context.get(loop.services, Turns.Service).ask({
+						chatId: source,
+						botId: helper.id,
+						triggerMessageId,
+						reason: "collaboration",
+					}),
+				);
+				const execute = vi.fn(async () => ({ removed: true }));
+				const discovery: ConnectorCatalog.Interface = {
+					forTurn: (workspace, projects, side, sessions) => {
+						expect(projects).toEqual({ projectId, ownProjectId: helper.defaultProject });
+						return wiki("allow", execute, ownConnector).forTurn(
+							workspace,
+							projects,
+							side,
+							sessions,
+						);
+					},
+				};
+				const { model } = scriptedSteps(
+					{
+						calls: [
+							{
+								toolCallId: "wipe",
+								toolName: CALL_TOOL,
+								input: { tool: "wiki__wipe", arguments: {} },
+							},
+						],
+					},
+					{ text: ["Done."] },
+				);
+				const result = await loop.runTurn(source, { model, connectorTools: discovery });
+				expect(execute).toHaveBeenCalledTimes(on ? 1 : 0);
+				expect(await callsOf(result.turnId)).toMatchObject([
+					{
+						chatId: source,
+						connectorId: ownConnector,
+						approvalStatus: null,
+						status: on ? "completed" : "failed",
+					},
+				]);
+			},
+			15_000,
+		);
 
 		it("hides a connector outside chat bounds even when the catalog offers it", async () => {
 			const project = await seedProject(workspaceId, { leadBotId: botId });

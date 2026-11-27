@@ -15,6 +15,7 @@ import {
 	connector,
 	type GitHubConnectorRepository,
 	type GitHubConnectorSettings,
+	projectBotConnector,
 	type ToolAccess,
 } from "../../database/schema.ts";
 import type { MemberSession } from "../../principal.ts";
@@ -34,7 +35,8 @@ export const OAUTH_EXCHANGE_CLAIM_MS = 30_000;
 /**
  * The only writer of `connector`: the MCP servers, HTTP endpoints and GitHub
  * apps each project is connected to, the MCP servers' sealed secrets and OAuth
- * records, and the apps' sealed credentials.
+ * records, and the apps' sealed credentials. Also of `project_bot_connector`:
+ * which of a bot's own connectors are on in the other projects it is in.
  *
  * A name, and the handle made from it, is unique per project. `target` does
  * not look at what bots may do with the tools: a connector whose tools are
@@ -120,6 +122,20 @@ export interface Interface {
 		projectId: string,
 		connectorId: string,
 	) => Effect.Effect<boolean>;
+	/**
+	 * Turns the bot `botId`'s own connector `connectorId` on in the project
+	 * `projectId`, for the address the connector has now, as `memberId`; or
+	 * off. The caller has proved the connector is the bot's and the bot is in
+	 * the project.
+	 */
+	readonly setOnInProject: (input: {
+		readonly workspaceId: string;
+		readonly projectId: string;
+		readonly botId: string;
+		readonly connectorId: string;
+		readonly memberId: string;
+		readonly on: boolean;
+	}) => Effect.Effect<void>;
 	/**
 	 * Records what a test of the configuration last updated at `testedAt`
 	 * found, unless the connector has been reconfigured since.
@@ -474,6 +490,40 @@ export const make = Effect.gen(function* () {
 							kind: connector.kind,
 						}),
 				).pipe(Effect.map(([row]) => row)),
+			),
+
+		setOnInProject: ({ workspaceId, projectId, botId, connectorId, memberId, on }) =>
+			operation(
+				"setOnInProject",
+				transaction(
+					Effect.gen(function* () {
+						const inProject = and(
+							eq(projectBotConnector.projectId, projectId),
+							eq(projectBotConnector.connectorId, connectorId),
+						);
+						yield* query((db) => db.delete(projectBotConnector).where(inProject));
+						if (!on) return;
+						// Shared, so the address can't change between reading it and keeping it.
+						const [current] = yield* query((db) =>
+							db
+								.select({ url: connector.url })
+								.from(connector)
+								.where(and(eq(connector.id, connectorId), eq(connector.workspaceId, workspaceId)))
+								.for("share"),
+						);
+						if (!current) return;
+						yield* query((db) =>
+							db.insert(projectBotConnector).values({
+								workspaceId,
+								projectId,
+								botId,
+								connectorId,
+								address: current.url,
+								turnedOnById: memberId,
+							}),
+						);
+					}),
+				),
 			),
 
 		remove: (workspaceId, projectId, connectorId) =>
