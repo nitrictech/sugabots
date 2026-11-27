@@ -1,7 +1,7 @@
 import type { ProjectChat } from "@sugabots/contracts";
 import { listedChat } from "@sugabots/contracts/testing";
 import { HttpResponse, http } from "msw";
-import { expect } from "storybook/test";
+import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { growthDesk } from "@/shell/story-fixtures.test-support.ts";
 import {
@@ -90,8 +90,8 @@ export const NoChatsYet = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		// The whole app renders, so the list can briefly show in more than one place.
-		await expect((await canvas.findAllByText("No chats yet")).length).toBeGreaterThan(0);
+		const page = await canvas.findByRole("region", { name: growthDesk.name });
+		await expect(await within(page).findByText("No chats yet")).toBeVisible();
 	},
 });
 
@@ -104,12 +104,10 @@ export const CouldNotLoad = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
+		const page = await canvas.findByRole("region", { name: growthDesk.name });
 		// The app retries a failure the API didn't mean before it shows it.
-		const notes = await canvas.findAllByText(
-			"Could not load these chats.",
-			{},
-			{ timeout: 15_000 },
-		);
-		await expect(notes.length).toBeGreaterThan(0);
+		await expect(
+			await within(page).findByText("Could not load these chats.", {}, { timeout: 15_000 }),
+		).toBeVisible();
 	},
 });
