@@ -91,6 +91,7 @@ export interface ServedOver {
 	 * default chat services publish to as well.
 	 */
 	readonly bus?: Layer.Layer<EventBus.Service>;
+	readonly eventStore?: EventStore.Interface;
 	/** The models a turn's model request asks; by default none, so any request fails. */
 	readonly models?: Models.Interface;
 	/**
@@ -232,7 +233,7 @@ async function buildOperationRegistries(over: ServedOver) {
 		over.bus ?? Layer.succeed(EventBus.Service, bus),
 		Layer.succeed(Models.Service, over.models ?? unusedModel()),
 		// Streams read what they send from the events stored in the test database.
-		EventStore.layer,
+		over.eventStore ? Layer.succeed(EventStore.Service, over.eventStore) : EventStore.layer,
 		over.streamsTiming ? Layer.succeed(Streams.Timing, over.streamsTiming) : Layer.empty,
 	);
 	return runOn(

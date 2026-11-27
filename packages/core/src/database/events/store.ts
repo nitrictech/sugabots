@@ -90,32 +90,41 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 				streams.map((stream) => sql`${stream}`),
 				sql`, `,
 			)}]::text[]`;
-			const rows = await runPromise(
-				transaction(
-					Effect.gen(function* () {
-						// A writer can reserve a sequence number before its event is visible.
-						// Wait for writers on these streams before taking the read snapshot.
-						yield* query((db) =>
-							db.execute(
-								sql`select pg_advisory_xact_lock_shared(hashtextextended(stream, 0))
+			const attempt = transaction(
+				Effect.gen(function* () {
+					// Writers can reserve sequence numbers before their events are visible.
+					// Take a fresh snapshot after locking every stream.
+					const [locks] = yield* query((db) =>
+						db.execute<{ acquired: boolean }>(
+							sql`select bool_and(pg_try_advisory_xact_lock_shared(hashtextextended(stream, 0))) as acquired
 								from (select distinct stream collate "C" as stream from unnest(${wanted}) as stream
 									order by stream) as ordered`,
-								"objects",
-							),
-						);
-						return yield* query((db) =>
-							db.execute<{ stream: EventStream; cursor: string | number }>(
-								sql`select stream, coalesce(
-									(select max(${event.seq}) from ${event}
-										where ${event.stream} = wanted.stream and ${event.seq} >= (${retentionBoundary})),
-									-(${sequencePosition}) - 1
-								) as cursor
-								from (select distinct stream from unnest(${wanted}) as stream) as wanted`,
-								"objects",
-							),
-						);
-					}),
-				),
+							"objects",
+						),
+					);
+					if (!locks?.acquired) return undefined;
+					return yield* query((db) =>
+						db.execute<{ stream: EventStream; cursor: string | number }>(
+							sql`select stream, coalesce(
+								(select max(${event.seq}) from ${event}
+									where ${event.stream} = wanted.stream and ${event.seq} >= (${retentionBoundary})),
+								-(${sequencePosition}) - 1
+							) as cursor
+							from (select distinct stream from unnest(${wanted}) as stream) as wanted`,
+							"objects",
+						),
+					);
+				}),
+			);
+			const rows = await runPromise(
+				Effect.gen(function* () {
+					while (true) {
+						const starts = yield* attempt;
+						if (starts !== undefined) return starts;
+						// The attempt has returned its connection and released any locks it took.
+						yield* Effect.sleep("25 millis");
+					}
+				}),
 				{ signal },
 			);
 			return new Map(rows.map(({ stream, cursor }) => [stream, Number(cursor)]));

@@ -37,7 +37,7 @@ import {
 } from "../authentication/seed.test-support.ts";
 import { chatServicesForTests } from "../chats/testing.ts";
 import { runningTurns } from "../chats/turns/testing.ts";
-import { effectRunner, query, transaction } from "../database/database.ts";
+import { Database, effectRunner, query, transaction } from "../database/database.ts";
 import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
@@ -319,6 +319,20 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			),
 		);
 
+	const observeStartupSnapshot = async (requested: () => void) =>
+		(
+			await servedRegistry({
+				bus: Layer.succeed(EventBus.Service, bus),
+				eventStore: {
+					...stored,
+					latest(streams, signal) {
+						requested();
+						return stored.latest(streams, signal);
+					},
+				},
+			})
+		).follow;
+
 	it("resets when the first missed event is pruned during startup", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);
@@ -329,8 +343,10 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const writer = holdStreamWriter(stream);
 		await writer.held;
 
-		const starting = follow(ed, "events.followChat", { chatId: world.chat, since });
-		await writer.waitForWaiters(1);
+		const requestedSnapshot = Promise.withResolvers<void>();
+		const followDuringStartup = await observeStartupSnapshot(() => requestedSnapshot.resolve());
+		const starting = followDuringStartup(ed, "events.followChat", { chatId: world.chat, since });
+		await requestedSnapshot.promise;
 		await stored.prune(new Date(Date.now() + 60_000));
 		await writer.release();
 		const resumed = await starting;
@@ -372,7 +388,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		expect(await nextType(reconnected)).toBe("chat.changed");
 	});
 
-	it("releases its blocked Postgres session when startup is interrupted", async () => {
+	it("leaves the only pool slot available while stream startup waits for a writer", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);
 		const settings = ConfigProvider.fromEnv({ env: { ...process.env, DATABASE_POOL_SIZE: "1" } });
@@ -384,7 +400,21 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const abort = new AbortController();
 		try {
 			await writer.held;
-			const { longRunning: isolated } = await servedRegistry({ runOn });
+			const transactionStarted = Promise.withResolvers<void>();
+			const eventStore = await runOn(
+				Effect.flatMap(Database, (database) =>
+					EventStore.make.pipe(
+						Effect.provideService(Database, {
+							...database,
+							transaction: (use) =>
+								database.transaction(
+									Effect.sync(() => transactionStarted.resolve()).pipe(Effect.andThen(use)),
+								),
+						}),
+					),
+				),
+			);
+			const { longRunning: isolated } = await servedRegistry({ runOn, eventStore });
 			const starting = runOn(
 				Effect.scoped(
 					isolated["events.followChat"](ed, { chatId: world.chat }, { kind: "request" }),
@@ -392,14 +422,15 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				{ signal: abort.signal },
 			);
 			const interrupted = expect(starting).rejects.toBeDefined();
-			await writer.waitForWaiters(1);
-
-			abort.abort();
-			await interrupted;
-			// The only pool slot is available while the writer still holds its lock.
-			await runOn(
-				query((db) => db.execute(sql`select 1`, "objects")).pipe(Effect.timeout("2 seconds")),
-			);
+			await transactionStarted.promise;
+			try {
+				await runOn(
+					query((db) => db.execute(sql`select 1`, "objects")).pipe(Effect.timeout("2 seconds")),
+				);
+			} finally {
+				abort.abort();
+				await interrupted;
+			}
 		} finally {
 			abort.abort();
 			await writer.release();
@@ -500,8 +531,13 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			outbox.publish([{ stream, event: concurrent }]),
 		);
 		await writer.held;
-		const starting = following(ed, "events.followChat", { chatId: world.chat, since });
-		await writer.waitForWaiters(1);
+		const requestedSnapshot = Promise.withResolvers<void>();
+		const followDuringStartup = await observeStartupSnapshot(() => requestedSnapshot.resolve());
+		const starting = pastReady(followDuringStartup)(ed, "events.followChat", {
+			chatId: world.chat,
+			since,
+		});
+		await requestedSnapshot.promise;
 		await writer.release();
 		const resumed = await starting;
 		for (const expected of [...missed, concurrent]) {
