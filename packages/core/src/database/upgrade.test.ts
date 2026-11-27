@@ -2382,6 +2382,61 @@ it.skipIf(!process.env.DATABASE_URL)(
 );
 
 it.skipIf(!process.env.DATABASE_URL)(
+	"selects the orphan file's author or the pod's fallback without scanning the pod for each author",
+	async () => {
+		const migration = await readFile(
+			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+			"utf8",
+		);
+		const chooseBots = migration
+			.split("--> statement-breakpoint")
+			.find((statement) => statement.includes('CREATE TEMP TABLE "orphan_file_bot"'));
+		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
+			await client.query("begin");
+			try {
+				await client.query(`
+					create temp table pod (id uuid primary key, kind text);
+					create temp table agent (
+						id uuid primary key, pod_id uuid, assistant_of uuid, created_at integer
+					);
+					create temp table artifact (
+						pod_id uuid, created_by_agent_id uuid, created_in_thread_id uuid
+					);
+					insert into pod values (md5('pod')::uuid, 'personal'), (md5('other')::uuid, 'personal');
+					insert into agent
+					select md5('bot' || number)::uuid, md5('pod')::uuid,
+						case when number = 1 then md5('owner')::uuid end, number
+					from generate_series(1, 2500) number;
+					insert into agent values (md5('outside bot')::uuid, md5('other')::uuid, null, 1);
+					insert into artifact select pod_id, id, null from agent where pod_id = md5('pod')::uuid;
+					insert into artifact values
+						(md5('pod')::uuid, null, null),
+						(md5('pod')::uuid, md5('outside bot')::uuid, null);
+					analyze pod, agent, artifact;
+				`);
+				const {
+					rows: [result],
+				} = await client.query<{
+					"QUERY PLAN": [{ Plan: { "Local Hit Blocks": number } }];
+				}>(`explain (analyze, buffers, timing off, format json) ${chooseBots}`);
+				const { rows } = await client.query(`
+					select count(*)::int as files,
+						count(*) filter (where bot_id = case
+							when created_by_agent_id is null or created_by_agent_id = md5('outside bot')::uuid
+							then md5('bot2')::uuid else created_by_agent_id end)::int as correct
+					from orphan_file_bot
+				`);
+				expect(rows).toEqual([{ files: 2502, correct: 2502 }]);
+				expect(result?.["QUERY PLAN"][0].Plan["Local Hit Blocks"]).toBeLessThan(20_000);
+			} finally {
+				await client.query("rollback");
+			}
+		});
+	},
+	UPGRADE_TIMEOUT_MS,
+);
+
+it.skipIf(!process.env.DATABASE_URL)(
 	"moves orphan files to their chats without comparing each file to every author",
 	async () => {
 		const migration = await readFile(

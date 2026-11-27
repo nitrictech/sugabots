@@ -521,19 +521,21 @@ WHERE t."pod_id" = "hosts"."pod_id" AND t."type" = 'pod_chat'
 -- it, or of the owner's oldest bot, preferring a bot other than their
 -- Personal Assistant. Open a chat if that bot has none.
 CREATE TEMP TABLE "orphan_file_bot" ON COMMIT DROP AS
-SELECT source."pod_id", source."created_by_agent_id", chosen."id" AS "bot_id"
-FROM (
+WITH "sources" AS (
 	SELECT DISTINCT a."pod_id", a."created_by_agent_id"
 	FROM "artifact" a JOIN "pod" p ON p."id" = a."pod_id"
 	WHERE p."kind" = 'personal' AND a."created_in_thread_id" IS NULL
-) source
-CROSS JOIN LATERAL (
-	SELECT "id" FROM "agent"
-	WHERE "pod_id" = source."pod_id"
-	ORDER BY ("id" = source."created_by_agent_id") DESC NULLS LAST,
-		"assistant_of" IS NOT NULL, "created_at", "id"
-	LIMIT 1
-) chosen;--> statement-breakpoint
+), "fallback_bots" AS (
+	SELECT DISTINCT ON (a."pod_id") a."pod_id", a."id"
+	FROM "agent" a
+	JOIN (SELECT DISTINCT "pod_id" FROM "sources") p ON p."pod_id" = a."pod_id"
+	ORDER BY a."pod_id", a."assistant_of" IS NOT NULL, a."created_at", a."id"
+)
+SELECT source."pod_id", source."created_by_agent_id", coalesce(author."id", fallback."id") AS "bot_id"
+FROM "sources" source
+LEFT JOIN "agent" author ON author."id" = source."created_by_agent_id"
+	AND author."pod_id" = source."pod_id"
+JOIN "fallback_bots" fallback ON fallback."pod_id" = source."pod_id";--> statement-breakpoint
 CREATE TEMP TABLE "orphan_file_chat" ON COMMIT DROP AS
 SELECT a."id" AS "bot_id", a."workspace_id", p."owner_id",
 	coalesce(latest."id", uuidv7()) AS "chat_id", latest."id" IS NULL AS "needs_chat"
