@@ -51,6 +51,7 @@ export interface BrowserSession {
 }
 
 const SCREENSHOT_TOOL = "browser_take_screenshot";
+const SESSION_TERMINATION_TIMEOUT = "2 seconds";
 const NO_BROWSER = userText`This computer's image has no desktop or browser. Its image needs sugabots-desktop, as Sugabots' default image has.`;
 
 /** A bot in a chat, whose desktop there is drawn in the bot's colour. */
@@ -303,15 +304,21 @@ export function browserSession(
 				{ signal: abortSignal },
 			);
 			if (toolName === "browser_close" && !result.isError) {
-				connecting = undefined;
-				await run(Cache.invalidate(sessions, connected.key));
 				try {
-					await connected.transport.terminateSession();
+					await run(Cache.invalidate(sessions, connected.key));
+					await run(
+						Effect.tryPromise({
+							try: () => connected.transport.terminateSession(),
+							catch: (cause) => cause,
+						}).pipe(Effect.timeout(SESSION_TERMINATION_TIMEOUT)),
+					);
 				} catch (cause) {
 					if (!(cause instanceof StreamableHTTPError && cause.code === 404))
 						await run(Effect.logWarning("Terminating a browser's MCP session failed", cause));
 				} finally {
-					await connected.client.close();
+					await connected.client.close().finally(() => {
+						connecting = undefined;
+					});
 				}
 			}
 			if (
