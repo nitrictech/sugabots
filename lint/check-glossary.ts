@@ -26,35 +26,40 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import type { Table } from "mdast";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
+import { toString as plainText } from "mdast-util-to-string";
+import { gfmTable } from "micromark-extension-gfm-table";
 
 interface CheckedWord {
 	/** The singular in lower case, as it starts an identifier. */
 	readonly word: string;
-	readonly plural: string;
-	/** What GLOSSARY.md says to use instead. */
-	readonly replacement: string;
-	/** The glossary term this word is a banned synonym of; absent for a retired term. */
-	readonly bannedFor?: string;
+	/** When it isn't the singular with "s" or "es" on the end. */
+	readonly plural?: string;
+	/** The word GLOSSARY.md lists, when this is another spelling of it or a phrase made from it. */
+	readonly formOf?: string;
 	/** Uses of the word that mean something else, removed before matching. */
 	readonly otherMeanings?: RegExp;
 	/** Files where the word is only ever someone else's, so it isn't checked there. */
 	readonly keptIn?: readonly RegExp[];
 }
 
-/** The glossary's Retired terms: words for things that no longer exist. */
-const RETIRED_WORDS: readonly CheckedWord[] = [
+/**
+ * The retired terms and banned synonyms checked, each as GLOSSARY.md lists it
+ * or a phrase made from one, with what tells it from its other senses. Whether
+ * it is retired, and what to use instead, are read from GLOSSARY.md.
+ */
+const CHECKED_WORDS: readonly CheckedWord[] = [
+	// Retired terms
 	{
 		word: "pod",
-		plural: "pods",
-		replacement: "project, or the bot",
 		// Apple's iPod.
 		otherMeanings: /iPod/g,
 	},
-	{ word: "crew", plural: "crews", replacement: "the project's bots" },
+	{ word: "crew" },
 	{
 		word: "channel",
-		plural: "channels",
-		replacement: "project",
 		// Others' channels: Slack's `@channel`, which a member writes to mention
 		// everyone in a chat, the Postgres notification channel, and Node's
 		// diagnostics channels.
@@ -69,13 +74,11 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 			/^packages\/web\/\.storybook\/public\/mockServiceWorker\.js$/,
 		],
 	},
-	{ word: "main chat", plural: "main chats", replacement: "a project's chats" },
-	{ word: "main thread", plural: "main threads", replacement: "a project's chats" },
-	{ word: "artifact", plural: "artifacts", replacement: "file" },
+	{ word: "main chat" },
+	{ word: "main thread" },
+	{ word: "artifact" },
 	{
 		word: "sandbox",
-		plural: "sandboxes",
-		replacement: "computer",
 		// Others' names: the OpenSandbox provider, its server's setting, SDK and
 		// container names; E2B's `sandboxUrl`; Chromium's and an iframe's
 		// sandbox. And names kept because something outside the code holds
@@ -97,8 +100,6 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 	},
 	{
 		word: "agent",
-		plural: "agents",
-		replacement: "bot",
 		// Others' agents: the HTTP user agent, coding agents, crawlers and AI
 		// agents generally, and SSH's and GPG's.
 		otherMeanings:
@@ -109,14 +110,12 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 			/^packages\/core\/src\/computers\/implementations\/computer-egress\.test\.ts$/,
 		],
 	},
-	{ word: "bot summary", plural: "bot summaries", replacement: "nothing: summaries are gone" },
-	{ word: "summariser", plural: "summarisers", replacement: "nothing: summaries are gone" },
-	{ word: "summarizer", plural: "summarizers", replacement: "nothing: summaries are gone" },
-	{ word: "scribe", plural: "scribes", replacement: "nothing: summaries are gone" },
+	{ word: "bot summary" },
+	{ word: "summariser" },
+	{ word: "summarizer", formOf: "summariser" },
+	{ word: "scribe" },
 	{
 		word: "inbox",
-		plural: "inboxes",
-		replacement: "the Personal Assistant, which tells a member what needs their attention",
 		// An email inbox: the one a sign-up link is sent to, and the ones bots
 		// in examples sort.
 		otherMeanings:
@@ -124,112 +123,69 @@ const RETIRED_WORDS: readonly CheckedWord[] = [
 	},
 	{
 		word: "direct message",
-		plural: "direct messages",
-		replacement: "a project's chat, or a bot's",
 	},
-];
 
-/** Banned synonyms: words for something the glossary names otherwise. */
-const BANNED_SYNONYMS: readonly CheckedWord[] = [
 	// Members and the workspace
-	{ word: "tenant", plural: "tenants", bannedFor: "Workspace", replacement: "workspace" },
+	{ word: "tenant" },
 	{
 		word: "person",
-		plural: "persons",
-		bannedFor: "Member",
-		replacement: "member",
 		// PostHog's own setting for the profiles it keeps of a site's visitors,
 		// and "personal" in capitals, which the acronym-led form would match.
 		otherMeanings: /person_profiles|PERSONAL_/g,
 	},
-	{ word: "people", plural: "people", bannedFor: "Member", replacement: "members" },
+	{ word: "people", plural: "people", formOf: "person" },
 	{
 		word: "session user",
-		plural: "session users",
-		bannedFor: "Member",
-		replacement: "current user",
+		formOf: "user",
 	},
 	{
 		word: "transfer ownership",
+		formOf: "transfer",
 		plural: "transferred ownership",
-		bannedFor: "Owner",
-		replacement: "hand over ownership",
 	},
-	{ word: "super admin", plural: "super admins", bannedFor: "Owner", replacement: "owner" },
-	{ word: "superuser", plural: "superusers", bannedFor: "Admin", replacement: "admin" },
+	{ word: "super admin" },
+	{ word: "superuser" },
 	{
 		word: "workspace invite",
-		plural: "workspace invites",
-		bannedFor: "Invitation",
-		replacement: "invitation",
+		formOf: "invite",
 	},
-	{ word: "sysadmin", plural: "sysadmins", bannedFor: "Operator", replacement: "operator" },
+	{ word: "sysadmin" },
 
 	// Bots
-	{ word: "shared bot", plural: "shared bots", bannedFor: "Public bot", replacement: "public bot" },
+	{ word: "shared bot" },
 	{
 		word: "unlisted bot",
-		plural: "unlisted bots",
-		bannedFor: "Private bot",
-		replacement: "private bot",
 	},
 	{
 		word: "invite-only bot",
-		plural: "invite-only bots",
-		bannedFor: "Private bot",
-		replacement: "private bot",
 	},
 	{
 		word: "hidden bot",
-		plural: "hidden bots",
-		bannedFor: "Personal bot",
-		replacement: "personal bot",
 	},
 	{
 		word: "secret bot",
-		plural: "secret bots",
-		bannedFor: "Personal bot",
-		replacement: "personal bot",
 	},
 	{
 		word: "background bot",
-		plural: "background bots",
-		bannedFor: "System bot",
-		replacement: "system bot",
 	},
 	{
 		word: "llm provider",
-		plural: "llm providers",
-		bannedFor: "Model provider",
-		replacement: "model provider",
 	},
 	{
 		word: "native tool",
-		plural: "native tools",
-		bannedFor: "Built-in tool",
-		replacement: "built-in tool",
 	},
 	{
 		word: "mcp tool",
-		plural: "mcp tools",
-		bannedFor: "Connector tool",
-		replacement: "connector tool",
 		// The protocol's own word for a tool's result, and Exa's search tool.
 		otherMeanings: /MCP tool result|Exa's MCP tool/g,
 	},
 	{
 		word: "preset",
-		plural: "presets",
-		bannedFor: "Built-in connector",
-		replacement: "built-in connector",
 		// Others' presets: Biome's rules, ffmpeg's encoder speed and Babel's.
 		otherMeanings: /"preset": "recommended"|"-preset",|@babel\/preset-typescript|"presets"/g,
 	},
 	{
 		word: "catalog entry",
-		plural: "catalog entries",
-		bannedFor: "Built-in connector",
-		replacement: "built-in connector",
 		// A tool that tool search can find, in the turn's catalog of them.
 		otherMeanings: /CatalogEntry/g,
 	},
@@ -237,80 +193,51 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 	// Projects and chats
 	{
 		word: "thread",
-		plural: "threads",
-		bannedFor: "Chat",
-		replacement: "chat",
 		// A web forum's, and GitHub's comments on a pull request's code.
 		otherMeanings: /forum thread|review thread|reviewThreadId/g,
 	},
-	{ word: "conversation", plural: "conversations", bannedFor: "Chat", replacement: "chat" },
-	{ word: "default bot", plural: "default bots", bannedFor: "Lead bot", replacement: "lead bot" },
+	{ word: "conversation" },
+	{ word: "default bot" },
 	{
 		word: "home project",
-		plural: "home projects",
-		bannedFor: "Default project",
-		replacement: "default project",
 	},
-	{ word: "mark done", plural: "marked done", bannedFor: "Resolved", replacement: "mark resolved" },
+	{ word: "mark done", formOf: "done", plural: "marked done" },
 	{
 		word: "chat done",
+		formOf: "done",
 		plural: "chats done",
-		bannedFor: "Resolved",
-		replacement: "a resolved chat",
 	},
-	{ word: "done at", plural: "done at", bannedFor: "Resolved", replacement: "resolved at" },
+	{ word: "done at", formOf: "done", plural: "done at" },
 	{
 		word: "archive chat",
+		formOf: "archived",
 		plural: "archived chat",
-		bannedFor: "Resolved",
-		replacement: "a resolved chat",
 	},
 	{
 		word: "subagent",
-		plural: "subagents",
-		bannedFor: "Collaboration",
-		replacement: "collaboration",
 	},
 	{
 		word: "kickoff message",
-		plural: "kickoff messages",
-		bannedFor: "Brief",
-		replacement: "brief",
 	},
-	{ word: "handover note", plural: "handover notes", bannedFor: "Brief", replacement: "brief" },
-	{ word: "decider", plural: "deciders", bannedFor: "Approver", replacement: "approver" },
-	{ word: "chat type", plural: "chat types", bannedFor: "Chat kind", replacement: "chat kind" },
+	{ word: "handover note" },
+	{ word: "decider" },
+	{ word: "chat type" },
 	{
 		word: "read state",
-		plural: "read states",
-		bannedFor: "Read cursor",
-		replacement: "read cursor",
 	},
 	{
 		word: "read receipt",
-		plural: "read receipts",
-		bannedFor: "Read cursor",
-		replacement: "read cursor",
 	},
 
 	// A project's resources
 	{
 		word: "sealed address",
-		plural: "sealed addresses",
-		bannedFor: "Page address",
-		replacement: "page address",
 	},
 	{
 		word: "share link",
-		plural: "share links",
-		bannedFor: "Page address",
-		replacement: "page address",
 	},
 	{
 		word: "connection",
-		plural: "connections",
-		bannedFor: "Connector",
-		replacement: "connector",
 		// Other connections: a socket's, an HTTP request's, a WebSocket's, the
 		// event stream's, a database's, and the computer providers' SDKs' own.
 		otherMeanings:
@@ -337,109 +264,63 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 	},
 	{
 		word: "whitelist",
-		plural: "whitelists",
-		bannedFor: "Allowed host",
-		replacement: "allowed hosts",
 	},
 	{
 		word: "allowed domain",
-		plural: "allowed domains",
-		bannedFor: "Allowed host",
-		replacement: "allowed host",
 	},
 	{
 		word: "blacklist",
-		plural: "blacklists",
-		bannedFor: "Blocked host",
-		replacement: "blocked hosts",
 	},
 	{
 		word: "denylist",
-		plural: "denylists",
-		bannedFor: "Blocked host",
-		replacement: "blocked hosts",
 	},
 	{
 		word: "blocked domain",
-		plural: "blocked domains",
-		bannedFor: "Blocked host",
-		replacement: "blocked host",
 	},
 	{
 		word: "allowlist",
-		plural: "allowlists",
-		bannedFor: "Network mode",
-		replacement: "allowed hosts only, the allowed hosts, a host request or the trusted hosts",
+		formOf: "allowlist mode",
 	},
 	{
 		word: "network access request",
-		plural: "network access requests",
-		bannedFor: "Host request",
-		replacement: "host request",
 	},
-	{ word: "unpriced", plural: "unpriced", bannedFor: "Unknown cost", replacement: "unknown cost" },
-	{ word: "estimated cost", plural: "estimated costs", bannedFor: "Cost", replacement: "cost" },
-	{ word: "sealed value", plural: "sealed values", bannedFor: "Secret", replacement: "secret" },
+	{ word: "unpriced", formOf: "unpriced request", plural: "unpriced" },
+	{ word: "estimated cost" },
+	{ word: "sealed value" },
 	{
 		word: "encrypted value",
-		plural: "encrypted values",
-		bannedFor: "Secret",
-		replacement: "secret",
 	},
 	{
 		word: "screen share",
-		plural: "screen shares",
-		bannedFor: "Desktop viewer",
-		replacement: "desktop viewer",
 	},
 	{
 		word: "remote view",
-		plural: "remote views",
-		bannedFor: "Desktop viewer",
-		replacement: "desktop viewer",
 	},
-	{ word: "ad-hoc run", plural: "ad-hoc runs", bannedFor: "Manual run", replacement: "manual run" },
-	{ word: "run now", plural: "run now", bannedFor: "Manual run", replacement: "start a run" },
+	{ word: "ad-hoc run" },
+	{ word: "run now", plural: "run now" },
 	{
 		word: "approval app",
-		plural: "approval apps",
-		bannedFor: "Tool source",
-		replacement: "tool source",
+		formOf: "app",
 	},
 	{
 		word: "tool permission",
-		plural: "tool permissions",
-		bannedFor: "Tool access",
-		replacement: "tool access",
 	},
 	{
 		word: "tool policy",
-		plural: "tool policies",
-		bannedFor: "Tool access",
-		replacement: "tool access",
 	},
 
 	// Architecture
 	{
 		word: "entry point",
-		plural: "entry points",
-		bannedFor: "Entrypoint",
-		replacement: "entrypoint",
 		// Docker's entrypoint, which names the program a container starts.
 		otherMeanings: /ENTRYPOINT/g,
 	},
-	{ word: "agent loop", plural: "agent loops", bannedFor: "Bot loop", replacement: "bot loop" },
+	{ word: "agent loop" },
 	{
 		word: "agent runtime",
-		plural: "agent runtimes",
-		bannedFor: "Bot loop",
-		replacement: "bot loop",
 	},
 	{
 		word: "use case",
-		plural: "use cases",
-		bannedFor: "Operation",
-		replacement: "operation",
 		// Plain English for what a story or an issue is for, and Mock Service
 		// Worker's own script.
 		keptIn: [
@@ -450,81 +331,50 @@ const BANNED_SYNONYMS: readonly CheckedWord[] = [
 	},
 	{
 		word: "tool registry",
-		plural: "tool registries",
-		bannedFor: "Exposure manifest",
-		replacement: "exposure manifest",
 	},
 	{
 		word: "chain of thought",
 		plural: "chains of thought",
-		bannedFor: "Thinking",
-		replacement: "thinking",
 	},
 	{
 		word: "live typing",
 		plural: "live typing",
-		bannedFor: "Token stream",
-		replacement: "token stream",
 	},
 	{
 		word: "model call",
-		plural: "model calls",
-		bannedFor: "Model request",
-		replacement: "model request",
 		// The verb: what the model calls, a tool. And the AI SDK's callbacks.
 		otherMeanings: /(?:[Tt]he|key the) model calls|LanguageModelCall/g,
 	},
 	{
 		word: "mutates",
 		plural: "mutates",
-		bannedFor: "Changes",
-		replacement: "changes",
 	},
 	{
 		word: "mutating",
 		plural: "mutating",
-		bannedFor: "Write/delete tool call",
-		replacement: "write/delete tool call",
 		// TanStack Query's count of requests under way.
 		otherMeanings: /useIsMutating|isMutating/g,
 	},
 	{
 		word: "spill file",
-		plural: "spill files",
-		bannedFor: "Long tool result",
-		replacement: "long tool result",
 	},
-	{ word: "rerun", plural: "reruns", bannedFor: "Retry", replacement: "retry" },
+	{ word: "rerun" },
 
 	// Errors
-	{ word: "error id", plural: "error ids", bannedFor: "Reference id", replacement: "reference id" },
+	{ word: "error id" },
 	{
 		word: "incident number",
-		plural: "incident numbers",
-		bannedFor: "Reference id",
-		replacement: "reference id",
 	},
 	{
 		word: "wire error",
-		plural: "wire errors",
-		bannedFor: "Public error",
-		replacement: "public error",
 	},
 	{
 		word: "third-party error",
-		plural: "third-party errors",
-		bannedFor: "Upstream error",
-		replacement: "upstream error",
 	},
 	{
 		word: "display message",
-		plural: "display messages",
-		bannedFor: "User message",
-		replacement: "user message",
 	},
 ];
-
-const CHECKED_WORDS: readonly CheckedWord[] = [...RETIRED_WORDS, ...BANNED_SYNONYMS];
 
 /** Tracked files that keep old words on purpose, or aren't ours to edit. */
 const SKIPPED_PATHS: readonly RegExp[] = [
@@ -552,7 +402,7 @@ const SKIPPED_PATHS: readonly RegExp[] = [
  * `mainChat`, `MainChat` and `MAIN_CHAT`. One led by an acronym is matched
  * with the acronym in capitals too: `MCP tool`, `MCPTool` and `LLM provider`.
  */
-function wordPattern({ word, plural }: CheckedWord): RegExp {
+function wordPattern({ word, plural = pluralise(word) }: CheckedWord): RegExp {
 	const forms = (casing: (part: string) => string, joinings: (part: string) => string[]) =>
 		[plural, word]
 			.map((phrase) => {
@@ -584,13 +434,96 @@ function wordPattern({ word, plural }: CheckedWord): RegExp {
 	);
 }
 
+/** The phrase with its last word made plural: "main chat" to "main chats", "entry" to "entries". */
+function pluralise(phrase: string): string {
+	if (/[^aeiou]y$/.test(phrase)) return `${phrase.slice(0, -1)}ies`;
+	if (/(?:s|x|ch|sh)$/.test(phrase)) return `${phrase}es`;
+	return `${phrase}s`;
+}
+
 function capitalise(text: string): string {
 	return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** A word GLOSSARY.md says not to use, and what to use instead. */
+interface GlossaryWord {
+	/** In lower case, without the note in brackets some carry, such as "invite (as a noun)". */
+	readonly word: string;
+	/** Whether it carried such a note, so it is banned only in that sense. */
+	readonly noted: boolean;
+	/** For a retired term, what replaced it; for a banned synonym, the term it is banned for. */
+	readonly useInstead: string;
+	readonly retired: boolean;
+}
+
+/** The words in GLOSSARY.md's tables of retired terms and of terms with their banned synonyms. */
+function parseGlossary(markdown: string): GlossaryWord[] {
+	const tree = fromMarkdown(markdown, {
+		extensions: [gfmTable()],
+		mdastExtensions: [gfmTableFromMarkdown()],
+	});
+	const tables = tree.children.filter((node): node is Table => node.type === "table");
+	return tables.flatMap(({ children: [header, ...rows] }) => {
+		const lastColumn = header?.children.at(-1);
+		const heading = lastColumn ? plainText(lastColumn) : "";
+		if (heading !== "Now" && heading !== "Banned synonyms") return [];
+		return rows.flatMap(({ children: [termCell, , lastCell] }): GlossaryWord[] => {
+			if (!termCell || !lastCell) return [];
+			const useInsteadOrTerm = plainText(lastCell).replace(/\.$/, "");
+			if (heading === "Now") {
+				// A row may retire several terms, each in bold: "**Main chat**, **main thread**".
+				return termCell.children
+					.filter((node) => node.type === "strong")
+					.map((term) => ({
+						...readWord(plainText(term)),
+						useInstead: useInsteadOrTerm,
+						retired: true,
+					}));
+			}
+			return useInsteadOrTerm
+				.split(/,\s*(?![^()]*\))/)
+				.filter((synonym) => /\p{L}/u.test(synonym))
+				.map((synonym) => ({
+					...readWord(synonym),
+					useInstead: plainText(termCell),
+					retired: false,
+				}));
+		});
+	});
+}
+
+/** "Invite (as a noun)" as the word "invite", noted. */
+function readWord(listed: string): Pick<GlossaryWord, "word" | "noted"> {
+	const word = listed.replace(/\s*\(.*\)\s*$/, "").trim();
+	return { word: word.toLowerCase(), noted: word !== listed.trim() };
+}
+
+/**
+ * The glossary's entries for a checked word. A retired term is retired whatever
+ * else it is banned for, as "channel" is. Where a word is banned both plainly and
+ * with a note, as "user" is, the plain entries are the ones meant.
+ */
+function findInGlossary(checked: CheckedWord, glossary: readonly GlossaryWord[]): GlossaryWord[] {
+	const listed = glossary.filter((entry) => entry.word === (checked.formOf ?? checked.word));
+	const retired = listed.filter((entry) => entry.retired);
+	if (retired.length > 0) return retired;
+	const plain = listed.filter((entry) => !entry.noted);
+	return plain.length > 0 ? plain : listed;
+}
+
 /** "retired", or what the word is a banned synonym of. */
-function describe({ bannedFor }: CheckedWord): string {
-	return bannedFor === undefined ? "retired" : `banned for ${bannedFor}`;
+function describe(entries: readonly GlossaryWord[]): string {
+	if (entries.some((entry) => entry.retired)) return "retired";
+	return `banned for ${joinDistinct(entries.map((entry) => entry.useInstead))}`;
+}
+
+/** What GLOSSARY.md says to use instead. */
+function replacementFor(entries: readonly GlossaryWord[]): string {
+	return joinDistinct(entries.map((entry) => entry.useInstead));
+}
+
+function joinDistinct(texts: readonly string[]): string {
+	return [...new Set(texts)].join(" or ");
 }
 
 interface Finding {
@@ -632,14 +565,18 @@ function trackedFiles(): Map<string, string> {
 	return new Map(paths.map((path) => [path, readFileSync(path, "utf8")]));
 }
 
-function printReport(checked: CheckedWord, findings: readonly Finding[]): void {
+function printReport(
+	checked: CheckedWord,
+	entries: readonly GlossaryWord[],
+	findings: readonly Finding[],
+): void {
 	const byArea = new Map<string, number>();
 	for (const { path } of findings) {
 		const area = areaOf(path);
 		byArea.set(area, (byArea.get(area) ?? 0) + 1);
 	}
 	console.log(
-		`${checked.word} (${describe(checked)}) → ${checked.replacement}: ${findings.length}`,
+		`${checked.word} (${describe(entries)}) → ${replacementFor(entries)}: ${findings.length}`,
 	);
 	for (const [area, count] of [...byArea].sort(([, a], [, b]) => b - a)) {
 		console.log(`  ${String(count).padStart(6)}  ${area}`);
@@ -647,15 +584,24 @@ function printReport(checked: CheckedWord, findings: readonly Finding[]): void {
 }
 
 const report = process.argv.includes("--report");
+const glossary = parseGlossary(readFileSync("GLOSSARY.md", "utf8"));
 const files = trackedFiles();
 let failed = false;
 for (const checked of CHECKED_WORDS) {
+	const entries = findInGlossary(checked, glossary);
+	if (entries.length === 0) {
+		failed = true;
+		console.error(
+			`"${checked.formOf ?? checked.word}" is checked here but GLOSSARY.md doesn't retire or ban it. Remove it from lint/check-glossary.ts, or add it to the glossary.`,
+		);
+		continue;
+	}
 	const findings = findingsOf(checked, files);
-	if (report) printReport(checked, findings);
+	if (report) printReport(checked, entries, findings);
 	if (findings.length === 0) continue;
 	failed = true;
 	console.error(
-		`"${checked.word}" is ${describe(checked)}; GLOSSARY.md says to use ${checked.replacement}:`,
+		`"${checked.word}" is ${describe(entries)}; GLOSSARY.md says to use ${replacementFor(entries)}:`,
 	);
 	for (const { path, line, text } of findings) console.error(`  ${path}:${line}  ${text}`);
 }
