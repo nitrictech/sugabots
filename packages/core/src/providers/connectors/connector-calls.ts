@@ -3,12 +3,13 @@ export * as ConnectorCalls from "./connector-calls.ts";
 import { safeValidateTypes } from "@ai-sdk/provider-utils";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { asSchema } from "ai";
-import { Context, Duration, Effect, Layer, Option } from "effect";
+import { Context, Duration, Effect, Exit, Layer, Option } from "effect";
 import { ConnectorCatalog, type OfferedTool } from "../../chats/tools/connector-catalog.ts";
+import { type HandOff, HandOffRefused, withHandOff } from "../../chats/tools/connector-hand-off.ts";
 import { withRecordedCall } from "../../chats/tools/recorded-call.ts";
 import { buildCatalog } from "../../chats/tools/tool-search/catalog.ts";
 import { searchOfferedTools } from "../../chats/tools/tool-search/tool.ts";
-import type { Database } from "../../database/database.ts";
+import { type Database, transaction } from "../../database/database.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import type { Approved } from "../../proofs/approved.ts";
 import type { CanUseConnector } from "../../proofs/can-use-connector.ts";
@@ -43,11 +44,17 @@ export interface Interface {
 		turn: RunsTurn<P, T>,
 		approved: Approved<NoInfer<P>, X, [T], "connectors.searchTools">,
 	) => Effect.Effect<unknown, ResourceHidden>;
-	readonly callTool: <P, T, K, X>(
+	/**
+	 * Runs the approved call. Its tool proves it again with `recheck` as it
+	 * hands the request to the network, and a call `recheck` refuses then is
+	 * refused as if the connector weren't there.
+	 */
+	readonly callTool: <P, T, K, X, E>(
 		turn: RunsTurn<P, T>,
 		use: CanUseConnector<NoInfer<P>, K>,
 		approved: Approved<NoInfer<P>, X, [T, K], "connectors.callTool">,
-	) => Effect.Effect<unknown, ResourceHidden>;
+		recheck: Effect.Effect<void, E, Database>,
+	) => Effect.Effect<unknown, ResourceHidden, Database>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -158,7 +165,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					searchOfferedTools(buildCatalog(turn.tools, {}), approved.input.query),
 				);
 			}),
-		callTool: (turn, use, approved) =>
+		callTool: (turn, use, approved, recheck) =>
 			Effect.gen(function* () {
 				const acting = turn.principal.value;
 				const call = approved.call.value;
@@ -177,14 +184,28 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					call.kind !== "toolCall"
 				)
 					return yield* new ResourceHidden({ resource: "connector" });
-				return yield* Effect.promise((signal) =>
-					Promise.resolve(
-						execute(approvedTool.arguments, {
-							toolCallId: approved.sdkToolCallId ?? call.toolCall,
-							messages: [],
-							abortSignal: signal,
-							context: withRecordedCall(undefined, call.toolCall),
-						}),
+				const runInTurn = Effect.runPromiseExitWith(yield* Effect.context<Database>());
+				const handOff: HandOff = async (send) => {
+					const sent = await runInTurn(transaction(Effect.andThen(recheck, Effect.sync(send))));
+					if (Exit.isFailure(sent)) throw new HandOffRefused();
+					return sent.value;
+				};
+				return yield* Effect.tryPromise({
+					try: (signal) =>
+						Promise.resolve(
+							execute(approvedTool.arguments, {
+								toolCallId: approved.sdkToolCallId ?? call.toolCall,
+								messages: [],
+								abortSignal: signal,
+								context: withHandOff(withRecordedCall(undefined, call.toolCall), handOff),
+							}),
+						),
+					catch: (cause) => cause,
+				}).pipe(
+					Effect.catch((cause) =>
+						cause instanceof HandOffRefused
+							? Effect.fail(new ResourceHidden({ resource: "connector" }))
+							: Effect.die(cause),
 					),
 				);
 			}),

@@ -12,6 +12,7 @@ import { HTTP_CONNECTOR_TOOLS } from "../../../providers/connectors/http-tools.t
 import { type EgressHttpClient, EgressRefused } from "../../../providers/network/egress.ts";
 import { readUpTo } from "../../../providers/web/fetch-page.ts";
 import { type OfferedTool, offeredTool } from "../connector-catalog.ts";
+import { readHandOff } from "../connector-hand-off.ts";
 import { type Failed, failed } from "../failed.ts";
 import { recordedCallOf } from "../recorded-call.ts";
 
@@ -72,12 +73,14 @@ export function httpTools(
 				const timeout = AbortSignal.timeout(TIMEOUT_MS);
 				let response: Response;
 				try {
-					response = await fetch(urlUnder(target.url, request), {
-						method,
-						headers,
-						body: request.body,
-						signal: abortSignal ? AbortSignal.any([timeout, abortSignal]) : timeout,
-					});
+					response = await readHandOff(context)(() =>
+						fetch(urlUnder(target.url, request), {
+							method,
+							headers,
+							body: request.body,
+							signal: abortSignal ? AbortSignal.any([timeout, abortSignal]) : timeout,
+						}),
+					);
 				} catch (cause) {
 					if (cause instanceof EgressRefused) return failed(cause.userMessage);
 					throw cause;
