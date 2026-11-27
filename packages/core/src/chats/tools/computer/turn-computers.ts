@@ -168,7 +168,9 @@ export const make = Effect.gen(function* () {
 			if (!step.computer) return yield* new NoComputerProvider();
 			const currentProvider = yield* providers.enabled(canUse.workspace);
 			if (!currentProvider) return yield* new NoComputerProvider();
-			if (currentProvider.id !== step.providerId) return yield* new ApprovalRefused();
+			if (currentProvider.id !== step.providerId || currentProvider.id !== canUse.provider) {
+				return yield* new ApprovalRefused();
+			}
 			const checked: CheckedStep<P, C> = {
 				...step,
 				[checkedStep]: true,

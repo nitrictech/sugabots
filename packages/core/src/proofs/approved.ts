@@ -182,7 +182,11 @@ export const proveComputerUseApproved = <P, X, N extends ComputerOperation, I, C
 ) =>
 	computerUse.principal.value === principal.value
 		? proveApproval(principal, call, rule, input, [computerUse.chat], {
-				resolvedTargets: { computer: computerUse.computer, machine: computerUse.machine },
+				resolvedTargets: {
+					provider: computerUse.provider,
+					computer: computerUse.computer,
+					machine: computerUse.machine,
+				},
 			})
 		: Effect.fail(new ApprovalRefused());
 

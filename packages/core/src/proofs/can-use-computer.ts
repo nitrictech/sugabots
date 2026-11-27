@@ -1,9 +1,9 @@
 import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import type { TurnFacts } from "../authentication/turn-facts.ts";
 import { type Executor, query } from "../database/database.ts";
-import { computer, placedChat } from "../database/schema.ts";
+import { computer, computerProvider, placedChat, project } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
 import {
@@ -91,6 +91,8 @@ export interface CanUseChatComputer<P, C> extends Proof<"CanUseChatComputer", [P
 	 * work on one machine doesn't cover another.
 	 */
 	readonly machine: string | null;
+	/** The enabled provider, including before the project has a computer. */
+	readonly provider: string | null;
 	/** The turn working on it, and which execution of the turn: the step that opened the computer. */
 	readonly turn: string;
 	readonly executionNumber: number;
@@ -128,11 +130,20 @@ export const proveCanUseChatComputer = <P, C>(
 		if (!botUsesComputer(decision.as, useTurnAdmission(acting, facts))) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanUseComputer" }));
 		}
-		const [made] = yield* query((db) =>
+		const [target] = yield* query((db) =>
 			db
-				.select({ id: computer.id, machine: computer.providerComputerId })
-				.from(computer)
-				.where(eq(computer.projectId, facts.project.id))
+				.select({
+					id: computer.id,
+					machine: computer.providerComputerId,
+					provider: computerProvider.id,
+				})
+				.from(project)
+				.leftJoin(computer, eq(computer.projectId, project.id))
+				.leftJoin(
+					computerProvider,
+					and(eq(computerProvider.workspaceId, project.workspaceId), computerProvider.enabled),
+				)
+				.where(eq(project.id, facts.project.id))
 				.limit(1),
 		);
 		const proof: CanUseChatComputer<P, C> = CanUseChatComputerProof.prove([principal, chatId], {
@@ -140,8 +151,9 @@ export const proveCanUseChatComputer = <P, C>(
 			chat: chatId,
 			workspace: facts.project.workspace,
 			project: facts.project.id,
-			computer: made?.id ?? null,
-			machine: made?.machine ?? null,
+			computer: target?.id ?? null,
+			machine: target?.machine ?? null,
+			provider: target?.provider ?? null,
 			turn: acting.turn,
 			executionNumber: acting.executionNumber,
 		});

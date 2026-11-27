@@ -18,7 +18,14 @@ import {
 import { turnFacts } from "../authentication/turn-facts.ts";
 import type { Computers } from "../computers/computers.ts";
 import { query } from "../database/database.ts";
-import { computer, connector, projectMember, toolCall, turn } from "../database/schema.ts";
+import {
+	computer,
+	computerProvider,
+	connector,
+	projectMember,
+	toolCall,
+	turn,
+} from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { ApprovalCheckReached, type Call } from "../operations/operation.ts";
 import type { Principal } from "../principal.ts";
@@ -661,6 +668,77 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 					.set({ providerComputerId: "another-machine" as Computers.ComputerId })
 					.where(eq(computer.id, computerId)),
 			);
+			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ApprovalNeeded");
+		});
+
+		it("requires a fresh approval after a provider change before a computer is made", async () => {
+			const { a } = world;
+			const computerBot = await seedBot(a.workspace, { usesComputer: true });
+			const project = await seedProject(a.workspace, {
+				leadBotId: computerBot.id,
+				members: [a.ed],
+			});
+			const edsBot = await as.botFor(
+				a.ed,
+				computerBot.id,
+				await seedProjectChat(a.workspace, project, a.ed),
+			);
+			const rule = approvalRule("computers.runCommand");
+			const command = { command: "ls", timeout_seconds: 30 };
+			const approvedFor = (call: Call) =>
+				named(edsBot, edsBot.chat, call, command, (principal, chat, call, input) =>
+					Effect.gen(function* () {
+						const canUse = yield* proveCanUseChatComputer(principal, chat);
+						yield* proveComputerUseApproved(principal, call, rule, input, canUse);
+					}),
+				);
+			const provider = (enabled: boolean) =>
+				onDatabase((db) =>
+					db
+						.insert(computerProvider)
+						.values({
+							workspaceId: a.workspace,
+							enabled,
+							settings: {
+								builtIn: "opensandbox",
+								serverUrl: "http://computers.test",
+								image: "debian",
+							},
+						})
+						.returning({ id: computerProvider.id }),
+				);
+			const [first] = await provider(true);
+			const [second] = await provider(false);
+			if (!first || !second) throw new Error("fixture");
+			const checked = await runOnPostgres(approvedFor({ kind: "approvalCheck" }).pipe(Effect.flip));
+			if (!(checked instanceof ApprovalCheckReached)) throw checked;
+			const allowed = await seedApprovalCall(edsBot, {
+				tool: rule.tool,
+				status: "allowed",
+				decidedBy: a.ed,
+				input: command,
+			});
+			await onDatabase((db) =>
+				db
+					.update(toolCall)
+					.set({ approvalResolvedTargets: checked.details.resolvedTargets })
+					.where(eq(toolCall.id, allowed)),
+			);
+			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ok");
+
+			await onDatabase((db) =>
+				db
+					.update(computerProvider)
+					.set({ enabled: false })
+					.where(eq(computerProvider.id, first.id)),
+			);
+			await onDatabase((db) =>
+				db
+					.update(computerProvider)
+					.set({ enabled: true })
+					.where(eq(computerProvider.id, second.id)),
+			);
+
 			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ApprovalNeeded");
 		});
 
