@@ -12,7 +12,7 @@ import {
 	DEFAULT_TIME_ZONE,
 	WORKSPACE_ROLES,
 } from "@sugabots/contracts";
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import {
 	type AnyPgColumn,
 	boolean,
@@ -32,13 +32,6 @@ import { primaryKey, stamp, updatedStamp } from "../database/sql.ts";
 /** Text with a check constraint rather than a Postgres enum, so adding a role needs no type migration. */
 const workspaceRole = <Role extends WorkspaceRole = WorkspaceRole>(name: string) =>
 	text(name).$type<Role>();
-
-function roleIsOneOf(column: AnyPgColumn, roles: readonly WorkspaceRole[]) {
-	return sql`${column} in (${sql.join(
-		roles.map((role) => sql.raw(`'${role}'`)),
-		sql`, `,
-	)})`;
-}
 
 /** A member. One row per member, across every workspace they belong to. */
 export const member = pgTable(
@@ -178,7 +171,7 @@ export const membership = pgTable(
 		index("membership_member_id_idx").on(table.memberId),
 		uniqueIndex("membership_owner_idx").on(table.workspaceId).where(sql`${table.role} = 'owner'`),
 		check("membership_owner_stays", sql`not ${table.leaving} or ${table.role} <> 'owner'`),
-		check("membership_role_check", roleIsOneOf(table.role, WORKSPACE_ROLES)),
+		check("membership_role_check", inArray(table.role, WORKSPACE_ROLES).inlineParams()),
 	],
 );
 
@@ -206,7 +199,7 @@ export const invitation = pgTable(
 	(table) => [
 		index("invitation_workspace_id_idx").on(table.workspaceId),
 		index("invitation_email_idx").on(table.email),
-		check("invitation_role_check", roleIsOneOf(table.role, ASSIGNABLE_WORKSPACE_ROLES)),
+		check("invitation_role_check", inArray(table.role, ASSIGNABLE_WORKSPACE_ROLES).inlineParams()),
 		check("invitation_status_check", sql`${table.status} in ('pending', 'accepted', 'canceled')`),
 	],
 );
