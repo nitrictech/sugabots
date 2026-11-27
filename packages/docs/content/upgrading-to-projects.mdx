@@ -11,11 +11,16 @@ update so far, so plan for it.
 
 - **Back up first.** See [Backups](/docs/deploy-with-docker#backups). The
   upgrade can't be undone except by restoring a backup.
-- **Plan for downtime.** The whole upgrade runs in one database transaction,
-  as the database is migrated. Stop every copy of the old version first, and
-  expect the migration to take longer than usual on a large installation. If
-  it fails partway, nothing changes, and the old version still runs on the
-  same database.
+- **Plan for downtime.** Stop every copy of the old version, then start one
+  copy of the new version to run the migration. Wait until it is ready, including
+  the file moves at startup, before starting other replicas. Time the SQL and
+  startup on a restored production snapshot to size the window. Leave room for
+  PostgreSQL's write-ahead log (WAL). An upgrade with about one million messages
+  generated about 3 GiB of WAL.
+- **Check whether the migration committed before restarting the old version.**
+  Restart it only after confirming that the SQL transaction rolled back. If the
+  upgrade fails after commit, continue with the new version or restore the
+  matching database and blob store backup.
 - **Know what migrates the database.** The Docker image migrates it by
   default, as the new version first starts. Set `SUGABOTS_SKIP_MIGRATIONS` to
   `true` (see [Configuration](/docs/configuration)) to have the image skip
@@ -81,8 +86,8 @@ update so far, so plan for it.
   upgrade is done.
 - **A Personal Assistant's automations are paused**, until the member it
   works for resumes them.
-- **Open browser tabs reload.** The history the web app catches up from is
-  cleared, so every open tab fetches everything again when it reconnects.
+- **Reconnecting clients refetch the app's data.** The event history they
+  usually catch up from is cleared during the upgrade.
 
 ## What keeps working
 
