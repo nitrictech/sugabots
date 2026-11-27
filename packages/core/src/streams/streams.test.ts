@@ -10,8 +10,20 @@ import {
 } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { Delivery } from "@sugabots/contracts/operations/events";
-import { and, eq, sql } from "drizzle-orm";
-import { Clock, Duration, Effect, Exit, Fiber, Layer, Queue, Scope, Stream } from "effect";
+import { and, eq, gt, sql } from "drizzle-orm";
+import {
+	Clock,
+	ConfigProvider,
+	Duration,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Queue,
+	Scope,
+	Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import {
@@ -25,14 +37,20 @@ import {
 } from "../authentication/seed.test-support.ts";
 import { chatServicesForTests } from "../chats/testing.ts";
 import { runningTurns } from "../chats/turns/testing.ts";
-import { query, transaction } from "../database/database.ts";
+import { effectRunner, query, transaction } from "../database/database.ts";
 import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { EventStore } from "../database/events/store.ts";
 import { inMemoryEventStore } from "../database/events/testing.ts";
-import { bot, projectMember, session } from "../database/schema.ts";
-import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../database/testing.ts";
+import { bot, event, projectMember, session } from "../database/schema.ts";
+import {
+	closeDatabase,
+	holdTransaction,
+	onDatabase,
+	runOnPostgres,
+	testInfrastructure,
+} from "../database/testing.ts";
 import type { Operations } from "../operations/registry.ts";
 import {
 	type CallOperation,
@@ -293,6 +311,101 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 
 		const next = await resumed.next();
 		expect(next !== "ended" && next.event).toEqual(streamEvent("reset"));
+	});
+
+	const holdStreamWriter = (stream: EventStream) =>
+		holdTransaction(
+			query((db) =>
+				db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${stream}, 0))`, "objects"),
+			),
+		);
+
+	it("resets when the first missed event is pruned during startup", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const stream = chatStream(world.chat);
+		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The stream has no cursor");
+		await commit(stream, streamEvent("chat.changed", { chatId: world.chat }));
+		const writer = holdStreamWriter(stream);
+		await writer.held;
+
+		const starting = follow(ed, "events.followChat", { chatId: world.chat, since });
+		await writer.waitForWaiters(1);
+		await stored.prune(new Date(Date.now() + 60_000));
+		await writer.release();
+		const resumed = await starting;
+		onTestFinished(() => resumed.close());
+
+		expect(await nextType(resumed)).toBe("reset");
+	});
+
+	it("resets when a later sequence is pruned but the cursor survives", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const stream = chatStream(world.chat);
+		const changed = streamEvent("chat.changed", { chatId: world.chat });
+		await commit(stream, changed);
+		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The stream has no cursor");
+		await commit(stream, changed);
+		await onDatabase((db) =>
+			db
+				.update(event)
+				.set({ createdAt: new Date(0) })
+				.where(and(eq(event.stream, stream), gt(event.seq, since))),
+		);
+		await stored.prune(new Date(1));
+		const resumed = await follow(ed, "events.followChat", { chatId: world.chat, since });
+		onTestFinished(() => resumed.close());
+
+		const reset = await resumed.next();
+		if (reset === "ended") throw new Error("The stream ended before reset");
+		expect(reset.event.type).toBe("reset");
+		expect(reset.seq).toBeDefined();
+		await resumed.close();
+		await commit(stream, changed);
+		const reconnected = await follow(ed, "events.followChat", {
+			chatId: world.chat,
+			since: reset.seq,
+		});
+		onTestFinished(() => reconnected.close());
+		expect(await nextType(reconnected)).toBe("chat.changed");
+	});
+
+	it("releases its blocked Postgres session when startup is interrupted", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const settings = ConfigProvider.fromEnv({ env: { ...process.env, DATABASE_POOL_SIZE: "1" } });
+		const runtime = ManagedRuntime.make(
+			testInfrastructure.pipe(Layer.provide(ConfigProvider.layer(settings))),
+		);
+		const runOn = effectRunner(runtime);
+		const writer = holdStreamWriter(chatStream(world.chat));
+		const abort = new AbortController();
+		try {
+			await writer.held;
+			const { longRunning: isolated } = await servedRegistry({ runOn });
+			const starting = runOn(
+				Effect.scoped(
+					isolated["events.followChat"](ed, { chatId: world.chat }, { kind: "request" }),
+				),
+				{ signal: abort.signal },
+			);
+			const interrupted = expect(starting).rejects.toBeDefined();
+			await writer.waitForWaiters(1);
+
+			abort.abort();
+			await interrupted;
+			// The only pool slot is available while the writer still holds its lock.
+			await runOn(
+				query((db) => db.execute(sql`select 1`, "objects")).pipe(Effect.timeout("2 seconds")),
+			);
+		} finally {
+			abort.abort();
+			await writer.release();
+			await runtime.dispose();
+		}
 	});
 
 	it("says where a reset stream starts, so a reconnect after it misses nothing", async () => {

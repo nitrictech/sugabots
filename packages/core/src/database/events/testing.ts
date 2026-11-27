@@ -3,6 +3,7 @@ import type { CommittedEvent } from "./outbox.ts";
 import { EventStore } from "./store.ts";
 
 interface MemoryRow extends EventStore.Stored {
+	event: StreamEvent & { type: DurableEventType };
 	stream: EventStream;
 	createdAt: Date;
 }
@@ -30,6 +31,19 @@ export function inMemoryEventStore({
 	let next = 0;
 	let prunedThrough = 0;
 
+	const following = (feeds: ReadonlyArray<EventStore.Feed>, limit: number) =>
+		rows
+			.filter((row) =>
+				feeds.some(
+					(feed) =>
+						feed.stream === row.stream &&
+						row.seq > feed.since &&
+						(feed.types === undefined || feed.types.includes(row.event.type)),
+				),
+			)
+			.slice(0, limit)
+			.map(({ seq, stream, event }) => ({ seq, stream, event }));
+
 	return {
 		record(stream, event) {
 			next += 1;
@@ -45,43 +59,35 @@ export function inMemoryEventStore({
 		},
 
 		async following(feeds, limit) {
-			return rows
-				.filter((row) =>
-					feeds.some(
-						(feed) =>
-							feed.stream === row.stream &&
-							row.seq > feed.since &&
-							(feed.types === undefined || feed.types.some((type) => type === row.event.type)),
-					),
-				)
-				.slice(0, limit)
-				.map(({ seq, stream, event }) => ({ seq, stream, event }));
+			return following(feeds, limit);
 		},
 
 		async latest(streams) {
 			return new Map(
 				streams.map((stream) => [
 					stream,
-					rows.findLast((row) => row.stream === stream)?.seq ?? -next - 1,
+					rows.findLast((row) => row.stream === stream && row.seq >= prunedThrough)?.seq ??
+						-next - 1,
 				]),
 			);
 		},
 
-		async has(stream, seq) {
-			if (seq <= 0) {
-				const position = EventStore.afterCursor(seq);
-				return (
-					prunedThrough <= position &&
-					position <= next &&
-					!rows.some((row) => row.stream === stream && row.seq <= position)
-				);
-			}
-			const row = rows.find((candidate) => candidate.seq === seq);
-			if (!row) return false;
-			return (
-				row.stream === stream ||
-				!rows.some((earlier) => earlier.stream === stream && earlier.seq <= seq)
-			);
+		async resume(stream, cursor, limit, controls = []) {
+			const position = EventStore.afterCursor(cursor);
+			if (position < prunedThrough) return undefined;
+			const retained =
+				cursor <= 0
+					? position <= next &&
+						!rows.some(
+							(row) => row.stream === stream && row.seq >= prunedThrough && row.seq <= position,
+						)
+					: rows.some(
+							(row) =>
+								row.seq === cursor &&
+								(row.stream === stream ||
+									!rows.some((earlier) => earlier.stream === stream && earlier.seq <= position)),
+						);
+			return retained ? following([{ stream, since: position }, ...controls], limit) : undefined;
 		},
 
 		async prune(before) {

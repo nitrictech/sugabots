@@ -140,11 +140,11 @@ for (const { name, skip, make, backdate } of stores) {
 		it("knows whether a resume point is still here", async () => {
 			const seq = await append(stream, rawEvent("message.created"));
 
-			expect(await store.has(stream, seq)).toBe(true);
-			expect(await store.has(stream, seq + 1_000_000)).toBe(false);
+			expect(await store.resume(stream, seq, 10)).toBeDefined();
+			expect(await store.resume(stream, seq + 1_000_000, 10)).toBeUndefined();
 			// Another stream's row, after events of the stream the client is resuming.
 			const elsewhere = await append(`chat:${crypto.randomUUID()}`, rawEvent("message.created"));
-			expect(await store.has(stream, elsewhere)).toBe(false);
+			expect(await store.resume(stream, elsewhere, 10)).toBeUndefined();
 		});
 
 		it("starts a stream with nothing stored where every stream is, and resumes it from there", async () => {
@@ -156,10 +156,7 @@ for (const { name, skip, make, backdate } of stores) {
 
 			const first = await append(stream, rawEvent("message.created"));
 
-			expect(await store.has(stream, cursor)).toBe(true);
-			expect(
-				(await store.replay(stream, EventStore.afterCursor(cursor), 10)).map(({ seq }) => seq),
-			).toEqual([first]);
+			expect((await store.resume(stream, cursor, 10))?.map(({ seq }) => seq)).toEqual([first]);
 		});
 
 		it.skipIf(name !== "postgres")(
@@ -195,8 +192,8 @@ for (const { name, skip, make, backdate } of stores) {
 			const kept = await append(stream, rawEvent("message.completed"));
 
 			expect(await store.prune(new Date(Date.now() - 60_000))).toBeGreaterThanOrEqual(1);
-			expect(await store.has(stream, old)).toBe(false);
-			expect(await store.has(stream, kept)).toBe(true);
+			expect(await store.resume(stream, old, 10)).toBeUndefined();
+			expect(await store.resume(stream, kept, 10)).toBeDefined();
 		});
 	});
 }

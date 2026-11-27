@@ -517,18 +517,15 @@ export const make = Effect.gen(function* () {
 						life.stop,
 					);
 				}
-				// Read from where the client left off, or what is stored next, and the
-				// control streams from now: listening began first, so nothing between is missed.
-				const resumes =
-					since !== undefined && (yield* Effect.promise(() => store.has(stream, since)));
-				const starts = yield* Effect.promise(() => store.latest([stream, ...controlStreams]));
+				const starts = yield* Effect.promise((signal) =>
+					store.latest([stream, ...controlStreams], signal),
+				);
 				const feeds = new Map(
 					[...starts].map(([stream, cursor]) => [stream, EventStore.afterCursor(cursor)]),
 				);
 				const watcherControls = new Map(
 					[...feeds].filter(([feed]) => controlStreams.includes(feed)),
 				);
-				if (resumes) feeds.set(stream, EventStore.afterCursor(since));
 				const first = yield* operation("follow", prove);
 				const outbox = yield* Queue.bounded<Delivery, Cause.Done>(READ_AHEAD);
 				const expiresAt = yield* operation("follow", expiryOf(principal));
@@ -536,6 +533,24 @@ export const make = Effect.gen(function* () {
 					yield* life.end;
 					return { stream: Stream.empty, ended: Deferred.await(life.ended) };
 				}
+				const replay =
+					since === undefined
+						? undefined
+						: yield* Effect.promise(() =>
+								store.resume(
+									stream,
+									since,
+									BATCH,
+									[...watcherControls]
+										.filter(([feed]) => feed !== stream)
+										.map(([stream, since]) => ({ stream, since, types: CONTROL_EVENT_TYPES })),
+								),
+							);
+				if (replay && since !== undefined) {
+					feeds.set(stream, EventStore.afterCursor(since));
+					for (const row of replay) feeds.set(row.stream, row.seq);
+				}
+
 				// Both carry where the stream starts, so a client cut off before
 				// anything else arrives resumes from there.
 				const start = starts.get(stream);
@@ -543,7 +558,7 @@ export const make = Effect.gen(function* () {
 					// Where the stream starts is known: whatever the client fetched before
 					// this, it fetches again, and what changes after arrives here.
 					yield* Queue.offer(outbox, { seq: start, event: streamEvent("ready") });
-				} else if (!resumes) {
+				} else if (!replay) {
 					// The resume point is gone, or was never this stream's: start again.
 					yield* Queue.offer(outbox, { seq: start, event: streamEvent("reset") });
 				}
@@ -590,21 +605,26 @@ export const make = Effect.gen(function* () {
 						if (outcome.kind === "send") yield* Queue.offer(outbox, outcome.delivery);
 						return outcome.kind !== "end";
 					});
+				const sendStored = Effect.fnUntraced(function* (rows: readonly EventStore.StoredOn[]) {
+					for (const row of rows) {
+						const outcome =
+							row.stream === stream ? yield* decide(row) : yield* control(row.event, row.seq);
+						if (!(yield* send(outcome))) return false;
+					}
+					return true;
+				});
 				/** Reads what is stored since it last read, in `seq` order, until none is left. */
 				const readStored = Effect.gen(function* () {
 					while (true) {
 						const rows = yield* readOn(feeds, (feed) =>
 							feed === stream ? undefined : CONTROL_EVENT_TYPES,
 						);
-						for (const row of rows) {
-							const outcome =
-								row.stream === stream ? yield* decide(row) : yield* control(row.event, row.seq);
-							if (!(yield* send(outcome))) return false;
-						}
+						if (!(yield* sendStored(rows))) return false;
 						if (rows.length < BATCH) return true;
 					}
 				});
 				const sending = Effect.gen(function* () {
+					if (replay && !(yield* sendStored(replay))) return;
 					wakeToRead();
 					while (true) {
 						const next = yield* Queue.take(woken);
@@ -654,7 +674,7 @@ export const make = Effect.gen(function* () {
 					},
 					life.stop,
 				);
-				const starts = yield* Effect.promise(() => store.latest([reach, own]));
+				const starts = yield* Effect.promise((signal) => store.latest([reach, own], signal));
 				const controls = new Map(
 					[...starts].map(([stream, cursor]) => [stream, EventStore.afterCursor(cursor)]),
 				);

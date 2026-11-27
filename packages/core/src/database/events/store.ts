@@ -1,8 +1,7 @@
 export * as EventStore from "./store.ts";
 
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
-import { and, asc, eq, gt, inArray, lte, notExists, or, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, asc, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
 import {
@@ -38,10 +37,18 @@ export interface Interface {
 	following(feeds: ReadonlyArray<Feed>, limit: number): Promise<StoredOn[]>;
 
 	/** The starting cursor for each distinct stream, taken together before following them. */
-	latest(streams: ReadonlyArray<EventStream>): Promise<Map<EventStream, number>>;
+	latest(
+		streams: ReadonlyArray<EventStream>,
+		signal?: AbortSignal,
+	): Promise<Map<EventStream, number>>;
 
-	/** Whether the cursor is still within the stream's retained history. */
-	has(stream: EventStream, cursor: number): Promise<boolean>;
+	/** resume reads the first batch, or returns undefined if cursor cannot be replayed. */
+	resume(
+		stream: EventStream,
+		cursor: number,
+		limit: number,
+		controls?: ReadonlyArray<Feed>,
+	): Promise<StoredOn[] | undefined>;
 
 	/** Drops events older than `before`. Returns how many went. */
 	prune(before: Date): Promise<number>;
@@ -77,28 +84,11 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 
 		async following(feeds, limit) {
 			if (feeds.length === 0) return [];
-			const rows = await run((db) =>
-				db
-					.select({ seq: event.seq, stream: event.stream, payload: event.payload })
-					.from(event)
-					.where(
-						or(
-							...feeds.map(({ stream, since, types }) =>
-								and(eq(event.stream, stream), gt(event.seq, since), typesInFeed(types)),
-							),
-						),
-					)
-					.orderBy(asc(event.seq))
-					.limit(limit),
-			);
-			return rows.map((row) => ({
-				seq: row.seq,
-				stream: row.stream as EventStream,
-				event: row.payload,
-			}));
+			const rows = await run((db) => followingRows(db, feeds, limit));
+			return rows.map(({ seq, stream, payload }) => ({ seq, stream, event: payload }));
 		},
 
-		async latest(streams) {
+		async latest(streams, signal) {
 			if (streams.length === 0) return new Map();
 			const wanted = sql`array[${sql.join(
 				streams.map((stream) => sql`${stream}`),
@@ -120,7 +110,8 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 						return yield* query((db) =>
 							db.execute<{ stream: EventStream; cursor: string | number }>(
 								sql`select stream, coalesce(
-									(select max(${event.seq}) from ${event} where ${event.stream} = wanted.stream),
+									(select max(${event.seq}) from ${event}
+										where ${event.stream} = wanted.stream and ${event.seq} >= (${retentionBoundary})),
 									-(${sequencePosition}) - 1
 								) as cursor
 								from (select distinct stream from unnest(${wanted}) as stream) as wanted`,
@@ -129,50 +120,44 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 						);
 					}),
 				),
+				{ signal },
 			);
 			return new Map(rows.map(({ stream, cursor }) => [stream, Number(cursor)]));
 		},
 
-		async has(stream, seq) {
-			if (seq <= 0) {
-				const position = afterCursor(seq);
-				const [row] = await run((db) =>
-					db.execute<{ retained: boolean }>(
-						sql`select ${position} <= (${sequencePosition})
-							and ${position} >= coalesce(
-								(select pruned_through from ${eventRetention}), 0
-							) and not exists (
-								select 1 from ${event}
-								where ${event.stream} = ${stream} and ${event.seq} <= ${position}
-							) as retained`,
-						"objects",
-					),
+		async resume(stream, cursor, limit, controls = []) {
+			const position = afterCursor(cursor);
+			const retained = sql`${position} >= (${retentionBoundary}) and ${
+				cursor <= 0
+					? sql`${position} <= (${sequencePosition}) and not exists (
+						select 1 from ${event} where ${event.stream} = ${stream}
+						and ${event.seq} between (${retentionBoundary}) and ${position}
+					)`
+					: sql`exists (
+						select 1 from ${event} as anchor where anchor.seq = ${cursor}
+						and (anchor.stream = ${stream} or not exists (
+							select 1 from ${event} where ${event.stream} = ${stream}
+							and ${event.seq} <= ${position}
+						))
+					)`
+			}`;
+			const rows = await run((db) => {
+				const batch = followingRows(db, [{ stream, since: position }, ...controls], limit);
+				return db.execute<{
+					retained: boolean;
+					seq: string | null;
+					stream: EventStream;
+					payload: StreamEvent;
+				}>(
+					sql`select retained, batch.* from (select ${retained} as retained) as resume
+						left join lateral (${batch}) as batch on retained order by batch.seq`,
+					"objects",
 				);
-				return row?.retained ?? false;
-			}
-			const earlier = alias(event, "earlier");
-			const rows = await run((db) =>
-				db
-					.select({ seq: event.seq })
-					.from(event)
-					.where(
-						and(
-							eq(event.seq, seq),
-							or(
-								eq(event.stream, stream),
-								notExists(
-									db
-										.select({ seq: earlier.seq })
-										.from(earlier)
-										.where(and(eq(earlier.stream, stream), lte(earlier.seq, seq))),
-								),
-							),
-						),
-					)
-					.limit(1),
+			});
+			if (!rows[0]?.retained) return undefined;
+			return rows.flatMap(({ seq, stream, payload }) =>
+				seq === null ? [] : [{ seq: Number(seq), stream, event: payload }],
 			);
-
-			return rows.length > 0;
 		},
 
 		async prune(before) {
@@ -202,7 +187,29 @@ export const layer = processLayer(Layer.effect(Service, make));
 
 const sequencePosition = sql`select case when is_called then last_value else 0 end from event_seq_seq`;
 
-/** afterCursor returns the sequence position to read after, including an empty stream's cursor. */
+// Pruning records one watermark across streams, so a gap can conservatively reset another stream.
+const retentionBoundary = sql`select coalesce((select pruned_through from ${eventRetention}), 0)`;
+
+function followingRows(db: Executor, feeds: readonly Feed[], limit: number) {
+	return db
+		.select({
+			seq: event.seq,
+			stream: sql<EventStream>`${event.stream}`.as("stream"),
+			payload: event.payload,
+		})
+		.from(event)
+		.where(
+			or(
+				...feeds.map(({ stream, since, types }) =>
+					and(eq(event.stream, stream), gt(event.seq, since), typesInFeed(types)),
+				),
+			),
+		)
+		.orderBy(asc(event.seq))
+		.limit(limit);
+}
+
+/** afterCursor returns the sequence position to read after, including a cursor without a retained event. */
 export function afterCursor(cursor: number): number {
 	return cursor < 0 ? -cursor - 1 : cursor;
 }
@@ -214,7 +221,7 @@ export interface Stored {
 }
 
 /** A stored event, and the stream it is on. */
-interface StoredOn extends Stored {
+export interface StoredOn extends Stored {
 	stream: EventStream;
 }
 

@@ -207,29 +207,15 @@ export function inProcess({
 				let replayed = since ?? 0;
 
 				if (since !== undefined && since > 0) {
-					if (await store.has(stream, since)) {
-						// One row past the cap is how "too long to be worth
-						// sending" is detected without a second query.
-						const missed = await store.replay(stream, since, MAX_REPLAY + 1);
-
-						if (missed.length > MAX_REPLAY) {
-							// Sending events the client is about to discard helps
-							// nobody: reset, and let it refetch over REST.
-							replayed = 0;
-							yield { event: resetEvent() };
-						} else {
-							for (const stored of missed) {
-								replayed = stored.seq;
-								yield stored;
-							}
-						}
-					} else {
-						// The resume point has been pruned, or was never ours.
-						// Nothing was replayed, so nothing live is a duplicate —
-						// and an id from another stream, or an invented one,
-						// must not go on suppressing events for being too small.
+					const missed = await store.resume(stream, since, MAX_REPLAY + 1);
+					if (!missed || missed.length > MAX_REPLAY) {
 						replayed = 0;
 						yield { event: resetEvent() };
+					} else {
+						for (const { seq, event } of missed) {
+							replayed = seq;
+							yield { seq, event };
+						}
 					}
 				}
 
