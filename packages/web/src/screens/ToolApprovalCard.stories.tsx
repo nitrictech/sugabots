@@ -253,9 +253,17 @@ export const BrowserPage = meta.story({
 		await waitFor(() =>
 			expect(canvas.getByText("On the page https://travel.example.com/checkout")).toBeVisible(),
 		);
+		await expect(
+			canvas.getByText(
+				"This approval covers the page, which can change while approval is pending.",
+			),
+		).toBeVisible();
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const request = await screen.findByRole("dialog");
 		await expect(request).toHaveTextContent("On the page https://travel.example.com/checkout");
+		await expect(request).toHaveTextContent(
+			"This approval covers the page, which can change while approval is pending.",
+		);
 	},
 });
 

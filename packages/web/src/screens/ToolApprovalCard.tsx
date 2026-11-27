@@ -317,9 +317,16 @@ export function ApprovalDestination({
 	const address = browserUrl ?? connectorUrl;
 	if (!address) return null;
 	return (
-		<p className="m-0 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
-			{browserUrl ? "On the page" : "Sends to"} {address}
-		</p>
+		<div className="space-y-1 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
+			<p className="m-0">
+				{browserUrl ? "On the page" : "Sends to"} {address}
+			</p>
+			{browserUrl && (
+				<p className="m-0">
+					This approval covers the page, which can change while approval is pending.
+				</p>
+			)}
+		</div>
 	);
 }
 
