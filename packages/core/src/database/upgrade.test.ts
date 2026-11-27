@@ -48,7 +48,7 @@ import { Ids } from "../ids/ids.ts";
 import { blockHost } from "../operations/computers/block-host.ts";
 import { runCommand } from "../operations/computers/use-computer.ts";
 import { viewDesktop } from "../operations/computers/view-desktop.ts";
-import { setOnInProject } from "../operations/connectors/set-on-in-project.ts";
+import { update as updateConnector } from "../operations/connectors/update.ts";
 import { servedOperations } from "../operations/testing.ts";
 import { usageMonth } from "../operations/workspace/usage-month.ts";
 import type { Principal } from "../principal.ts";
@@ -182,6 +182,24 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					],
 				);
 				await client.query(legacyMigrationScaleRows);
+				await client.query(
+					`with added as (
+						insert into routine (workspace_id, agent_id, name, instructions, state)
+						select workspace_id, id, 'Triage issues', 'Triage new issues', 'enabled'
+						from agent where id = any($1) returning id, workspace_id
+					)
+					insert into routine_trigger (workspace_id, routine_id, settings)
+					select workspace_id, id, $2 from added`,
+					[
+						[legacy.bots.planner, legacy.bots.budget],
+						{
+							kind: "github",
+							connectionId: legacy.familyGitHubConnector,
+							repository: "acme/web",
+							events: ["issues"],
+						},
+					],
+				);
 				await client.query(legacySummaryRequest);
 				await client.query("update model_request set agent_id = $1 where id = $2", [
 					legacy.bots.planner,
@@ -296,6 +314,27 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					default_of_bot_id: legacy.bots.helper,
 					applied_settings: null,
 				},
+			]);
+		});
+
+		it("keeps the shared GitHub app in the converted project and pauses its old triggers", async () => {
+			expect(
+				await upgraded.rows("select project_id from connector where id = $1", [
+					legacy.familyGitHubConnector,
+				]),
+			).toEqual([{ project_id: legacy.pods.family }]);
+			expect(
+				await upgraded.rows(
+					`select automation.state, project.default_of_bot_id
+					 from automation_trigger join automation on automation.id = automation_trigger.automation_id
+					 join project on project.id = automation.project_id
+					 where automation_trigger.kind = 'github' and automation_trigger.settings->>'connectorId' = $1
+					 order by project.default_of_bot_id`,
+					[legacy.familyGitHubConnector],
+				),
+			).toEqual([
+				{ state: "paused", default_of_bot_id: legacy.bots.planner },
+				{ state: "paused", default_of_bot_id: legacy.bots.budget },
 			]);
 		});
 
@@ -1217,12 +1256,12 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 
 						const refresh = provider.holdOpening(machine.id);
 						const switchingOff = yield* Effect.forkScoped(
-							setOnInProject.run(
+							updateConnector.run(
 								member,
 								{
 									projectId,
 									connectorId: legacy.familyGitHubConnector,
-									on: false,
+									changes: { enabled: false },
 								},
 								{ kind: "request" },
 							),
@@ -1235,7 +1274,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						expect(started).toBe(true);
 						expect(yield* command).toMatchObject({ status: "failed" });
 						refresh.release();
-						expect(yield* Fiber.join(switchingOff)).toMatchObject({ on: false });
+						expect(yield* Fiber.join(switchingOff)).toMatchObject({ enabled: false });
 						expect(machine.networks.at(-1)?.credentials).toEqual([]);
 						expect(yield* command).toMatchObject({ exitCode: 0 });
 

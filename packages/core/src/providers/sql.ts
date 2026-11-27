@@ -291,8 +291,6 @@ export const projectBotConnector = pgTable(
 		connectorId: uuid("connector_id").notNull(),
 		/** The connector's `addressRevision` when it was turned on; it stays on only while that is unchanged. */
 		addressRevision: integer("address_revision").notNull(),
-		/** Whether the upgrade kept this GitHub app's sign-in for the project's computer. */
-		computerSignIn: boolean("computer_sign_in").notNull().default(false),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [
@@ -308,9 +306,6 @@ export const projectBotConnector = pgTable(
 			name: "project_bot_connector_connector_workspace_fkey",
 		}).onDelete("cascade"),
 		index("project_bot_connector_connector_id_idx").on(table.connectorId),
-		uniqueIndex("project_bot_connector_computer_sign_in_idx")
-			.on(table.projectId)
-			.where(sql`${table.computerSignIn}`),
 	],
 );
 

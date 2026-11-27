@@ -65,12 +65,14 @@ ALTER TABLE "sandbox_agent_allowed_host" ADD CONSTRAINT "sandbox_agent_allowed_h
 -- Sugabots manages it, so it has no automations for a GitHub app to start, and
 -- the other bots are the ones whose calls name the connection. A `pod` whose
 -- only bot is its Personal Assistant keeps no original; the assistant gets a
--- copy below.
+-- copy below. A shared pod keeps its GitHub app for the project it becomes.
 WITH "keeper" AS (
 	SELECT DISTINCT ON ("connection"."id") "connection"."id" AS "connection_id", "agent"."id" AS "agent_id"
 	FROM "connection"
 	JOIN "agent" ON "agent"."pod_id" = "connection"."pod_id"
+	JOIN "pod" ON "pod"."id" = "connection"."pod_id"
 	WHERE "agent"."provisioned_key" IS DISTINCT FROM 'personal-assistant'
+		AND NOT ("pod"."kind" = 'shared' AND "connection"."kind" = 'github')
 	ORDER BY "connection"."id",
 		EXISTS (
 			SELECT 1 FROM "routine"
@@ -83,10 +85,8 @@ WITH "keeper" AS (
 )
 UPDATE "connection" SET "agent_id" = "keeper"."agent_id"
 FROM "keeper" WHERE "connection"."id" = "keeper"."connection_id";--> statement-breakpoint
--- A GitHub connection is its own GitHub App, so it went to that one bot. The
--- other bots' automations that it started can't be started by it any
--- more, so they're paused, showing as paused rather than silently never running,
--- until their bot has its own GitHub app and someone points the trigger at it.
+-- A GitHub trigger needs an app in its automation's project. An app that
+-- stays with a shared pod, or goes to a different bot, cannot start it.
 UPDATE "routine" SET "state" = 'paused'
 WHERE "state" = 'enabled' AND EXISTS (
 	SELECT 1 FROM "routine_trigger"
@@ -3284,15 +3284,12 @@ CREATE TABLE "project_bot_connector" (
 );
 --> statement-breakpoint
 CREATE INDEX "project_bot_connector_connector_id_idx" ON "project_bot_connector" ("connector_id");--> statement-breakpoint
-ALTER TABLE "project_bot_connector" ADD COLUMN "computer_sign_in" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-CREATE UNIQUE INDEX "project_bot_connector_computer_sign_in_idx" ON "project_bot_connector" ("project_id") WHERE "computer_sign_in";--> statement-breakpoint
 ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_project_bot_fkey" FOREIGN KEY ("project_id","bot_id") REFERENCES "project_bot"("project_id","bot_id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_connector_workspace_fkey" FOREIGN KEY ("connector_id","workspace_id") REFERENCES "connector"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 -- A `shared` `pod`'s bots used their own connectors in the `pod`, so each
--- stays on in the private project the `pod` became. Its one GitHub app
--- also keeps signing in the shared computer after the app moves to a bot.
-INSERT INTO "project_bot_connector" ("workspace_id", "project_id", "bot_id", "connector_id", "address_revision", "computer_sign_in")
-SELECT b."workspace_id", pb."project_id", b."id", c."id", c."address_revision", c."kind" = 'github'
+-- stays on in the private project the `pod` became.
+INSERT INTO "project_bot_connector" ("workspace_id", "project_id", "bot_id", "connector_id", "address_revision")
+SELECT b."workspace_id", pb."project_id", b."id", c."id", c."address_revision"
 FROM "bot" b
 INNER JOIN "project_bot" pb ON pb."bot_id" = b."id"
 INNER JOIN "project" p ON p."id" = pb."project_id" AND p."default_of_bot_id" IS NULL

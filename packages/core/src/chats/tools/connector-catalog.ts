@@ -28,7 +28,6 @@ import { ConnectorStore, everyToolOff } from "../../providers/connectors/connect
 import type { ConnectorTarget } from "../../providers/connectors/connector-target.ts";
 import type { Connected } from "../../providers/connectors/github/connected.ts";
 import {
-	findGitHubConnectorForComputer,
 	GitHubConnectors,
 	gitHubConnectorForProject,
 } from "../../providers/connectors/github/github-connectors.ts";
@@ -363,12 +362,12 @@ export function from({
 				const endpointTools = reached
 					.filter((target) => target.kind === "http")
 					.map((target) => httpTools(target, httpClients.for({ baseUrl: target.url })));
-				const computerGitHub =
-					turn.computerSignsIn && foundGitHub.length > 0
-						? yield* findGitHubConnectorForComputer({ workspaceId, projectId })
-						: undefined;
 				const gitHub = yield* Effect.forEach(foundGitHub, (connected) =>
-					gitHubOffered(connected, computerGitHub?.id === connected.connector.id, turn),
+					gitHubOffered(
+						connected,
+						turn.computerSignsIn && connected.connector.projectId === projectId,
+						turn,
+					),
 				);
 				const ownTools = {
 					tools: Object.assign({}, ...endpointTools, ...gitHub.map(({ tools }) => tools)),
