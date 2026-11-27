@@ -32,6 +32,16 @@ export type ApprovedOperation =
 	| BotLoopOperationName<typeof operationContracts>
 	| "automations.list";
 
+export type ComputerOperation = Exclude<
+	Extract<ApprovedOperation, `computers.${string}`>,
+	"computers.requestHost"
+>;
+
+export type OrdinaryOperation = Exclude<
+	ApprovedOperation,
+	"connectors.callTool" | "computers.requestHost" | ComputerOperation
+>;
+
 export interface ApprovalRule<
 	A extends Approval = Approval,
 	N extends ApprovedOperation = ApprovedOperation,
@@ -125,7 +135,7 @@ type NamedTargets<Targets extends readonly unknown[]> = {
 export const proveApproved = <
 	P,
 	X,
-	N extends Exclude<ApprovedOperation, "connectors.callTool">,
+	N extends OrdinaryOperation,
 	I,
 	const Targets extends [unknown, ...unknown[]],
 >(
@@ -145,7 +155,7 @@ export const proveApproved = <
 export const proveApprovedAsResolved = <
 	P,
 	X,
-	N extends Exclude<ApprovedOperation, "connectors.callTool">,
+	N extends OrdinaryOperation,
 	I,
 	const Targets extends [unknown, ...unknown[]],
 >(
@@ -164,13 +174,7 @@ export const proveApprovedAsResolved = <
  * the same computer its provider has since recovered or upgraded onto another
  * machine.
  */
-export const proveComputerUseApproved = <
-	P,
-	X,
-	N extends Exclude<ApprovedOperation, "connectors.callTool">,
-	I,
-	C,
->(
+export const proveComputerUseApproved = <P, X, N extends ComputerOperation, I, C>(
 	principal: Named<P, Principal>,
 	call: Named<X, Call>,
 	rule: ApprovalRule<OrdinaryApproval, N>,
@@ -311,78 +315,113 @@ const proveApproval = <
 		if (need === "refused") return yield* Effect.fail(new ApprovalRefused());
 		if (call.kind !== "toolCall" || !isUuid(call.toolCall))
 			return need === "nothing" && !connectorUse ? approved(null) : yield* new ApprovalNeeded();
-		const [decision] = yield* query((db) =>
-			db
-				.select({
-					tool: toolCall.tool,
-					computerProjectId: toolCall.approvalComputerProjectId,
-					resolvedTargets: toolCall.approvalResolvedTargets,
-					accessAtApproval: toolCall.approvalConnectorAccess,
-					connectorId: toolCall.connectorId,
-					connectorRevision: toolCall.connectorRevision,
-					remoteToolName: toolCall.remoteToolName,
-					callStatus: toolCall.status,
-					sentInExecution: toolCall.sentInExecution,
-					writeOrDelete: toolCall.writeOrDelete,
-					sdkToolCallId: toolCall.sdkToolCallId,
-					status: toolCall.approvalStatus,
-					decidedBy: toolCall.decidedById,
-					executionInput: toolCall.executionInput,
-					input: toolCall.input,
-				})
-				.from(toolCall)
-				.where(and(eq(toolCall.id, call.toolCall), eq(toolCall.turnId, acting.turn)))
-				.limit(1),
-		);
-		const name = connectorUse
-			? connectorToolKey(connectorUse.reach.handle, connectorUse.tool)
-			: tool;
-		if (
-			connectorUse &&
-			(decision?.callStatus !== "running" ||
-				decision.sentInExecution !== acting.executionNumber ||
-				decision.connectorId !== connectorUse.reach.connector.value ||
-				decision.connectorRevision !== connectorUse.reach.revision ||
-				decision.remoteToolName !== connectorUse.tool ||
-				(connectorUse.writeOrDelete && !decision.writeOrDelete) ||
-				!sameRecordedInput(name, decision.executionInput ?? decision.input, argumentsToApprove, {
-					builtIn: false,
-				}))
-		)
-			return yield* new ApprovalRefused();
-		if (
-			decision &&
-			(decision.tool !== name ||
-				decision.status === "denied" ||
-				(decision.status === "allowed" &&
-					computerProjectId !== undefined &&
-					computerProjectId !== decision.computerProjectId))
-		)
-			return yield* Effect.fail(new ApprovalRefused());
-		if (need === "nothing" && !decision?.status) return approved(null, decision?.sdkToolCallId);
-		// A connector call's input was compared with what was recorded above.
-		if (
-			!connectorUse &&
-			decision?.status === "allowed" &&
-			!sameRecordedInput(name, decision.executionInput ?? decision.input, argumentsToApprove, {
-				builtIn: true,
-			})
-		) {
-			return yield* new ApprovalRefused();
+		const decision = yield* readRecordedCall(acting.turn, call.toolCall);
+		const recorded = decideRecordedCall(decision, {
+			need,
+			name: connectorUse ? connectorToolKey(connectorUse.reach.handle, connectorUse.tool) : tool,
+			executionNumber: acting.executionNumber,
+			argumentsToApprove,
+			connectorUse,
+			computerProjectId,
+			resolvedTargets,
+		});
+		if (recorded === "refused") return yield* new ApprovalRefused();
+		if (recorded === "needed") return yield* new ApprovalNeeded();
+		if (recorded !== null) {
+			const { approver } = yield* approverFacts(recorded, facts, computerProjectId);
+			if (!approver) return yield* new ApprovalNeeded();
 		}
-		if (
-			decision?.status !== "allowed" ||
-			!decision.decidedBy ||
-			!isDeepStrictEqual(decision.resolvedTargets ?? null, resolvedTargets ?? null) ||
-			(connectorUse?.access === "ask" && decision.accessAtApproval !== "ask")
-		) {
-			return yield* Effect.fail(new ApprovalNeeded());
-		}
-		const decidedBy = decision.decidedBy;
-		const { approver } = yield* approverFacts(decidedBy, facts, computerProjectId);
-		if (!approver) return yield* Effect.fail(new ApprovalNeeded());
-		return approved(decidedBy, decision.sdkToolCallId);
+		return approved(recorded, decision?.sdkToolCallId);
 	});
+
+const readRecordedCall = (turnId: string, callId: string) =>
+	query((db) =>
+		db
+			.select({
+				tool: toolCall.tool,
+				computerProjectId: toolCall.approvalComputerProjectId,
+				resolvedTargets: toolCall.approvalResolvedTargets,
+				accessAtApproval: toolCall.approvalConnectorAccess,
+				connectorId: toolCall.connectorId,
+				connectorRevision: toolCall.connectorRevision,
+				remoteToolName: toolCall.remoteToolName,
+				callStatus: toolCall.status,
+				sentInExecution: toolCall.sentInExecution,
+				writeOrDelete: toolCall.writeOrDelete,
+				sdkToolCallId: toolCall.sdkToolCallId,
+				status: toolCall.approvalStatus,
+				decidedBy: toolCall.decidedById,
+				executionInput: toolCall.executionInput,
+				input: toolCall.input,
+			})
+			.from(toolCall)
+			.where(and(eq(toolCall.id, callId), eq(toolCall.turnId, turnId)))
+			.limit(1),
+	).pipe(Effect.map(([recorded]) => recorded));
+
+function decideRecordedCall<P, K>(
+	decision: Effect.Success<ReturnType<typeof readRecordedCall>>,
+	{
+		need,
+		name,
+		executionNumber,
+		argumentsToApprove,
+		connectorUse,
+		computerProjectId,
+		resolvedTargets,
+	}: {
+		need: Exclude<Need, "refused">;
+		name: string;
+		executionNumber: number;
+		argumentsToApprove: unknown;
+		connectorUse: CanUseConnector<P, K> | undefined;
+		computerProjectId: string | undefined;
+		resolvedTargets: ResolvedTargets | undefined;
+	},
+) {
+	if (
+		connectorUse &&
+		(decision?.callStatus !== "running" ||
+			decision.sentInExecution !== executionNumber ||
+			decision.connectorId !== connectorUse.reach.connector.value ||
+			decision.connectorRevision !== connectorUse.reach.revision ||
+			decision.remoteToolName !== connectorUse.tool ||
+			(connectorUse.writeOrDelete && !decision.writeOrDelete) ||
+			!sameRecordedInput(name, decision.executionInput ?? decision.input, argumentsToApprove, {
+				builtIn: false,
+			}))
+	)
+		return "refused";
+	if (
+		decision &&
+		(decision.tool !== name ||
+			decision.status === "denied" ||
+			(decision.status === "allowed" &&
+				computerProjectId !== undefined &&
+				computerProjectId !== decision.computerProjectId))
+	)
+		return "refused";
+	if (need === "nothing" && !decision?.status) return null;
+	// A connector call's input was compared with what was recorded above.
+	if (
+		!connectorUse &&
+		decision?.status === "allowed" &&
+		!sameRecordedInput(name, decision.executionInput ?? decision.input, argumentsToApprove, {
+			builtIn: true,
+		})
+	) {
+		return "refused";
+	}
+	if (
+		decision?.status !== "allowed" ||
+		!decision.decidedBy ||
+		!isDeepStrictEqual(decision.resolvedTargets ?? null, resolvedTargets ?? null) ||
+		(connectorUse?.access === "ask" && decision.accessAtApproval !== "ask")
+	) {
+		return "needed";
+	}
+	return decision.decidedBy;
+}
 
 const inputTargetFields = {
 	"automations.list": ["projectId"],

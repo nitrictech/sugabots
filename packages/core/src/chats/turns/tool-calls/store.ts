@@ -38,8 +38,8 @@ import {
 	holdRunningTurn,
 	holdTurnForToolWrite,
 } from "../fence.ts";
-import type { ApprovalBinding } from "../loop-values.ts";
 import { mayRunTools } from "../lifecycle.ts";
+import type { ApprovalBinding } from "../loop-values.ts";
 import { WorkAdmission } from "../work-admission.ts";
 import {
 	APPROVAL_NO_LONGER_APPLIES,
@@ -727,12 +727,6 @@ type BeganExecution =
 	| { readonly _tag: "NoPendingApproval" }
 	| { readonly _tag: "Refused"; readonly reason: string };
 
-/**
- * The value as JSON will keep it, cut down when it is too large to store. The
- * round trip through text is what drops `undefined` and anything else JSON
- * cannot carry; the cut keeps the start, which is where a page's title and a
- * result list's first entries are.
- */
 export function inputShownInFull(input: unknown): boolean {
 	return storedJsonText(input).length <= MAX_STORED_JSON_CHARACTERS;
 }

@@ -8,20 +8,13 @@ import {
 	type ApprovalRule,
 	type Approved,
 	approvalRule,
+	type ComputerOperation,
 	type OrdinaryApproval,
 	proveComputerUseApproved,
 } from "../../proofs/approved.ts";
 import { proveCanUseChatComputer } from "../../proofs/can-use-computer.ts";
 import { named } from "../../proofs/proof.ts";
 import { type Call, defineOperation } from "../operation.ts";
-
-type ComputerOperation =
-	| "computers.runCommand"
-	| "computers.readFile"
-	| "computers.writeFile"
-	| "computers.copyChatFile"
-	| "computers.shareFile"
-	| "computers.useBrowser";
 
 /**
  * A bot's work on its computer: the computer of the project its turn's chat

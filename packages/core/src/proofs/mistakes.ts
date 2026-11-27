@@ -138,7 +138,7 @@ import {
 const proveRealApproved = <
 	P,
 	X,
-	N extends Exclude<ApprovedOperation, "connectors.callTool">,
+	N extends OrdinaryOperation,
 	const Targets extends [unknown, ...unknown[]],
 >(
 	principal: Named<P, Principal>,
@@ -862,10 +862,11 @@ export const connectorsServiceMistakes = named(
 
 import {
 	type ApprovalRule,
-	type ApprovedOperation,
 	approvalRule,
 	type OrdinaryApproval,
+	type OrdinaryOperation,
 	proveComputerRequestApproved,
+	proveComputerUseApproved,
 	proveApproved as proveNamedApproval,
 } from "./approved.ts";
 
@@ -1061,12 +1062,20 @@ export const computerUseMistakes = named(
 			Effect.gen(function* () {
 				const canUse = yield* proveCanUseChatComputer(principal, chat);
 				const otherUses = yield* proveCanUseChatComputer(other, chat);
-				const approved = yield* proveRealApproved(
-					principal,
-					call,
-					approvalRule("computers.runCommand"),
-					command,
-					chat,
+				const step = yield* turnComputers.checkStep(canUse);
+				const otherStep = yield* turnComputers.checkStep(otherUses);
+				const approved = yield* named(command, (input) =>
+					proveComputerUseApproved(
+						principal,
+						call,
+						approvalRule("computers.runCommand"),
+						input,
+						canUse,
+					),
+				);
+				yield* named(command, (input) =>
+					// @ts-expect-error TS2345 [Argument of type 'ApprovalRule<'] A computer command needs an approval bound to the machine.
+					proveNamedApproval(principal, call, approvalRule("computers.runCommand"), input, chat),
 				);
 
 				// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NoInfer<NameA>, NameC>'] Only the principal that can use the computer may request this host.
@@ -1076,26 +1085,26 @@ export const computerUseMistakes = named(
 				yield* proveNamedApproval(
 					principal,
 					call,
-					// @ts-expect-error TS2345 [parameter of type 'ApprovalRule<OrdinaryApproval, "computers.requestHost">] A computer request uses its dedicated approval prover.
+					// @ts-expect-error TS2345 [parameter of type 'ApprovalRule<OrdinaryApproval, OrdinaryOperation>] A computer request uses its dedicated approval prover.
 					approvalRule("computers.requestHost"),
 					host,
 					chat,
 				);
 
 				// A command run on the computer another principal may use, with this one's approval.
-				// @ts-expect-error TS2345 [Argument of type 'CanUseChatComputer<NameB, NameC>' is not assignable to parameter of type 'CanUseChatComputer<NameA, NameC>']
-				yield* turnComputers.runCommand(otherUses, approved);
+				// @ts-expect-error TS2345 [Argument of type 'CheckedStep<NameB, NameC>' is not assignable to parameter of type 'CheckedStep<NameA, NameC>']
+				yield* turnComputers.runCommand(otherStep, approved);
 
 				// A command run with no proof that the call may run.
 				// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameC], "computers.runCommand">']
-				yield* turnComputers.runCommand(canUse, canUse);
+				yield* turnComputers.runCommand(step, canUse);
 
 				// A host request read back with the reach of the chat, not the proof the bot may use its computer.
 				const reach = yield* proveRealReachesChat(principal, chat);
 				// @ts-expect-error TS2739 [from type 'CanUseChatComputer<NameA, NameC>'] Chat reach does not prove permission to read a computer request.
 				yield* computerNetwork.requestedHost(reach, approved);
 
-				yield* turnComputers.runCommand(canUse, approved);
+				yield* turnComputers.runCommand(step, approved);
 				yield* computerNetwork.requestedHost(
 					canUse,
 					yield* proveComputerRequestApproved(principal, call, host, canUse),
