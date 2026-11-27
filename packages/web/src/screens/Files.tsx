@@ -81,7 +81,7 @@ export function FilesPage({
 		"project" in owner ? owner.project.id : owner.bot.defaultProjectId,
 	);
 	const navigate = useNavigate();
-	const hrefOf = useFileHref();
+	const fileHref = useFileHref();
 	const { leaveForPage } = useLeave();
 	return (
 		<FileListView
@@ -96,10 +96,12 @@ export function FilesPage({
 					owner={owner}
 					fileId={selectedId}
 					version={version}
-					onVersionChange={(version) => void navigate({ href: hrefOf(owner, selectedId, version) })}
+					onVersionChange={(version) =>
+						void navigate({ href: fileHref(owner, selectedId, version) })
+					}
 					// Leaving in its place, as a deleted one is left, goes back to the list when that is behind.
 					onClose={(how) =>
-						how?.replace ? leaveForPage(hrefOf(owner)) : void navigate({ href: hrefOf(owner) })
+						how?.replace ? leaveForPage(fileHref(owner)) : void navigate({ href: fileHref(owner) })
 					}
 				/>
 			)}
@@ -362,7 +364,7 @@ export function FileStageView({
 	deletion?: Deletion;
 }) {
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
-	const hrefOf = useFileHref();
+	const fileHref = useFileHref();
 	const copying = useCopy("Copy link");
 	if (typeof file !== "object") {
 		return (
@@ -386,7 +388,7 @@ export function FileStageView({
 	);
 	function copyLink() {
 		if (typeof file !== "object") return;
-		const href = hrefOf(owner, file.id);
+		const href = fileHref(owner, file.id);
 		void copying.copy(new URL(href, window.location.origin).href);
 	}
 	return (
