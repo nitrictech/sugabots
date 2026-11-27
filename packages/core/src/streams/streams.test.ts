@@ -61,16 +61,19 @@ import type { MemberSession } from "../principal.ts";
 import { authenticators, principals } from "../proofs/world.test-support.ts";
 import { Streams } from "./streams.ts";
 
-async function observeWatcherSleeps(clock: Clock.Clock) {
-	const sleeps = await Effect.runPromise(Queue.unbounded<Duration.Duration>());
+async function observeWatcherSleeps(clock: Clock.Clock, catchUp: Duration.Input) {
+	const checkInterval = Duration.toMillis(catchUp) / 2;
+	const sleeps = await Effect.runPromise(Queue.unbounded<void>());
 	return {
 		clock: {
 			...clock,
 			sleep: (duration) =>
-				Effect.forkChild(clock.sleep(duration), { startImmediately: true }).pipe(
-					Effect.tap(() => Queue.offer(sleeps, duration)),
-					Effect.flatMap(Fiber.join),
-				),
+				Duration.toMillis(duration) === checkInterval
+					? Effect.forkChild(clock.sleep(duration), { startImmediately: true }).pipe(
+							Effect.tap(() => Queue.offer(sleeps, undefined)),
+							Effect.flatMap(Fiber.join),
+						)
+					: clock.sleep(duration),
 		} satisfies Clock.Clock,
 		clear: () => Effect.runPromise(Queue.clear(sleeps)),
 		// Session expiry and reach catch-up each schedule a sleep when the watcher starts.
@@ -143,7 +146,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		}));
 		clock = await Effect.runPromise(Scope.provide(TestClock.make(), clockScope));
 		await Effect.runPromise(clock.setTime(Date.UTC(2000, 0, 1)));
-		watcherSleeps = await observeWatcherSleeps(clock);
+		watcherSleeps = await observeWatcherSleeps(clock, catchUp);
 		({ follow: followOnTestClock } = await servedRegistry({
 			chats,
 			bus: Layer.succeed(EventBus.Service, bus),
@@ -1151,7 +1154,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			const scope = Scope.makeUnsafe();
 			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
 			const sessionClock = await Effect.runPromise(Scope.provide(TestClock.make(), scope));
-			const sleeps = await observeWatcherSleeps(sessionClock);
+			const sleeps = await observeWatcherSleeps(sessionClock, interval);
 			const running = await followWith(
 				world,
 				Effect.succeed({
@@ -1167,7 +1170,8 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				query((db) => db.execute(sql`lock table session in access exclusive mode`)),
 			);
 			await stalled.held;
-			const checkDelay = await sleeps.waitForInitialSleeps();
+			const checkDelay = Duration.toMillis(interval) / 2;
+			await sleeps.waitForInitialSleeps();
 			await Effect.runPromise(sessionClock.adjust(checkDelay));
 			await stalled.waitForWaiters(1);
 			await Effect.runPromise(sessionClock.adjust(checkDelay));
