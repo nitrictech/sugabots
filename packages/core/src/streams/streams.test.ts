@@ -605,6 +605,34 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			return { ...running, stream, principal };
 		};
 
+		it("shares a proof for a control event and checks a later change again", async () => {
+			const world = await staffed();
+			let proofs = 0;
+			const running = await followWith(
+				world,
+				Effect.sync((): Streams.Hearing => {
+					proofs += 1;
+					return {
+						kind: "workspace",
+						workspace: world.workspace,
+						projects: { reached: new Set([world.project]), unreached: new Set() },
+						bots: { reached: new Set(), unreached: new Set() },
+					};
+				}),
+				"10 seconds",
+			);
+			const feed = workspaceStream(world.workspace);
+			const reader = Stream.toReadableStream(running.stream).getReader();
+			onTestFinished(() => reader.cancel());
+			const changed = streamEvent("reach.changed", { about: { kind: "workspace" } });
+
+			await commit(feed, Audience.forWorkspace(changed));
+			expect((await reader.read()).value?.event).toEqual(changed);
+			await commit(feed, Audience.forWorkspace(changed));
+			expect((await reader.read()).value?.event).toEqual(changed);
+			expect(proofs).toBe(3);
+		});
+
 		it("keeps ordered reach after an older watcher proof finishes", async () => {
 			const world = await staffed();
 			const watching = Promise.withResolvers<void>();

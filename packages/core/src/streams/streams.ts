@@ -22,6 +22,7 @@ import {
 	Layer,
 	Queue,
 	type Scope,
+	Semaphore,
 	Stream,
 } from "effect";
 import { expiryOf } from "../authentication/session.ts";
@@ -29,6 +30,7 @@ import { namedMemberColumns, toMember } from "../chats/store/participants.ts";
 import { type Database, query, serviceOperations } from "../database/database.ts";
 import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
+import { CONTROL_EVENT_TYPES } from "../database/events/sql.ts";
 import { EventStore } from "../database/events/store.ts";
 import { bot, member, placedChat, project } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
@@ -207,9 +209,6 @@ const BATCH = 100;
  */
 const UNSTORED_HELD = 256;
 
-/** The events that change what a long-running operation may do: it proves again, or ends. */
-const CONTROL_TYPES: ReadonlyArray<DurableEventType> = ["reach.changed", "session.ended"];
-
 /** What wakes a stream: something stored to read, or an event that isn't stored. */
 type Woken =
 	| { readonly kind: "stored" }
@@ -310,13 +309,14 @@ export const make = Effect.gen(function* () {
 	) {
 		const ended = Deferred.makeUnsafe<void>();
 		const end = Effect.asVoid(Deferred.succeed(ended, undefined));
-		const reachChanged = yield* Queue.sliding<void>(1);
-		const onEvent = (event: StreamEvent) => {
+		const reachChanged = yield* Queue.sliding<number | null>(1);
+		const proving = yield* Semaphore.make(1);
+		const onEvent = (event: StreamEvent, seq: number | undefined) => {
 			if (event.type === "session.ended" && endsSession(event, principal)) stop();
-			if (event.type === "reach.changed") Queue.offerUnsafe(reachChanged, undefined);
+			if (event.type === "reach.changed") Queue.offerUnsafe(reachChanged, seq ?? null);
 		};
 		const stop = () => void Deferred.doneUnsafe(ended, Effect.void);
-		const proveAgain = operation("follow", Effect.exit(prove)).pipe(
+		const recheck = operation("follow", Effect.exit(prove)).pipe(
 			Effect.tap((exit) => {
 				if (Exit.isSuccess(exit)) return Effect.void;
 				return Effect.andThen(
@@ -327,6 +327,22 @@ export const make = Effect.gen(function* () {
 				);
 			}),
 		);
+		// Share checks for the same change without making a newer change wait for an older check.
+		let lastControl: { seq: number; check: typeof recheck } | undefined;
+		const proveAgain = (seq?: number) => {
+			if (seq === undefined) return recheck;
+			return proving
+				.withPermits(1)(
+					Effect.gen(function* () {
+						if (lastControl?.seq === seq) return lastControl.check;
+						if (lastControl && seq < lastControl.seq) return recheck;
+						const check = yield* Effect.cached(recheck);
+						lastControl = { seq, check };
+						return check;
+					}),
+				)
+				.pipe(Effect.flatten);
+		};
 		return { ended, end, stop, reachChanged, onEvent, proveAgain };
 	});
 
@@ -360,23 +376,27 @@ export const make = Effect.gen(function* () {
 			}).pipe(Effect.ensuring(life.end));
 			yield* Effect.forkScoped(session);
 
-			const checkReach = (changed: boolean) =>
+			const checkReach = (changed: number | null | undefined) =>
 				Effect.gen(function* () {
 					while (true) {
-						const rows = yield* readOn(controls, () => CONTROL_TYPES);
-						for (const { event } of rows) {
+						const rows = yield* readOn(controls, () => CONTROL_EVENT_TYPES);
+						for (const { event, seq } of rows) {
 							if (event.type === "session.ended" && endsSession(event, principal)) return false;
-							if (event.type === "reach.changed") changed = true;
+							if (event.type === "reach.changed" && changed !== null) {
+								changed = Math.max(seq, changed ?? seq);
+							}
 						}
 						if (rows.length < BATCH) break;
 					}
 					caughtUp();
-					return !changed || Exit.isSuccess(yield* life.proveAgain);
+					return (
+						changed === undefined || Exit.isSuccess(yield* life.proveAgain(changed ?? undefined))
+					);
 				});
 			while (true) {
 				const changed = yield* Effect.raceFirst(
-					Queue.take(life.reachChanged).pipe(Effect.as(true)),
-					Effect.sleep(checkInterval).pipe(Effect.as(false)),
+					Queue.take(life.reachChanged),
+					Effect.sleep(checkInterval).pipe(Effect.as(undefined)),
 				);
 				const holds = yield* Effect.raceFirst(
 					checkReach(changed),
@@ -495,7 +515,7 @@ export const make = Effect.gen(function* () {
 							const controls =
 								(listened === reach && event.type === "reach.changed") ||
 								(listened === own && event.type === "session.ended");
-							if (controls) life.onEvent(event);
+							if (controls) life.onEvent(event, delivery.seq);
 							if (delivery.seq !== undefined) {
 								wakeToRead();
 							} else if (listened === stream && unstoredHeld < UNSTORED_HELD) {
@@ -532,11 +552,12 @@ export const make = Effect.gen(function* () {
 					yield* Queue.offer(outbox, { seq: start, event: streamEvent("reset") });
 				}
 				let current = first;
-				const proveForSending = Effect.map(life.proveAgain, (exit) => {
-					if (Exit.isFailure(exit)) return false;
-					current = exit.value;
-					return true;
-				});
+				const proveForSending = (seq?: number) =>
+					Effect.map(life.proveAgain(seq), (exit) => {
+						if (Exit.isFailure(exit)) return false;
+						current = exit.value;
+						return true;
+					});
 				const projects = new Map<string, string | undefined>();
 				/** Projects and bots still unknown after proving again: made and gone since. */
 				const gone = new Set<string>();
@@ -548,23 +569,24 @@ export const make = Effect.gen(function* () {
 						if (event.type === "session.ended") {
 							return endsSession(event, principal) ? END : SKIP;
 						}
-						if (event.type === "reach.changed" && !(yield* proveForSending)) return END;
+						if (event.type === "reach.changed" && !(yield* proveForSending(delivery.seq)))
+							return END;
 						const heard = yield* heardBy(current, audience, projects);
 						if (heard === "heard") return sent;
 						if (heard === "unheard" || (audience && gone.has(idOf(audience)))) return SKIP;
-						if (!(yield* proveForSending)) return END;
+						if (!(yield* proveForSending())) return END;
 						const heardNow = yield* heardBy(current, audience, projects);
 						if (heardNow === "heard") return sent;
 						if (heardNow === "unknown" && audience) gone.add(idOf(audience));
 						return SKIP;
 					});
 				/** What a stored event on a control stream other than the one followed does. */
-				const control = (event: StreamEvent) =>
+				const control = (event: StreamEvent, seq: number) =>
 					Effect.gen(function* () {
 						if (event.type === "session.ended") {
 							return endsSession(event, principal) ? END : SKIP;
 						}
-						if (event.type === "reach.changed" && !(yield* proveForSending)) return END;
+						if (event.type === "reach.changed" && !(yield* proveForSending(seq))) return END;
 						return SKIP;
 					});
 				const send = (outcome: Outcome) =>
@@ -576,11 +598,11 @@ export const make = Effect.gen(function* () {
 				const readStored = Effect.gen(function* () {
 					while (true) {
 						const rows = yield* readOn(feeds, (feed) =>
-							feed === stream ? undefined : CONTROL_TYPES,
+							feed === stream ? undefined : CONTROL_EVENT_TYPES,
 						);
 						for (const row of rows) {
 							const outcome =
-								row.stream === stream ? yield* decide(row) : yield* control(row.event);
+								row.stream === stream ? yield* decide(row) : yield* control(row.event, row.seq);
 							if (!(yield* send(outcome))) return false;
 						}
 						if (rows.length < BATCH) return true;
@@ -624,15 +646,15 @@ export const make = Effect.gen(function* () {
 
 				yield* listen(
 					reach,
-					({ event }) => {
-						if (event.type === "reach.changed") life.onEvent(event);
+					({ event, seq }) => {
+						if (event.type === "reach.changed") life.onEvent(event, seq);
 					},
 					life.stop,
 				);
 				yield* listen(
 					own,
-					({ event }) => {
-						if (event.type === "session.ended") life.onEvent(event);
+					({ event, seq }) => {
+						if (event.type === "session.ended") life.onEvent(event, seq);
 					},
 					life.stop,
 				);
