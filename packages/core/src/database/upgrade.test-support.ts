@@ -113,11 +113,17 @@ export type LegacyFile =
 	| { kind: "thread"; threadId: string; fileId: string; text: string }
 	| { kind: "version"; fileId: string; versionId: string; text: string };
 
+const orphanedCollaboration = "0000000f-0000-4000-8000-000000000021";
+const askingBot = "0000000c-0000-4000-8000-000000000020";
+const askingTurn = "00000002-0000-4000-8000-000000000124";
+const askingReply = "00000001-0000-4000-8000-000000000125";
+
 export const migrationScale = {
 	memberlessWorkspace: "0000000a-0000-4000-8000-000000000002",
 	memberlessPod: "0000000d-0000-4000-8000-000000000020",
 	memberlessGeneral: "0000000f-0000-4000-8000-000000000020",
-	orphanedCollaboration: "0000000f-0000-4000-8000-000000000021",
+	orphanedCollaboration,
+	collaborationReply: "00000001-0000-4000-8000-000000000124",
 	hostlessPersonalChat: "0000000f-0000-4000-8000-000000000022",
 	unattributedRequest: "00000015-0000-4000-8000-000000000020",
 	unclaimedRun: "00000009-0000-4000-8000-000000000003",
@@ -128,6 +134,12 @@ export const migrationScale = {
 	reservedBot: "0000000c-0000-4000-8000-000000000006",
 	cyclicChat: "0000000f-0000-4000-8000-000000000025",
 	files: {
+		collaborationAttachment: {
+			kind: "thread",
+			threadId: orphanedCollaboration,
+			fileId: "00000004-0000-4000-8000-000000000021",
+			text: "Budget breakdown",
+		},
 		collaboration: {
 			kind: "version",
 			fileId: "00000006-0000-4000-8000-000000000020",
@@ -579,16 +591,28 @@ VALUES ('${migrationScale.memberlessPod}', '${migrationScale.memberlessWorkspace
 INSERT INTO "thread" ("id", "workspace_id", "pod_id", "type", "main", "title", "conversation_id")
 VALUES ('${migrationScale.memberlessGeneral}', '${migrationScale.memberlessWorkspace}', '${migrationScale.memberlessPod}', 'pod_chat', true, 'General', '${migrationScale.memberlessGeneral}');
 
--- Written files outlived one collaboration's record and a personal chat has no host.
+-- The asking bot's deletion takes the collaboration record with it.
 INSERT INTO "thread" ("id", "workspace_id", "pod_id", "host_agent_id", "type", "title", "conversation_id", "parent_thread_id") VALUES
  ('${migrationScale.orphanedCollaboration}', '${legacy.workspace}', '${legacy.pods.family}', '${legacy.bots.budget}', 'collaboration', 'Budget', '${legacy.threads.trip}', '${legacy.threads.trip}'),
  ('${migrationScale.hostlessPersonalChat}', '${legacy.workspace}', '0000000d-0000-4000-8000-000000000003', NULL, 'conversation', 'Files', '${migrationScale.hostlessPersonalChat}', NULL);
+INSERT INTO "agent" ("id", "workspace_id", "pod_id", "name", "handle", "color", "face")
+VALUES ('${askingBot}', '${legacy.workspace}', '${legacy.pods.family}', 'Travel', 'travel', 'sky', 'dot');
+INSERT INTO "turn" ("id", "thread_id", "agent_id", "trigger_message_id", "status", "model", "reason", "started_at", "finished_at")
+VALUES ('${askingTurn}', '${legacy.threads.trip}', '${askingBot}', '${legacy.tripMessages.asked}', 'done', 'm', 'mention', '2026-10-05 09:03', '2026-10-05 09:06');
+INSERT INTO "message" ("id", "thread_id", "author_agent_id", "kind", "status", "parts", "content") VALUES
+ ('${askingReply}', '${legacy.threads.trip}', '${askingBot}', 'text', 'complete', '[]', ''),
+ ('${migrationScale.collaborationReply}', '${migrationScale.orphanedCollaboration}', '${legacy.bots.budget}', 'text', 'complete', '[{"type":"text","text":"The budget is ready."}]', 'The budget is ready.');
+INSERT INTO "collaboration" ("parent_thread_id", "parent_message_id", "turn_id", "child_thread_id", "collaborator_agent_id", "brief", "status", "answer", "at_offset")
+VALUES ('${legacy.threads.trip}', '${askingReply}', '${askingTurn}', '${migrationScale.orphanedCollaboration}', '${legacy.bots.budget}', 'Check the budget', 'done', 'The budget is ready.', 0);
+INSERT INTO "thread_file" ("id", "thread_id", "kind", "name", "content_type", "size", "message_id", "position")
+VALUES ('${migrationScale.files.collaborationAttachment.fileId}', '${migrationScale.orphanedCollaboration}', 'agent_attachment', 'budget.txt', 'text/plain', ${migrationScale.files.collaborationAttachment.text.length}, '${migrationScale.collaborationReply}', 0);
 INSERT INTO "artifact" ("id", "workspace_id", "pod_id", "kind", "title", "current_version", "created_by_agent_id", "created_in_thread_id") VALUES
  ('${migrationScale.files.collaboration.fileId}', '${legacy.workspace}', '${legacy.pods.family}', 'document', 'Budget', 1, '${legacy.bots.budget}', '${migrationScale.orphanedCollaboration}'),
  ('${migrationScale.files.personal.fileId}', '${legacy.workspace}', '0000000d-0000-4000-8000-000000000003', 'document', 'Personal notes', 1, '${legacy.bots.helper}', '${migrationScale.hostlessPersonalChat}');
 INSERT INTO "artifact_version" ("id", "artifact_id", "number", "content_type", "size") VALUES
  ('${migrationScale.files.collaboration.versionId}', '${migrationScale.files.collaboration.fileId}', 1, 'text/markdown', ${migrationScale.files.collaboration.text.length}),
  ('${migrationScale.files.personal.versionId}', '${migrationScale.files.personal.fileId}', 1, 'text/markdown', ${migrationScale.files.personal.text.length});
+DELETE FROM "agent" WHERE "id" = '${askingBot}';
 UPDATE "agent" SET "created_by_id" = NULL WHERE "id" = '${legacy.bots.helper}';
 INSERT INTO "model_request" ("id", "workspace_id", "purpose", "step", "provider_id", "model", "outcome", "started_at", "ended_at", "cost_usd", "cost_source")
 VALUES ('${migrationScale.unattributedRequest}', '${legacy.workspace}', 'agent-turn', 0, '${legacy.provider}', 'm', 'completed', '2026-10-05 09:01', '2026-10-05 09:02', 0.5, 'provider-reported');

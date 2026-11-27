@@ -410,6 +410,16 @@ ON CONFLICT DO NOTHING;--> statement-breakpoint
 -- becomes one of that bot's threads, outside any project.
 UPDATE "thread" SET "type" = 'pod_chat'
 WHERE "type" = 'conversation' AND "host_agent_id" IS NULL AND "pod_id" IS NOT NULL;--> statement-breakpoint
+-- Deleting the asking bot can leave its helper's chat without a collaboration
+-- record. Its old parent link keeps the replies with the same pod's members.
+CREATE TEMP TABLE "collaboration_parent" ON COMMIT DROP AS
+SELECT child."id" AS "chat_id", parent."id" AS "parent_chat_id"
+FROM "thread" child
+JOIN "thread" parent ON parent."id" = coalesce(child."parent_thread_id", child."conversation_id")
+	AND parent."workspace_id" = child."workspace_id" AND parent."pod_id" = child."pod_id"
+WHERE child."type" = 'collaboration' AND parent."type" <> 'system_agent'
+	AND NOT EXISTS (SELECT 1 FROM "collaboration" WHERE "child_thread_id" = child."id");--> statement-breakpoint
+ALTER TABLE "collaboration_parent" ADD PRIMARY KEY ("chat_id");--> statement-breakpoint
 UPDATE "thread" SET "type" = 'conversation', "pod_id" = NULL WHERE "type" = 'bot_channel';--> statement-breakpoint
 UPDATE "thread" SET "pod_id" = NULL WHERE "type" <> 'pod_chat' AND "pod_id" IS NOT NULL;--> statement-breakpoint
 -- Keep written files listed by a pod even if their chat cannot be migrated.
@@ -421,6 +431,8 @@ WITH RECURSIVE removed_chat AS (
 	WHERE (p."kind" = 'personal' AND t."type" = 'pod_chat')
 		OR (t."type" = 'collaboration' AND NOT EXISTS (
 			SELECT 1 FROM "collaboration" c WHERE c."child_thread_id" = t."id"
+		) AND NOT EXISTS (
+			SELECT 1 FROM "collaboration_parent" c WHERE c."chat_id" = t."id"
 		))
 		OR (t."type" = 'routine' AND NOT EXISTS (
 			SELECT 1 FROM "routine_execution" r WHERE r."thread_id" = t."id"
@@ -440,6 +452,7 @@ WITH RECURSIVE removed_chat AS (
 	) dependent
 )
 SELECT "id" FROM removed_chat;--> statement-breakpoint
+DELETE FROM "collaboration_parent" WHERE "chat_id" IN (SELECT "id" FROM "removed_chat");--> statement-breakpoint
 CREATE TEMP TABLE "removed_collaboration_folder" ON COMMIT DROP AS
 SELECT t."id" AS "from_chat_id", parent."id" AS "to_chat_id"
 FROM "thread" t
@@ -1303,14 +1316,13 @@ CREATE TRIGGER system_conversation_conversation_deletion
 AFTER DELETE ON "system_conversation"
 FOR EACH ROW EXECUTE FUNCTION delete_conversation_of_kind_row();
 --> statement-breakpoint
--- The trigger checks only conversations written from now on. One an earlier
--- version left without what makes it its kind, such as a collaboration nested
--- under one whose record was deleted, nothing can reach any more: it goes, with
--- what is in it, and its own nested collaborations by the triggers above.
+-- A conversation without its kind row goes, except a collaboration whose
+-- parent is known. Its messages and files move to that parent below.
 DELETE FROM "conversation" AS c WHERE NOT CASE c."kind"
 	WHEN 'project_chat' THEN EXISTS (SELECT 1 FROM "task" WHERE "conversation_id" = c."id")
 		OR EXISTS (SELECT 1 FROM "channel_conversation" WHERE "conversation_id" = c."id")
 	WHEN 'collaboration' THEN EXISTS (SELECT 1 FROM "collaboration" WHERE "conversation_id" = c."id")
+		OR EXISTS (SELECT 1 FROM "collaboration_parent" WHERE "chat_id" = c."id")
 	WHEN 'run' THEN EXISTS (SELECT 1 FROM "run" WHERE "conversation_id" = c."id")
 	WHEN 'automation_feed' THEN EXISTS (SELECT 1 FROM "automation_feed" WHERE "conversation_id" = c."id")
 	WHEN 'system_chat' THEN EXISTS (SELECT 1 FROM "system_conversation" WHERE "conversation_id" = c."id")
@@ -2552,16 +2564,19 @@ WHERE "prefix" LIKE 'threads/%';--> statement-breakpoint
 -- A helper's failed turn its workflow will start again has not ended, which
 -- its asking bot's hand-back waits for.
 ALTER TABLE "turn" ADD COLUMN "retrying" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+INSERT INTO "collaboration_parent" ("chat_id", "parent_chat_id")
+SELECT "chat_id", "parent_chat_id" FROM "collaboration";--> statement-breakpoint
+CREATE INDEX ON "collaboration_parent" ("parent_chat_id");--> statement-breakpoint
 CREATE TEMP TABLE "collaboration_move" ON COMMIT DROP AS
 WITH RECURSIVE descendants AS (
 	SELECT child."chat_id", child."parent_chat_id" AS "target_chat_id"
-	FROM "collaboration" child
-	WHERE NOT EXISTS (SELECT 1 FROM "collaboration" parent WHERE parent."chat_id" = child."parent_chat_id")
+	FROM "collaboration_parent" child
+	WHERE NOT EXISTS (SELECT 1 FROM "collaboration_parent" parent WHERE parent."chat_id" = child."parent_chat_id")
 	UNION ALL
 	SELECT child."chat_id", descendants."target_chat_id"
 	FROM descendants
 	CROSS JOIN LATERAL (
-		SELECT "chat_id" FROM "collaboration" WHERE "parent_chat_id" = descendants."chat_id"
+		SELECT "chat_id" FROM "collaboration_parent" WHERE "parent_chat_id" = descendants."chat_id"
 		-- Keep the parent index lookup for each chat when the tree is deep.
 		OFFSET 0
 	) child
@@ -2574,12 +2589,13 @@ DECLARE
 	affected_chats uuid[];
 BEGIN
 	SELECT array_agg(child."chat_id" ORDER BY child."chat_id") INTO affected_chats
-	FROM "collaboration" child
+	FROM "collaboration_parent" child
 	WHERE NOT EXISTS (SELECT 1 FROM "collaboration_move" moved WHERE moved."chat_id" = child."chat_id");
 	IF affected_chats IS NOT NULL THEN
 		RAISE EXCEPTION 'Collaboration chat ancestry has a cycle: %', array_to_string(affected_chats, ', ');
 	END IF;
 END $$;--> statement-breakpoint
+DROP TABLE "collaboration_parent";--> statement-breakpoint
 CREATE TABLE "computer_folder_move" (
 	"from_chat_id" uuid PRIMARY KEY,
 	"to_chat_id" uuid NOT NULL,

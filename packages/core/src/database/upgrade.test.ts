@@ -1070,14 +1070,35 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(bot?.handle).not.toMatch(/^(here|channel|personal-assistant(-\d+)?)$/);
 		});
 
-		it("keeps written files from removed chats within their original audience", async () => {
+		it("keeps replies and attachments from a collaboration whose asking bot was deleted", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const pat = await upgraded.signIn(legacy.members.pat);
+			const ana = await upgraded.signIn(legacy.members.ana);
+			const chatId = legacy.threads.trip;
+			const chat = await call(pat, "chats.get", { chatId, limit: 20 });
+			expect(chat.messages).toContainEqual(
+				expect.objectContaining({
+					id: migrationScale.collaborationReply,
+					content: "The budget is ready.",
+				}),
+			);
+			const { fileId, text } = migrationScale.files.collaborationAttachment;
+			const attachment = await call(pat, "chats.file", { chatId, fileId });
+			const chunks = await Effect.runPromise(Stream.runCollect(attachment.stream));
+			expect(Buffer.concat(chunks).toString("utf8")).toBe(text);
+			await expect(call(ana, "chats.file", { chatId, fileId })).rejects.toBeInstanceOf(
+				ResourceHidden,
+			);
+		});
+
+		it("keeps written files from a folded collaboration and a removed personal chat", async () => {
 			const { collaboration, personal } = migrationScale.files;
 			expect(
 				await upgraded.rows(`select id, chat_id from file where id = any($1) order by id`, [
 					[collaboration.fileId, personal.fileId],
 				]),
 			).toEqual([
-				{ id: collaboration.fileId, chat_id: legacy.threads.general },
+				{ id: collaboration.fileId, chat_id: legacy.threads.trip },
 				{ id: personal.fileId, chat_id: legacy.threads.report },
 			]);
 			for (const file of [collaboration, personal]) {
