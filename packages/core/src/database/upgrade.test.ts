@@ -2559,19 +2559,12 @@ it.skipIf(!process.env.DATABASE_URL)(
 					from generate_series(1, 8997) ordinal;
 					analyze message, lane, lane_request, "turn", message_reaction, file, tool_call;
 				`);
-				const { rows: plan } = await client.query<{ "QUERY PLAN": string }>(
-					`explain (analyze, timing off) ${cleanup}`,
-				);
+				const discardedPairs = await countDiscardedPairs(client, cleanup);
 				const { rows: kept } = await client.query(
 					`select ordinal from generate_series(1, 3000) ordinal
 					 join message on id = md5('reply' || ordinal)::uuid order by ordinal`,
 				);
 				expect(kept).toEqual([{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }, { ordinal: 4 }]);
-				const discardedPairs = plan.reduce(
-					(count, { "QUERY PLAN": line }) =>
-						count + Number(/Rows Removed by Join Filter: (\d+)/.exec(line)?.[1] ?? 0),
-					0,
-				);
 				expect(discardedPairs).toBeLessThan(10_000);
 			} finally {
 				await client.query("rollback");
