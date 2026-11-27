@@ -12,7 +12,7 @@
  * operation's errors with. Every one needs a session.
  */
 
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi";
 import {
 	type HttpMethod,
@@ -137,13 +137,9 @@ function endpointOf(contract: OperationContract.Contract, offer: HttpOffer) {
 	const verb = contract.name.slice(contract.name.indexOf(".") + 1);
 	// `checkExposure` holds every offered operation's input to a struct.
 	const { fields } = contract.input as Schema.Struct<Schema.Struct.Fields>;
-	const parameterNames = new Set(pathParameters(offer.path));
-	const fieldsWhere = (isParameter: boolean) =>
-		Object.fromEntries(
-			Object.entries(fields).filter(([field]) => parameterNames.has(field) === isParameter),
-		);
-	const parameters = fieldsWhere(true);
-	const others = fieldsWhere(false);
+	const parameterNames = pathParameters(offer.path);
+	const parameters = Struct.pick(fields, parameterNames);
+	const others = Struct.omit(fields, parameterNames);
 	const hasOthers = Object.keys(others).length > 0;
 	const bodiless = bodilessMethods.has(offer.method);
 	const answersNothing = contract.output.ast._tag === "Void";
@@ -155,7 +151,7 @@ function endpointOf(contract: OperationContract.Contract, offer: HttpOffer) {
 		),
 	];
 	return HttpApiEndpoint.make(offer.method)(verb, offer.path, {
-		params: parameterNames.size > 0 ? parameters : undefined,
+		params: parameterNames.length > 0 ? parameters : undefined,
 		query: bodiless && hasOthers ? others : undefined,
 		payload: !bodiless && hasOthers ? Schema.Struct(others) : undefined,
 		success: answersNothing
