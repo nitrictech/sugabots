@@ -11,16 +11,20 @@ export const addTrigger = defineOperation(
 	(principal, input) =>
 		Effect.gen(function* () {
 			const automations = yield* ProjectAutomations.Service;
-			return yield* named(principal, input.projectId, input.automationId, (principal, project, automation) =>
-				Effect.gen(function* () {
-					const { reach, target } = yield* proveReachesProjectAutomation(
-						principal,
-						project,
-						automation,
-					);
-					const canManage = yield* proveCanManageProject(reach);
-					return yield* automations.addTrigger(canManage, automation, target, input.trigger);
-				}),
+			return yield* named(
+				principal,
+				input.projectId,
+				input.automationId,
+				(principal, project, automation) =>
+					Effect.gen(function* () {
+						const { reach, target } = yield* proveReachesProjectAutomation(
+							principal,
+							project,
+							automation,
+						);
+						const canManage = yield* proveCanManageProject(reach);
+						return yield* automations.addTrigger(canManage, automation, target, input.trigger);
+					}),
 			);
 		}),
 );

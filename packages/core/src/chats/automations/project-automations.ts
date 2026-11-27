@@ -49,7 +49,7 @@ import type {
 } from "../../proofs/reaches-project-automation.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { ChatStore } from "../store/store.ts";
-import { holdTurnOf, type FenceRefusal } from "../turns/turns.ts";
+import { type FenceRefusal, holdTurnOf } from "../turns/turns.ts";
 import type { RoutineInput, Scope } from "./automation.ts";
 import { automationsOf, projectRunsPage, restrictableAutomations } from "./automation-view.ts";
 import { makeAcceptWebhook, type WebhookAnswer } from "./automation-webhooks.ts";

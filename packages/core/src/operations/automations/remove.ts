@@ -11,16 +11,20 @@ export const remove = defineOperation(
 	(principal, input) =>
 		Effect.gen(function* () {
 			const automations = yield* ProjectAutomations.Service;
-			return yield* named(principal, input.projectId, input.automationId, (principal, project, automation) =>
-				Effect.gen(function* () {
-					const { reach, target } = yield* proveReachesProjectAutomation(
-						principal,
-						project,
-						automation,
-					);
-					const canManage = yield* proveCanManageProject(reach);
-					return yield* automations.remove(canManage, automation, target);
-				}),
+			return yield* named(
+				principal,
+				input.projectId,
+				input.automationId,
+				(principal, project, automation) =>
+					Effect.gen(function* () {
+						const { reach, target } = yield* proveReachesProjectAutomation(
+							principal,
+							project,
+							automation,
+						);
+						const canManage = yield* proveCanManageProject(reach);
+						return yield* automations.remove(canManage, automation, target);
+					}),
 			);
 		}),
 );

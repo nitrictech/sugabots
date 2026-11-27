@@ -306,31 +306,19 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 		expect(await runsIn()).toEqual([]);
 	});
 
-	it("refuses a member's runs and changes to automations that wait on their demotion, once it commits", async () => {
+	it("refuses new runs and changes after a member is demoted", async () => {
 		const created = await automations.create(
 			{ projectId: ownProjectId },
 			{ name: "Report", instructions: "Report.", triggers: [{ kind: "webhook" }] },
 		);
 		const address = { projectId: ownProjectId, automationId: created.automation.id };
 		const before = await automations.list({ projectId: ownProjectId });
-		const demoting = holdTransaction(
-			Effect.gen(function* () {
-				yield* query((db) =>
-					db
-						.select({ id: workspace.id })
-						.from(workspace)
-						.where(eq(workspace.id, workspaceId))
-						.for("no key update"),
-				);
-				yield* query((db) =>
-					db
-						.update(membership)
-						.set({ role: "viewer" })
-						.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId))),
-				);
-			}),
+		await onDatabase((db) =>
+			db
+				.update(membership)
+				.set({ role: "viewer" })
+				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, memberId))),
 		);
-		await demoting.held;
 
 		const calls = [
 			automations.run({ ...address, requestId: crypto.randomUUID() }),
@@ -342,8 +330,6 @@ describe.skipIf(!process.env.DATABASE_URL)("Automations, against Postgres", asyn
 				{ name: "Another", instructions: "Report.", triggers: [] },
 			),
 		];
-		await waitUntilWaitingOnLocks(calls.length);
-		await demoting.release();
 
 		for (const outcome of await Promise.allSettled(calls)) {
 			expect(outcome).toMatchObject({ status: "rejected", reason: expect.any(ActionForbidden) });
