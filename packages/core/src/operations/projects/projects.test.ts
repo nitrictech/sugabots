@@ -107,7 +107,7 @@ describe("the projects operations, beyond who may call them", () => {
 			ownPersonalBot: await naming(a.personal.id),
 		}).toEqual({
 			someoneElsesPersonalBot: ["ResourceHidden", "ResourceHidden", "ResourceHidden"],
-			ownPersonalBot: ["BotNotPublic", "ResourceHidden", "BotNotPublic"],
+			ownPersonalBot: ["PersonalBotInProject", "ResourceHidden", "PersonalBotInProject"],
 		});
 	});
 });

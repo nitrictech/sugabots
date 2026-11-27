@@ -13,6 +13,7 @@ export const personalBot: Bot = {
 		update: false,
 		delete: true,
 		talk: false,
+		manageMembers: false,
 		resources: {
 			openSettings: true,
 			readHistory: false,

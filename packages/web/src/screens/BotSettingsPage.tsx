@@ -11,10 +11,17 @@ import {
 	INSTRUCTIONS_MAX_LENGTH,
 } from "@sugabots/contracts";
 import { ProviderLogo } from "@sugabots/provider-logos";
-import { Link, useRouter } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { ArrowUpRight, ChevronDown, Pencil } from "lucide-react";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
-import { useDeleteBot, useModels, useUpdateBot, whoseBot } from "@/lib/bots.ts";
+import {
+	useBotMembers,
+	useDeleteBot,
+	useModels,
+	usePlaceBotMember,
+	useUpdateBot,
+	whoseBot,
+} from "@/lib/bots.ts";
 import { characterCount } from "@/lib/character-count.ts";
 import { useComputerAccess } from "@/lib/computer-providers.ts";
 import { usableToolCount, useConnectors } from "@/lib/connectors.ts";
@@ -48,6 +55,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 import { InstructionsField } from "@/ui/instructions-field.tsx";
+import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import {
 	SettingsControlRow,
 	SettingsDanger,
@@ -60,6 +68,7 @@ import {
 import { Toggle } from "@/ui/toggle.tsx";
 import { useCommittedDraft } from "@/ui/use-committed-draft.ts";
 import { BotAutomations } from "./AutomationEditing.tsx";
+import { AddMembersMenu, MemberRows } from "./MemberList.tsx";
 
 /*
  * One bot's settings, as a page of its own beside its chats, and as its
@@ -154,6 +163,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 						/>
 						{!assistant && <AddedByRow bot={bot} />}
 					</SettingsGroup>
+					{bot.visibility === "private" && <BotMembers bot={bot} />}
 					{!assistant && (
 						<Instructions bot={bot} editable={may.update} save={save} savePending={savePending} />
 					)}
@@ -737,25 +747,156 @@ function ToolRow({
 	);
 }
 
+/** What each visibility means for who reaches a bot, as its settings say it. */
+const VISIBILITY_MEANINGS = {
+	public: "Everyone in the workspace can see it, talk to it and add it to projects",
+	private: "Only its members can see it and talk to it. It can join private projects only",
+} as const;
+
+/** What switching a bot to each visibility changes, asked before it is switched. */
+const VISIBILITY_SWITCHES = {
+	public: {
+		label: "Make public",
+		description:
+			"Everyone in the workspace will be able to see it and talk to it, and read its chats and files. It can then join any project.",
+	},
+	private: {
+		label: "Make private",
+		description:
+			"Only you, admins and the members you add will see it and its chats and files. It will leave every public project it's in. If it leads one, choose another lead bot there first.",
+	},
+} as const;
+
 /**
- * Whether everyone in the workspace sees the bot, or only its creator. It is
- * chosen when the bot is made and never changes, so there is no toggle.
+ * Who sees the bot: everyone in the workspace, its members, or only its
+ * creator. Whoever manages a public or private bot may switch it between the
+ * two, after a word on what changes; whether a bot is personal is chosen when
+ * it is made and never changes.
  */
 function VisibilityRow({ bot }: { bot: Bot }) {
-	const isPublic = bot.visibility === "public";
 	const viewerId = useSession().member?.id;
-	const mine = bot.createdBy !== null && bot.createdBy.id === viewerId;
-	return (
-		<SettingsRow
-			label="Visibility"
-			sub={
-				isPublic
-					? "Everyone in the workspace can see it, talk to it and add it to projects"
-					: mine
+	const update = useUpdateBot(bot.id);
+	const [switching, setSwitching] = useState<"public" | "private">();
+	if (bot.visibility === "personal") {
+		const mine = bot.createdBy !== null && bot.createdBy.id === viewerId;
+		return (
+			<SettingsRow
+				label="Visibility"
+				sub={
+					mine
 						? "Only you can see it and talk to it, and it works with your permissions"
 						: "Only the member who made it can see it and talk to it"
+				}
+				trailing={<SettingsValue>Personal</SettingsValue>}
+			/>
+		);
+	}
+	const current = bot.visibility;
+	const asked = switching && VISIBILITY_SWITCHES[switching];
+	return (
+		<>
+			<SettingsRow
+				label="Visibility"
+				sub={VISIBILITY_MEANINGS[current]}
+				trailing={
+					bot.permissions.update ? (
+						<SegmentedControl
+							label="Visibility"
+							options={[
+								{ value: "public", label: "Public" },
+								{ value: "private", label: "Private" },
+							]}
+							value={current}
+							onChange={(chosen) => {
+								if (chosen !== current) setSwitching(chosen);
+							}}
+						/>
+					) : (
+						<SettingsValue>{current === "public" ? "Public" : "Private"}</SettingsValue>
+					)
+				}
+			/>
+			<DeleteDialog
+				open={switching !== undefined}
+				onOpenChange={(open) => {
+					if (!open) {
+						setSwitching(undefined);
+						update.reset();
+					}
+				}}
+				title={`Make ${bot.name} ${switching ?? ""}?`}
+				description={asked?.description ?? ""}
+				confirmLabel={asked?.label}
+				pending={update.isPending}
+				error={update.error ? failureMessage(update.error) : undefined}
+				onDelete={async () => {
+					if (!switching) return;
+					try {
+						await update.mutateAsync({ visibility: switching });
+					} catch {
+						return;
+					}
+					setSwitching(undefined);
+				}}
+			/>
+		</>
+	);
+}
+
+/**
+ * A private bot's members, who see it and talk to it: whoever made it, the
+ * workspace's admins, and whoever its members invite. Any member but a
+ * viewer may add and remove them.
+ */
+function BotMembers({ bot }: { bot: Bot }) {
+	const members = useBotMembers(bot.id);
+	const place = usePlaceBotMember(bot.id);
+	const navigate = useNavigate();
+	const viewerId = useSession().member?.id;
+	const may = bot.permissions.manageMembers;
+	const isYou = (memberId: string) => memberId === viewerId;
+	return (
+		<MemberRows
+			label="Members"
+			description="Who can see it and talk to it, and read its chats and files. Admins are always members."
+			action={
+				may && (
+					<AddMembersMenu
+						workspaceId={bot.workspaceId}
+						present={members.data}
+						onAdd={(memberId) => place.mutate({ memberId, member: true })}
+						pending={place.isPending}
+						error={place.error}
+					/>
+				)
 			}
-			trailing={<SettingsValue>{isPublic ? "Public" : "Personal"}</SettingsValue>}
+			workspaceId={bot.workspaceId}
+			members={members}
+			emptyLabel="Nobody is a member yet"
+			mayRemove={(member) => may && member.removable}
+			removeLabel={(member) =>
+				isYou(member.memberId) ? "Remove yourself" : `Remove ${member.name}`
+			}
+			confirmation={(member) =>
+				isYou(member.memberId)
+					? {
+							title: `Remove yourself from ${bot.name}?`,
+							description: "You won't see it or its chats any more, unless a member adds you back.",
+							confirmLabel: "Remove",
+						}
+					: {
+							title: `Remove ${member.name} from ${bot.name}?`,
+							description:
+								"They won't see it or its chats any more. You can add them back at any time.",
+							confirmLabel: "Remove",
+						}
+			}
+			onRemove={async (member) => {
+				await place.mutateAsync({ memberId: member.memberId, member: false });
+				if (isYou(member.memberId)) await navigate(botsLink());
+			}}
+			pending={place.isPending}
+			error={place.error}
 		/>
 	);
 }

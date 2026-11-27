@@ -234,6 +234,15 @@ ALTER TABLE "agent" ADD COLUMN "visibility" text DEFAULT 'public' NOT NULL;--> s
 ALTER TABLE "agent" ADD COLUMN "assistant_of" uuid;--> statement-breakpoint
 ALTER TABLE "pod" ADD COLUMN "description" text;--> statement-breakpoint
 ALTER TABLE "pod" ADD COLUMN "visibility" text DEFAULT 'public' NOT NULL;--> statement-breakpoint
+-- Only its people reached a `pod`, so each one kept is a private project,
+-- whose members they stay.
+UPDATE "pod" SET "visibility" = 'private';--> statement-breakpoint
+-- Only its people reached a `shared` `pod`'s bots, so each becomes a private
+-- bot, with them as its members. Marked here, while a bot still names its
+-- `pod`; "Private bots" below makes them private, once private bots exist.
+ALTER TABLE "agent" ADD COLUMN "in_shared_pod" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+UPDATE "agent" SET "in_shared_pod" = true
+FROM "pod" WHERE "pod"."id" = "agent"."pod_id" AND "pod"."kind" = 'shared';--> statement-breakpoint
 CREATE INDEX "pinned_agent_agent_id_idx" ON "pinned_agent" ("agent_id");--> statement-breakpoint
 CREATE INDEX "pod_agent_agent_id_idx" ON "pod_agent" ("agent_id");--> statement-breakpoint
 ALTER TABLE "pinned_agent" ADD CONSTRAINT "pinned_agent_workspace_member_fkey" FOREIGN KEY ("workspace_id","user_id") REFERENCES "workspace_member"("workspace_id","user_id") ON DELETE CASCADE;--> statement-breakpoint
@@ -3284,3 +3293,81 @@ CREATE TRIGGER session_ended
 AFTER DELETE ON "session"
 REFERENCING OLD TABLE AS ended_sessions
 FOR EACH STATEMENT EXECUTE FUNCTION publish_ended_sessions();
+--> statement-breakpoint
+-- ## Private bots
+-- A bot may be private: reached only by its members, as a private project
+-- is. The owner and admins are members of every private bot, as of every
+-- project members made, so `bot_member` is the whole list of who reaches one.
+CREATE TABLE "bot_member" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"workspace_id" uuid NOT NULL,
+	"bot_id" uuid NOT NULL,
+	"member_id" uuid NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX "bot_member_idx" ON "bot_member" ("bot_id","member_id");--> statement-breakpoint
+CREATE INDEX "bot_member_member_id_idx" ON "bot_member" ("member_id");--> statement-breakpoint
+ALTER TABLE "bot_member" ADD CONSTRAINT "bot_member_bot_workspace_fkey" FOREIGN KEY ("bot_id","workspace_id") REFERENCES "bot"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "bot_member" ADD CONSTRAINT "bot_member_membership_fkey" FOREIGN KEY ("workspace_id","member_id") REFERENCES "membership"("workspace_id","member_id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "bot" DROP CONSTRAINT "bot_visibility_check", ADD CONSTRAINT "bot_visibility_check" CHECK ("visibility" in ('public', 'private', 'personal'));--> statement-breakpoint
+-- Serialises every write that decides whether an administrator is in a private bot, as `lock_project_membership` does for projects.
+CREATE FUNCTION lock_bot_membership(workspace uuid) RETURNS void
+LANGUAGE sql AS $$
+	SELECT pg_advisory_xact_lock(hashtext('bot_membership:' || workspace::text));
+$$;--> statement-breakpoint
+CREATE FUNCTION add_administrators_to_private_bot() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+	PERFORM lock_bot_membership(NEW."workspace_id");
+	INSERT INTO "bot_member" ("workspace_id", "bot_id", "member_id")
+	SELECT NEW."workspace_id", NEW."id", "member_id"
+	FROM "membership"
+	WHERE "workspace_id" = NEW."workspace_id" AND "role" IN ('owner', 'admin') AND NOT "leaving"
+	ON CONFLICT ("bot_id", "member_id") DO NOTHING;
+	RETURN NULL;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER bot_administrators
+AFTER INSERT OR UPDATE OF "visibility" ON "bot"
+FOR EACH ROW WHEN (NEW."visibility" = 'private')
+EXECUTE FUNCTION add_administrators_to_private_bot();--> statement-breakpoint
+-- Only adds: somebody demoted keeps the private bots they are in.
+CREATE FUNCTION add_new_administrator_to_private_bots() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+	PERFORM lock_bot_membership(NEW."workspace_id");
+	INSERT INTO "bot_member" ("workspace_id", "bot_id", "member_id")
+	SELECT NEW."workspace_id", "id", NEW."member_id"
+	FROM "bot"
+	WHERE "workspace_id" = NEW."workspace_id" AND "visibility" = 'private'
+	ON CONFLICT ("bot_id", "member_id") DO NOTHING;
+	RETURN NULL;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER administrator_private_bots
+AFTER INSERT OR UPDATE OF "role" ON "membership"
+FOR EACH ROW WHEN (NEW."role" IN ('owner', 'admin') AND NOT NEW."leaving")
+EXECUTE FUNCTION add_new_administrator_to_private_bots();--> statement-breakpoint
+-- A `shared` `pod`'s bots become private, its people their members (the
+-- trigger above adds the owner and admins), with each bot's creator while
+-- they are in the workspace. Each stays in the private project its `pod`
+-- became, so its own chats, files, connectors and automations, in its default
+-- project, are reached by those who reached them before, and nobody else.
+UPDATE "bot" SET "visibility" = 'private' WHERE "in_shared_pod";--> statement-breakpoint
+INSERT INTO "bot_member" ("workspace_id", "bot_id", "member_id")
+SELECT b."workspace_id", b."id", pm."member_id"
+FROM "bot" b
+INNER JOIN "project_bot" pb ON pb."bot_id" = b."id"
+INNER JOIN "project" p ON p."id" = pb."project_id" AND p."default_of_bot_id" IS NULL
+INNER JOIN "project_member" pm ON pm."project_id" = p."id"
+WHERE b."in_shared_pod"
+ON CONFLICT ("bot_id", "member_id") DO NOTHING;--> statement-breakpoint
+INSERT INTO "bot_member" ("workspace_id", "bot_id", "member_id")
+SELECT b."workspace_id", b."id", b."created_by_id"
+FROM "bot" b
+INNER JOIN "membership" m ON m."workspace_id" = b."workspace_id"
+	AND m."member_id" = b."created_by_id" AND NOT m."leaving"
+WHERE b."in_shared_pod"
+ON CONFLICT ("bot_id", "member_id") DO NOTHING;--> statement-breakpoint
+ALTER TABLE "bot" DROP COLUMN "in_shared_pod";

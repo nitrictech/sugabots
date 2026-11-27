@@ -32,12 +32,21 @@ const publicBotBy = (createdById: string | null): BotFacts => ({
 	visibility: "public",
 	createdById,
 	assistantOf: null,
+	memberIds: [],
+});
+
+const privateBotBy = (createdById: string, memberIds: readonly string[]): BotFacts => ({
+	visibility: "private",
+	createdById,
+	assistantOf: null,
+	memberIds,
 });
 
 const personalBotBy = (createdById: string): BotFacts => ({
 	visibility: "personal",
 	createdById,
 	assistantOf: null,
+	memberIds: [],
 });
 
 /**
@@ -83,6 +92,7 @@ const BOT_PERMISSIONS = Object.keys({
 	"bot.use": true,
 	"bot.settings.read": true,
 	"bot.update": true,
+	"bot.members.manage": true,
 	"connector.read": true,
 	"automation.read": true,
 	"automation.manage": true,
@@ -133,6 +143,14 @@ const VIEWER_IN_PROJECT: ProjectPermission[] = [
 	"automation.history.read",
 	"computer.read",
 ];
+
+/** What only a private bot's members may do with it: invite and remove its members. */
+const ONLY_ON_PRIVATE_BOTS: BotPermission[] = ["bot.members.manage"];
+
+/** Every bot permission that means something on a public or personal bot. */
+const NOT_ONLY_ON_PRIVATE_BOTS = BOT_PERMISSIONS.filter(
+	(permission) => !ONLY_ON_PRIVATE_BOTS.includes(permission),
+);
 
 /** What anybody who reaches a bot may do with it without managing it. */
 const USING_A_BOT: BotPermission[] = [
@@ -310,8 +328,21 @@ describe("reaching a bot", () => {
 		expect(reachesBot(actor("owner"), personalBotBy(BOB))).toBe(false);
 	});
 
+	it.each(["owner", "admin", "editor", "viewer"] as const)(
+		"lets a %s reach a private bot only as one of its members",
+		(role) => {
+			expect(reachesBot(actor(role), privateBotBy(BOB, [BOB, ALICE]))).toBe(true);
+			expect(reachesBot(actor(role), privateBotBy(BOB, [BOB]))).toBe(false);
+		},
+	);
+
+	it("leaves a private bot's creator out once they are no longer one of its members", () => {
+		expect(reachesBot(actor("editor", BOB), privateBotBy(BOB, [ALICE]))).toBe(false);
+	});
+
 	it("lets nobody outside the workspace reach any bot, even one they made", () => {
 		expect(reachesBot(actor(undefined), publicBotBy(ALICE))).toBe(false);
+		expect(reachesBot(actor(undefined), privateBotBy(ALICE, [ALICE]))).toBe(false);
 		expect(reachesBot(actor(undefined), personalBotBy(ALICE))).toBe(false);
 	});
 });
@@ -326,14 +357,17 @@ describe("bot actions", () => {
 		},
 	);
 
-	it.each(BOT_PERMISSIONS)("an editor may %s on a bot they made", (permission) => {
+	it.each(NOT_ONLY_ON_PRIVATE_BOTS)("an editor may %s on a bot they made", (permission) => {
 		expect(mayOnBot(actor("editor"), permission, publicBotBy(ALICE))).toBe(true);
 		expect(mayOnBot(actor("editor"), permission, personalBotBy(ALICE))).toBe(true);
 	});
 
-	it.each(BOT_PERMISSIONS)("an admin may %s on a public bot somebody else made", (permission) => {
-		expect(mayOnBot(actor("admin"), permission, publicBotBy(BOB))).toBe(true);
-	});
+	it.each(NOT_ONLY_ON_PRIVATE_BOTS)(
+		"an admin may %s on a public bot somebody else made",
+		(permission) => {
+			expect(mayOnBot(actor("admin"), permission, publicBotBy(BOB))).toBe(true);
+		},
+	);
 
 	it.each(BOT_PERMISSIONS)(
 		"an admin may %s on another member's personal bot only to manage it",
@@ -360,6 +394,29 @@ describe("bot actions", () => {
 	it("does not let a viewer manage a bot they made before they became one", () => {
 		for (const permission of MANAGING_A_BOT.filter((one) => !VIEWING_A_BOT.includes(one))) {
 			expect(mayOnBot(actor("viewer"), permission, publicBotBy(ALICE))).toBe(false);
+		}
+	});
+
+	it("lets a private bot's members but viewers invite and remove its members", () => {
+		const privateOne = privateBotBy(BOB, [BOB, ALICE]);
+		expect(mayOnBot(actor("editor"), "bot.members.manage", privateOne)).toBe(true);
+		expect(mayOnBot(actor("viewer"), "bot.members.manage", privateOne)).toBe(false);
+		expect(mayOnBot(actor("editor"), "bot.members.manage", privateBotBy(BOB, [BOB]))).toBe(false);
+	});
+
+	it("lets an editor use a private bot they are a member of, and not manage it", () => {
+		for (const permission of BOT_PERMISSIONS) {
+			expect(mayOnBot(actor("editor"), permission, privateBotBy(BOB, [ALICE]))).toBe(
+				USING_A_BOT.includes(permission) || ONLY_ON_PRIVATE_BOTS.includes(permission),
+			);
+		}
+	});
+
+	it("lets an admin who isn't one of a private bot's members manage it without using it", () => {
+		for (const permission of BOT_PERMISSIONS) {
+			expect(mayOnBot(actor("admin"), permission, privateBotBy(BOB, [BOB]))).toBe(
+				MANAGING_A_BOT.includes(permission),
+			);
 		}
 	});
 

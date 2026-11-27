@@ -149,6 +149,7 @@ export const failureForError = {
 	ModelProviderNotFound: NotFound,
 	NoComputer: NotFound,
 	NotGitHubConnector: NotFound,
+	NotBotMember: NotFound,
 	NotInProject: NotFound,
 	ProjectGone: NotFound,
 	ProviderModelNotFound: NotFound,
@@ -185,6 +186,7 @@ export const failureForError = {
 	ModelInUse: Conflict,
 	ModelProviderNameConflict: Conflict,
 	ProjectHasGitHubConnector: Conflict,
+	ProjectHasPrivateBots: Conflict,
 	ProjectSlugTaken: Conflict,
 	ProviderModelAlreadyConfigured: Conflict,
 	SlugTaken: Conflict,
@@ -201,6 +203,7 @@ export const failureForError = {
 	FileTooLarge: PayloadTooLarge,
 
 	// What was asked for can't be done as asked.
+	AdministratorInEveryPrivateBot: BadRequest,
 	AdministratorInEveryProject: BadRequest,
 	AssistantHandleFixed: BadRequest,
 	AssistantInstructionsManaged: BadRequest,
@@ -239,6 +242,7 @@ export const failureForError = {
 	NotInWorkspace: BadRequest,
 	NotReadyToFinish: BadRequest,
 	OwnerStays: BadRequest,
+	PersonalBotInProject: BadRequest,
 	PersonalVisibilityFixed: BadRequest,
 	ProviderActivationRequiresCredential: BadRequest,
 	ProviderModelsRequireCredential: BadRequest,

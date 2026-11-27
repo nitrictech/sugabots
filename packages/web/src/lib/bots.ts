@@ -19,9 +19,10 @@ import { useRequiredWorkspaceId, useWorkspace } from "@/lib/workspace.ts";
  * One query for the whole roster, which the sidebar lists and every bot route
  * resolves its handle out of.
  *
- * The API scopes it: every public bot and your own personal ones, your
- * Personal Assistants included; an administrator also sees others' personal
- * bots listed, their Personal Assistants included.
+ * The API scopes it: every public bot, the private bots you are a member of,
+ * and your own personal ones, your Personal Assistants included; an
+ * administrator also sees others' personal bots listed, their Personal
+ * Assistants included.
  */
 export function useBots(): {
 	bots: readonly Bot[] | undefined;
@@ -217,11 +218,42 @@ function useInvalidateBots(): () => Promise<void> {
 			// A bot's chats list shows it.
 			queries.invalidateQueries({ queryKey: projectChatsKey(workspaceId) }),
 			// So do the bots lists of the projects it is in, which the list of
-			// projects counts. A bot made personal or deleted leaves every project.
+			// projects counts. A bot made private leaves every public project, and
+			// a bot deleted every project.
 			queries.invalidateQueries({ queryKey: ["project-bots"] }),
 			queries.invalidateQueries({ queryKey: projectsQuery(workspaceId).queryKey }),
 		]);
 	};
+}
+
+/** The members of a private bot: who sees it and talks to it. */
+export function useBotMembers(botId: string) {
+	return useQuery({
+		queryKey: ["bot-members", botId],
+		queryFn: ({ signal }) =>
+			Effect.runPromise(client.api.bots.listMembers({ params: { botId } }), { signal }),
+	});
+}
+
+/**
+ * Invites a member in the workspace to a private bot, or takes them out. One
+ * mutation for both directions because the caller is one list with an add
+ * and a remove on it.
+ */
+export function usePlaceBotMember(botId: string) {
+	const queries = useQueryClient();
+	const invalidate = useInvalidateBots();
+
+	return useMutation({
+		mutationFn: ({ memberId, member }: { memberId: string; member: boolean }) =>
+			Effect.runPromise(
+				member
+					? client.api.bots.addMember({ params: { botId }, payload: { memberId } })
+					: client.api.bots.removeMember({ params: { botId, memberId } }),
+			),
+		onSuccess: () =>
+			Promise.all([queries.invalidateQueries({ queryKey: ["bot-members", botId] }), invalidate()]),
+	});
 }
 
 /**

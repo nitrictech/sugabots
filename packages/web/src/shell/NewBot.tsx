@@ -45,6 +45,7 @@ import { LetterTile } from "@/ui/letter-tile.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import { SegmentedControl } from "@/ui/segmented-control.tsx";
 import { SettingsRadioMark } from "@/ui/settings-page.tsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs.tsx";
 
 /** A bot's avatar: its colour, shape and eyes. */
 export interface Avatar {
@@ -76,8 +77,8 @@ export type Part = "shape" | "eyes";
  * its name written over it, and a few avatars drawn at random, with Customise
  * for its colour, head and eyes, which open at the right in place of the
  * models. At the right the models it can think with, the suggested first,
- * then each provider's. It is public unless made personal, and starts by
- * asking its creator what it's for in its first chat.
+ * then each provider's. It is public unless made private or personal, and
+ * starts by asking its creator what it's for in its first chat.
  */
 export function NewBotDialog({ onCreated }: { onCreated: (bot: Bot) => Promise<void> }) {
 	const [name, setName] = useState("");
@@ -748,64 +749,67 @@ export function AvatarStep({
 }) {
 	const group = useId();
 	return (
-		<div className="flex min-h-0 flex-1 flex-col">
+		<Tabs
+			value={part}
+			onValueChange={(chosen) => onPartChange(chosen === "eyes" ? "eyes" : "shape")}
+			className="min-h-0 flex-1"
+		>
 			<StepHeader onBack={onDone}>
-				<div role="tablist" aria-label="Part" className="flex gap-4">
-					{(["shape", "eyes"] as const).map((one) => (
-						<button
-							key={one}
-							type="button"
-							role="tab"
-							aria-selected={part === one}
-							onClick={() => onPartChange(one)}
-							className={cn(
-								"focus-ring rounded-sm font-semibold text-sm transition-colors",
-								part === one ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-							)}
-						>
-							{one === "shape" ? "Shape" : "Eyes"}
-						</button>
-					))}
-				</div>
+				<TabsList aria-label="Part">
+					<TabsTrigger value="shape">Shape</TabsTrigger>
+					<TabsTrigger value="eyes">Eyes</TabsTrigger>
+				</TabsList>
 			</StepHeader>
-			<div role="tabpanel" className="flex min-h-0 min-w-0 flex-1 flex-col">
-				<fieldset className="m-0 grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-4 justify-items-center gap-2 overflow-y-auto border-0 px-5 pb-4">
-					<legend className="sr-only">{part === "shape" ? "Shape" : "Eyes"}</legend>
-					{part === "shape"
-						? botShapes.map((one) => (
-								<Tile
-									key={one}
-									group={group}
-									label={one}
-									chosen={one === avatar.shape}
-									onChoose={() => onChange({ shape: one })}
-								>
-									<span className="flex" style={{ color: botPalettes[avatar.color].face }}>
-										<ShapeGlyph shape={one} size={44} />
-									</span>
-								</Tile>
-							))
-						: botEyes.map((one) => (
-								<Tile
-									key={one}
-									group={group}
-									label={one}
-									chosen={one === avatar.eyes}
-									onChoose={() => onChange({ eyes: one })}
-								>
-									<span className="flex text-foreground">
-										<EyesGlyph eyes={one} width={44} />
-									</span>
-								</Tile>
-							))}
-				</fieldset>
-			</div>
+			<TabsContent value="shape" className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<TileGrid legend="Shape">
+					{botShapes.map((one) => (
+						<Tile
+							key={one}
+							group={`${group}-shape`}
+							label={one}
+							chosen={one === avatar.shape}
+							onChoose={() => onChange({ shape: one })}
+						>
+							<span className="flex" style={{ color: botPalettes[avatar.color].face }}>
+								<ShapeGlyph shape={one} size={44} />
+							</span>
+						</Tile>
+					))}
+				</TileGrid>
+			</TabsContent>
+			<TabsContent value="eyes" className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<TileGrid legend="Eyes">
+					{botEyes.map((one) => (
+						<Tile
+							key={one}
+							group={`${group}-eyes`}
+							label={one}
+							chosen={one === avatar.eyes}
+							onChoose={() => onChange({ eyes: one })}
+						>
+							<span className="flex text-foreground">
+								<EyesGlyph eyes={one} width={44} />
+							</span>
+						</Tile>
+					))}
+				</TileGrid>
+			</TabsContent>
 			<div className="shrink-0 px-5 pb-5">
 				<div className="rounded-2xl border border-border-strong px-4 py-3.5">
 					<BotColourPicker value={avatar.color} onChange={(color) => onChange({ color })} />
 				</div>
 			</div>
-		</div>
+		</Tabs>
+	);
+}
+
+/** The tiles of one part of an avatar, four to a row, scrolling when they don't fit. */
+function TileGrid({ legend, children }: { legend: string; children: ReactNode }) {
+	return (
+		<fieldset className="m-0 grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-4 justify-items-center gap-2 overflow-y-auto border-0 px-5 pb-4">
+			<legend className="sr-only">{legend}</legend>
+			{children}
+		</fieldset>
 	);
 }
 
@@ -821,7 +825,17 @@ function ProviderMark({ model }: { model: OfferedModel }) {
 	);
 }
 
-/** Whether the new bot is public, for everyone in the workspace, or personal, for its creator alone. */
+/** What each choice of who sees a new bot means, in a line under the choice. */
+const VISIBILITY_MEANINGS: Record<BotVisibility, string> = {
+	public: "Everyone in the workspace can see it and talk to it.",
+	private: "Only you, admins and the members you invite can see it.",
+	personal: "Only you can see it, and it acts with your access. This can't be changed later.",
+};
+
+/**
+ * Whether the new bot is public, for everyone in the workspace; private, for
+ * the members invited to it; or personal, for its creator alone.
+ */
 function VisibilityChoice({
 	value,
 	onChange,
@@ -829,17 +843,25 @@ function VisibilityChoice({
 	value: BotVisibility;
 	onChange: (value: BotVisibility) => void;
 }) {
+	const meaning = useId();
 	return (
-		<SegmentedControl
-			label="Who can see it"
-			options={[
-				{ value: "public", label: "Public" },
-				{ value: "personal", label: "Only me" },
-			]}
-			value={value}
-			onChange={onChange}
-			className="w-full"
-		/>
+		<div className="flex w-full flex-col gap-1.5">
+			<SegmentedControl
+				label="Who can see it"
+				options={[
+					{ value: "public", label: "Public" },
+					{ value: "private", label: "Private" },
+					{ value: "personal", label: "Personal" },
+				]}
+				value={value}
+				onChange={onChange}
+				className="w-full"
+				describedBy={meaning}
+			/>
+			<p id={meaning} className="text-muted-foreground text-xs">
+				{VISIBILITY_MEANINGS[value]}
+			</p>
+		</div>
 	);
 }
 

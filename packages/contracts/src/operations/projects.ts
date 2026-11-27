@@ -14,7 +14,9 @@ import {
 	LeadsProjects,
 	NotInProject,
 	NotInWorkspace,
+	PersonalBotInProject,
 	ProjectGone,
+	ProjectHasPrivateBots,
 	ProjectSlugTaken,
 	UnusableProjectName,
 } from "../errors/projects.ts";
@@ -97,7 +99,7 @@ export const projectsContracts = {
 	}),
 	"projects.create": OperationContract.make("projects.create", {
 		description:
-			"Make a project led by a public bot, with you in it, or for a bot, the member it acts for. Public projects are listed for anyone in the workspace to join; private ones only for the members added. Its address is derived from its name unless you give one.",
+			"Make a project led by a bot you can talk to, with you in it, or for a bot, the member it acts for. A private bot leads only a private project, and a personal bot none. Public projects are listed for anyone in the workspace to join; private ones only for the members added. Its address is derived from its name unless you give one.",
 		input: Schema.Struct({
 			workspace: workspaceIdOrSlugSchema.annotate({
 				description: "The workspace's id or address.",
@@ -111,6 +113,7 @@ export const projectsContracts = {
 			UnusableProjectName,
 			ProjectSlugTaken,
 			BotNotPublic,
+			PersonalBotInProject,
 			...approvalAndFenceRefusals,
 		],
 		changes: true,
@@ -119,10 +122,18 @@ export const projectsContracts = {
 	}),
 	"projects.update": OperationContract.make("projects.update", {
 		description:
-			"Change a project's name, address, colour, description, visibility or lead bot, which must be public.",
+			"Change a project's name, address, colour, description, visibility or lead bot. A private project with private bots stays private until they leave; a private bot leads only a private project.",
 		input: Schema.Struct({ projectId: uuidSchema, changes: projectUpdateSchema }),
 		output: projectSchema,
-		errors: [...refusals, EmptyProjectUpdate, ProjectGone, ProjectSlugTaken, BotNotPublic],
+		errors: [
+			...refusals,
+			EmptyProjectUpdate,
+			ProjectGone,
+			ProjectSlugTaken,
+			BotNotPublic,
+			PersonalBotInProject,
+			ProjectHasPrivateBots,
+		],
 		changes: true,
 		http: { kind: "offered", method: "PATCH", path: "/projects/:projectId" },
 		botLoop: {
@@ -223,13 +234,14 @@ export const projectsContracts = {
 		},
 	}),
 	"projects.addBot": OperationContract.make("projects.addBot", {
-		description: "Add a public bot to a project, so members there can mention it.",
+		description:
+			"Add a bot you can talk to to a project, so members there can mention it: a public bot to any project, a private bot to a private one.",
 		input: Schema.Struct({
 			projectId: projectIdSchema,
 			botId: uuidSchema.annotate({ description: "The bot's id." }),
 		}),
 		output: Schema.Void,
-		errors: [...refusals, BotNotPublic, ...approvalAndFenceRefusals],
+		errors: [...refusals, BotNotPublic, PersonalBotInProject, ...approvalAndFenceRefusals],
 		changes: true,
 		http: { kind: "offered", method: "POST", path: "/projects/:projectId/bots" },
 		botLoop: changesReachForMember("add_bot_to_project"),

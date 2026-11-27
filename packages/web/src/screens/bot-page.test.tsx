@@ -128,13 +128,26 @@ describe("what everybody sees", () => {
 		within(profile).getByText("Added by");
 	});
 
-	it("says whether the bot is public or personal, with no way to change it", async () => {
+	it("lets whoever manages the bot switch it between public and private, never personal", async () => {
+		mount(page);
+
+		const profile = await screen.findByRole("region", { name: "Profile" });
+		const visibility = await within(profile).findByRole("group", { name: "Visibility" });
+		expect(
+			within(visibility).getByRole<HTMLInputElement>("radio", { name: "Public" }).checked,
+		).toBe(true);
+		within(visibility).getByRole("radio", { name: "Private" });
+		expect(within(visibility).queryByRole("radio", { name: "Personal" })).toBeNull();
+	});
+
+	it("says whether the bot is public to whoever may not change it", async () => {
+		rosterAnswers({ permissions: { ...linear.permissions, update: false } });
 		mount(page);
 
 		const profile = await screen.findByRole("region", { name: "Profile" });
 		await within(profile).findByText("Visibility");
 		within(profile).getByText("Public");
-		expect(within(profile).queryByRole("switch")).toBeNull();
+		expect(within(profile).queryByRole("group", { name: "Visibility" })).toBeNull();
 	});
 
 	it("says a bot nobody added was made with the workspace", async () => {
@@ -244,6 +257,7 @@ describe("an admin", () => {
 				update: false,
 				delete: true,
 				talk: false,
+				manageMembers: false,
 				resources: {
 					openSettings: true,
 					readHistory: false,

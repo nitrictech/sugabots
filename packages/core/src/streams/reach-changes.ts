@@ -15,3 +15,16 @@ export const reachChanged = (workspaceId: string, about: ReachChange): PendingEv
 		streamEvent("reach.changed", { about }),
 	),
 });
+
+/**
+ * The event that records a change to who reaches the bot `botId` that may
+ * leave some members out, as making it private or taking a member out of it
+ * does. Sent to everyone in the workspace, so those who no longer reach it
+ * hear it too and drop it from what they see.
+ */
+export const botReachNarrowed = (workspaceId: string, botId: string): PendingEvent => ({
+	stream: workspaceStream(workspaceId),
+	event: Audience.forWorkspace(
+		streamEvent("reach.changed", { about: { kind: "bot" as const, botId } }),
+	),
+});

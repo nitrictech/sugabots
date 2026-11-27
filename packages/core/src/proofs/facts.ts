@@ -15,6 +15,7 @@ import { and, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { askerOf, type TurnFacts } from "../authentication/turn-facts.ts";
+import { botMemberIds } from "../authorization/access.ts";
 import {
 	type Actor,
 	type BotFacts,
@@ -133,12 +134,14 @@ const reachFactsWhere = (
 				defaultOfVisibility: defaultOfBot.visibility,
 				defaultOfCreatedBy: defaultOfBot.createdById,
 				defaultOfAssistantOf: defaultOfBot.assistantOf,
+				defaultOfMemberIds: botMemberIds(defaultOfBot.id),
 				role: membership.role,
 				projectMemberId: projectMember.id,
 				botWorkspace: actingBot.workspaceId,
 				botVisibility: actingBot.visibility,
 				botCreatedBy: actingBot.createdById,
 				botAssistantOf: actingBot.assistantOf,
+				botMemberIds: botMemberIds(actingBot.id),
 				botUsesComputer: actingBot.usesComputer,
 				botDeleting: botRemovalStarted(actingBot.id),
 				botInProject: sql<boolean>`exists (
@@ -185,6 +188,7 @@ const reachFactsWhere = (
 									visibility: row.defaultOfVisibility,
 									createdById: row.defaultOfCreatedBy,
 									assistantOf: row.defaultOfAssistantOf,
+									memberIds: row.defaultOfMemberIds,
 								}
 							: null,
 				},
@@ -203,6 +207,7 @@ const reachFactsWhere = (
 								visibility: row.botVisibility,
 								createdById: row.botCreatedBy,
 								assistantOf: row.botAssistantOf,
+								memberIds: row.botMemberIds,
 								usesComputer: row.botUsesComputer ?? false,
 								deleting: row.botDeleting,
 							}
@@ -249,6 +254,7 @@ export const botRecord = (db: Executor, botId: string) =>
 				visibility: bot.visibility,
 				createdById: bot.createdById,
 				assistantOf: bot.assistantOf,
+				memberIds: botMemberIds(bot.id),
 				systemBotKey: bot.systemBotKey,
 				defaultProject: project.id,
 				deleting: project.deleting,
@@ -267,6 +273,7 @@ export const botRecord = (db: Executor, botId: string) =>
 			visibility: row.visibility,
 			createdById: row.createdById,
 			assistantOf: row.assistantOf,
+			memberIds: row.memberIds,
 			systemBot: row.systemBotKey !== null,
 			defaultProject: row.defaultProject,
 			deleting: row.deleting ?? false,

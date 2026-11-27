@@ -166,6 +166,34 @@ export const MadeAsShown = meta.story({
 	},
 });
 
+/**
+ * Who can see the new bot, chosen beside its name: Public, Private or
+ * Personal, with a line saying what the choice means. A private bot is made
+ * with its creator and the admins as its members.
+ */
+export const MadePrivate = meta.story({
+	beforeEach({ msw }) {
+		created = [];
+		msw.use(createBot, listBots);
+	},
+	play: async ({ args, userEvent }) => {
+		const dialog = await screen.findByRole("dialog", { name: "New bot" });
+		const choice = within(dialog).getByRole("group", { name: "Who can see it" });
+		await expect(within(choice).getByRole("radio", { name: "Public" })).toBeChecked();
+		await expect(
+			within(dialog).getByText("Everyone in the workspace can see it and talk to it."),
+		).toBeInTheDocument();
+		await userEvent.click(within(choice).getByRole("radio", { name: "Private" }));
+		await expect(
+			within(dialog).getByText("Only you, admins and the members you invite can see it."),
+		).toBeInTheDocument();
+		await userEvent.type(within(dialog).getByRole("textbox", { name: "Name" }), "Payroll");
+		await userEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+		await waitFor(() => expect(args.onCreated).toHaveBeenCalled());
+		await expect(created).toEqual([expect.objectContaining({ visibility: "private" })]);
+	},
+});
+
 /** The × discards a bot that has a name and a model, rather than making it. */
 export const ClosedWithoutMaking = meta.story({
 	beforeEach({ msw }) {

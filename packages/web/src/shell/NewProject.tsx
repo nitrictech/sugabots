@@ -9,12 +9,13 @@ import {
 } from "@sugabots/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
+import { useBots } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { projectLink } from "@/lib/links.ts";
 import { useCreateProject, useProjects } from "@/lib/projects.ts";
 import { useWorkspacePermissions } from "@/lib/workspace.ts";
 import { ProjectColourPicker } from "@/shell/AvatarPicker.tsx";
-import { LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
+import { canBeInProject, LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Dialog } from "@/ui/dialog.tsx";
@@ -43,6 +44,7 @@ export function NewProjectDialog({
 	const [description, setDescription] = useState("");
 	const [visibility, setVisibility] = useState<ProjectVisibility>("public");
 	const [leadBotId, setLeadBotId] = useState<string | null>(null);
+	const { bots } = useBots();
 	// Until somebody picks one, the colour the workspace's projects have least of,
 	// so projects made without a second thought still look unlike each other.
 	const color =
@@ -97,7 +99,11 @@ export function NewProjectDialog({
 						maxLength={PROJECT_DESCRIPTION_MAX_LENGTH}
 					/>
 					<SettingsControlRow label="Lead bot">
-						<LeadBotPicker value={leadBotId} onChange={setLeadBotId} />
+						<LeadBotPicker
+							value={leadBotId}
+							onChange={setLeadBotId}
+							privateProject={visibility === "private"}
+						/>
 					</SettingsControlRow>
 					<SettingsControlRow label="Who can join">
 						<SegmentedControl
@@ -107,7 +113,14 @@ export function NewProjectDialog({
 								{ value: "private", label: "Invited only" },
 							]}
 							value={visibility}
-							onChange={setVisibility}
+							onChange={(chosen) => {
+								setVisibility(chosen);
+								// A private bot leads only a private project.
+								const lead = bots?.find((bot) => bot.id === leadBotId);
+								if (lead && !canBeInProject(lead, { private: chosen === "private" })) {
+									setLeadBotId(null);
+								}
+							}}
 						/>
 					</SettingsControlRow>
 					<SettingsControlRow label="Colour">

@@ -124,7 +124,7 @@ export const projectPermissionsSchema = Schema.Struct({
 	rename: Schema.Boolean,
 	/** Invite and remove members. */
 	manageMembers: Schema.Boolean,
-	/** Add and remove bots, which must be public. */
+	/** Add and remove bots: public ones, and in a private project private ones too. */
 	manageBots: Schema.Boolean,
 	/** Take yourself out of the project. Never for an administrator, who is in every one. */
 	leave: Schema.Boolean,
@@ -187,7 +187,10 @@ export const newProjectSchema = Schema.Struct({
 	),
 	/** Public when left out. */
 	visibility: Schema.optional(projectVisibilitySchema),
-	/** The lead bot: a public bot, added to the project's bots if it is not one already. */
+	/**
+	 * The lead bot: a public bot, or a private bot for a private project, added
+	 * to the project's bots if it is not one already.
+	 */
 	leadBotId: uuidSchema,
 });
 

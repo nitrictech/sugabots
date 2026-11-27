@@ -1371,7 +1371,6 @@ export const reachServiceMistakes = named(
 	(principal, other, chat, bot) =>
 		Effect.gen(function* () {
 			const reachedChat = yield* proveRealReachesChat(principal, chat);
-			const reachedBot = yield* proveReachesBot(other, bot);
 			const otherMember = yield* proveIsMember(other);
 			const canTakePart = yield* proveRealCanTakePart(reachedChat);
 
@@ -1383,8 +1382,8 @@ export const reachServiceMistakes = named(
 			yield* streams.reportTyping(canTakePart, otherMember);
 			// @ts-expect-error TS2740 [from type 'ReachesChat<unknown, unknown>'] Reading chat details requires proven reach to the chat.
 			yield* details.get(chat);
-			// @ts-expect-error TS2345 [Argument of type 'ReachesBot<NameB, NameD>' is not assignable to parameter of type 'ReachesBot<NameA, NameD>'] The computer's bot and chat must be reached by the same principal.
-			yield* desktop.openComputer(reachedChat, reachedBot);
+			// @ts-expect-error TS2740 [from type 'ReachesChat<unknown, unknown>'] Opening a bot's desktop requires proven reach to its chat.
+			yield* desktop.openComputer(chat, bot);
 			// @ts-expect-error TS2740 [from type 'IsMember<unknown>'] Reading a referral link requires a signed-in member.
 			yield* accounts.referralLink(other);
 			// @ts-expect-error TS2740 [from type 'IsMember<unknown>'] Resetting a referral link requires a signed-in member.
@@ -1396,7 +1395,7 @@ export const reachServiceMistakes = named(
 			streams.hearingOwn(otherMember);
 			yield* streams.reportTyping(canTakePart, yield* proveIsMember(principal));
 			yield* details.get(reachedChat);
-			yield* desktop.openComputer(reachedChat, yield* proveReachesBot(principal, bot));
+			yield* desktop.openComputer(reachedChat, bot);
 			yield* accounts.referralLink(otherMember);
 			yield* accounts.resetReferralLink(otherMember);
 			yield* floor.giveFloor(committed, reachedChat);

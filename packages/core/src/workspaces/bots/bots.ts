@@ -1,19 +1,28 @@
 export * as Bots from "./bots.ts";
 
-import type { Bot, BotUpdate, NewBot, SystemBot, SystemBotKey } from "@sugabots/contracts";
+import type {
+	Bot,
+	BotMember,
+	BotUpdate,
+	NewBot,
+	SystemBot,
+	SystemBotKey,
+} from "@sugabots/contracts";
 import {
+	AdministratorInEveryPrivateBot,
 	AssistantHandleFixed,
 	AssistantInstructionsManaged,
 	type BotGone,
 	type BotHandleReserved,
 	type BotNameTaken,
 	EmptyBotUpdate,
+	NotBotMember,
 	PersonalVisibilityFixed,
 	type SystemBotImmutable,
 	SystemBotMissing,
 } from "@sugabots/contracts/errors/bots";
 import type { ComputerMadeMeanwhile } from "@sugabots/contracts/errors/computers";
-import type { LeadsProjects } from "@sugabots/contracts/errors/projects";
+import { type LeadsProjects, NotInWorkspace } from "@sugabots/contracts/errors/projects";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
 import { Context, Effect, Layer } from "effect";
@@ -24,10 +33,15 @@ import { serviceOperations, Transaction, transaction } from "../../database/data
 import { EventOutbox } from "../../database/events/outbox.ts";
 import type { ActsForMember } from "../../proofs/acts-for-member.ts";
 import type { Approved } from "../../proofs/approved.ts";
-import type { CanChangeBotReach, CanDeleteBot } from "../../proofs/bot-permissions.ts";
+import type {
+	CanChangeBotMembers,
+	CanChangeBotReach,
+	CanDeleteBot,
+} from "../../proofs/bot-permissions.ts";
 import type { CanManageBot } from "../../proofs/can-manage-bot.ts";
 import type { ProjectDeletionStarted } from "../../proofs/deletion-started.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
+import type { Named } from "../../proofs/proof.ts";
 import type { ReachesBot } from "../../proofs/reaches-bot.ts";
 import type {
 	CanCreateBots,
@@ -36,12 +50,13 @@ import type {
 } from "../../proofs/workspace-permissions.ts";
 import { holdingModel } from "../../providers/model-providers/held-models.ts";
 import { ModelProviderStore } from "../../providers/model-providers/model-provider-store.ts";
-import { reachChanged } from "../../streams/reach-changes.ts";
+import { botReachNarrowed, reachChanged } from "../../streams/reach-changes.ts";
 import { processLayer, Tier } from "../../tiers.ts";
+import { refuseWhileLeading } from "../projects/project-leads.ts";
 import { defaultProjectOf } from "../projects/project-reads.ts";
 import { ProjectStore } from "../projects/project-store.ts";
 import { changesPersonal } from "./bot.ts";
-import { memberFacingBot, systemBots, visibleMemberFacingBots } from "./bot-reads.ts";
+import { botMembers, memberFacingBot, systemBots, visibleMemberFacingBots } from "./bot-reads.ts";
 import { BotStore } from "./bot-store.ts";
 import { PersonalAssistants } from "./personal-assistants.ts";
 
@@ -65,6 +80,7 @@ export interface Interface {
 	 * instructions, handle and visibility; a bot managing itself in its own chats, only its instructions and
 	 * description, which its interview writes. Changes to visibility and
 	 * computer use require `canChangeReach`, proved under its workspace's lock.
+	 * Made private, it leaves every public project, refused while it leads one.
 	 */
 	readonly update: <P, B>(
 		canManage: CanManageBot<P, B>,
@@ -82,6 +98,7 @@ export interface Interface {
 		| PersonalVisibilityFixed
 		| AssistantInstructionsManaged
 		| AssistantHandleFixed
+		| LeadsProjects
 		| ResourceHidden
 	>;
 	/**
@@ -94,6 +111,18 @@ export interface Interface {
 		written: { readonly instructions: string; readonly description: string },
 		approved: Approved<P, X, [B], "bots.saveInstructions">,
 	) => Effect.Effect<Bot, AssistantInstructionsManaged | BotGone | ResourceHidden | FenceRefusal>;
+	/** The members of the bot, by name: a private bot's, and none of any other. */
+	readonly members: <P, B>(reach: ReachesBot<P, B>) => Effect.Effect<BotMember[]>;
+	/** Adds `member` to the private bot. Adding somebody already one of its members changes nothing. */
+	readonly addMember: <P, B, U>(
+		canChange: CanChangeBotMembers<P, B>,
+		member: Named<U, string>,
+	) => Effect.Effect<void, NotInWorkspace, Transaction>;
+	/** Takes `member` out of the private bot. Refuses an administrator, who belongs to every one. */
+	readonly removeMember: <P, B, U>(
+		canChange: CanChangeBotMembers<P, B>,
+		member: Named<U, string>,
+	) => Effect.Effect<void, AdministratorInEveryPrivateBot | NotBotMember, Transaction>;
 	/** Records a deletion after ensuring the bot is free to delete. */
 	readonly beginRemoval: <P, B>(
 		canDelete: CanDeleteBot<P, B>,
@@ -138,6 +167,16 @@ export const make = Effect.gen(function* () {
 	const projects = yield* ProjectStore.Service;
 	const personalAssistants = yield* PersonalAssistants.Service;
 	const outbox = yield* EventOutbox.Service;
+
+	/**
+	 * Takes the bot out of every public project as it is made private, once it
+	 * leads none, and returns those projects' ids.
+	 */
+	const leavePublicProjects = (workspaceId: string, botId: string, viewerId: string) =>
+		Effect.gen(function* () {
+			yield* refuseWhileLeading(botId, { viewerId, onlyPublic: true });
+			return yield* projects.removeBotFromPublicProjects(workspaceId, botId);
+		});
 
 	/** The bot `botId` as `actor` is shown it, with whether they pinned it. */
 	const shown = (botId: string, actor: Actor) =>
@@ -194,16 +233,61 @@ export const make = Effect.gen(function* () {
 					}
 					const updated = yield* transaction(
 						Effect.gen(function* () {
+							// A private bot is only in private projects.
+							const left =
+								facts.visibility === "public" && changes.visibility === "private"
+									? yield* leavePublicProjects(workspace, facts.id, actor.memberId)
+									: [];
 							const row = yield* store.update(workspace, facts.id, changes);
 							// Who reaches a bot, and whether its desktop may stay open, follow its
 							// visibility and computer use, so streams and desktop viewers prove again.
 							if (changesReach) {
-								yield* outbox.publish([reachChanged(workspace, { kind: "bot", botId: row.id })]);
+								yield* outbox.publish([
+									row.visibility === "private" && facts.visibility !== "private"
+										? botReachNarrowed(workspace, row.id)
+										: reachChanged(workspace, { kind: "bot", botId: row.id }),
+									...left.map((projectId) =>
+										reachChanged(workspace, { kind: "project", projectId }),
+									),
+								]);
 							}
 							return row;
 						}),
 					);
 					return yield* shown(updated.id, actor);
+				}),
+			),
+
+		members: (reach) => operation("members", botMembers(reach.bot.value)),
+
+		addMember: (canChange, member) =>
+			operation(
+				"addMember",
+				Effect.gen(function* () {
+					yield* Transaction;
+					const { workspace, bot } = canChange.reach;
+					if (!(yield* store.addMember(workspace, bot.value, member.value))) {
+						return yield* new NotInWorkspace();
+					}
+					yield* outbox.publish([reachChanged(workspace, { kind: "bot", botId: bot.value })]);
+				}),
+			),
+
+		removeMember: (canChange, member) =>
+			operation(
+				"removeMember",
+				Effect.gen(function* () {
+					yield* Transaction;
+					const { workspace, bot } = canChange.reach;
+					const outcome = yield* store.removeMember(workspace, bot.value, member.value);
+					switch (outcome) {
+						case "removed":
+							return yield* outbox.publish([botReachNarrowed(workspace, bot.value)]);
+						case "administrator":
+							return yield* new AdministratorInEveryPrivateBot();
+						case "not_a_member":
+							return yield* new NotBotMember();
+					}
 				}),
 			),
 

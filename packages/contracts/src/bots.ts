@@ -1,5 +1,6 @@
 import { Schema, Struct } from "effect";
 import { namedMemberSchema } from "./api.ts";
+import { emailSchema } from "./email.ts";
 import { resourcePermissionsSchema, slugify } from "./projects.ts";
 import { isoTimestampSchema } from "./timestamps.ts";
 import { uuidSchema } from "./uuid.ts";
@@ -8,9 +9,9 @@ import { uuidSchema } from "./uuid.ts";
  * Bots: AI teammates, each with a name, handle, avatar, model and instructions.
  *
  * A bot belongs to its workspace. It is public, for everyone in the
- * workspace, or personal, for the member who made it, whose permissions it
- * acts with. A Personal Assistant is a personal bot. Public bots can be added
- * to projects.
+ * workspace; private, for its members; or personal, for the member who made
+ * it, whose permissions it acts with. A Personal Assistant is a personal bot.
+ * Public bots can be added to any project, private bots to private projects.
  */
 
 /**
@@ -128,8 +129,12 @@ export function handleFromName(name: string): string {
 export const systemBotKeySchema = Schema.Literals(["compact"]);
 export type SystemBotKey = typeof systemBotKeySchema.Type;
 
-/** Whether everyone in the workspace sees a bot, or only the member who made it. */
-const botVisibilitySchema = Schema.Literals(["public", "personal"]);
+/**
+ * Whether everyone in the workspace sees a bot, only its members, or only the
+ * member who made it. Public and private bots may switch; whether a bot is
+ * personal is chosen when it is made and never changes.
+ */
+const botVisibilitySchema = Schema.Literals(["public", "private", "personal"]);
 export type BotVisibility = typeof botVisibilitySchema.Type;
 
 /** What the member asking may do with a bot, resolved by the API so a client never reasons about roles. */
@@ -139,6 +144,8 @@ export const botPermissionsSchema = Schema.Struct({
 	delete: Schema.Boolean,
 	/** Read and write in its chats. False for a personal bot an admin only sees listed. */
 	talk: Schema.Boolean,
+	/** Invite and remove its members: on a private bot, any of its members but viewers. */
+	manageMembers: Schema.Boolean,
 	/** What the member may do with what its default project holds. */
 	resources: resourcePermissionsSchema,
 });
@@ -182,7 +189,7 @@ export const botSchema = Schema.Struct({
 	naturalBrowsing: Schema.optional(Schema.Boolean),
 	/** Who added it, by name: null when nobody did, or they are no longer in the workspace. */
 	createdBy: Schema.NullOr(namedMemberSchema),
-	/** Whether everyone in the workspace sees it, or only its creator. */
+	/** Whether everyone in the workspace sees it, only its members, or only its creator. */
 	visibility: botVisibilitySchema,
 	/**
 	 * Whether it is a Personal Assistant: a personal bot, always, whose
@@ -201,6 +208,18 @@ export const botSchema = Schema.Struct({
 });
 
 export type Bot = typeof botSchema.Type;
+
+/** A member of a private bot, who sees it and talks to it. */
+export const botMemberSchema = Schema.Struct({
+	memberId: uuidSchema,
+	name: Schema.String,
+	email: emailSchema,
+	image: Schema.NullOr(Schema.String),
+	/** Whether they can be taken out of it. Never an administrator, who is in every private bot. */
+	removable: Schema.Boolean,
+});
+
+export type BotMember = typeof botMemberSchema.Type;
 
 /** How long a bot's name may be. */
 export const BOT_NAME_MAX_LENGTH = 64;

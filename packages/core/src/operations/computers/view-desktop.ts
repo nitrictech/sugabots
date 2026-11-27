@@ -5,7 +5,6 @@ import { DesktopViewer } from "../../chats/tools/browser/viewer.ts";
 import type { Principal } from "../../principal.ts";
 import { type ComputerUse, proveCanUseComputer } from "../../proofs/can-use-computer.ts";
 import { type Named, named } from "../../proofs/proof.ts";
-import { proveReachesBot } from "../../proofs/reaches-bot.ts";
 import { proveReachesChat } from "../../proofs/reaches-chat.ts";
 import { Streams } from "../../streams/streams.ts";
 import { followerOf } from "../events/following.ts";
@@ -31,7 +30,7 @@ export const viewDesktop = defineLongRunningOperation(
 				Effect.gen(function* () {
 					const computer = yield* viewer.openComputer(
 						yield* proveReachesChat(principal, chat),
-						yield* proveReachesBot(principal, bot),
+						bot,
 					);
 					return yield* named(computer.id, (computerId) =>
 						Effect.flatMap(mostUse(principal, computerId), (canUse) =>
@@ -49,7 +48,7 @@ export const viewDesktop = defineLongRunningOperation(
 					Effect.gen(function* () {
 						const computer = yield* viewer.stillShown(
 							yield* proveReachesChat(principal, chat),
-							yield* proveReachesBot(principal, bot),
+							bot,
 						);
 						yield* named(computer, (computerId) =>
 							Effect.asVoid(proveCanUseComputer(principal, computerId, use)),

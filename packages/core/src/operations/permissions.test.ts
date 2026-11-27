@@ -166,6 +166,20 @@ const memberInJ = allowing(
 /** Changing J's chats: whoever reaches J but viewers, within a turn's bounds. */
 const changesJsChats = { ...readsJ, viewer: "ActionForbidden" } as const satisfies Rule;
 
+/**
+ * Reaching a private bot Ed made, with Ed and Vi among its members, which no
+ * project has: its members, and a bot acting for one in member bounds.
+ */
+const reachesPrivateBot = allowing(everyone("ResourceHidden"), [
+	"admin",
+	"editor",
+	"viewer",
+	...IN_MEMBER_BOUNDS,
+]);
+
+/** Changing who is in that private bot: its members but viewers, and a bot only in member bounds. */
+const changesWhoIsInPrivateBot = { ...reachesPrivateBot, viewer: "ActionForbidden" } as const;
+
 /** Changing who is in J: anyone in it but viewers, and a bot only in member bounds. */
 const changesWhoIsInJ = {
 	...changesJsChats,
@@ -357,6 +371,9 @@ const fresh = {
 		return memberId;
 	},
 	host: () => `host-${unique()}.example.com`,
+	/** A private bot Ed made, with Ed and Vi among its members, in no project. */
+	privateBot: ({ a }: Fixture) =>
+		seedBot(a.workspace, { createdById: a.ed, visibility: "private", members: [a.ed, a.vi] }),
 };
 
 const inA = ({ a }: Fixture) => ({ workspace: a.workspace });
@@ -978,6 +995,29 @@ const rows: {
 			"admin",
 			"editor",
 		]),
+	},
+	"bots.listMembers": {
+		input: async (fixture) => ({ botId: (await fresh.privateBot(fixture)).id }),
+		outcomes: reachesPrivateBot,
+	},
+	"bots.addMember": {
+		input: async (fixture) => ({
+			botId: (await fresh.privateBot(fixture)).id,
+			memberId: await seedMember(fixture.a.workspace, "editor"),
+		}),
+		outcomes: changesWhoIsInPrivateBot,
+	},
+	"bots.removeMember": {
+		input: async (fixture) => {
+			const memberId = await seedMember(fixture.a.workspace, "editor");
+			const privateBot = await seedBot(fixture.a.workspace, {
+				createdById: fixture.a.ed,
+				visibility: "private",
+				members: [fixture.a.ed, fixture.a.vi, memberId],
+			});
+			return { botId: privateBot.id, memberId };
+		},
+		outcomes: changesWhoIsInPrivateBot,
 	},
 	"bots.pin": {
 		input: ({ a }) => ({ botId: a.pub.id }),

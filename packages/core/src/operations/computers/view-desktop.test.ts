@@ -70,7 +70,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 				computer: desktopComputer,
 				holder: { kind: "viewer", id: randomUUID() },
 				chat: chat.chat.value,
-				bot: { id: bot.bot.value, color: "green" },
+				bot: { id: bot.value, color: "green" },
 			}),
 		show: (opened, canUse) =>
 			Effect.succeed({
@@ -89,7 +89,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 							db
 								.select({ usesComputer: bot.usesComputer })
 								.from(bot)
-								.where(eq(bot.id, shown.bot.value)),
+								.where(eq(bot.id, shown.value)),
 						),
 					catch: () => unavailable,
 				});

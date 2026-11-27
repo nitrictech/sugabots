@@ -9,28 +9,35 @@ import {
 	DropdownMenuTrigger,
 } from "@/ui/dropdown-menu.tsx";
 
-/** The bots that can lead a project: the workspace's public bots, which alone are in projects. */
-function useLeadableBots(): readonly Bot[] {
-	const { bots } = useBots();
-	return bots?.filter((bot) => bot.visibility === "public" && !bot.assistant) ?? [];
+/**
+ * Whether `bot` may be in a project that is `private` or not: a public bot in
+ * any, a private bot only in a private one, and a personal bot in none.
+ */
+export function canBeInProject(bot: Bot, project: { readonly private: boolean }): boolean {
+	if (bot.assistant) return false;
+	return bot.visibility === "public" || (bot.visibility === "private" && project.private);
 }
 
 /**
  * Choosing a project's lead bot, which answers its chats unless members
- * mention another: one of the workspace's public bots, added to the project
- * if it isn't in it yet.
+ * mention another: one of the bots you can talk to that may be in the project,
+ * added to it if it isn't in it yet.
  */
 export function LeadBotPicker({
 	value,
 	onChange,
+	privateProject,
 	disabled = false,
 }: {
 	/** The lead bot's id; null while none is chosen. */
 	value: string | null;
 	onChange: (botId: string) => void;
+	/** Whether the project is private, so a private bot may lead it. */
+	privateProject: boolean;
 	disabled?: boolean;
 }) {
-	const leadable = useLeadableBots();
+	const { bots } = useBots();
+	const leadable = bots?.filter((bot) => canBeInProject(bot, { private: privateProject })) ?? [];
 	const lead = leadable.find((bot) => bot.id === value);
 	return (
 		<DropdownMenu>
@@ -53,7 +60,7 @@ export function LeadBotPicker({
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-52">
 				{leadable.length === 0 ? (
-					<DropdownMenuItem disabled>No public bots yet.</DropdownMenuItem>
+					<DropdownMenuItem disabled>No bots can lead it yet.</DropdownMenuItem>
 				) : (
 					leadable.map((bot) => (
 						<BotMenuItem key={bot.id} bot={bot} onClick={() => onChange(bot.id)} />

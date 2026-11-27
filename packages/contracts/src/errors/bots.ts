@@ -163,3 +163,33 @@ export class PersonalVisibilityFixed
 		return userText`Whether a bot is personal is chosen when it's made, and can't be changed`;
 	}
 }
+
+/** Administrators belong to every private bot, so nobody takes one out of it. */
+export class AdministratorInEveryPrivateBot
+	extends Schema.TaggedError<AdministratorInEveryPrivateBot>()("AdministratorInEveryPrivateBot", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "An administrator can't be taken out of a private bot";
+	}
+	get userMessage() {
+		return userText`Administrators are members of every private bot`;
+	}
+}
+
+/** The member to take out of the private bot isn't one of its members. */
+export class NotBotMember
+	extends Schema.TaggedError<NotBotMember>()("NotBotMember", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The member to take out is not one of the bot's members";
+	}
+	get userMessage() {
+		return userText`That member is not one of this bot's members`;
+	}
+}

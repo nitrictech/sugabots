@@ -1,4 +1,4 @@
-import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
+import { type BotVisibility, WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
 
 /**
  * What a member may do, as named actions rather than role comparisons.
@@ -19,8 +19,8 @@ import { WORKSPACE_ROLES, type WorkspaceRole } from "@sugabots/contracts";
  *   exception: it follows its bot (see `mayInProject`).
  * - **Bot actions** concern a bot, and what its default project holds, as
  *   that project's actions are decided. They are answered from the caller's
- *   role and the bot's visibility and creator, and whether it is their own
- *   Personal Assistant, which they manage and run whatever their role.
+ *   role, the bot's visibility, creator and members, and whether it is their
+ *   own Personal Assistant, which they manage and run whatever their role.
  *
  * Every permission here is asked for somewhere.
  *
@@ -122,7 +122,9 @@ export type BotPermission =
 	| "bot.use"
 	/** See the bot's settings and the state of its computer. */
 	| "bot.settings.read"
-	| "bot.update";
+	| "bot.update"
+	/** Invite and remove a private bot's members. */
+	| "bot.members.manage";
 
 /**
  * The caller.
@@ -146,8 +148,10 @@ export interface ProjectFacts {
 
 /** What a decision about a bot needs to know about it. */
 export interface BotFacts {
-	visibility: "public" | "personal";
+	visibility: BotVisibility;
 	createdById: string | null;
+	/** On a private bot: its members, who reach it. Empty on any other. */
+	memberIds: readonly string[];
 	/**
 	 * On a Personal Assistant: the member it is for, who made it. Null for any
 	 * other bot. Whose it is, as for any bot, is `createdById`'s to say.
@@ -273,6 +277,7 @@ const BOT_TALKER_GRANTS = new Set<BotPermission>([
 	"bot.read",
 	"bot.use",
 	"bot.settings.read",
+	"bot.members.manage",
 	"connector.read",
 	"automation.read",
 	"automation.history.read",
@@ -366,13 +371,21 @@ export function personalBotCreator(
 }
 
 /**
- * Whether the caller reaches the bot: its creator for a personal bot, and
- * anyone in the workspace for a public one.
+ * Whether the caller reaches the bot: anyone in the workspace for a public
+ * bot, its members for a private one, and its creator for a personal one.
+ * A private bot in a project is talked to there by the project's members,
+ * which is the project's reach, not the bot's.
  */
 export function reachesBot(actor: Actor, bot: BotFacts): boolean {
 	if (!actor.workspaceRole) return false;
-	if (bot.visibility === "personal") return personalBotCreator(bot) === actor.memberId;
-	return true;
+	switch (bot.visibility) {
+		case "public":
+			return true;
+		case "private":
+			return bot.memberIds.includes(actor.memberId);
+		case "personal":
+			return personalBotCreator(bot) === actor.memberId;
+	}
 }
 
 /**
@@ -383,6 +396,9 @@ export function reachesBot(actor: Actor, bot: BotFacts): boolean {
 export function mayOnBot(actor: Actor, permission: BotPermission, bot: BotFacts): boolean {
 	const role = roleOnBot(actor, bot);
 	if (!role) return false;
+	// Only a private bot has members to invite: everyone reaches a public
+	// one, and a personal one is its creator's alone.
+	if (permission === "bot.members.manage" && bot.visibility !== "private") return false;
 	const manages =
 		role !== "viewer" && (managesEveryBot(actor) || bot.createdById === actor.memberId);
 	if (manages && BOT_MANAGER_GRANTS.has(permission)) return true;

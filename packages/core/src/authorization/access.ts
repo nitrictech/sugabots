@@ -1,6 +1,6 @@
 import type { WorkspaceRole } from "@sugabots/contracts";
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
-import { bot, membership, project, projectMember } from "../database/schema.ts";
+import { bot, botMember, membership, project, projectMember } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import { rolesGrantedInProject } from "./permissions.ts";
 
@@ -105,10 +105,30 @@ function reachedBotFor(
 		where reach_bot.id = ${outerColumn(botId)}
 			and reach_bot.system_bot_key is null
 			and ${notBeingDeleted}
-			and case
-				when reach_bot.visibility = 'personal' then reach_bot.created_by_id = ${outerColumn(memberId)}
-				else true
+			and case reach_bot.visibility
+				when 'public' then true
+				when 'private' then exists (
+					select 1
+					from ${botMember} as reach_bot_member
+					where reach_bot_member.bot_id = reach_bot.id
+						and reach_bot_member.member_id = ${outerColumn(memberId)}
+				)
+				when 'personal' then reach_bot.created_by_id = ${outerColumn(memberId)}
+				else false
 			end
+	)`;
+}
+
+/**
+ * SQL for the ids of the members of the bot `botId` names, as
+ * `BotFacts.memberIds` holds them: a private bot's members, and none for any
+ * other bot, which has no `bot_member` rows.
+ */
+export function botMemberIds(botId: SQLWrapper): SQL<string[]> {
+	return sql<string[]>`(
+		select coalesce(json_agg(listed_bot_member.member_id), '[]'::json)
+		from ${botMember} as listed_bot_member
+		where listed_bot_member.bot_id = ${outerColumn(botId)}
 	)`;
 }
 

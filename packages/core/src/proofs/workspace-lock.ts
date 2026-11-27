@@ -12,7 +12,8 @@ import { defineProof, type Named, named, type Proof } from "./proof.ts";
  * afresh once it had taken it.
  *
  * Operations that change who reaches what (a role, an invitation, a
- * project's members, a bot that stops being public or is deleted, ownership
+ * project's or a private bot's members, a bot made private or public or
+ * deleted, ownership
  * handed over, someone removed from the workspace) check and write under this
  * one lock, taken by {@link underWorkspaceLock}: their provers demand it, and
  * their writes demand the transaction it holds and proofs about P, which only

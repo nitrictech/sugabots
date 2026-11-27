@@ -21,9 +21,10 @@ import { SettingsGroup, SettingsRow, SettingsValue } from "@/ui/settings-page.ts
 
 /**
  * Every bot the member reaches: their Personal Assistants, oldest first, if
- * they have any, with a + that makes them one, then the public bots and their own personal
- * ones, each opening the bot, with a pin that puts it in the sidebar or takes
- * it out. A + makes another bot.
+ * they have any, with a + that makes them one, then the public bots, the
+ * private ones they are a member of and their own personal ones, each opening
+ * the bot, with a pin that puts it in the sidebar or takes it out. A + makes
+ * another bot.
  */
 export function BotsDirectory() {
 	const { bots: reachable, isPending, error } = useBots();
@@ -140,7 +141,9 @@ function BotRow({
 								? usable
 									? "Personal"
 									: whoseBot(bot, "personal bot")
-								: null,
+								: bot.visibility === "private"
+									? "Private"
+									: null,
 							bot.description,
 						]
 							.filter(Boolean)

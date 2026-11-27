@@ -1,4 +1,10 @@
-export { BotNotPublic, ProjectGone, ProjectSlugTaken } from "@sugabots/contracts/errors/projects";
+export {
+	BotNotPublic,
+	PersonalBotInProject,
+	ProjectGone,
+	ProjectHasPrivateBots,
+	ProjectSlugTaken,
+} from "@sugabots/contracts/errors/projects";
 export * as ProjectStore from "./project-store.ts";
 
 import {
@@ -8,8 +14,15 @@ import {
 	type ProjectUpdate,
 	type ProjectVisibility,
 } from "@sugabots/contracts";
-import { BotNotPublic, ProjectGone, ProjectSlugTaken } from "@sugabots/contracts/errors/projects";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import {
+	BotNotPublic,
+	PersonalBotInProject,
+	ProjectGone,
+	ProjectHasPrivateBots,
+	ProjectSlugTaken,
+} from "@sugabots/contracts/errors/projects";
+import { DisplayName } from "@sugabots/errors";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
@@ -25,17 +38,17 @@ import { type LeadsProjects, refuseWhileLeading } from "./project-leads.ts";
  * with its bot by a trigger (see `project`).
  *
  * A project's own rules are enforced here, so they hold however it is
- * reached: its slug is unique in its workspace, only public bots are in one,
- * and its lead bot is one of them. Whether somebody may ask for any of this is
+ * reached: its slug is unique in its workspace, no personal bot is in one, a
+ * private bot only in a private one, and its lead bot is one of its bots. Whether somebody may ask for any of this is
  * not decided here. `update` refuses a default project as gone, before it
  * writes anything; `remove` and the member and bot methods don't check, so their callers pass a project
  * members made, which they have already authorized.
  */
 export interface Interface {
 	/**
-	 * Creates a project with `creatorId` as its first member, led by the
-	 * public bot `leadBotId`, which is its first bot. Without a colour it takes
-	 * the one fewest of the workspace's projects have.
+	 * Creates a project with `creatorId` as its first member, led by the bot
+	 * `leadBotId`, which is its first bot, on the terms of {@link Interface.addBot}.
+	 * Without a colour it takes the one fewest of the workspace's projects have.
 	 */
 	readonly create: (
 		workspaceId: string,
@@ -48,17 +61,21 @@ export interface Interface {
 			visibility?: ProjectVisibility;
 			leadBotId: string;
 		},
-	) => Effect.Effect<schema.ProjectRow, ProjectSlugTaken | BotNotPublic>;
+	) => Effect.Effect<schema.ProjectRow, ProjectSlugTaken | BotNotPublic | PersonalBotInProject>;
 	/**
-	 * Changes a project members made; a new lead bot, which must be public, is
-	 * added to its bots. A default project, or one not in `workspaceId`, fails
-	 * with `ProjectGone` before anything is written.
+	 * Changes a project members made; a new lead bot is added to its bots, on
+	 * the terms of {@link Interface.addBot} for the project as changed. Made
+	 * public, it is refused while it has private bots. A default project, or
+	 * one not in `workspaceId`, fails with `ProjectGone` before anything is written.
 	 */
 	readonly update: (
 		workspaceId: string,
 		projectId: string,
 		changes: ProjectUpdate,
-	) => Effect.Effect<schema.ProjectRow, ProjectGone | ProjectSlugTaken | BotNotPublic>;
+	) => Effect.Effect<
+		schema.ProjectRow,
+		ProjectGone | ProjectSlugTaken | BotNotPublic | PersonalBotInProject | ProjectHasPrivateBots
+	>;
 	/** Removes a project. One already gone counts as removed. */
 	readonly markDeleting: (workspaceId: string, projectId: string) => Effect.Effect<boolean>;
 	readonly remove: (workspaceId: string, projectId: string) => Effect.Effect<void>;
@@ -90,12 +107,25 @@ export interface Interface {
 		projectId: string,
 		memberId: string,
 	) => Effect.Effect<"removed" | "not_a_member" | "administrator">;
-	/** Puts a public bot of the workspace in the project. Adding one already in it changes nothing. */
+	/**
+	 * Puts a bot of the workspace in the project: a public bot in any, a
+	 * private bot in a private one, and a personal bot in none. Adding one
+	 * already in it changes nothing.
+	 */
 	readonly addBot: (
 		workspaceId: string,
 		projectId: string,
 		botId: string,
-	) => Effect.Effect<void, BotNotPublic>;
+	) => Effect.Effect<void, BotNotPublic | PersonalBotInProject>;
+	/**
+	 * Takes the bot out of every public project members made, as it is made
+	 * private, and returns those projects' ids. The caller first refuses while
+	 * it leads one.
+	 */
+	readonly removeBotFromPublicProjects: (
+		workspaceId: string,
+		botId: string,
+	) => Effect.Effect<string[]>;
 	/**
 	 * Refused for the project's lead bot, which stays until another is chosen;
 	 * the refusal is worded for `viewerId`.
@@ -115,12 +145,16 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ProjectStore");
 
-	/** Puts a public bot of the workspace in the project. Adding one already in it changes nothing. */
+	/**
+	 * Puts a public bot of the workspace in the project, or a private bot in a
+	 * private project. Adding one already in it changes nothing.
+	 */
 	const addBot = (workspaceId: string, projectId: string, botId: string) =>
 		Effect.gen(function* () {
-			// The share lock waits for a change making the bot personal to commit,
-			// then checks the bot as it is: that change takes the bot out of its
-			// projects, and the row added here would otherwise be one it missed.
+			// The share locks wait for a change of the bot's or the project's
+			// visibility to commit, then check them as they are: that change
+			// takes the bot out of public projects, or refuses a project with
+			// private bots, and the row added here would otherwise be one it missed.
 			const added = yield* query((db) =>
 				db.execute<{ bot_id: string }>(
 					sql`
@@ -130,11 +164,12 @@ export const make = Effect.gen(function* () {
 					inner join ${bot}
 						on ${bot.workspaceId} = ${project.workspaceId}
 						and ${bot.id} = ${botId}
-						and ${bot.visibility} = 'public'
+						and (${bot.visibility} = 'public'
+							or (${bot.visibility} = 'private' and ${project.visibility} = 'private'))
 						and ${bot.systemBotKey} is null
 					where ${project.id} = ${projectId}
 					and ${project.workspaceId} = ${workspaceId}
-					for share of ${bot}
+					for share of ${bot}, ${project}
 					on conflict do nothing
 					returning "bot_id"
 				`,
@@ -149,7 +184,34 @@ export const make = Effect.gen(function* () {
 					.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, botId)))
 					.limit(1),
 			);
-			if (!present) return yield* new BotNotPublic();
+			if (present) return;
+			const [refused] = yield* query((db) =>
+				db
+					.select({ visibility: bot.visibility })
+					.from(bot)
+					.where(and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId), isNull(bot.systemBotKey)))
+					.limit(1),
+			);
+			return yield* refused?.visibility === "private"
+				? new BotNotPublic()
+				: new PersonalBotInProject();
+		});
+
+	/** Refuses to leave the project public while any of its bots is private, naming them. */
+	const refuseWhilePrivateBots = (projectId: string) =>
+		Effect.gen(function* () {
+			const privateBots = yield* query((db) =>
+				db
+					.select({ name: bot.name })
+					.from(projectBot)
+					.innerJoin(bot, eq(bot.id, projectBot.botId))
+					.where(and(eq(projectBot.projectId, projectId), eq(bot.visibility, "private")))
+					.orderBy(asc(bot.name)),
+			);
+			if (privateBots.length === 0) return;
+			return yield* new ProjectHasPrivateBots({
+				bots: privateBots.map((one) => DisplayName.fromRecord(one.name)),
+			});
 		});
 
 	/**
@@ -273,9 +335,6 @@ export const make = Effect.gen(function* () {
 						if (!found) {
 							return yield* new ProjectGone({ projectId });
 						}
-						if (changes.leadBotId !== undefined) {
-							yield* addBot(workspaceId, projectId, changes.leadBotId);
-						}
 						// An UPDATE has no `on conflict`, so a taken slug arrives as a unique
 						// violation. The slug is the only unique column a change can touch.
 						const [row] = yield* queryCatching(
@@ -288,6 +347,12 @@ export const make = Effect.gen(function* () {
 						if (!row) {
 							return yield* new ProjectGone({ projectId });
 						}
+						// After the update, so a new lead is checked against the visibility
+						// it is changed to; a refusal rolls the update back.
+						if (changes.leadBotId !== undefined) {
+							yield* addBot(workspaceId, projectId, changes.leadBotId);
+						}
+						if (row.visibility === "public") yield* refuseWhilePrivateBots(projectId);
 						return row;
 					}),
 				),
@@ -401,6 +466,26 @@ export const make = Effect.gen(function* () {
 
 		addBot: (workspaceId, projectId, botId) =>
 			operation("addBot", addBot(workspaceId, projectId, botId)),
+
+		removeBotFromPublicProjects: (workspaceId, botId) =>
+			operation(
+				"removeBotFromPublicProjects",
+				query((db) =>
+					db.execute<{ project_id: string }>(
+						sql`
+						delete from ${projectBot}
+						using ${project}
+						where ${projectBot.workspaceId} = ${workspaceId}
+							and ${projectBot.botId} = ${botId}
+							and ${project.id} = ${projectBot.projectId}
+							and ${project.defaultOfBotId} is null
+							and ${project.visibility} = 'public'
+						returning ${projectBot.projectId}
+					`,
+						"objects",
+					),
+				).pipe(Effect.map((left) => left.map((one) => one.project_id))),
+			),
 
 		removeBot: (workspaceId, projectId, botId, viewerId) =>
 			operation(

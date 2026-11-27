@@ -13,6 +13,7 @@ export function SegmentedControl<Value extends string>({
 	onChange,
 	disabled = false,
 	className,
+	describedBy,
 }: {
 	/** Names the group for assistive technology. */
 	label: string;
@@ -22,12 +23,15 @@ export function SegmentedControl<Value extends string>({
 	onChange: (value: Value) => void;
 	disabled?: boolean;
 	className?: string;
+	/** The id of what explains the current choice, read out with the group. */
+	describedBy?: string;
 }) {
 	const name = useId();
 
 	return (
 		<fieldset
 			disabled={disabled}
+			aria-describedby={describedBy}
 			className={cn(
 				"m-0 flex shrink-0 rounded-lg border-0 bg-chip p-0.5 disabled:opacity-50",
 				className,

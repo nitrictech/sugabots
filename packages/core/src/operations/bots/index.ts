@@ -5,12 +5,15 @@
  */
 
 import { Bots } from "../../workspaces/bots/bots.ts";
+import { addMember } from "./add-member.ts";
 import { create } from "./create.ts";
 import { createAssistant } from "./create-assistant.ts";
 import { list } from "./list.ts";
+import { listMembers } from "./list-members.ts";
 import { listSystemBots } from "./list-system-bots.ts";
 import { pin } from "./pin.ts";
 import { remove } from "./remove.ts";
+import { removeMember } from "./remove-member.ts";
 import { saveInstructions } from "./save-instructions.ts";
 import { unpin } from "./unpin.ts";
 import { update } from "./update.ts";
@@ -22,6 +25,9 @@ export const botsOperations = {
 	"bots.update": update,
 	"bots.saveInstructions": saveInstructions,
 	"bots.remove": remove,
+	"bots.listMembers": listMembers,
+	"bots.addMember": addMember,
+	"bots.removeMember": removeMember,
 	"bots.pin": pin,
 	"bots.unpin": unpin,
 	"bots.createAssistant": createAssistant,

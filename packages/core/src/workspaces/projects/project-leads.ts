@@ -8,13 +8,14 @@ import { bot, project, projectMember } from "../../database/schema.ts";
 export { LeadsProjects } from "@sugabots/contracts/errors/projects";
 
 /**
- * The lead bot of a project members made is always one of its public bots. So
- * a bot leading projects members made is not taken out of one, made personal or
- * deleted until each has another lead; its own default project, which it
- * leads, goes with it.
+ * The lead bot of a project members made is always one of its bots. So a bot
+ * leading projects members made is not taken out of one, made private while
+ * one is public, or deleted until each has another lead; its own default
+ * project, which it leads, goes with it.
  *
  * Fails with `LeadsProjects` when the bot `botId` leads any of the projects
- * `among` selects (every project members made, unless narrowed to one). The
+ * `among` selects (every project members made, unless narrowed to one, or to
+ * the public ones). The
  * refusal names only the projects `viewerId` sees, the public ones and those
  * they are in, so it never tells them a private project's name. Run it in the
  * transaction that changes the bot, after locking its row, so a lead chosen
@@ -22,7 +23,7 @@ export { LeadsProjects } from "@sugabots/contracts/errors/projects";
  */
 export const refuseWhileLeading = Effect.fn("ProjectLeads.refuseWhileLeading")(function* (
 	botId: string,
-	among: { viewerId: string; projectId?: string },
+	among: { viewerId: string; projectId?: string; onlyPublic?: boolean },
 ) {
 	const led = yield* query((db) =>
 		db
@@ -42,6 +43,7 @@ export const refuseWhileLeading = Effect.fn("ProjectLeads.refuseWhileLeading")(f
 					eq(project.leadBotId, botId),
 					isNull(project.defaultOfBotId),
 					among.projectId === undefined ? undefined : eq(project.id, among.projectId),
+					among.onlyPublic ? eq(project.visibility, "public") : undefined,
 				),
 			)
 			.orderBy(asc(project.name)),

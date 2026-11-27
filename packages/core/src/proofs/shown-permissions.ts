@@ -11,7 +11,7 @@ import type {
 	ResourcePermissions,
 	WorkspacePermissions,
 } from "@sugabots/contracts";
-import type { Actor, BotFacts } from "../authorization/permissions.ts";
+import { type Actor, type BotFacts, mayOnBot } from "../authorization/permissions.ts";
 import { mayJoin } from "./can-join-project.ts";
 import { takesOverDesktop } from "./can-use-computer.ts";
 import { memberManagingChats } from "./chat-permissions.ts";
@@ -89,6 +89,7 @@ export function botPermissionsShown(
 		visibility: bot.visibility,
 		createdById: bot.createdById,
 		assistantOf: bot.assistantOf,
+		memberIds: bot.memberIds,
 	};
 	const memberFacing = { ...facts, systemBot: false };
 	const managesIt = managesBot(actor, facts);
@@ -96,6 +97,7 @@ export function botPermissionsShown(
 		update: managesIt,
 		delete: managesIt || restrictsBot(actor, memberFacing),
 		talk: memberReachesBot(actor, memberFacing),
+		manageMembers: mayOnBot(actor, "bot.members.manage", facts),
 		// Nobody is in a default project: it is reached through its bot.
 		resources: resourcePermissionsShown(
 			{ actor, inProject: false },

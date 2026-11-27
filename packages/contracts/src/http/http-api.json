@@ -260,6 +260,24 @@
 				"WebhookSecretTooShort": 400
 			}
 		},
+		"bots.addMember": {
+			"route": "POST /bots/:botId/members",
+			"answers": [
+				204
+			],
+			"params": {
+				"botId": "uuid"
+			},
+			"query": {},
+			"body": {
+				"memberId": "uuid"
+			},
+			"errors": {
+				"ActionForbidden": 403,
+				"NotInWorkspace": 400,
+				"ResourceHidden": 404
+			}
+		},
 		"bots.create": {
 			"route": "POST /workspaces/:workspace/bots",
 			"answers": [
@@ -281,7 +299,7 @@
 				"disabledTools": "optional Array<string> | null",
 				"usesComputer": "optional boolean | null",
 				"naturalBrowsing": "optional boolean | null",
-				"visibility": "optional \"public\" | \"personal\" | null"
+				"visibility": "optional \"public\" | \"private\" | \"personal\" | null"
 			},
 			"errors": {
 				"ActionForbidden": 403,
@@ -313,6 +331,21 @@
 			],
 			"params": {
 				"workspace": "string"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"ResourceHidden": 404
+			}
+		},
+		"bots.listMembers": {
+			"route": "GET /bots/:botId/members",
+			"answers": [
+				200
+			],
+			"params": {
+				"botId": "uuid"
 			},
 			"query": {},
 			"body": {},
@@ -360,6 +393,24 @@
 				"SystemBotImmutable": 400
 			}
 		},
+		"bots.removeMember": {
+			"route": "DELETE /bots/:botId/members/:memberId",
+			"answers": [
+				204
+			],
+			"params": {
+				"botId": "uuid",
+				"memberId": "uuid"
+			},
+			"query": {},
+			"body": {},
+			"errors": {
+				"ActionForbidden": 403,
+				"AdministratorInEveryPrivateBot": 400,
+				"NotBotMember": 404,
+				"ResourceHidden": 404
+			}
+		},
 		"bots.unpin": {
 			"route": "DELETE /bots/:botId/pin",
 			"answers": [
@@ -389,7 +440,7 @@
 			},
 			"query": {},
 			"body": {
-				"changes": "{ name?: string | null; handle?: string | null; description?: string | null; color?: \"red\" | \"orange\" | \"amber\" | \"yellow\" | \"lime\" | \"green\" | \"emerald\" | \"teal\" | \"sky\" | \"ice\" | \"indigo\" | \"violet\" | \"purple\" | \"fuchsia\" | \"pink\" | \"rose\" | null; eyes?: \"pill\" | \"dot\" | \"arc\" | \"square\" | \"wink\" | null; shape?: \"circle\" | \"squircle\" | \"pebble\" | \"blob\" | \"wobble\" | \"drop\" | \"leaf\" | \"dome\" | \"bowl\" | \"hexagon\" | \"octagon\" | \"triangle\" | \"pentagon\" | \"diamond\" | \"shield\" | \"star\" | \"flower\" | \"scallop\" | \"ghost\" | \"bear\" | \"antenna\" | null; model?: string | null; instructions?: string | null; disabledTools?: Array<string> | null; usesComputer?: boolean | null; naturalBrowsing?: boolean | null; visibility?: \"public\" | \"personal\" | null }"
+				"changes": "{ name?: string | null; handle?: string | null; description?: string | null; color?: \"red\" | \"orange\" | \"amber\" | \"yellow\" | \"lime\" | \"green\" | \"emerald\" | \"teal\" | \"sky\" | \"ice\" | \"indigo\" | \"violet\" | \"purple\" | \"fuchsia\" | \"pink\" | \"rose\" | null; eyes?: \"pill\" | \"dot\" | \"arc\" | \"square\" | \"wink\" | null; shape?: \"circle\" | \"squircle\" | \"pebble\" | \"blob\" | \"wobble\" | \"drop\" | \"leaf\" | \"dome\" | \"bowl\" | \"hexagon\" | \"octagon\" | \"triangle\" | \"pentagon\" | \"diamond\" | \"shield\" | \"star\" | \"flower\" | \"scallop\" | \"ghost\" | \"bear\" | \"antenna\" | null; model?: string | null; instructions?: string | null; disabledTools?: Array<string> | null; usesComputer?: boolean | null; naturalBrowsing?: boolean | null; visibility?: \"public\" | \"private\" | \"personal\" | null }"
 			},
 			"errors": {
 				"ActionForbidden": 403,
@@ -399,6 +450,7 @@
 				"BotHandleReserved": 400,
 				"BotNameTaken": 409,
 				"EmptyBotUpdate": 400,
+				"LeadsProjects": 409,
 				"ModelNotEnabled": 400,
 				"PersonalVisibilityFixed": 400,
 				"ResourceHidden": 404,
@@ -1912,6 +1964,7 @@
 				"ApprovalRefused": 403,
 				"BotCannotReach": 403,
 				"BotNotPublic": 400,
+				"PersonalBotInProject": 400,
 				"ResourceHidden": 404,
 				"TurnEnded": 409,
 				"TurnExecutionSuperseded": 409
@@ -1959,6 +2012,7 @@
 				"ApprovalRefused": 403,
 				"BotNotPublic": 400,
 				"InvalidProjectDetails": 400,
+				"PersonalBotInProject": 400,
 				"ProjectSlugTaken": 409,
 				"ResourceHidden": 404,
 				"TurnEnded": 409,
@@ -2136,7 +2190,9 @@
 				"BotCannotReach": 403,
 				"BotNotPublic": 400,
 				"EmptyProjectUpdate": 400,
+				"PersonalBotInProject": 400,
 				"ProjectGone": 404,
+				"ProjectHasPrivateBots": 409,
 				"ProjectSlugTaken": 409,
 				"ResourceHidden": 404
 			}

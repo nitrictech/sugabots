@@ -14917,6 +14917,134 @@
         "n|col|public.turn.status",
         "n|col|public.turn.finished_at"
       ]
+    },
+    {
+      "statementType": "create_table",
+      "statementTarget": [
+        "table",
+        "public",
+        "bot_member"
+      ],
+      "writes": [
+        "s|tbl|public.bot_member",
+        "n|tbl|public.bot_member",
+        "e|tbl|public.bot_member",
+        "n|rel|public.bot_member",
+        "n|type|public.bot_member",
+        "n|rel|public.bot_member_pkey"
+      ],
+      "reads": [
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "bot_member",
+        "bot_member_idx"
+      ],
+      "writes": [
+        "s|idx|public.bot_member_idx",
+        "n|idx|public.bot_member_idx",
+        "e|idx|public.bot_member_idx",
+        "n|rel|public.bot_member_idx"
+      ],
+      "reads": [
+        "n|tbl|public.bot_member",
+        "n|sch|public",
+        "n|col|public.bot_member.bot_id",
+        "n|col|public.bot_member.member_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "bot_member",
+        "bot_member_member_id_idx"
+      ],
+      "writes": [
+        "s|idx|public.bot_member_member_id_idx",
+        "n|idx|public.bot_member_member_id_idx",
+        "e|idx|public.bot_member_member_id_idx",
+        "n|rel|public.bot_member_member_id_idx"
+      ],
+      "reads": [
+        "n|tbl|public.bot_member",
+        "n|sch|public",
+        "n|col|public.bot_member.member_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "bot_member"
+      ],
+      "writes": [
+        "s|fk|public.bot_member.bot_member_bot_workspace_fkey",
+        "n|fk|public.bot_member.bot_member_bot_workspace_fkey",
+        "e|fk|public.bot_member.bot_member_bot_workspace_fkey",
+        "n|con|public.bot_member.bot_member_bot_workspace_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.bot_member",
+        "n|sch|public",
+        "n|tbl|public.bot",
+        "n|sch|public",
+        "n|col|public.bot_member.bot_id",
+        "n|col|public.bot_member.workspace_id",
+        "n|col|public.bot.id",
+        "n|col|public.bot.workspace_id",
+        "e|uniqueness|public.bot.id.workspace_id"
+      ]
+    },
+    {
+      "statementType": "create_fk",
+      "statementTarget": [
+        "table",
+        "public",
+        "bot_member"
+      ],
+      "writes": [
+        "s|fk|public.bot_member.bot_member_membership_fkey",
+        "n|fk|public.bot_member.bot_member_membership_fkey",
+        "e|fk|public.bot_member.bot_member_membership_fkey",
+        "n|con|public.bot_member.bot_member_membership_fkey"
+      ],
+      "reads": [
+        "n|tbl|public.bot_member",
+        "n|sch|public",
+        "n|tbl|public.membership",
+        "n|sch|public",
+        "n|col|public.bot_member.workspace_id",
+        "n|col|public.bot_member.member_id",
+        "n|col|public.membership.workspace_id",
+        "n|col|public.membership.member_id",
+        "e|uniqueness|public.membership.member_id.workspace_id"
+      ]
+    },
+    {
+      "statementType": "alter_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "bot"
+      ],
+      "writes": [
+        "s|ck|public.bot.bot_visibility_check"
+      ],
+      "reads": [
+        "n|tbl|public.bot",
+        "n|sch|public",
+        "n|col|public.bot.visibility",
+        "e|col|public.bot.visibility"
+      ],
+      "sqlHash": "82dae31a68ce1df2"
     }
   ],
   "deltas": [
@@ -24335,6 +24463,214 @@
         "method": "btree",
         "concurrently": false,
         "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "name": "bot_member",
+        "isRlsEnabled": false,
+        "entityType": "tables"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "uuidv7()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "workspace_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "bot_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "member_id",
+        "type": "uuid",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "now()",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "bot_member_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "bot_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "member_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": true,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "bot_member_member_id_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "member_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "bot_member_bot_workspace_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "bot_id",
+          "workspace_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "bot",
+        "columnsTo": [
+          "id",
+          "workspace_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "bot_member_membership_fkey",
+        "nameExplicit": true,
+        "columns": [
+          "workspace_id",
+          "member_id"
+        ],
+        "schemaTo": "public",
+        "tableTo": "membership",
+        "columnsTo": [
+          "workspace_id",
+          "member_id"
+        ],
+        "onUpdate": "NO ACTION",
+        "onDelete": "CASCADE",
+        "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "bot_member",
+        "name": "bot_member_pkey",
+        "columns": [
+          "id"
+        ],
+        "nameExplicit": false,
+        "entityType": "pks"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "checks\u0000[\"public\",\"bot\",\"bot_visibility_check\"]",
+      "set": {
+        "value": "\"visibility\" in ('public', 'private', 'personal')"
       }
     }
   ]

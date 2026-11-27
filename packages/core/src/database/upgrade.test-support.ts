@@ -15,8 +15,12 @@ const workspace = "0000000a-0000-4000-8000-000000000001";
 export const legacy = {
 	workspace,
 	members: {
+		/** The owner, so in every shared pod. */
 		sam: "0000000b-0000-4000-8000-000000000001",
+		/** In the Family and Notes pods. */
 		pat: "0000000b-0000-4000-8000-000000000002",
+		/** In no shared pod. */
+		ana: "0000000b-0000-4000-8000-000000000003",
 	},
 	provider: "0000000e-0000-4000-8000-000000000000",
 	pods: {
@@ -27,6 +31,7 @@ export const legacy = {
 	},
 	bots: {
 		planner: "0000000c-0000-4000-8000-000000000001",
+		budget: "0000000c-0000-4000-8000-000000000002",
 		/** Pat's bot, in their personal pod beside their Personal Assistant. */
 		helper: "0000000c-0000-4000-8000-000000000004",
 	},
@@ -193,6 +198,10 @@ INSERT INTO "agent" ("id", "workspace_id", "pod_id", "name", "handle", "provisio
  ('0000000c-0000-4000-8000-000000000004', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000003', 'Helper', 'helper', NULL, 'lime', 'wink', 'm', '0000000b-0000-4000-8000-000000000002', '2026-10-03 09:02');
 INSERT INTO "agent" ("id", "workspace_id", "name", "handle", "system_agent_key", "color", "face") VALUES
  ('0000000c-0000-4000-8000-000000000009', '0000000a-0000-4000-8000-000000000001', 'Compaction', 'compaction', 'compaction', 'rose', 'pill');
+
+-- The Family pod's calendar, which its bots used.
+INSERT INTO "connection" ("id", "workspace_id", "pod_id", "name", "handle", "kind", "url", "auth_kind", "tools", "created_by_id", "created_at") VALUES
+ ('00000011-0000-4000-8000-000000000010', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000001', 'Calendar', 'calendar', 'http', 'https://calendar.example.com', 'header', '[]', '0000000b-0000-4000-8000-000000000001', '2026-10-01 09:03');
 
 -- Each pod's computer.
 INSERT INTO "sandbox" ("id", "workspace_id", "pod_id", "sandbox_provider_id", "provider_sandbox_id", "image") VALUES

@@ -22,6 +22,7 @@ import {
 	automationRun,
 	automationTrigger,
 	bot,
+	botMember,
 	chat,
 	computer,
 	computerProvider,
@@ -99,7 +100,9 @@ export async function seedBot(
 	workspaceId: string,
 	fields: {
 		readonly createdById?: string | null;
-		readonly visibility?: "public" | "personal";
+		readonly visibility?: "public" | "private" | "personal";
+		/** A private bot's members besides the owner and admins, whom the database adds. */
+		readonly members?: readonly string[];
 		readonly assistantOf?: string;
 		readonly systemBotKey?: "compact";
 		readonly usesComputer?: boolean;
@@ -126,6 +129,15 @@ export async function seedBot(
 				.returning({ id: bot.id }),
 		),
 	);
+	const members = fields.members ?? [];
+	if (members.length > 0) {
+		await onDatabase((db) =>
+			db
+				.insert(botMember)
+				.values(members.map((memberId) => ({ workspaceId, botId: row.id, memberId })))
+				.onConflictDoNothing(),
+		);
+	}
 	const [owned] = await onDatabase((db) =>
 		db.select({ id: project.id }).from(project).where(eq(project.defaultOfBotId, row.id)),
 	);

@@ -31,8 +31,8 @@ const messageId = Schema.String.check(Schema.isMinLength(1));
 /**
  * What a change of who reaches what was about: a membership (a role, someone
  * joining, leaving or being removed, ownership handed over), a project's
- * members or bots, a bot (one made public or personal, or deleted), or the
- * whole workspace (deleted).
+ * members or bots, a bot (one made public or private, a private bot's
+ * members, or one deleted), or the whole workspace (deleted).
  */
 const reachChangeSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("membership"), memberId: uuidSchema }),

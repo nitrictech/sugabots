@@ -9,6 +9,7 @@ export {
 export * as BotStore from "./bot-store.ts";
 
 import {
+	administersWorkspace,
 	type BotUpdate,
 	colorFromText,
 	handleFromName,
@@ -25,7 +26,7 @@ import {
 	SystemBotMissing,
 } from "@sugabots/contracts/errors/bots";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { and, asc, eq, isNotNull, isNull, like, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, like, type SQL, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import {
 	type QueryFailure,
@@ -36,7 +37,7 @@ import {
 	transaction,
 } from "../../database/database.ts";
 import { violatedUniqueConstraint } from "../../database/errors.ts";
-import { bot, membership, pinnedBot } from "../../database/schema.ts";
+import { bot, botMember, membership, pinnedBot } from "../../database/schema.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { refuseWhileLeading } from "../projects/project-leads.ts";
 import { changesPersonal, type MemberFacingBotRow, memberFacingBotRow } from "./bot.ts";
@@ -44,21 +45,31 @@ import { INTERVIEW_PROMPT } from "./interview-prompt.ts";
 import { SYSTEM_BOTS } from "./system-bots.ts";
 
 /**
- * The only writer of `bot` and `pinned_bot`: the bots members make, each
- * member's Personal Assistants, and the workspace's system bots, of which only
- * the model ever changes. Each bot but a system bot gets its default project
- * as it is made, from the `bot_default_project` trigger, and it goes with it.
+ * The only writer of `bot`, `bot_member` and `pinned_bot`: the bots members
+ * make, each member's Personal Assistants, and the workspace's system bots, of
+ * which only the model ever changes. Each bot but a system bot gets its
+ * default project as it is made, from the `bot_default_project` trigger, and
+ * it goes with it.
+ *
+ * A private bot's creator is one of its members from when it is made private,
+ * while they are in the workspace; the owner and admins are added by the
+ * `bot_administrators` trigger. Its members go when it is made public. Whether
+ * somebody may ask for any of this is not decided here.
  */
 export interface Interface {
 	/**
-	 * Creates a bot, pinned for its creator. Without instructions it starts with
-	 * `INTERVIEW_PROMPT`.
+	 * Creates a bot, pinned for its creator, and one of its members when it is
+	 * private. Without instructions it starts with `INTERVIEW_PROMPT`.
 	 */
 	readonly create: (
 		workspaceId: string,
 		input: { createdById: string; bot: NewBot },
 	) => Effect.Effect<MemberFacingBotRow, BotNameTaken | BotHandleReserved>;
-	/** Refused when it would make the bot personal, or stop it being personal. */
+	/**
+	 * Refused when it would make the bot personal, or stop it being personal.
+	 * Made private, its creator becomes one of its members; made public, it has
+	 * none. Which projects it is in is the caller's to change first.
+	 */
 	readonly update: (
 		workspaceId: string,
 		botId: string,
@@ -67,6 +78,22 @@ export interface Interface {
 		MemberFacingBotRow,
 		BotNameTaken | BotHandleReserved | BotGone | SystemBotImmutable | PersonalVisibilityFixed
 	>;
+	/**
+	 * Adds a member in the bot's workspace to the private bot, and says whether
+	 * `memberId` is one of its members now: `false` when they aren't in its
+	 * workspace, or the bot isn't private. Adding one already in it changes nothing.
+	 */
+	readonly addMember: (
+		workspaceId: string,
+		botId: string,
+		memberId: string,
+	) => Effect.Effect<boolean>;
+	/** Refuses an administrator, who belongs to every private bot. */
+	readonly removeMember: (
+		workspaceId: string,
+		botId: string,
+		memberId: string,
+	) => Effect.Effect<"removed" | "not_a_member" | "administrator">;
 	/** Removes the bot and its default project once the computer is gone. */
 	readonly remove: (workspaceId: string, botId: string) => Effect.Effect<void, SystemBotImmutable>;
 	/**
@@ -194,6 +221,9 @@ export const make = Effect.gen(function* () {
 								.insert(pinnedBot)
 								.values({ workspaceId, memberId: createdById, botId: created.id }),
 						);
+						if (created.visibility === "private") {
+							yield* insertBotMember(workspaceId, created.id, createdById);
+						}
 						return created;
 					}),
 				),
@@ -212,17 +242,18 @@ export const make = Effect.gen(function* () {
 						if (changes.handle !== undefined && isReservedHandle(changes.handle)) {
 							return yield* new BotHandleReserved({ handle: changes.handle });
 						}
-						if (changes.visibility !== undefined) {
-							const [current] = yield* query((db) =>
-								db
-									.select({ visibility: bot.visibility })
-									.from(bot)
-									.where(and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId)))
-									.for("update"),
-							);
-							if (current && changesPersonal(current.visibility, changes.visibility)) {
-								return yield* new PersonalVisibilityFixed();
-							}
+						const [current] =
+							changes.visibility === undefined
+								? []
+								: yield* query((db) =>
+										db
+											.select({ visibility: bot.visibility })
+											.from(bot)
+											.where(and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId)))
+											.for("update"),
+									);
+						if (current && changesPersonal(current.visibility, changes.visibility)) {
+							return yield* new PersonalVisibilityFixed();
 						}
 						const [row] = yield* queryCatching(
 							(db) =>
@@ -237,7 +268,78 @@ export const make = Effect.gen(function* () {
 						if (!updated) {
 							return yield* new BotGone({ botId });
 						}
+						if (current?.visibility === "public" && updated.visibility === "private") {
+							if (updated.createdById !== null) {
+								yield* insertBotMember(workspaceId, botId, updated.createdById);
+							}
+						}
+						if (current?.visibility === "private" && updated.visibility === "public") {
+							yield* query((db) => db.delete(botMember).where(eq(botMember.botId, botId)));
+						}
 						return updated;
+					}),
+				),
+			),
+
+		addMember: (workspaceId, botId, memberId) =>
+			operation(
+				"addMember",
+				Effect.gen(function* () {
+					if (yield* insertBotMember(workspaceId, botId, memberId)) return true;
+					// `bot_member`'s foreign key to `membership` means somebody already
+					// one of its members is in its workspace.
+					const [existing] = yield* query((db) =>
+						db
+							.select({ id: botMember.id })
+							.from(botMember)
+							.where(
+								and(
+									eq(botMember.workspaceId, workspaceId),
+									eq(botMember.botId, botId),
+									eq(botMember.memberId, memberId),
+								),
+							)
+							.limit(1),
+					);
+					return existing !== undefined;
+				}),
+			),
+
+		removeMember: (workspaceId, botId, memberId) =>
+			operation(
+				"removeMember",
+				transaction(
+					Effect.gen(function* () {
+						// Held until the transaction ends, so nobody is promoted between the
+						// role check and the delete. The bot and role triggers take it too.
+						yield* query((db) => db.execute(sql`select lock_bot_membership(${workspaceId})`));
+						const [held] = yield* query((db) =>
+							db
+								.select({ role: membership.role })
+								.from(membership)
+								.where(
+									and(
+										eq(membership.workspaceId, workspaceId),
+										eq(membership.memberId, memberId),
+										eq(membership.leaving, false),
+									),
+								)
+								.limit(1),
+						);
+						if (administersWorkspace(held?.role)) return "administrator";
+						const removed = yield* query((db) =>
+							db
+								.delete(botMember)
+								.where(
+									and(
+										eq(botMember.workspaceId, workspaceId),
+										eq(botMember.botId, botId),
+										eq(botMember.memberId, memberId),
+									),
+								)
+								.returning({ id: botMember.id }),
+						);
+						return removed.length > 0 ? "removed" : "not_a_member";
 					}),
 				),
 			),
@@ -367,6 +469,32 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = processLayer(Layer.effect(Service, make));
+
+/**
+ * Puts `memberId` among the private bot `botId`'s members if they are in its
+ * workspace, and says whether this added them. Somebody already one of them
+ * is left as they are.
+ */
+const insertBotMember = (workspaceId: string, botId: string, memberId: string) =>
+	query((db) =>
+		db.execute<{ id: string }>(
+			sql`
+			insert into ${botMember} ("workspace_id", "bot_id", "member_id")
+			select ${bot.workspaceId}, ${bot.id}, ${memberId}
+			from ${bot}
+			inner join ${membership}
+				on ${membership.workspaceId} = ${bot.workspaceId}
+				and ${membership.memberId} = ${memberId}
+				and not ${membership.leaving}
+			where ${bot.id} = ${botId}
+				and ${bot.workspaceId} = ${workspaceId}
+				and ${bot.visibility} = 'private'
+			on conflict ("bot_id", "member_id") do nothing
+			returning "id"
+		`,
+			"objects",
+		),
+	).pipe(Effect.map((inserted) => inserted.length > 0));
 
 /**
  * A member's Personal Assistants, oldest first, with their membership's row

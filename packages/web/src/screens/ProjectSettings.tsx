@@ -2,12 +2,10 @@ import {
 	PROJECT_DESCRIPTION_MAX_LENGTH,
 	PROJECT_NAME_MAX_LENGTH,
 	type Project,
-	type ProjectMember,
-	workspaceRoleLabel,
 } from "@sugabots/contracts";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { Minus } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { useBots } from "@/lib/bots.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { botSettingsLink, projectBotsLink, projectMembersLink, projectsLink } from "@/lib/links.ts";
@@ -23,15 +21,13 @@ import {
 	useUpdateProject,
 } from "@/lib/projects.ts";
 import { useSession } from "@/lib/session.ts";
-import { useMemberships } from "@/lib/workspace.ts";
 import { ProjectColourPicker } from "@/shell/AvatarPicker.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { OwnerCrumb, OwnerPageCrumb } from "@/shell/BotCrumb.tsx";
-import { BotMenuItem, LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
+import { BotMenuItem, canBeInProject, LeadBotPicker } from "@/shell/LeadBotPicker.tsx";
 import { Page } from "@/shell/Page.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Alert } from "@/ui/alert.tsx";
-import { MemberAvatar } from "@/ui/avatar.tsx";
 import { useLeave } from "@/ui/back-button.tsx";
 import { DeleteDialog } from "@/ui/delete-dialog.tsx";
 import {
@@ -49,10 +45,10 @@ import {
 	SettingsNameRow,
 	SettingsPage,
 	SettingsRow,
-	SettingsRowAlert,
 	SettingsValue,
 } from "@/ui/settings-page.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
+import { AddMembersMenu, MemberRows } from "./MemberList.tsx";
 
 /** Which of a project's settings pages is open: its own, its members, or its bots. */
 export type ProjectSettingsSection = "general" | "members" | "bots";
@@ -67,9 +63,8 @@ const SECTION_TITLES = {
 /**
  * One project's settings, as pages of its own beside its chats: its own,
  * its lead bot among them, with its members and its bots each a page under
- * it. Its computer and connectors are pages of the project's own. Only
- * public bots can be added, and a bot made personal leaves its projects,
- * unless it leads one.
+ * it. Its computer and connectors are pages of the project's own. Public
+ * bots can be added, and private ones to a private project.
  */
 export function ProjectSettingsPage({
 	project,
@@ -166,6 +161,7 @@ function ProjectDetails({ project }: { project: Project }) {
 					<SettingsControlRow label="Lead bot">
 						<LeadBotPicker
 							value={project.leadBotId}
+							privateProject={project.visibility === "private"}
 							disabled={relead.isPending}
 							onChange={(leadBotId) => void relead.mutateAsync({ leadBotId }).catch(() => {})}
 						/>
@@ -260,7 +256,7 @@ function ProjectDetails({ project }: { project: Project }) {
 
 /**
  * The bots added to the project, which answer there when mentioned, with
- * adding another public bot and taking one out for whoever may. The lead bot
+ * adding another bot that may be in it and taking one out for whoever may. The lead bot
  * stays until another is chosen.
  */
 function ProjectBots({ project }: { project: Project }) {
@@ -271,7 +267,9 @@ function ProjectBots({ project }: { project: Project }) {
 	const inProject = new Set(bots.data?.map((bot) => bot.id));
 	const addable =
 		workspaceBots?.filter(
-			(bot) => bot.visibility === "public" && !bot.assistant && !inProject.has(bot.id),
+			(bot) =>
+				canBeInProject(bot, { private: project.visibility === "private" }) &&
+				!inProject.has(bot.id),
 		) ?? [];
 	const count = bots.data?.length ?? 0;
 	return (
@@ -285,7 +283,7 @@ function ProjectBots({ project }: { project: Project }) {
 						</SettingsAddButton>
 						<DropdownMenuContent align="end" className="min-w-52">
 							{addable.length === 0 ? (
-								<DropdownMenuItem disabled>Every public bot is here.</DropdownMenuItem>
+								<DropdownMenuItem disabled>Every bot you can add is here.</DropdownMenuItem>
 							) : (
 								addable.map((bot) => (
 									<BotMenuItem
@@ -339,148 +337,68 @@ function ProjectBots({ project }: { project: Project }) {
 }
 
 /*
- * The members in the project. Anyone in the workspace can be added; the label
- * after a name is their standing in the workspace, since a project has no
- * roles of its own. Administrators are in every project, so who can be taken
- * out, and whether you may leave, is the API's answer.
+ * The members in the project. Anyone in the workspace can be added.
+ * Administrators are in every project, so who can be taken out, and whether
+ * you may leave, is the API's answer.
  */
 function Members({ project }: { project: Project }) {
 	const members = useProjectMembers(project.id);
-	const memberships = useMemberships(project.workspaceId);
 	const remove = usePlaceProjectMember(project.id);
 	const leave = useLeaveProject(project.id);
 	const navigate = useNavigate();
-	const [removing, setRemoving] = useState<ProjectMember>();
 	const session = useSession();
-	const roleOf = (memberId: string) =>
-		memberships.data?.find((membership) => membership.member.id === memberId)?.role;
 	const isYou = (memberId: string) => memberId === session.member?.id;
-	const mayTakeOut = (member: ProjectMember) =>
-		isYou(member.memberId)
-			? project.permissions.leave
-			: project.permissions.manageMembers && member.removable;
-	const leaving = removing !== undefined && isYou(removing.memberId);
-	const pending = leaving ? leave : remove;
-
-	async function takeOut(member: ProjectMember) {
-		const isLeaving = isYou(member.memberId);
-		try {
-			if (isLeaving) {
-				await leave.mutateAsync();
-			} else {
-				await remove.mutateAsync({ memberId: member.memberId, member: false });
-			}
-		} catch {
-			return;
-		}
-		setRemoving(undefined);
-		if (isLeaving) await navigate(projectsLink());
-	}
-
-	let rows: ReactNode;
-	if (members.isError) {
-		rows = <SettingsRowAlert>{failureMessage(members.error)}</SettingsRowAlert>;
-	} else if (members.data?.length === 0) {
-		rows = <SettingsRow label="Nobody is in this project yet" />;
-	} else {
-		rows = members.data?.map((member) => (
-			<SettingsRow
-				key={member.memberId}
-				icon={<MemberAvatar member={member} size={24} />}
-				label={member.name}
-				trailing={
-					<>
-						<SettingsValue>
-							{isYou(member.memberId)
-								? "You"
-								: // Said once the workspace roster has answered, not guessed before it.
-									memberships.data && workspaceRoleLabel(roleOf(member.memberId))}
-						</SettingsValue>
-						{mayTakeOut(member) && (
-							<IconButton
-								variant="destructive"
-								label={isYou(member.memberId) ? `Leave ${project.name}` : `Remove ${member.name}`}
-								disabled={remove.isPending || leave.isPending}
-								onClick={() => setRemoving(member)}
-							>
-								<Minus size={13} strokeWidth={2.6} />
-							</IconButton>
-						)}
-					</>
-				}
-			/>
-		));
-	}
-
+	const pending = remove.isPending || leave.isPending;
 	return (
-		<SettingsGroup>
-			{rows}
-			<DeleteDialog
-				open={removing !== undefined}
-				onOpenChange={(open) => {
-					if (!open) setRemoving(undefined);
-				}}
-				title={
-					leaving
-						? `Leave ${project.name}?`
-						: `Remove ${removing?.name ?? "this member"} from ${project.name}?`
+		<MemberRows
+			workspaceId={project.workspaceId}
+			members={members}
+			emptyLabel="Nobody is in this project yet"
+			mayRemove={(member) =>
+				isYou(member.memberId)
+					? project.permissions.leave
+					: project.permissions.manageMembers && member.removable
+			}
+			removeLabel={(member) =>
+				isYou(member.memberId) ? `Leave ${project.name}` : `Remove ${member.name}`
+			}
+			confirmation={(member) =>
+				isYou(member.memberId)
+					? {
+							title: `Leave ${project.name}?`,
+							description: "You leave its chats. If it's public, you can join again.",
+							confirmLabel: "Leave",
+						}
+					: {
+							title: `Remove ${member.name} from ${project.name}?`,
+							description: "They leave its chats. You can add them back at any time.",
+							confirmLabel: "Remove",
+						}
+			}
+			onRemove={async (member) => {
+				if (!isYou(member.memberId)) {
+					return remove.mutateAsync({ memberId: member.memberId, member: false });
 				}
-				description={
-					leaving
-						? "You leave its chats. If it's public, you can join again."
-						: "They leave its chats. You can add them back at any time."
-				}
-				confirmLabel={leaving ? "Leave" : "Remove"}
-				pending={pending.isPending}
-				error={pending.error ? failureMessage(pending.error) : undefined}
-				onDelete={async () => {
-					if (removing) await takeOut(removing);
-				}}
-			/>
-		</SettingsGroup>
+				await leave.mutateAsync();
+				await navigate(projectsLink());
+			}}
+			pending={pending}
+			error={remove.error ?? leave.error}
+		/>
 	);
 }
 
-/**
- * Add members, beside the Members title: a menu of the workspace's members who
- * aren't in the project yet, each added as they are picked. Why an add failed is
- * said under the button.
- */
+/** Add members, beside the Members title. */
 function AddMembersButton({ project }: { project: Project }) {
 	const members = useProjectMembers(project.id);
-	const memberships = useMemberships(project.workspaceId);
 	const invite = usePlaceProjectMember(project.id);
-	const inProject = new Set(members.data?.map((member) => member.memberId));
-	const invitable =
-		memberships.data?.filter((membership) => !inProject.has(membership.member.id)) ?? [];
 	return (
-		<div className="flex flex-col items-end gap-2">
-			<DropdownMenu>
-				<SettingsAddButton disabled={invite.isPending} render={<DropdownMenuTrigger />}>
-					Add members
-				</SettingsAddButton>
-				<DropdownMenuContent align="end" className="min-w-52">
-					{memberships.isPending ? (
-						<DropdownMenuItem disabled>Loading…</DropdownMenuItem>
-					) : invitable.length === 0 ? (
-						<DropdownMenuItem disabled>Everyone in the workspace is here.</DropdownMenuItem>
-					) : (
-						invitable.map((membership) => (
-							<DropdownMenuItem
-								key={membership.member.id}
-								onClick={() => invite.mutate({ memberId: membership.member.id, member: true })}
-							>
-								{/* Hidden from the name, or the initials would read as part of it. */}
-								<span aria-hidden>
-									<MemberAvatar member={membership.member} size={22} />
-								</span>
-								<span className="min-w-0 flex-1 truncate">{membership.member.name}</span>
-							</DropdownMenuItem>
-						))
-					)}
-				</DropdownMenuContent>
-			</DropdownMenu>
-			{invite.error && <Alert>{failureMessage(invite.error)}</Alert>}
-		</div>
+		<AddMembersMenu
+			workspaceId={project.workspaceId}
+			present={members.data}
+			onAdd={(memberId) => invite.mutate({ memberId, member: true })}
+			pending={invite.isPending}
+			error={invite.error}
+		/>
 	);
 }

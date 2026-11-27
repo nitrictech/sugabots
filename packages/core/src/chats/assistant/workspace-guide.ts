@@ -1,10 +1,10 @@
 export * as WorkspaceGuide from "./workspace-guide.ts";
 
 import type { WorkspaceGuide as Guide } from "@sugabots/contracts/workspace-guide";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { type Executor, query, serviceOperations } from "../../database/database.ts";
-import { automation, project } from "../../database/schema.ts";
+import { automation, bot, project } from "../../database/schema.ts";
 import type { Approved } from "../../proofs/approved.ts";
 import type { ReachSet } from "../../proofs/reach-set.ts";
 import type { CanReadWorkspace } from "../../proofs/workspace-permissions.ts";
@@ -68,12 +68,18 @@ export const make = Effect.gen(function* () {
 					// no bot to suggest to them: it is only named for its failing automations.
 					const reachedBots = yield* bots.list(canRead);
 					const workspaceBots = reachedBots.filter((bot) => !bot.assistant);
-					const handleOf = new Map(workspaceBots.map((bot) => [bot.id, `@${bot.handle}`]));
+					// A private project's members talk to its lead there, a private bot
+					// included, without reaching it, so its handle is read for them here.
+					const leadHandles = yield* query((db) =>
+						leadHandlesOf(
+							db,
+							listedProjects.map((listed) => listed.leadBotId),
+						),
+					);
 					const leadHandleOf = (botId: string) => {
-						const handle = handleOf.get(botId);
-						// A lead is a public bot, which everyone in the workspace reaches.
-						if (!handle) throw new Error("A project's lead bot is out of its member's reach");
-						return handle;
+						const handle = leadHandles.get(botId);
+						if (!handle) throw new Error("A project's lead bot is gone");
+						return `@${handle}`;
 					};
 					const failing = yield* query((db) => failingAutomationsByProject(db, workspaceId, reach));
 					const unreadMentions = yield* view.unreadMentions(canRead, reach, LISTED_ITEMS);
@@ -185,3 +191,15 @@ const failingAutomationsByProject = <P, W>(
 			),
 		)
 		.groupBy(project.id, project.defaultOfBotId);
+
+/** The handles of the bots `botIds`, by id. */
+const leadHandlesOf = (db: Executor, botIds: readonly string[]) =>
+	Effect.map(
+		botIds.length === 0
+			? Effect.succeed([])
+			: db
+					.select({ id: bot.id, handle: bot.handle })
+					.from(bot)
+					.where(inArray(bot.id, [...botIds])),
+		(rows) => new Map(rows.map((row) => [row.id, row.handle])),
+	);

@@ -16,7 +16,7 @@ import {
 } from "../../../database/schema.ts";
 import { Ids } from "../../../ids/ids.ts";
 import type { CanUseComputer } from "../../../proofs/can-use-computer.ts";
-import type { ReachesBot } from "../../../proofs/reaches-bot.ts";
+import type { Named } from "../../../proofs/proof.ts";
 import type { ReachesChat } from "../../../proofs/reaches-chat.ts";
 import { processLayer, Tier } from "../../../tiers.ts";
 import { placeOf } from "../computer/tools.ts";
@@ -25,8 +25,9 @@ import { startDesktop } from "./browser.ts";
 /**
  * A bot's desktop in a chat, opened by a member to watch or take over: where
  * the browser it drives is shown, on the computer the bot works on there, the
- * chat's project's. Whoever reaches the chat and the bot may watch it, while
- * the bot takes part in the chat and uses computers; whoever may change
+ * chat's project's. Whoever reaches the chat may watch it while the bot takes
+ * part in the chat and uses computers, a private bot they don't reach
+ * included, as they talk to it there; whoever may change
  * things there may take it over, clicking and typing on it. Opening it uses
  * the computer as a turn would, resuming it, or making it if the project has
  * none, and starts the desktop if it isn't running; the computer stays awake
@@ -45,7 +46,7 @@ export interface Interface {
 	 */
 	readonly openComputer: <P, C, B>(
 		chat: ReachesChat<P, C>,
-		bot: ReachesBot<P, B>,
+		bot: Named<B, string>,
 	) => Effect.Effect<OpenedComputer, DesktopUnavailable | Computers.Unavailable, Scope.Scope>;
 	/**
 	 * Starts the bot's desktop on `opened`, and answers where its VNC server
@@ -63,7 +64,7 @@ export interface Interface {
 	 */
 	readonly stillShown: <P, C, B>(
 		chat: ReachesChat<P, C>,
-		bot: ReachesBot<P, B>,
+		bot: Named<B, string>,
 	) => Effect.Effect<string, DesktopUnavailable>;
 }
 
@@ -99,8 +100,8 @@ export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("DesktopViewer");
 
 	/** Whether the bot is the one the chat is with, or was added to it. */
-	const takesPart = <P, C, B>(chat: ReachesChat<P, C>, bot: ReachesBot<P, B>) =>
-		chat.project.defaultOf?.id === bot.bot.value
+	const takesPart = <P, C, B>(chat: ReachesChat<P, C>, bot: Named<B, string>) =>
+		chat.project.defaultOf?.id === bot.value
 			? Effect.succeed(true)
 			: query((db) =>
 					db
@@ -109,7 +110,7 @@ export const make = Effect.gen(function* () {
 						.where(
 							and(
 								eq(chatParticipant.chatId, chat.chat.value),
-								eq(chatParticipant.botId, bot.bot.value),
+								eq(chatParticipant.botId, bot.value),
 							),
 						)
 						.limit(1),
@@ -119,7 +120,7 @@ export const make = Effect.gen(function* () {
 	 * The bot, with its colour, once it is found to take part in the chat and
 	 * use a computer there.
 	 */
-	const requireShown = <P, C, B>(chat: ReachesChat<P, C>, bot: ReachesBot<P, B>) =>
+	const requireShown = <P, C, B>(chat: ReachesChat<P, C>, bot: Named<B, string>) =>
 		Effect.gen(function* () {
 			if (!(yield* takesPart(chat, bot))) {
 				return yield* new DesktopUnavailable({ reason: NOT_IN_THIS_CHAT });
@@ -128,7 +129,7 @@ export const make = Effect.gen(function* () {
 				db
 					.select({ usesComputer: botTable.usesComputer, color: botTable.color })
 					.from(botTable)
-					.where(eq(botTable.id, bot.bot.value))
+					.where(eq(botTable.id, bot.value))
 					.limit(1),
 			);
 			// The UI hides the desktop then too, but this is what stops a request
@@ -136,7 +137,7 @@ export const make = Effect.gen(function* () {
 			if (!found?.usesComputer) {
 				return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
 			}
-			return { id: bot.bot.value, color: found.color };
+			return { id: bot.value, color: found.color };
 		});
 
 	return Service.of({

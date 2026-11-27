@@ -6,6 +6,11 @@ import {
 	type ProjectVisibility,
 } from "@sugabots/contracts";
 import {
+	AdministratorInEveryPrivateBot,
+	NotBotMember,
+	PersonalVisibilityFixed,
+} from "@sugabots/contracts/errors/bots";
+import {
 	AdministratorInEveryProject,
 	NotInProject,
 	NotInWorkspace,
@@ -124,9 +129,21 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			callOperation(await signIn(memberId), "bots.update", input),
 		remove: async (input: InputOf<"bots.remove">) =>
 			callOperation(await signIn(memberId), "bots.remove", input),
+		list: async () =>
+			callOperation(await signIn(memberId), "bots.list", { workspace: workspaceId }),
+		members: async (input: InputOf<"bots.listMembers">) =>
+			callOperation(await signIn(memberId), "bots.listMembers", input),
+		addMember: async (input: InputOf<"bots.addMember">) =>
+			callOperation(await signIn(memberId), "bots.addMember", input),
+		removeMember: async (input: InputOf<"bots.removeMember">) =>
+			callOperation(await signIn(memberId), "bots.removeMember", input),
 	});
 	/** A bot `creatorId` made, public unless said otherwise. */
-	const aBot = async (creatorId: string, name: string, visibility?: "public" | "personal") =>
+	const aBot = async (
+		creatorId: string,
+		name: string,
+		visibility?: "public" | "private" | "personal",
+	) =>
 		botsAs(creatorId).create({
 			workspace: workspaceId,
 			bot: { name, model: "test-model", visibility },
@@ -512,7 +529,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 
 			await expect(
 				projectsAs(editorId).addBot({ projectId: made.id, botId: own.id }),
-			).rejects.toBeInstanceOf(ProjectStore.BotNotPublic);
+			).rejects.toBeInstanceOf(ProjectStore.PersonalBotInProject);
 			await expect(
 				projectsAs(editorId).addBot({ projectId: made.id, botId: someoneElses.id }),
 			).rejects.toThrow(ResourceHidden);
@@ -743,7 +760,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 					slug: "mine",
 					leadBotId: diary.id,
 				}),
-			).rejects.toBeInstanceOf(ProjectStore.BotNotPublic);
+			).rejects.toBeInstanceOf(ProjectStore.PersonalBotInProject);
 			expect((await listedTo(editorId)).map(({ id }) => id)).toEqual([made.id]);
 		});
 
@@ -860,6 +877,153 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				leadId,
 				triage.id,
 			]);
+		});
+	});
+
+	describe("private bots", () => {
+		/** The ids of the members of the bot `botId`, as `memberId` lists them. */
+		const botMemberIds = async (memberId: string, botId: string) =>
+			(await botsAs(memberId).members({ botId })).map((one) => one.memberId).sort();
+		/** The ids of the bots `memberId` is listed. */
+		const botsListedTo = async (memberId: string) =>
+			(await botsAs(memberId).list()).map(({ id }) => id);
+
+		it("is reached by its creator, the admins and the members they invite, and listed only to them", async () => {
+			const diary = await aBot(editorId, "Diary", "private");
+
+			expect(await botMemberIds(editorId, diary.id)).toEqual([adminId, editorId].sort());
+			expect(await botsListedTo(viewerId)).not.toContain(diary.id);
+			await expect(botsAs(viewerId).members({ botId: diary.id })).rejects.toThrow(ResourceHidden);
+
+			await botsAs(editorId).addMember({ botId: diary.id, memberId: viewerId });
+			expect(await botsListedTo(viewerId)).toContain(diary.id);
+			expect(await botMemberIds(viewerId, diary.id)).toEqual([adminId, editorId, viewerId].sort());
+			await expect(
+				botsAs(viewerId).addMember({ botId: diary.id, memberId: outsiderId }),
+			).rejects.toThrow(ActionForbidden);
+			await expect(
+				botsAs(editorId).removeMember({ botId: diary.id, memberId: adminId }),
+			).rejects.toBeInstanceOf(AdministratorInEveryPrivateBot);
+
+			await botsAs(editorId).removeMember({ botId: diary.id, memberId: viewerId });
+			expect(await botsListedTo(viewerId)).not.toContain(diary.id);
+			await expect(
+				botsAs(editorId).removeMember({ botId: diary.id, memberId: viewerId }),
+			).rejects.toBeInstanceOf(NotBotMember);
+		});
+
+		it("joins and leads private projects only, where the project's members talk to it", async () => {
+			const diary = await aBot(editorId, "Diary", "private");
+			const open = await create(editorId, { name: "Open", slug: "open" });
+			const closed = await create(editorId, {
+				name: "Closed",
+				slug: "closed",
+				visibility: "private",
+			});
+			await projectsAs(editorId).addMember({ projectId: closed.id, memberId: viewerId });
+
+			await expect(
+				projectsAs(editorId).addBot({ projectId: open.id, botId: diary.id }),
+			).rejects.toBeInstanceOf(ProjectStore.BotNotPublic);
+			await expect(
+				projectsAs(editorId).create({
+					workspace: workspaceId,
+					name: "Led",
+					slug: "led",
+					leadBotId: diary.id,
+				}),
+			).rejects.toBeInstanceOf(ProjectStore.BotNotPublic);
+			const led = await projectsAs(editorId).create({
+				workspace: workspaceId,
+				name: "Led",
+				slug: "led",
+				visibility: "private",
+				leadBotId: diary.id,
+			});
+			expect(led.leadBotId).toBe(diary.id);
+
+			await projectsAs(editorId).addBot({ projectId: closed.id, botId: diary.id });
+			// Vi talks to it in Closed, and reaches it nowhere else.
+			expect(
+				(await projectsAs(viewerId).bots({ projectId: closed.id })).map(({ id }) => id),
+			).toContain(diary.id);
+			expect(await botsListedTo(viewerId)).not.toContain(diary.id);
+		});
+
+		it("keeps a project with a private bot private until the bot leaves it", async () => {
+			const diary = await aBot(editorId, "Diary", "private");
+			const closed = await create(adminId, {
+				name: "Closed",
+				slug: "closed",
+				visibility: "private",
+			});
+			await projectsAs(adminId).addBot({ projectId: closed.id, botId: diary.id });
+
+			const opening = projectsAs(adminId).update({
+				projectId: closed.id,
+				changes: { visibility: "public" },
+			});
+			await expect(opening).rejects.toBeInstanceOf(ProjectStore.ProjectHasPrivateBots);
+			await expect(opening).rejects.toMatchObject({
+				userMessage: "Diary is a private bot, so this project stays private until they leave it.",
+			});
+
+			await projectsAs(adminId).removeBot({ projectId: closed.id, botId: diary.id });
+			const opened = await projectsAs(adminId).update({
+				projectId: closed.id,
+				changes: { visibility: "public" },
+			});
+			expect(opened.visibility).toBe("public");
+		});
+
+		it("takes a bot made private out of public projects, once it leads none, and keeps it in private ones", async () => {
+			const triage = await aBot(editorId, "Triage");
+			const open = await create(editorId, { name: "Open", slug: "open" });
+			const closed = await create(editorId, {
+				name: "Closed",
+				slug: "closed",
+				visibility: "private",
+			});
+			for (const projectId of [open.id, closed.id]) {
+				await projectsAs(editorId).addBot({ projectId, botId: triage.id });
+			}
+			await projectsAs(adminId).update({ projectId: open.id, changes: { leadBotId: triage.id } });
+
+			await expect(
+				botsAs(editorId).update({ botId: triage.id, changes: { visibility: "private" } }),
+			).rejects.toMatchObject({
+				userMessage: "Triage leads Open. Choose another lead bot for it first.",
+			});
+
+			await projectsAs(adminId).update({ projectId: open.id, changes: { leadBotId: leadId } });
+			const made = await botsAs(editorId).update({
+				botId: triage.id,
+				changes: { visibility: "private" },
+			});
+			expect(made.visibility).toBe("private");
+			const botsIn = async (projectId: string) =>
+				(await projectsAs(adminId).bots({ projectId })).map(({ id }) => id);
+			expect(await botsIn(open.id)).not.toContain(triage.id);
+			expect(await botsIn(closed.id)).toContain(triage.id);
+			expect(await botMemberIds(editorId, triage.id)).toEqual([adminId, editorId].sort());
+
+			// Made public again, it stays in Closed, and has no members: everyone reaches it.
+			await botsAs(editorId).update({ botId: triage.id, changes: { visibility: "public" } });
+			expect(await botsIn(closed.id)).toContain(triage.id);
+			expect(await botMemberIds(viewerId, triage.id)).toEqual([]);
+			expect(await botsListedTo(viewerId)).toContain(triage.id);
+		});
+
+		it("never makes a bot personal, or a personal bot public or private", async () => {
+			const triage = await aBot(editorId, "Triage", "private");
+			const diary = await aBot(editorId, "Diary", "personal");
+
+			await expect(
+				botsAs(editorId).update({ botId: triage.id, changes: { visibility: "personal" } }),
+			).rejects.toBeInstanceOf(PersonalVisibilityFixed);
+			await expect(
+				botsAs(editorId).update({ botId: diary.id, changes: { visibility: "private" } }),
+			).rejects.toBeInstanceOf(PersonalVisibilityFixed);
 		});
 	});
 

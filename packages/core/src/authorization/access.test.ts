@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
-import { bot, placedChat, project } from "../database/schema.ts";
+import { seedBot, seedProjectChat } from "../authentication/seed.test-support.ts";
+import { bot, placedChat, project, projectBot } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { named } from "../proofs/proof.ts";
 import { proveReachesBot } from "../proofs/reaches-bot.ts";
@@ -15,15 +16,29 @@ describe("reach written as SQL", () => {
 		await closeDatabase();
 	});
 
-	it("agrees with the member reach provers for bots, projects and chats", async () => {
+	it("agrees with the member reach provers for bots, projects and chats, private bots included", async () => {
 		const { a, b } = await buildWorld();
 		await onDatabase((db) =>
 			db.update(project).set({ deleting: true }).where(eq(project.id, a.helper.defaultProject)),
 		);
+		// A private bot Ed made, with Ed among its members, in the private project J,
+		// where Vi talks to it without being one of its members.
+		const privateBot = await seedBot(a.workspace, {
+			createdById: a.ed,
+			visibility: "private",
+			members: [a.ed],
+		});
+		await onDatabase((db) =>
+			db
+				.insert(projectBot)
+				.values({ workspaceId: a.workspace, projectId: a.project, botId: privateBot.id }),
+		);
+		const privateBotChat = await seedProjectChat(a.workspace, privateBot.defaultProject, a.ed);
 		const as = principals(await authenticators());
 		const editor = await as.member(a.ed);
 		const viewer = await as.member(a.vi);
 		const outsider = await as.member(a.erin);
+		const admin = await as.member(a.admin);
 		const cases = [
 			{
 				member: editor,
@@ -80,6 +95,41 @@ describe("reach written as SQL", () => {
 				projectId: a.otherProject,
 				chatId: a.otherChat,
 				expected: [false, true, true],
+			},
+			{
+				member: editor,
+				botId: privateBot.id,
+				projectId: privateBot.defaultProject,
+				chatId: privateBotChat,
+				expected: [true, true, true],
+			},
+			{
+				member: admin,
+				botId: privateBot.id,
+				projectId: privateBot.defaultProject,
+				chatId: privateBotChat,
+				expected: [true, true, true],
+			},
+			{
+				member: viewer,
+				botId: privateBot.id,
+				projectId: privateBot.defaultProject,
+				chatId: privateBotChat,
+				expected: [false, false, false],
+			},
+			{
+				member: viewer,
+				botId: privateBot.id,
+				projectId: a.project,
+				chatId: a.chat,
+				expected: [false, true, true],
+			},
+			{
+				member: outsider,
+				botId: privateBot.id,
+				projectId: privateBot.defaultProject,
+				chatId: privateBotChat,
+				expected: [false, false, false],
 			},
 			{
 				member: viewer,

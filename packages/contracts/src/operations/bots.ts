@@ -5,6 +5,7 @@
 
 import { Schema } from "effect";
 import {
+	botMemberSchema,
 	botSchema,
 	botUpdateSchema,
 	DESCRIPTION_MAX_LENGTH,
@@ -13,18 +14,20 @@ import {
 	systemBotKeySchema,
 } from "../bots.ts";
 import {
+	AdministratorInEveryPrivateBot,
 	AssistantHandleFixed,
 	AssistantInstructionsManaged,
 	BotGone,
 	BotHandleReserved,
 	BotNameTaken,
 	EmptyBotUpdate,
+	NotBotMember,
 	PersonalVisibilityFixed,
 	SystemBotImmutable,
 	SystemBotMissing,
 } from "../errors/bots.ts";
 import { ClaimLost, ComputerMadeMeanwhile, ComputerUnavailable } from "../errors/computers.ts";
-import { LeadsProjects } from "../errors/projects.ts";
+import { LeadsProjects, NotInWorkspace } from "../errors/projects.ts";
 import {
 	ActionForbidden,
 	ApprovalNeeded,
@@ -65,6 +68,13 @@ const forMemberInMemberBounds = <const Tool extends string>(tool: Tool) =>
 		approval: { kind: "always", approvers: "turn" },
 	}) as const;
 
+/** Held back: it changes who reaches a bot, which a bot may do only in member bounds. */
+const changesWhoReaches = {
+	kind: "heldBack",
+	reason:
+		"It changes who reaches a bot, which a bot may do only in member bounds, and no tool does it yet.",
+} as const;
+
 /** Held back: it manages the workspace or a bot, which a bot may do only in member bounds. */
 const managesInMemberBounds = {
 	kind: "heldBack",
@@ -99,7 +109,7 @@ export const botsContracts = {
 	}),
 	"bots.update": OperationContract.make("bots.update", {
 		description:
-			"Change a bot you manage: its name, handle, avatar, description, instructions, model, tools or computer use. Whether a bot is personal is chosen when it is made and never changes. Of a Personal Assistant, all but its instructions and handle.",
+			"Change a bot you manage: its name, handle, avatar, description, instructions, model, tools, computer use, or whether it is public or private. A bot made private leaves every public project, once each it leads has another lead. Whether a bot is personal is chosen when it is made and never changes. Of a Personal Assistant, all but its instructions and handle.",
 		input: Schema.Struct({ botId: uuidSchema, changes: botUpdateSchema }),
 		output: botSchema,
 		errors: [
@@ -113,6 +123,7 @@ export const botsContracts = {
 			PersonalVisibilityFixed,
 			AssistantInstructionsManaged,
 			AssistantHandleFixed,
+			LeadsProjects,
 		],
 		changes: true,
 		http: { kind: "offered", method: "PATCH", path: "/bots/:botId" },
@@ -176,6 +187,41 @@ export const botsContracts = {
 			kind: "heldBack",
 			reason: "Deleting a bot deletes its chats, files and computer; members do it in the web app.",
 		},
+	}),
+	"bots.listMembers": OperationContract.make("bots.listMembers", {
+		description: "List the members of a private bot, by name.",
+		input: aBot,
+		output: Schema.Array(botMemberSchema),
+		errors: refusals,
+		changes: false,
+		http: { kind: "offered", method: "GET", path: "/bots/:botId/members" },
+		botLoop: {
+			kind: "heldBack",
+			reason: "No tool lists a bot's members; offering one waits for tools to become operations.",
+		},
+	}),
+	"bots.addMember": OperationContract.make("bots.addMember", {
+		description:
+			"Invite a member of the workspace to a private bot, so they see it and talk to it, with its chats and files.",
+		input: Schema.Struct({
+			botId: uuidSchema,
+			memberId: uuidSchema.annotate({ description: "The member's id." }),
+		}),
+		output: Schema.Void,
+		errors: [...refusals, NotInWorkspace],
+		changes: true,
+		http: { kind: "offered", method: "POST", path: "/bots/:botId/members" },
+		botLoop: changesWhoReaches,
+	}),
+	"bots.removeMember": OperationContract.make("bots.removeMember", {
+		description:
+			"Take a member out of a private bot. The workspace's owner and admins stay in every one.",
+		input: Schema.Struct({ botId: uuidSchema, memberId: uuidSchema }),
+		output: Schema.Void,
+		errors: [...refusals, AdministratorInEveryPrivateBot, NotBotMember],
+		changes: true,
+		http: { kind: "offered", method: "DELETE", path: "/bots/:botId/members/:memberId" },
+		botLoop: changesWhoReaches,
 	}),
 	"bots.pin": OperationContract.make("bots.pin", {
 		description:

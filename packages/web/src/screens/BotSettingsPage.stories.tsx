@@ -210,6 +210,82 @@ export const ModelPage = meta.story({
 	},
 });
 
+/** Growth Desk made private, with its members invited by whoever reaches it. */
+const privateBots = bots.map((bot) =>
+	bot.id === growthDesk.id
+		? {
+				...bot,
+				visibility: "private" as const,
+				permissions: { ...bot.permissions, manageMembers: true },
+			}
+		: bot,
+);
+
+/** A member Growth Desk's members invited, whom they may take out again. */
+const invited = {
+	memberId: "0199a3a0-0000-7000-8000-0000000000e2",
+	name: "Ana Lee",
+	email: "ana@example.com",
+	image: null,
+	removable: true,
+};
+
+/**
+ * A private bot's settings: Private chosen, saying who sees it, and its
+ * Members, with Add members and each one but an admin removable.
+ */
+export const PrivateBotMembers = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/bots/:botId/members`, () =>
+				HttpResponse.json([
+					{
+						memberId: "0199a3a0-0000-7000-8000-0000000000d2",
+						name: "Sam Rivera",
+						email: "sam@example.com",
+						image: null,
+						removable: false,
+					},
+					invited,
+				]),
+			),
+			...appHandlers({ models, bots: privateBots }),
+		);
+	},
+	play: async ({ canvas }) => {
+		const visibility = await canvas.findByRole("group", { name: "Visibility" });
+		await expect(within(visibility).getByRole("radio", { name: "Private" })).toBeChecked();
+		await expect(
+			canvas.getByText(/^Only its members can see it and talk to it/),
+		).toBeInTheDocument();
+		await expect(await canvas.findByRole("heading", { name: "Members" })).toBeInTheDocument();
+		await expect(await canvas.findByText(invited.name)).toBeInTheDocument();
+		await expect(
+			canvas.getByRole("button", { name: `Remove ${invited.name}` }),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("button", { name: "Remove Sam Rivera" })).toBeNull();
+		await expect(canvas.getByRole("button", { name: "Add members" })).toBeInTheDocument();
+	},
+});
+
+/**
+ * Making a public bot private asks first, saying who will see it and that it
+ * leaves the public projects it is in.
+ */
+export const MakingPrivate = meta.story({
+	play: async ({ canvas, userEvent }) => {
+		const visibility = await canvas.findByRole("group", { name: "Visibility" });
+		await userEvent.click(within(visibility).getByRole("radio", { name: "Private" }));
+		const dialog = await within(document.body).findByRole("dialog", {
+			name: `Make ${growthDesk.name} private?`,
+		});
+		await expect(
+			within(dialog).getByText(/It will leave every public project it's in/),
+		).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Make private" })).toBeInTheDocument();
+	},
+});
+
 /** An editor in the workspace, who may not change the bot. */
 function editorHandlers() {
 	return appHandlers({

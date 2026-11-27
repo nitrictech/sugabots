@@ -63,7 +63,11 @@ export function creatorOf(bot: {
  * automations; `createdBy` is {@link creatorOf} its `createdById`.
  */
 export function toBot(
-	row: MemberFacingBotRow & { defaultProjectId: string; createdBy: NamedMember | null },
+	row: MemberFacingBotRow & {
+		memberIds: readonly string[];
+		defaultProjectId: string;
+		createdBy: NamedMember | null;
+	},
 	viewer: { actor: Actor; pinned: boolean },
 ): Bot {
 	const permissions = botPermissionsShown(viewer.actor, row, row.defaultProjectId);

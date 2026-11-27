@@ -1,14 +1,15 @@
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Effect } from "effect";
-import type { Actor } from "../authorization/permissions.ts";
+import { type Actor, mayOnBot } from "../authorization/permissions.ts";
 import type { CanManageBot } from "./can-manage-bot.ts";
 import type { CanRestrictBot } from "./can-restrict-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
+import type { ReachesBot } from "./reaches-bot.ts";
 import type { HoldsWorkspaceLock } from "./workspace-lock.ts";
 
 /**
- * What P may do to a bot it manages or restricts. Each is a pure function of
- * `CanManageBot` or `CanRestrictBot`, with no query.
+ * What P may do to a bot it manages, restricts or reaches. Each is a pure
+ * function of `CanManageBot`, `CanRestrictBot` or `ReachesBot`, with no query.
  */
 
 /**
@@ -34,8 +35,43 @@ export interface CanChangeBotReach<P, B> extends Proof<"CanChangeBotReach", [P, 
 	readonly manage: CanManageBot<P, B>;
 }
 
+/**
+ * P may invite and remove the private bot B's members: any of its members
+ * but viewers, by `bot.members.manage`. A bot may only in member bounds, as
+ * this changes who reaches what. Proved under B's workspace's lock, from a
+ * reach proved there too.
+ */
+export interface CanChangeBotMembers<P, B> extends Proof<"CanChangeBotMembers", [P, B]> {
+	readonly reach: ReachesBot<P, B>;
+	/** The member whose permissions gave it: a member signed in, or a bot's asker. */
+	readonly actor: Actor;
+}
+
 const CanDeleteBotProof = defineProof("CanDeleteBot");
 const CanChangeBotReachProof = defineProof("CanChangeBotReach");
+const CanChangeBotMembersProof = defineProof("CanChangeBotMembers");
+
+export const proveCanChangeBotMembers = <P, W, B>(
+	lock: HoldsWorkspaceLock<P, W>,
+	reach: ReachesBot<P, B>,
+): Effect.Effect<CanChangeBotMembers<P, B>, ActionForbidden | ResourceHidden> => {
+	if (reach.workspace !== lock.workspace.value) {
+		return Effect.fail(new ResourceHidden({ resource: "bot" }));
+	}
+	const actor = reach.viewer;
+	const principal = reach.principal.value;
+	const inMemberBounds =
+		principal._tag === "MemberSession" ||
+		(principal._tag === "BotForAsker" && principal.bounds.kind === "member");
+	if (!actor || !inMemberBounds || !mayOnBot(actor, "bot.members.manage", reach.facts)) {
+		return Effect.fail(new ActionForbidden({ proof: "CanChangeBotMembers" }));
+	}
+	const proof: CanChangeBotMembers<P, B> = CanChangeBotMembersProof.prove(
+		[reach.principal, reach.bot],
+		{ reach, actor },
+	);
+	return Effect.succeed(proof);
+};
 
 export const proveCanChangeBotReach = <P, W, B>(
 	lock: HoldsWorkspaceLock<P, W>,

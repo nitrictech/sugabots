@@ -145,6 +145,7 @@ const MANAGER_OF_BOT: BotPermissions = {
 	update: true,
 	delete: true,
 	talk: true,
+	manageMembers: false,
 	resources: MANAGER_OF_RESOURCES,
 };
 

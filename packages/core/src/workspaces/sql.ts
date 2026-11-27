@@ -327,7 +327,7 @@ export const projectMember = pgTable(
  * A bot: a name, an avatar, instructions and the tools it may reach for.
  *
  * A row is one of three things: a bot members made (`system_bot_key` and
- * `assistant_of` both null), public or personal by `visibility`; a Personal
+ * `assistant_of` both null), public, private or personal by `visibility`; a Personal
  * Assistant (`assistant_of` names the member it is for, who is its creator),
  * a personal bot of which a member may have several; or a system bot
  * (`system_bot_key` names it), which works in the background for the whole
@@ -371,8 +371,12 @@ export const bot = pgTable(
 		// Derived from the name unless an admin sets one; unique per workspace.
 		handle: text("handle").notNull(),
 		systemBotKey: text("system_bot_key").$type<SystemBotKey>(),
-		// Whether everyone in the workspace sees the bot, or only its creator.
-		visibility: text("visibility").$type<"public" | "personal">().notNull().default("public"),
+		// Whether everyone in the workspace sees the bot, only its members
+		// (`bot_member`), or only its creator.
+		visibility: text("visibility")
+			.$type<"public" | "private" | "personal">()
+			.notNull()
+			.default("public"),
 		// On a Personal Assistant: the member whose membership it goes with, who
 		// is also its creator. Whose it is is read from `createdById`.
 		assistantOf: uuid("assistant_of"),
@@ -400,7 +404,7 @@ export const bot = pgTable(
 		updatedAt: updatedStamp("updated_at"),
 	},
 	(table) => [
-		check("bot_visibility_check", sql`${table.visibility} in ('public', 'personal')`),
+		check("bot_visibility_check", sql`${table.visibility} in ('public', 'private', 'personal')`),
 		// A Personal Assistant is a personal bot its member made. Its creator is
 		// cleared only as their account goes, which takes their membership too.
 		check(
@@ -432,6 +436,44 @@ export const bot = pgTable(
 		// scans, so a second index on `workspace_id` alone would only cost writes.
 		uniqueIndex("bot_system_bot_key_idx").on(table.workspaceId, table.systemBotKey),
 		uniqueIndex("bot_id_workspace_id_idx").on(table.id, table.workspaceId),
+	],
+);
+
+/**
+ * Who is in a private bot: the members who see it, talk to it, and read its
+ * chats and files. A public bot and a personal bot have none: everyone in the
+ * workspace reaches a public one, and only its creator a personal one.
+ *
+ * Its creator is added as it is made private, by `BotStore`. The owner and
+ * admins are added by triggers, as they are to every project members made
+ * (see `projectMember`): `bot_administrators` adds every owner and admin to a
+ * bot as it becomes private, and `administrator_private_bots` adds a new
+ * owner or admin to every private bot. Both take
+ * `lock_bot_membership(workspace_id)`, as must anything that removes a row on
+ * the strength of somebody's role. Demoting an admin leaves their rows.
+ */
+export const botMember = pgTable(
+	"bot_member",
+	{
+		id: primaryKey(),
+		workspaceId: uuid("workspace_id").notNull(),
+		botId: uuid("bot_id").notNull(),
+		memberId: uuid("member_id").notNull(),
+		createdAt: stamp("created_at"),
+	},
+	(table) => [
+		foreignKey({
+			columns: [table.botId, table.workspaceId],
+			foreignColumns: [bot.id, bot.workspaceId],
+			name: "bot_member_bot_workspace_fkey",
+		}).onDelete("cascade"),
+		foreignKey({
+			columns: [table.workspaceId, table.memberId],
+			foreignColumns: [membership.workspaceId, membership.memberId],
+			name: "bot_member_membership_fkey",
+		}).onDelete("cascade"),
+		uniqueIndex("bot_member_idx").on(table.botId, table.memberId),
+		index("bot_member_member_id_idx").on(table.memberId),
 	],
 );
 

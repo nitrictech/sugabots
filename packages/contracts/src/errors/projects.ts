@@ -130,7 +130,9 @@ export class NotInProject
 	}
 }
 
-/** Only a public bot of the workspace is put in a project. */
+const LIST = new Intl.ListFormat("en", { type: "conjunction" });
+
+/** A public project has only public bots: a private bot joins and leads private projects alone. */
 export class BotNotPublic
 	extends Schema.TaggedError<BotNotPublic>()("BotNotPublic", {})
 	implements DomainError
@@ -138,14 +140,49 @@ export class BotNotPublic
 	readonly isRetryable = false;
 	override readonly [ErrorReporter.severity] = "Info" as const;
 	override get message() {
-		return "The bot is not a public bot of the project's workspace";
+		return "The bot is not public, and the project is";
 	}
 	get userMessage() {
-		return userText`Only a public bot can be added to a project`;
+		return userText`A private bot can only be in private projects`;
 	}
 }
 
-const LIST = new Intl.ListFormat("en", { type: "conjunction" });
+/** A personal bot is its creator's alone, so it is in no project but its own default project. */
+export class PersonalBotInProject
+	extends Schema.TaggedError<PersonalBotInProject>()("PersonalBotInProject", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The bot is personal, or not a bot of the project's workspace";
+	}
+	get userMessage() {
+		return userText`A personal bot can't be added to a project`;
+	}
+}
+
+/**
+ * The project has private bots, so it stays private until each leaves.
+ * `bots` names them, as the project's members see them in it.
+ */
+export class ProjectHasPrivateBots
+	extends Schema.TaggedError<ProjectHasPrivateBots>()("ProjectHasPrivateBots", {
+		bots: Schema.Array(DisplayName.schema),
+	})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The project has private bots, so it can't be made public";
+	}
+	get userMessage() {
+		// A list of names members see is itself a name they see.
+		const names = DisplayName.fromRecord(LIST.format(this.bots));
+		return userText`${names} ${this.bots.length === 1 ? "is a private bot" : "are private bots"}, so this project stays private until they leave it.`;
+	}
+}
 
 /**
  * The bot leads projects members made, so it stays in them, public, until each

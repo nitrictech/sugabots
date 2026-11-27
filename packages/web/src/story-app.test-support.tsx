@@ -405,6 +405,18 @@ export function appHandlers(data: StoryAppData = {}): RequestHandler[] {
 				},
 			]),
 		),
+		// The viewer alone is a member of each private bot.
+		http.get(api("/bots/:botId/members"), () =>
+			HttpResponse.json([
+				{
+					memberId: storyMember.id,
+					name: storyMember.name,
+					email: storyMember.email,
+					image: null,
+					removable: false,
+				},
+			]),
+		),
 		http.get(api("/projects/:projectId/automations"), () => HttpResponse.json([])),
 		// No computers set up, unless a story says otherwise.
 		http.get(api("/workspaces/:workspace/computer-providers/access"), () =>

@@ -41,6 +41,7 @@ export const BOT_PERMISSIONS: BotPermissions = {
 	update: true,
 	delete: true,
 	talk: true,
+	manageMembers: false,
 	resources: PERMISSIONS.resources,
 };
 

@@ -17,7 +17,9 @@ import {
 	type LeadsProjects,
 	NotInProject,
 	NotInWorkspace,
+	type PersonalBotInProject,
 	type ProjectGone,
+	type ProjectHasPrivateBots,
 	type ProjectSlugTaken,
 	type UnusableProjectName,
 } from "@sugabots/contracts/errors/projects";
@@ -66,9 +68,10 @@ export interface Interface {
 	/** The projects of the workspace its reader is in, and the public ones they could join, by name. */
 	readonly list: <P, W>(canRead: CanReadWorkspace<P, W>) => Effect.Effect<Project[]>;
 	/**
-	 * A project with the member who may create it in it, led by `lead`, which
-	 * must be a public bot of the workspace, at the address `details.slug`, or
-	 * one derived from its name when that is left out.
+	 * A project with the member who may create it in it, led by `lead`, a bot
+	 * of the workspace that isn't personal, and private only for a private
+	 * project, at the address `details.slug`, or one derived from its name when
+	 * that is left out.
 	 */
 	readonly create: <P, W, B, X>(
 		lock: HoldsWorkspaceLock<P, W>,
@@ -78,13 +81,19 @@ export interface Interface {
 		approved: Approved<P, X, [W, B], "projects.create">,
 	) => Effect.Effect<
 		Project,
-		InvalidProjectDetails | UnusableProjectName | ProjectSlugTaken | BotNotPublic | FenceRefusal,
+		| InvalidProjectDetails
+		| UnusableProjectName
+		| ProjectSlugTaken
+		| BotNotPublic
+		| PersonalBotInProject
+		| FenceRefusal,
 		Transaction
 	>;
 	/**
-	 * Changes the project's settings, and with `lead` its lead bot, which must
-	 * be public and becomes one of its bots, under its workspace's lock, in
-	 * whose transaction the change is made.
+	 * Changes the project's settings, and with `lead` its lead bot, which
+	 * becomes one of its bots on the terms of {@link Interface.addBot}, under its
+	 * workspace's lock, in whose transaction the change is made. A project with
+	 * private bots stays private.
 	 */
 	readonly update: <P, J, B>(
 		canChange: CanChangeProjectSettings<P, J>,
@@ -92,7 +101,12 @@ export interface Interface {
 		lead: ReachesBot<P, B> | undefined,
 	) => Effect.Effect<
 		Project,
-		EmptyProjectUpdate | ProjectGone | ProjectSlugTaken | BotNotPublic,
+		| EmptyProjectUpdate
+		| ProjectGone
+		| ProjectSlugTaken
+		| BotNotPublic
+		| PersonalBotInProject
+		| ProjectHasPrivateBots,
 		Transaction
 	>;
 	readonly beginRemoval: <P, J>(
@@ -136,12 +150,15 @@ export interface Interface {
 	) => Effect.Effect<Project, ResourceHidden | FenceRefusal, Transaction>;
 	/** The project's bots, by name, as the member acting sees them. */
 	readonly bots: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<Bot[]>;
-	/** Adds `bot`, which must be a public bot of the workspace. Adding one already in it changes nothing. */
+	/**
+	 * Adds `bot`: a public bot to any project, a private bot to a private one,
+	 * and a personal bot to none. Adding one already in it changes nothing.
+	 */
 	readonly addBot: <P, J, B, X>(
 		canChange: CanChangeProjectMembers<P, J>,
 		bot: ReachesBot<P, B>,
 		approved: Approved<P, X, [J, B], "projects.addBot">,
-	) => Effect.Effect<void, BotNotPublic | FenceRefusal, Transaction>;
+	) => Effect.Effect<void, BotNotPublic | PersonalBotInProject | FenceRefusal, Transaction>;
 	/** Refused for the project's lead bot, until another is chosen. */
 	readonly removeBot: <P, J, B>(
 		canChange: CanChangeProjectMembers<P, J>,
