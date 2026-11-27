@@ -127,14 +127,53 @@ type Segments<Path extends string> = Path extends `${infer Segment}/${infer Rest
 export type PathParameters<Path extends string> =
 	Segments<Path> extends infer Segment ? (Segment extends `:${infer Name}` ? Name : never) : never;
 
-/** Characters the router reads as more than a plain segment or a parameter's name. */
+/** Characters the router reads as more than a plain segment. */
 type RouteSyntax = ":" | "*" | "?" | "(" | ")" | "+" | "." | "{" | "}" | " " | "#";
+
+type Digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+type LowerLetter =
+	| "a"
+	| "b"
+	| "c"
+	| "d"
+	| "e"
+	| "f"
+	| "g"
+	| "h"
+	| "i"
+	| "j"
+	| "k"
+	| "l"
+	| "m"
+	| "n"
+	| "o"
+	| "p"
+	| "q"
+	| "r"
+	| "s"
+	| "t"
+	| "u"
+	| "v"
+	| "w"
+	| "x"
+	| "y"
+	| "z";
+/** The characters a parameter's name may use, the ones every router and URL builder reads as part of it. */
+type WordCharacter = Digit | LowerLetter | Uppercase<LowerLetter> | "_";
+
+/** Whether `Name` is one or more ASCII word characters. */
+type IsWord<Name extends string> = Name extends `${WordCharacter}${infer Rest}`
+	? Rest extends ""
+		? true
+		: IsWord<Rest>
+	: false;
 
 /**
  * Whether `Path` is in the one grammar offered paths use: segments after a
- * leading slash, none empty, each either plain or `:` and a name, with
- * nothing the router reads as more. The endpoint's parameters are then
- * exactly its `:` segments, however they are read.
+ * leading slash, none empty, each either plain, with nothing the router reads
+ * as more, or `:` and a name of ASCII letters, digits and underscores. The
+ * endpoint's parameters are then exactly its `:` segments, however they are
+ * read.
  */
 type PlainPath<Path extends string> = Path extends `/${infer Rest}`
 	? Segments<Rest> extends infer Segment extends string
@@ -142,9 +181,9 @@ type PlainPath<Path extends string> = Path extends `/${infer Rest}`
 				Segment extends ""
 					? true
 					: Segment extends `:${infer Name}`
-						? Name extends "" | `${string}${RouteSyntax | "-"}${string}`
-							? true
-							: false
+						? IsWord<Name> extends true
+							? false
+							: true
 						: Segment extends `${string}${RouteSyntax}${string}`
 							? true
 							: false
