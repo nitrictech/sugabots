@@ -1,10 +1,13 @@
-import { TurnEnded } from "@sugabots/contracts/errors/proofs";
+import { ActionForbidden, ResourceHidden, TurnEnded } from "@sugabots/contracts/errors/proofs";
 import { TurnExecutionSuperseded } from "@sugabots/contracts/errors/turns";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Effect } from "effect";
+import { askerOf, turnFacts } from "../../authentication/turn-facts.ts";
+import type { ProjectPermission } from "../../authorization/permissions.ts";
 import { type Database, query } from "../../database/database.ts";
-import { ACTIVE_TURN_STATUSES, turn } from "../../database/schema.ts";
+import { ACTIVE_TURN_STATUSES, placedChat, turn, workspace } from "../../database/schema.ts";
 import type { Principal } from "../../principal.ts";
+import { mayInProjectAs, memberReaches, reachFacts, turnReachesChat } from "../../proofs/facts.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
 
 /**
@@ -23,25 +26,50 @@ export const fenced = (proof: FencedProof) =>
 
 /**
  * A proof about one execution of a turn, whose writes the fence guards:
- * `RunsTurn`, or `EndsTurn` for the write that ends it.
+ * `RunsTurn`, or `EndsTurn` for the write that ends it. A tool's write may
+ * also say what it needs of the turn's asker in a project (see
+ * `holdTurnForToolWrite`).
  */
 export type FencedProof = Pick<RunsTurn<unknown, unknown>, "execution"> & {
 	readonly turn: { readonly value: string };
+	readonly needs?: WriteNeeds | undefined;
 };
+
+/**
+ * What a tool's write needs of the member its turn acts for, which its
+ * operation proved before the write: the permission `permission` in the
+ * project `project`.
+ */
+export interface WriteNeeds {
+	readonly project: string;
+	readonly permission: ProjectPermission;
+}
 
 /**
  * The fence for the writes of the execution `execution` of the turn
  * `turnId`, for a tool that writes on its turn's behalf once its call is
  * recorded, outside the running turn's records: what it keeps passes the same
- * check the loop's own writes do.
+ * check the loop's own writes do, and what it `needs`.
  */
-export const executionFence = (turnId: string, execution: number): FencedProof => ({
+export const executionFence = (
+	turnId: string,
+	execution: number,
+	needs?: WriteNeeds,
+): FencedProof => ({
 	turn: { value: turnId },
 	execution,
+	needs,
 });
 
 /** How the fence refuses a write: the turn ended, or a newer execution has taken it over. */
 export type FenceRefusal = TurnEnded | TurnExecutionSuperseded;
+
+/**
+ * How the fence refuses a tool's write (see `holdTurnForToolWrite`): as it
+ * refuses any write, or because the member its turn acts for lost the chat
+ * or project meanwhile, or the permission the write needs.
+ */
+export type ToolWriteRefusal = FenceRefusal | ResourceHidden | ActionForbidden;
 
 /**
  * Why the fence refused a write for `runsTurn`: the turn ended, or a newer
@@ -83,9 +111,17 @@ export const holdRunningTurn = (runsTurn: FencedProof, lock: "update" | "share")
  * and closed too once the turn was asked to end (see `TurnEndRequest`), so a
  * call already in flight stops writing as the request commits, while the
  * loop's own writes still record how the turn ended.
+ *
+ * It first shares the workspace's lock, which every change to who reaches
+ * what takes, so a removal or demotion either commits before it, and is seen,
+ * or waits for the write. Under it, the turn must still reach its chat and,
+ * for a write that `needs` it, its member must still reach the project and
+ * hold the permission there: a call proved before the change doesn't write
+ * after it. A run that acts for no member has nothing of a member to lose.
  */
 export const holdTurnForToolWrite = (proof: FencedProof) =>
 	Effect.gen(function* () {
+		yield* shareWorkspaceLockOf(proof);
 		const [held] = yield* query((db) =>
 			db
 				.select({ id: turn.id })
@@ -95,15 +131,45 @@ export const holdTurnForToolWrite = (proof: FencedProof) =>
 				.for("share"),
 		);
 		if (!held) return yield* Effect.fail(yield* fenceRefusal(proof));
+		const standing = yield* query((db) =>
+			Effect.gen(function* () {
+				const facts = yield* turnFacts(db, proof.turn.value);
+				if (!facts || !(yield* turnReachesChat(db, facts))) return "hidden" as const;
+				const asker = askerOf(facts);
+				if (!proof.needs || asker === undefined) return "allowed" as const;
+				const place = yield* reachFacts(db, proof.needs.project, { member: asker });
+				if (!place?.member || !memberReaches(place.member, place.project)) return "hidden" as const;
+				return mayInProjectAs(place.member, place.project, proof.needs.permission)
+					? ("allowed" as const)
+					: ("forbidden" as const);
+			}),
+		);
+		if (standing === "hidden") return yield* new ResourceHidden({ resource: "chat" });
+		if (standing === "forbidden") return yield* new ActionForbidden({ proof: "ToolWrite" });
 	});
+
+/**
+ * Takes the lock of the workspace the turn's chat is in `FOR SHARE`: before
+ * the turn's own row, the order every change to who reaches what takes them in.
+ */
+const shareWorkspaceLockOf = (proof: FencedProof) =>
+	query((db) =>
+		db
+			.select({ id: workspace.id })
+			.from(workspace)
+			.innerJoin(placedChat, eq(placedChat.workspaceId, workspace.id))
+			.innerJoin(turn, eq(turn.chatId, placedChat.id))
+			.where(eq(turn.id, proof.turn.value))
+			.for("share", { of: workspace }),
+	);
 
 /**
  * Holds the fence for tool writes (see `holdTurnForToolWrite`) of the turn
  * `principal` acts in, when it is a bot in a turn, so a write an operation
- * makes for a bot's tool call passes it. A member signed in has no turn to
- * fence.
+ * makes for a bot's tool call passes it, with what the write `needs`. A member
+ * signed in has no turn to fence.
  */
-export const holdTurnOf = (principal: Principal) =>
+export const holdTurnOf = (principal: Principal, needs?: WriteNeeds) =>
 	principal._tag === "BotForAsker" || principal._tag === "AutomationRun"
-		? holdTurnForToolWrite(executionFence(principal.turn, principal.executionNumber))
+		? holdTurnForToolWrite(executionFence(principal.turn, principal.executionNumber, needs))
 		: Effect.void;

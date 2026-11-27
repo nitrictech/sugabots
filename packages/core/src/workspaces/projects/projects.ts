@@ -26,7 +26,7 @@ import {
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
-import { type FenceRefusal, holdTurnOf } from "../../chats/turns/turns.ts";
+import { holdTurnOf, type ToolWriteRefusal } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations, Transaction } from "../../database/database.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
@@ -86,7 +86,7 @@ export interface Interface {
 		| ProjectSlugTaken
 		| BotNotPublic
 		| PersonalBotInProject
-		| FenceRefusal,
+		| ToolWriteRefusal,
 		Transaction
 	>;
 	/**
@@ -147,7 +147,7 @@ export interface Interface {
 	readonly join: <P, J, X>(
 		canJoin: CanJoinProject<P, J>,
 		approved: Approved<P, X, [J], "projects.join">,
-	) => Effect.Effect<Project, ResourceHidden | FenceRefusal, Transaction>;
+	) => Effect.Effect<Project, ResourceHidden | ToolWriteRefusal, Transaction>;
 	/** The project's bots, by name, as the member acting sees them. */
 	readonly bots: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<Bot[]>;
 	/**
@@ -158,7 +158,7 @@ export interface Interface {
 		canChange: CanChangeProjectMembers<P, J>,
 		bot: ReachesBot<P, B>,
 		approved: Approved<P, X, [J, B], "projects.addBot">,
-	) => Effect.Effect<void, BotNotPublic | PersonalBotInProject | FenceRefusal, Transaction>;
+	) => Effect.Effect<void, BotNotPublic | PersonalBotInProject | ToolWriteRefusal, Transaction>;
 	/** Refused for the project's lead bot, until another is chosen. */
 	readonly removeBot: <P, J, B>(
 		canChange: CanChangeProjectMembers<P, J>,

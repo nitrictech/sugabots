@@ -3,15 +3,19 @@ import { eq } from "drizzle-orm";
 import { Context, Effect, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { TurnAuthentication } from "../../authentication/turn.ts";
-import { file, message, toolCall, turn } from "../../database/schema.ts";
+import { file, membership, message, projectChat, toolCall, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { asRunningTurn } from "../../operations/running-turn.ts";
 import { servedOperations } from "../../operations/testing.ts";
 import type { BotPrincipal } from "../../principal.ts";
+import { approvalRule, proveApproved } from "../../proofs/approved.ts";
 import { proveEndsTurn } from "../../proofs/ends-turn.ts";
+import { proveCanChangeChat } from "../../proofs/project-permissions.ts";
 import { named } from "../../proofs/proof.ts";
+import { proveReachesChat } from "../../proofs/reaches-chat.ts";
+import { Chats } from "../chats/chats.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { executionFence, holdRunningTurn } from "./fence.ts";
 import { TurnRecords } from "./records.ts";
@@ -241,4 +245,57 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 			failure: { _tag: "TurnEnded" },
 		});
 	});
+
+	it.each([
+		["made a viewer", "ActionForbidden"],
+		["removed from the workspace", "ResourceHidden"],
+	] as const)(
+		"refuses a call proved before its asker was %s, writing nothing",
+		async (change, refusal) => {
+			const { principal } = opened;
+			if (principal._tag !== "BotForAsker") throw new Error("fixture");
+			const loseStanding = () =>
+				onDatabase((db) =>
+					change === "made a viewer"
+						? db
+								.update(membership)
+								.set({ role: "viewer" })
+								.where(eq(membership.memberId, principal.asker))
+						: db.delete(membership).where(eq(membership.memberId, principal.asker)),
+				);
+			const input = { chatId: principal.chat, resolved: true };
+			const call = { kind: "request", request: "resolve" } as const;
+
+			const result = await run(
+				Effect.result(
+					named(principal, principal.chat, call, input, (acting, chat, calling, asked) =>
+						Effect.gen(function* () {
+							const reach = yield* proveReachesChat(acting, chat);
+							const canChange = yield* proveCanChangeChat(reach);
+							const approved = yield* proveApproved(
+								acting,
+								calling,
+								approvalRule("chats.setResolved"),
+								asked,
+								chat,
+							);
+							// The change commits after the call was proved, before it writes.
+							yield* Effect.promise(loseStanding);
+							const chats = yield* Chats.Service;
+							return yield* chats.setResolved(reach, true, canChange, approved);
+						}),
+					).pipe(Effect.provide(Chats.layer)),
+				),
+			);
+
+			expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: refusal } });
+			const [stored] = await onDatabase((db) =>
+				db
+					.select({ resolvedAt: projectChat.resolvedAt })
+					.from(projectChat)
+					.where(eq(projectChat.chatId, principal.chat)),
+			);
+			expect(stored?.resolvedAt).toBeNull();
+		},
+	);
 });

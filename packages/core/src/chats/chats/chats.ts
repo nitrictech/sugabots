@@ -42,7 +42,7 @@ import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import { memberColumns } from "../store/participants.ts";
 import { ChatStore } from "../store/store.ts";
-import { type FenceRefusal, holdTurnOf, Turns } from "../turns/turns.ts";
+import { holdTurnOf, type ToolWriteRefusal, Turns } from "../turns/turns.ts";
 import { toAutomationFeed, toProjectChat } from "./chat.ts";
 import { chatTitleFrom } from "./chat-title.ts";
 import { reachedChatOfKind } from "./reached-chat.ts";
@@ -128,14 +128,14 @@ export interface Interface {
 		resolved: boolean,
 		canChange: CanChangeChat<P, C>,
 		approved: Approved<P, X, [C], "chats.setResolved">,
-	) => Effect.Effect<void, ResourceHidden | FenceRefusal>;
+	) => Effect.Effect<void, ResourceHidden | ToolWriteRefusal>;
 	readonly startBriefedChat: <P, B, X>(
 		mayBrief: MayBrief<P, B>,
 		input: { title: string; brief: string },
 		approved: Approved<P, X, [B], "chats.startBriefedChat">,
 	) => Effect.Effect<
 		BotStartedChat,
-		ApprovalRefused | BotHasNoModel | ResourceHidden | FenceRefusal
+		ApprovalRefused | BotHasNoModel | ResourceHidden | ToolWriteRefusal
 	>;
 	/**
 	 * Records that the member has read the chat `reach` is about up to its
@@ -351,7 +351,7 @@ export const make = Effect.gen(function* () {
 						) {
 							return yield* new ApprovalRefused();
 						}
-						yield* holdTurnOf(principal);
+						yield* holdTurnOf(principal, { project: mayBrief.project, permission: "project.read" });
 						const botId = mayBrief.bot.value;
 						const [recipient] = yield* query((db) =>
 							db
@@ -387,7 +387,10 @@ export const make = Effect.gen(function* () {
 				transaction(
 					Effect.gen(function* () {
 						const principal = approved.principal.value;
-						yield* holdTurnOf(principal);
+						yield* holdTurnOf(principal, {
+							project: reach.project.id,
+							permission: "project.change",
+						});
 						const chat = yield* reachedChatOfKind(reach, ["project_chat"]);
 						yield* chats.setResolved(chat, resolved);
 					}),

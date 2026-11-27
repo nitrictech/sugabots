@@ -30,8 +30,8 @@ import { BlobDeletions } from "../blob-store/deletions.ts";
 import {
 	commitWrittenFile,
 	executionFence,
-	type FenceRefusal,
 	replayWrittenFile,
+	type ToolWriteRefusal,
 } from "../chats/turns/turns.ts";
 import {
 	type Database,
@@ -119,7 +119,7 @@ export interface Interface {
 		input: NewWrittenFile,
 	) => Effect.Effect<
 		FileWritten,
-		ActionForbidden | ApprovalRefused | FileContentTooLarge | FenceRefusal
+		ActionForbidden | ApprovalRefused | FileContentTooLarge | ToolWriteRefusal
 	>;
 	readonly replace: <P, F, X>(
 		canChange: CanChangeFile<P, F>,
@@ -133,7 +133,7 @@ export interface Interface {
 		| FileStale
 		| FileKindFixed
 		| FileContentTooLarge
-		| FenceRefusal
+		| ToolWriteRefusal
 	>;
 	readonly edit: <P, F, X>(
 		canChange: CanChangeFile<P, F>,
@@ -147,7 +147,7 @@ export interface Interface {
 		| FileStale
 		| FileEditTextUnmatched
 		| FileContentTooLarge
-		| FenceRefusal
+		| ToolWriteRefusal
 	>;
 }
 
@@ -261,7 +261,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"create",
 				Effect.gen(function* () {
-					const writer = yield* fileWriter(approved);
+					const writer = yield* fileWriter(approved, canChange.reach.project.id);
 					const chatId = canChange.reach.chat.value;
 					if (writer.principal.chat !== chatId)
 						return yield* new ActionForbidden({ proof: "CanChangeChat" });
@@ -281,7 +281,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"replace",
 				Effect.gen(function* () {
-					const writer = yield* fileWriter(approved);
+					const writer = yield* fileWriter(approved, reach.project.id);
 					const found = yield* writtenFileIn(reach);
 					const replay = yield* replayFileWrite(writer);
 					if (replay) return replay;
@@ -297,7 +297,7 @@ export const make = Effect.gen(function* () {
 			operation(
 				"edit",
 				Effect.gen(function* () {
-					const writer = yield* fileWriter(approved);
+					const writer = yield* fileWriter(approved, reach.project.id);
 					const found = yield* writtenFileIn(reach);
 					const replay = yield* replayFileWrite(writer);
 					if (replay) return replay;
@@ -341,10 +341,13 @@ interface EditWrittenFile {
 interface FileWriter {
 	readonly principal: BotPrincipal;
 	readonly toolCallId: string;
+	/** The project the file is written in, where its turn's asker must still change things. */
+	readonly projectId: string;
 }
 
 const fileWriter = <P, X, Target>(
 	approved: Approved<P, X, [Target], "files.write" | "files.edit">,
+	projectId: string,
 ): Effect.Effect<FileWriter, ActionForbidden | ApprovalRefused> =>
 	Effect.gen(function* () {
 		const principal = approved.principal.value;
@@ -353,11 +356,14 @@ const fileWriter = <P, X, Target>(
 		}
 		const call = approved.call.value;
 		if (call.kind !== "toolCall" || !isUuid(call.toolCall)) return yield* new ApprovalRefused();
-		return { principal, toolCallId: call.toolCall };
+		return { principal, toolCallId: call.toolCall, projectId };
 	});
 
-const fileWriteFence = ({ principal }: FileWriter) =>
-	executionFence(principal.turn, principal.executionNumber);
+const fileWriteFence = ({ principal, projectId }: FileWriter) =>
+	executionFence(principal.turn, principal.executionNumber, {
+		project: projectId,
+		permission: "project.change",
+	});
 
 const replayFileWrite = (writer: FileWriter) =>
 	replayWrittenFile(fileWriteFence(writer), writer.toolCallId);

@@ -178,6 +178,7 @@ export {
 	holdRunningTurn,
 	holdTurnForToolWrite,
 	holdTurnOf,
+	type ToolWriteRefusal,
 } from "./fence.ts";
 export {
 	type Ended,

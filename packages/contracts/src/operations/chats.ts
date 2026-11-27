@@ -151,7 +151,7 @@ export const chatsContracts = {
 			}),
 		}),
 		output: Schema.Struct({ chat: botStartedChatSchema }),
-		errors: [ResourceHidden, BotHasNoModel, ...approvalAndFenceRefusals],
+		errors: [ResourceHidden, ActionForbidden, BotHasNoModel, ...approvalAndFenceRefusals],
 		changes: true,
 		http: { kind: "heldBack", reason: "A brief is written by a bot in a turn for its asker." },
 		botLoop: {

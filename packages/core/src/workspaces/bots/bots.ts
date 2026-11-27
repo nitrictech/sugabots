@@ -27,7 +27,7 @@ import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proo
 import type { ModelNotEnabled } from "@sugabots/contracts/errors/providers";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
-import { type FenceRefusal, holdTurnOf } from "../../chats/turns/turns.ts";
+import { holdTurnOf, type ToolWriteRefusal } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations, Transaction, transaction } from "../../database/database.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
@@ -110,7 +110,10 @@ export interface Interface {
 		canManage: CanManageBot<P, B>,
 		written: { readonly instructions: string; readonly description: string },
 		approved: Approved<P, X, [B], "bots.saveInstructions">,
-	) => Effect.Effect<Bot, AssistantInstructionsManaged | BotGone | ResourceHidden | FenceRefusal>;
+	) => Effect.Effect<
+		Bot,
+		AssistantInstructionsManaged | BotGone | ResourceHidden | ToolWriteRefusal
+	>;
 	/** The members of the bot, by name: a private bot's, and none of any other. */
 	readonly members: <P, B>(reach: ReachesBot<P, B>) => Effect.Effect<BotMember[]>;
 	/** Adds `member` to the private bot. Adding somebody already one of its members changes nothing. */
@@ -136,7 +139,7 @@ export interface Interface {
 		reach: ReachesBot<P, B>,
 		pinned: boolean,
 		approved: Approved<P, X, [B], "bots.pin" | "bots.unpin">,
-	) => Effect.Effect<Bot, ResourceHidden | FenceRefusal>;
+	) => Effect.Effect<Bot, ResourceHidden | ToolWriteRefusal>;
 	/**
 	 * Another Personal Assistant for the member, whatever their role, on the
 	 * workspace's default model. Joining a workspace gives them their first; this
