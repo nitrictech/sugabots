@@ -14,6 +14,7 @@ import { proveCanSteer } from "../../proofs/turn-control.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import type { ChatEvent } from "../events.ts";
 import { ChatStore } from "../store/store.ts";
+import { recordJoin } from "../turns/joins.ts";
 import { Turns } from "../turns/turns.ts";
 import { type FloorMessage, floorOf, loadFloorScope, loadRepliedTurn } from "./floor.ts";
 
@@ -79,7 +80,7 @@ export const make = Effect.gen(function* () {
 				!held.opened &&
 				Turns.TurnRequests.joinsUnopened({ ...request, askerId: acting.member }, held.running)
 			) {
-				yield* Turns.recordJoin(request.triggerMessageId, {
+				yield* recordJoin(request.triggerMessageId, {
 					botId: held.running.botId,
 					triggerMessageId: held.running.triggerMessageId,
 				});

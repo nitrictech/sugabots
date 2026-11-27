@@ -181,8 +181,14 @@
 										"message": "Core starts turns without knowing the bot loop: it declares the services that start, steer and interrupt turns, and the server provides them from `@sugabots/bot-loop`."
 									},
 									{
-										"group": ["**/turns/**", "!**/turns/turns", "!**/turns/turns.ts"],
-										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`; its other files are internal."
+										"group": [
+											"**/turns/**",
+											"!**/turns/turns",
+											"!**/turns/turns.ts",
+											"!**/turns/joins",
+											"!**/turns/joins.ts"
+										],
+										"message": "Outside `chats/turns/`, import the Turns module only through `turns/turns.ts`, or, within core, `turns/joins.ts`; its other files are internal."
 									},
 									{
 										"group": [

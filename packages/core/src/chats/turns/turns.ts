@@ -197,7 +197,7 @@ export { TurnRecords as Records } from "./records.ts";
 export { TurnRequests } from "./requests.ts";
 export { TurnRuns as Runs } from "./runs.ts";
 export { TurnSignals } from "./signals.ts";
-export { type NotRunnable, recordJoin } from "./store.ts";
+export type { NotRunnable } from "./store.ts";
 export {
 	ApprovalDecision,
 	DENIED_OUTPUT,
