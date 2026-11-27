@@ -194,6 +194,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(await callsOf(turnId)).toMatchObject([
 				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
 			]);
+			expect(await chatsAs(adminId).approvals(workspaceId)).toMatchObject({
+				waiting: [],
+				answered: [
+					{
+						call: { id: parked.id, error },
+						answer: { status: "closed", closedAt: expect.any(String) },
+					},
+				],
+			});
 			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
 			expect(execute).not.toHaveBeenCalled();
 		});

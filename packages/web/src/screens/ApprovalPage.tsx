@@ -7,6 +7,7 @@ import type {
 import { Link } from "@tanstack/react-router";
 import { Check, X } from "lucide-react";
 import { useApprovalToolSource, useAskedIn } from "@/lib/approval-tool-source.ts";
+import { closedApprovalMessage } from "@/lib/approvals.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import { useWorkspaceApprovals } from "@/lib/chats.ts";
 import { formatListTime } from "@/lib/list-time.ts";
@@ -61,6 +62,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 		found.kind === "waiting" && awaitsApproval(call),
 	);
 	const review = useReviewToolCall(request.chatId, call.approval?.id);
+	const answer = found.kind === "answered" ? found.request.answer : undefined;
 	const { project, askedIn } = useAskedIn(request);
 
 	return (
@@ -104,6 +106,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 					<p className="m-0 text-subtle-foreground text-xs max-md:hidden">Asked {askedIn}</p>
 				</header>
 				<ApprovalDestination
+					botName={bot.name}
 					browserUrl={call.approval?.browserUrl}
 					gitHub={call.approval?.gitHub}
 					connectorUrl={connector?.url}
@@ -112,9 +115,9 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 				/>
 				<ExactRequest input={call.input} />
 				<div className="flex flex-wrap items-center gap-3 pt-1 max-md:flex-col max-md:items-stretch max-md:gap-4">
-					{found.kind === "answered" ? (
+					{answer && answer.status !== "closed" ? (
 						// Announced when the member has just answered it here.
-						<AnswerGiven answer={found.request.answer} announced={review.isSuccess} />
+						<AnswerGiven answer={answer} announced={review.isSuccess} />
 					) : (
 						<PendingApprovalAnswer request={request} actionLabel={action} review={review} />
 					)}
@@ -131,9 +134,8 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 }
 
 /**
- * Allow and Deny for a request still waiting on the member, or, once its bot
- * stopped before it was answered, that it no longer waits. A phone answers with
- * two wide buttons. `review` answers it, so the caller can tell once it has.
+ * Allow and Deny for a request still waiting on the member, or why it closed.
+ * A phone answers with two wide buttons.
  */
 export function PendingApprovalAnswer({
 	request,
@@ -149,8 +151,9 @@ export function PendingApprovalAnswer({
 	const { call, bot } = request;
 	if (!awaitsApproval(call)) {
 		return (
-			<p className="m-0 text-xs text-muted-foreground">
-				No longer waiting: {bot.name} stopped before it was answered.
+			<p role={review.error ? "status" : undefined} className="m-0 text-xs text-muted-foreground">
+				{closedApprovalMessage(call, bot.name) ??
+					`No longer waiting: ${bot.name} stopped before it was answered.`}
 			</p>
 		);
 	}
@@ -170,7 +173,7 @@ function AnswerGiven({
 	answer,
 	announced,
 }: {
-	answer: AnsweredApproval["answer"];
+	answer: Exclude<AnsweredApproval["answer"], { status: "closed" }>;
 	announced: boolean;
 }) {
 	const allowed = answer.status === "allowed";

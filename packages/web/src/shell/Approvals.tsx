@@ -7,6 +7,7 @@ import {
 	useApprovalToolSource,
 	useAskedIn,
 } from "@/lib/approval-tool-source.ts";
+import { closedApprovalMessage } from "@/lib/approvals.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import { useWorkspaceApprovals } from "@/lib/chats.ts";
 import { stepLabel } from "@/lib/tool-names.ts";
@@ -177,6 +178,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 			</Link>
 			<div className="ml-9 min-w-0 max-md:ml-0">
 				<ApprovalDestination
+					botName={bot.name}
 					browserUrl={call.approval?.browserUrl}
 					gitHub={call.approval?.gitHub}
 					connectorUrl={connector?.url}
@@ -199,7 +201,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 	);
 }
 
-/** A request already answered: which bot, what it would have done, which way it went, and when. */
+/** A resolved request: who asked, what it would have done, and how it ended. */
 function ResolvedRow({ request }: { request: AnsweredApproval }) {
 	const { bot, answer, call } = request;
 	const action = stepLabel(call.tool);
@@ -215,16 +217,28 @@ function ResolvedRow({ request }: { request: AnsweredApproval }) {
 				<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={20} />
 			)}
 			{/* On a phone, what it would have done over which bot, as two lines. */}
-			<span className="min-w-0 flex-1 truncate text-muted-foreground max-md:flex max-md:flex-col max-md:gap-0.5">
-				<span className="text-foreground max-md:order-2 max-md:truncate max-md:text-xs max-md:text-subtle-foreground">
-					{hostRequest?.description ?? bot.name}
-				</span>{" "}
-				<span className="max-md:truncate max-md:text-foreground">{action}</span>
-			</span>
-			<span className="shrink-0 text-muted-foreground text-xs">
-				{answer.status === "allowed" ? "Allowed" : "Denied"}
-			</span>
-			<ListTime at={answer.decidedAt} className="w-16 text-right" />
+			<div className="min-w-0 flex-1">
+				<div className="truncate text-muted-foreground max-md:flex max-md:flex-col max-md:gap-0.5">
+					<span className="text-foreground max-md:order-2 max-md:truncate max-md:text-xs max-md:text-subtle-foreground">
+						{hostRequest?.description ?? bot.name}
+					</span>{" "}
+					<span className="max-md:truncate max-md:text-foreground">{action}</span>
+				</div>
+				{answer.status === "closed" && (
+					<p className="mt-1 mb-0 text-muted-foreground text-xs wrap-anywhere">
+						{closedApprovalMessage(call, bot.name)}
+					</p>
+				)}
+			</div>
+			{answer.status !== "closed" && (
+				<span className="shrink-0 text-muted-foreground text-xs">
+					{answer.status === "allowed" ? "Allowed" : "Denied"}
+				</span>
+			)}
+			<ListTime
+				at={answer.status === "closed" ? answer.closedAt : answer.decidedAt}
+				className="w-16 text-right"
+			/>
 		</Link>
 	);
 }

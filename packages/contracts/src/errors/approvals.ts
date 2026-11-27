@@ -38,7 +38,7 @@ export class ToolApprovalConflict
 	get userMessage() {
 		switch (this.reason) {
 			case "briefDestinationChanged":
-				return userText`This approval was closed because the brief now names a different bot or project.`;
+				return userText`This approval was closed because the chat the bot wanted to start changed.`;
 			case "connectorChanged":
 				return userText`This approval was closed because the connector or its tool settings changed.`;
 			default:

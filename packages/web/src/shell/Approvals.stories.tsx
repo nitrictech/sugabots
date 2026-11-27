@@ -39,7 +39,11 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]) {
 	});
 }
 
-function answered(id: string, tool: string, answer: AnsweredApproval["answer"]): AnsweredApproval {
+function answered(
+	id: string,
+	tool: string,
+	answer: Exclude<AnsweredApproval["answer"], { status: "closed" }>,
+): AnsweredApproval {
 	return { ...request(id, tool, { ...answer, id: "approval-1", approvers: "chat" }), answer };
 }
 

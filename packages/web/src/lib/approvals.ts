@@ -25,3 +25,10 @@ export function awaitedApprovers(call: ToolCallPart) {
 		? "The workspace's owner or an admin can decide. In a bot's own chats, whoever made the bot can too."
 		: "Waiting for someone with permission to answer this.";
 }
+
+export function closedApprovalMessage(call: ToolCallPart, botName: string): string | undefined {
+	const approval = call.approval;
+	if (approval?.status !== "denied" || approval.decidedAt !== null || !call.error) return undefined;
+	const reason = /[.!?]$/.test(call.error) ? call.error : `${call.error}.`;
+	return `${reason} Ask ${botName} to try again.`;
+}

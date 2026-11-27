@@ -1,5 +1,6 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
 import { useEffect, useState } from "react";
 import { expect, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
@@ -145,6 +146,49 @@ export const Answered = meta.story({
 	args: { call: decided("allowed", "Rowan") },
 	play: async ({ canvas }) => {
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
+	},
+});
+
+const connectorClosedReason =
+	"This approval was closed because the connector or its tool settings changed.";
+
+/** A connector changes before Allow, and the chat receives the closed request. */
+export const ClosedAfterAllow = meta.story({
+	globals: PHONE,
+	loaders: [() => ({ closedCall: Promise.withResolvers<ToolCallPart>() })],
+	beforeEach({ msw, args }) {
+		msw.use(
+			http.post(`${import.meta.env.VITE_API_URL}/tool-calls/${args.call.id}/approval`, () =>
+				HttpResponse.json({ _tag: "Conflict", message: connectorClosedReason }, { status: 409 }),
+			),
+		);
+	},
+	render: function ClosedAfterAllowCard(args, { loaded }) {
+		const [call, setCall] = useState(args.call);
+		useEffect(() => {
+			void loaded.closedCall.promise.then(setCall);
+		}, [loaded.closedCall]);
+		return <ToolApprovalCard {...args} call={call} />;
+	},
+	play: async ({ canvas, args, loaded, userEvent }) => {
+		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
+		const request = await screen.findByRole("dialog", { name: "Create event" });
+		await userEvent.click(screen.getByRole("button", { name: "Allow: Create event" }));
+		await expect(await screen.findByRole("alert")).toHaveTextContent(connectorClosedReason);
+		loaded.closedCall.resolve(
+			asking({
+				...args.call,
+				status: "failed",
+				error: connectorClosedReason,
+				finishedAt: "2026-11-10T09:02:00.000Z",
+				approval: args.call.approval && { ...args.call.approval, status: "denied" },
+			}),
+		);
+		const outcome = `${connectorClosedReason} Ask Trip Planner to try again.`;
+		await waitFor(() => expect(request).toHaveTextContent(outcome));
+		await expect(screen.queryByRole("button", { name: "Allow: Create event" })).toBeNull();
+		await userEvent.click(screen.getByRole("button", { name: "Close" }));
+		await expect(await canvas.findByText(outcome)).toBeVisible();
 	},
 });
 

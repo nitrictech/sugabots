@@ -340,7 +340,7 @@ const NOBODY = "00000000-0000-0000-0000-000000000000";
 
 /**
  * The approvals across the workspace for `memberId`: those waiting on a
- * decision they may make, and the latest answered, in chats `reachesChat`
+ * decision they may make, and the latest resolved, in chats `reachesChat`
  * reaches.
  */
 const approvalsFor = (workspaceId: string, memberId: string, reachesChat: ReachesChatSql) =>
@@ -349,11 +349,11 @@ const approvalsFor = (workspaceId: string, memberId: string, reachesChat: Reache
 			approverStandingIn(db, workspaceId, memberId, reachesChat),
 		);
 		const waiting = yield* query((db) => waitingApprovalRows(db, workspaceId, approver));
-		const answered = yield* query((db) => answeredApprovalRows(db, workspaceId, reachesChat));
+		const resolved = yield* query((db) => resolvedApprovalRows(db, workspaceId, reachesChat));
 		return {
 			waiting: waiting.map(toApprovalRequest),
-			answered: answered.flatMap((row): AnsweredApproval[] => {
-				const answer = answerOf(row);
+			answered: resolved.flatMap((row): AnsweredApproval[] => {
+				const answer = readApprovalOutcome(row);
 				return answer ? [{ ...toApprovalRequest(row), answer }] : [];
 			}),
 		};
@@ -978,7 +978,7 @@ function runAttentionTerms(db: Executor, input: AttentionScope) {
 }
 
 /** How many answered approvals the approvals page lists, newest first. */
-const ANSWERED_APPROVALS = 50;
+const RESOLVED_APPROVALS = 50;
 /** At most this many waiting approvals are listed; more than this many waiting is a backlog to clear in its chats. */
 export const WAITING_APPROVALS = 100;
 
@@ -1053,10 +1053,10 @@ function pendingCallsApprovedBy(
 }
 
 /**
- * The tool calls answered in chats `reachesChat` reaches, newest answer
+ * The tool calls answered or closed in chats `reachesChat` reaches, newest
  * first, each with the bot that asked and its chat.
  */
-const answeredApprovalRows = Effect.fn("ChatView.answeredApprovalRows")(function* (
+const resolvedApprovalRows = Effect.fn("ChatView.resolvedApprovalRows")(function* (
 	db: Executor,
 	workspaceId: string,
 	reachesChat: ReachesChatSql,
@@ -1068,12 +1068,19 @@ const answeredApprovalRows = Effect.fn("ChatView.answeredApprovalRows")(function
 			and(
 				eq(asking.workspaceId, workspaceId),
 				inArray(toolCall.approvalStatus, ["allowed", "denied"]),
-				isNotNull(toolCall.decidedAt),
+				or(
+					isNotNull(toolCall.decidedAt),
+					and(
+						eq(toolCall.approvalStatus, "denied"),
+						isNotNull(toolCall.error),
+						isNotNull(toolCall.finishedAt),
+					),
+				),
 				reachesChat(asking),
 			),
 		)
-		.orderBy(desc(toolCall.decidedAt))
-		.limit(ANSWERED_APPROVALS);
+		.orderBy(desc(sql`coalesce(${toolCall.decidedAt}, ${toolCall.finishedAt})`))
+		.limit(RESOLVED_APPROVALS);
 });
 
 /**
@@ -1120,7 +1127,7 @@ type AskingChat = ReturnType<typeof alias<typeof placedChat, "asking_chat">>;
 /** The chat the asking chat belongs to. */
 type ApprovalChat = ReturnType<typeof alias<typeof placedChat, "approval_chat">>;
 
-type ApprovalRow = Effect.Success<ReturnType<typeof answeredApprovalRows>>[number];
+type ApprovalRow = Effect.Success<ReturnType<typeof resolvedApprovalRows>>[number];
 
 function toApprovalRequest(row: ApprovalRow): ApprovalRequest {
 	const call = toToolCallPart(row.call, row.decidedByName);
@@ -1142,16 +1149,19 @@ function toApprovalRequest(row: ApprovalRow): ApprovalRequest {
 	};
 }
 
-/** How `row`'s call was answered, or null when nobody has answered it. */
-function answerOf(row: ApprovalRow): AnsweredApproval["answer"] | null {
-	const { approvalStatus, decidedAt } = row.call;
+function readApprovalOutcome(row: ApprovalRow): AnsweredApproval["answer"] | null {
+	const { approvalStatus, decidedAt, finishedAt, error } = row.call;
 	if (approvalStatus !== "allowed" && approvalStatus !== "denied") return null;
-	if (!decidedAt) return null;
-	return {
-		status: approvalStatus,
-		decidedByName: row.decidedByName,
-		decidedAt: decidedAt.toISOString(),
-	};
+	if (decidedAt) {
+		return {
+			status: approvalStatus,
+			decidedByName: row.decidedByName,
+			decidedAt: decidedAt.toISOString(),
+		};
+	}
+	return approvalStatus === "denied" && finishedAt && error !== null
+		? { status: "closed", closedAt: finishedAt.toISOString() }
+		: null;
 }
 
 /** A member's standing as an approver, loaded when it is first needed. */

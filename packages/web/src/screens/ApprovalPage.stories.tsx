@@ -73,6 +73,29 @@ const answerable = request("01", "awaiting_approval", {
 });
 const stopped = request("02", "failed", pending);
 const answered: AnsweredApproval = { ...request("03", "failed", denied), answer: denied };
+const brief = request("06", "awaiting_approval", pending);
+const briefRequest: ApprovalRequest = {
+	...brief,
+	call: {
+		...brief.call,
+		tool: "start_chat",
+		input: { title: "Draft the report", brief: "Summarize the launch.", with: "@report-writer" },
+	},
+};
+const briefClosedReason =
+	"This approval was closed because the chat the bot wanted to start changed.";
+const closedAt = "2026-09-18T09:04:00.000Z";
+const closedBrief: AnsweredApproval = {
+	...briefRequest,
+	call: {
+		...briefRequest.call,
+		status: "failed",
+		error: briefClosedReason,
+		finishedAt: closedAt,
+		approval: { ...pending, status: "denied" },
+	},
+	answer: { status: "closed", closedAt },
+};
 
 const hostApproval = request("04", "awaiting_approval", pending);
 const outside = {
@@ -135,6 +158,41 @@ export const Answered = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByText(/Denied by Rowan Ellis/, undefined)).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
+	},
+});
+
+/** A changed brief closes on Allow, and the reason stays visible on the request and in Approvals. */
+export const ClosedAfterAllow = meta.story({
+	globals: { theme: "light" },
+	render: at(briefRequest.call.id),
+	loaders: [() => ({ closedRequest: Promise.withResolvers<void>() })],
+	beforeEach({ msw, loaded }) {
+		let closed = false;
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats/approvals`, async () => {
+				if (!closed) return HttpResponse.json({ waiting: [briefRequest], answered: [] });
+				await loaded.closedRequest.promise;
+				return HttpResponse.json({ waiting: [], answered: [closedBrief] });
+			}),
+			http.post(`${API}/tool-calls/${briefRequest.call.id}/approval`, () => {
+				closed = true;
+				return HttpResponse.json({ _tag: "Conflict", message: briefClosedReason }, { status: 409 });
+			}),
+		);
+	},
+	play: async ({ canvas, loaded, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: /^Allow/ }));
+		try {
+			await expect(await canvas.findByRole("alert")).toHaveTextContent(briefClosedReason);
+		} finally {
+			loaded.closedRequest.resolve();
+		}
+		const outcome = `${briefClosedReason} Ask Growth Desk to try again.`;
+		await expect(await canvas.findByText(outcome)).toBeVisible();
+		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
+		await expect(canvas.getByRole("link", { name: "Open chat" })).toBeVisible();
+		await userEvent.click(canvas.getByRole("link", { name: "Back to Approvals" }));
+		await expect(await canvas.findByText(outcome)).toBeVisible();
 	},
 });
 

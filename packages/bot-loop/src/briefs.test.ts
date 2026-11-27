@@ -310,8 +310,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 			db.update(bot).set({ model: "m", handle: "report-writer" }).where(eq(bot.id, replacement.id)),
 		);
 
-		const error =
-			"This approval was closed because the brief now names a different bot or project.";
+		const error = "This approval was closed because the chat the bot wanted to start changed.";
 		await expect(
 			chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
 		).rejects.toMatchObject({ userMessage: error });

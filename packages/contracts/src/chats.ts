@@ -163,21 +163,27 @@ const approvalRequestSchema = Schema.Struct({
 
 export type ApprovalRequest = typeof approvalRequestSchema.Type;
 
-/** An approval request somebody answered: how, by whom, and when. */
+/** An approval request that was answered or closed. */
 const answeredApprovalSchema = Schema.Struct({
 	...approvalRequestSchema.fields,
-	answer: Schema.Struct({
-		status: Schema.Literals(["allowed", "denied"]),
-		decidedByName: Schema.NullOr(Schema.String),
-		decidedAt: isoTimestampSchema,
-	}),
+	answer: Schema.Union([
+		Schema.Struct({
+			status: Schema.Literals(["allowed", "denied"]),
+			decidedByName: Schema.NullOr(Schema.String),
+			decidedAt: isoTimestampSchema,
+		}),
+		Schema.Struct({
+			status: Schema.Literal("closed"),
+			closedAt: isoTimestampSchema,
+		}),
+	]),
 });
 
 export type AnsweredApproval = typeof answeredApprovalSchema.Type;
 
 /**
  * The approvals across a workspace as the member sees them: those waiting on
- * a decision they may make, oldest first, and the latest ones answered in the
+ * a decision they may make, oldest first, and the latest ones resolved in the
  * projects they reach, newest first.
  */
 export const workspaceApprovalsSchema = Schema.Struct({

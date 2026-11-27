@@ -12,7 +12,7 @@ import {
 	useState,
 } from "react";
 import { hostRequestPresentation } from "@/lib/approval-tool-source.ts";
-import { awaitedApprovers } from "@/lib/approvals.ts";
+import { awaitedApprovers, closedApprovalMessage } from "@/lib/approvals.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import { type MarkedConnector, useApprovalConnector } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -80,6 +80,7 @@ export function ToolApprovalCard({
 	const decide = (decision: Decision) =>
 		review.mutate({ call, decision }, { onSuccess: () => setReviewing(false) });
 	const decided = call.approval;
+	const closedMessage = closedApprovalMessage(call, bot.name);
 	// Only an answer given here is announced; one already in the history is just read.
 	const announced = review.isSuccess;
 	const status =
@@ -91,6 +92,13 @@ export function ToolApprovalCard({
 			<Outcome announced={announced} icon={<Check aria-hidden size={12} strokeWidth={2.8} />}>
 				Allowed{decided.decidedByName && ` by ${decided.decidedByName}`}
 			</Outcome>
+		) : closedMessage ? (
+			<p
+				role={review.error ? "status" : undefined}
+				className="m-0 text-pretty text-muted-foreground text-xs leading-normal"
+			>
+				{closedMessage}
+			</p>
 		) : decided?.status === "denied" ? (
 			<Outcome announced={announced} icon={<X aria-hidden size={12} strokeWidth={2.8} />}>
 				Denied{decided.decidedByName && ` by ${decided.decidedByName}`}. {bot.name} won't go ahead.
@@ -106,6 +114,7 @@ export function ToolApprovalCard({
 				<StepHeading step={step} />
 				<div className="min-w-0 md:ml-8">
 					<ApprovalDestination
+						botName={bot.name}
 						browserUrl={call.approval?.browserUrl}
 						gitHub={call.approval?.gitHub}
 						connectorUrl={boundConnector?.url}
@@ -305,12 +314,14 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 type ApprovalGitHub = NonNullable<ToolCallPart["approval"]>["gitHub"];
 
 export function ApprovalDestination({
+	botName,
 	browserUrl,
 	gitHub,
 	connectorUrl,
 	connectorChanged,
 	waiting,
 }: {
+	botName: string;
 	browserUrl?: string | undefined;
 	gitHub?: ApprovalGitHub | undefined;
 	connectorUrl?: string | null | undefined;
@@ -318,11 +329,11 @@ export function ApprovalDestination({
 	/** Whether the request still waits for an answer, which the browser note is about. */
 	waiting?: boolean | undefined;
 }) {
-	if (connectorChanged) {
+	if (waiting && connectorChanged) {
 		return (
 			<p className="m-0 pb-1.5 text-muted-foreground text-xs">
-				This connector changed after the bot asked, so allowing this won't run it. Deny it and ask
-				the bot to try again.
+				This connector changed after {botName} asked. Choosing Allow closes this request and tells{" "}
+				{botName} why. Ask {botName} to try again.
 			</p>
 		);
 	}
@@ -418,6 +429,7 @@ function ReviewSheet({
 					<div className="flex flex-col gap-4 px-4 py-4">
 						<ReviewHeading step={step} bot={bot} headingId={headingId} />
 						<ApprovalDestination
+							botName={bot.name}
 							browserUrl={browserUrl}
 							gitHub={gitHub}
 							connectorUrl={connectorUrl}

@@ -5,6 +5,7 @@ import {
 	type ToolApprovalDecision,
 	type ToolCallPart,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import {
 	queryOptions,
 	skipToken,
@@ -157,6 +158,11 @@ export function useChat(chatId: string | undefined) {
 
 export function useReviewToolCall(chatId: string | null, approvalId: string | undefined) {
 	const queries = useQueryClient();
+	const refresh = () =>
+		Promise.all([
+			...(chatId ? [queries.invalidateQueries({ queryKey: ["chat", chatId] })] : []),
+			refreshEveryWorkspaceApprovals(queries),
+		]);
 	const review = useMutation({
 		mutationKey: ["review-tool-call", approvalId],
 		/**
@@ -176,11 +182,10 @@ export function useReviewToolCall(chatId: string | null, approvalId: string | un
 					payload: { approvalId: call.approval?.id ?? "", decision },
 				}),
 			),
-		onSuccess: () =>
-			Promise.all([
-				...(chatId ? [queries.invalidateQueries({ queryKey: ["chat", chatId] })] : []),
-				refreshEveryWorkspaceApprovals(queries),
-			]),
+		onSuccess: refresh,
+		onError: (error) => {
+			if (isApiFailure(error) && error._tag === "Conflict") void refresh();
+		},
 	});
 	const current = review.variables?.call.approval?.id === approvalId;
 	return {
