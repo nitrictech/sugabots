@@ -15378,6 +15378,24 @@
         "n|sch|public",
         "n|col|public.file.name"
       ]
+    },
+    {
+      "statementType": "alter_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "project_chat",
+        "started_by_id"
+      ],
+      "writes": [
+        "s|colprop|public.project_chat.started_by_id.notNull"
+      ],
+      "reads": [
+        "n|tbl|public.project_chat",
+        "n|sch|public",
+        "n|col|public.project_chat.started_by_id"
+      ],
+      "sqlHash": "c2a24000589c0309"
     }
   ],
   "deltas": [
@@ -22563,16 +22581,6 @@
       "op": "create",
       "row": {
         "schema": "public",
-        "table": "model_request",
-        "name": "model_request_bot_valid",
-        "value": "\"purpose\" = 'bot-turn' or \"bot_id\" is null",
-        "entityType": "checks"
-      }
-    },
-    {
-      "op": "create",
-      "row": {
-        "schema": "public",
         "table": "turn",
         "name": "turn_failure_has_error",
         "value": "\"status\" <> 'failed' or \"error\" is not null",
@@ -25351,6 +25359,16 @@
       "op": "create",
       "row": {
         "schema": "public",
+        "table": "model_request",
+        "name": "model_request_bot_valid",
+        "value": "\"purpose\" = 'bot-turn' or \"bot_id\" is null",
+        "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
         "table": "message",
         "name": "message_author_chat_created_at_idx",
         "nameExplicit": true,
@@ -25499,6 +25517,13 @@
         "method": "gin",
         "concurrently": false,
         "entityType": "indexes"
+      }
+    },
+    {
+      "op": "alter",
+      "key": "columns\u0000[\"public\",\"project_chat\",\"started_by_id\"]",
+      "set": {
+        "notNull": false
       }
     }
   ]
