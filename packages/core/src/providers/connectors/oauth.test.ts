@@ -89,7 +89,7 @@ async function signedInConnector(accessToken: string) {
 		signedInById: memberId,
 		version: null,
 	});
-	return { workspaceId, connector, store, record };
+	return { workspaceId, memberId, connector, store, record };
 }
 
 function clientsThrough(upstream: EgressHttpClient) {
@@ -106,6 +106,52 @@ function clientsThrough(upstream: EgressHttpClient) {
 
 describe.skipIf(!process.env.DATABASE_URL)("refreshing a stored connector", () => {
 	afterAll(closeDatabase);
+
+	it("uses the retained client's registered callback when consent is needed again", async () => {
+		const registeredRedirect = "http://sugabots.test/api/connections/oauth/callback";
+		const { workspaceId, memberId, connector, record } = await signedInConnector("revoked");
+		const upstream: EgressHttpClient = (input, init) => {
+			if (
+				init?.body instanceof URLSearchParams &&
+				init.body.get("grant_type") === "refresh_token"
+			) {
+				return Promise.resolve(Response.json({ error: "invalid_grant" }, { status: 400 }));
+			}
+			return fetch(input, init);
+		};
+		const signIn = ConnectorSignIn.layer.pipe(
+			Layer.provide(unimplemented(Egress.Service, { oauth: upstream })),
+		);
+		await runOnPostgres(
+			Effect.gen(function* () {
+				const service = yield* ConnectorSignIn.Service;
+				const result = yield* service.begin({
+					workspaceId,
+					connectorId: connector.id,
+					serverUrl,
+					startedByMemberId: memberId,
+					startedBySessionId: "member-session",
+				});
+				if (!("authorizationUrl" in result)) throw new Error("The connector needs fresh consent");
+				const parameters = new URL(result.authorizationUrl).searchParams;
+				expect(parameters.get("client_id")).toBe(record.clientInformation?.client_id);
+				expect(parameters.get("redirect_uri")).toBe(registeredRedirect);
+				const state = parameters.get("state");
+				if (!state) throw new Error("The authorization request is missing its state");
+				yield* service.finish(
+					workspaceId,
+					connector.id,
+					serverUrl,
+					{
+						code: "the-code",
+						state,
+					},
+					memberId,
+				);
+				expect(tokenRequests.at(-1)?.get("redirect_uri")).toBe(registeredRedirect);
+			}).pipe(Effect.provide(signIn)),
+		);
+	});
 
 	it.each([
 		["AbortError", () => Promise.reject(new DOMException("Stopped", "AbortError"))],

@@ -42,22 +42,25 @@ const app = (operations: Partial<Operations.Interface>) =>
 	);
 
 describe("a connector's sign-in", () => {
-	it("finishes at the callback and sends the browser back to the project", async () => {
-		const calls: unknown[] = [];
-		const back = await app({
-			"connectors.oauthCallback": (principal, input) =>
-				Effect.sync(() => {
-					calls.push({ input, memberId: memberOf(principal) });
-					return { kind: "done", at: ofProject } as const;
-				}),
-		}).request("/connectors/oauth/callback?code=the-code&state=s-1", signedIn);
+	it.each(["/connectors/oauth/callback", "/connections/oauth/callback"])(
+		"finishes at %s and sends the browser back to the project",
+		async (path) => {
+			const calls: unknown[] = [];
+			const back = await app({
+				"connectors.oauthCallback": (principal, input) =>
+					Effect.sync(() => {
+						calls.push({ input, memberId: memberOf(principal) });
+						return { kind: "done", at: ofProject } as const;
+					}),
+			}).request(`${path}?code=the-code&state=s-1`, signedIn);
 
-		expect(back.status).toBe(302);
-		expect(back.headers.get("location")).toBe(
-			`http://localhost:5173/connectors/oauth/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}`,
-		);
-		expect(calls).toEqual([{ input: { code: "the-code", state: "s-1" }, memberId: USER_ID }]);
-	});
+			expect(back.status).toBe(302);
+			expect(back.headers.get("location")).toBe(
+				`http://localhost:5173/connectors/oauth/return?workspace=${WORKSPACE_ID}&project=${PROJECT_ID}`,
+			);
+			expect(calls).toEqual([{ input: { code: "the-code", state: "s-1" }, memberId: USER_ID }]);
+		},
+	);
 
 	it("sends a failed sign-in back with a code, and nothing the authorization server wrote", async () => {
 		const back = await app({

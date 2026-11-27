@@ -92,10 +92,15 @@ export function toolAccessCountsOf(
 }
 
 /**
- * Where an authorization server sends the browser back after a connector's
- * sign-in: an API path, under `API_BASE_PATH`.
+ * The API route that finishes a connector's sign-in, under `API_BASE_PATH`.
  */
 export const CONNECTOR_SIGN_IN_CALLBACK_PATH = "/connectors/oauth/callback";
+
+/**
+ * The callback path registered with authorization servers, under `API_BASE_PATH`.
+ * It stays stable so a connector can reuse its OAuth client when signing in again.
+ */
+export const CONNECTOR_OAUTH_REDIRECT_PATH = "/connections/oauth/callback";
 
 /**
  * The web page a connector's OAuth sign-in returns to, with `workspace` and

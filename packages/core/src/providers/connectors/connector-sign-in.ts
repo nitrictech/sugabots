@@ -1,7 +1,7 @@
 export * as ConnectorSignIn from "./connector-sign-in.ts";
 
 import { setTimeout as delay } from "node:timers/promises";
-import { CONNECTOR_SIGN_IN_CALLBACK_PATH } from "@sugabots/contracts";
+import { CONNECTOR_OAUTH_REDIRECT_PATH } from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { type DomainError, userText } from "@sugabots/errors";
 import { Context, DateTime, Effect, ErrorReporter, Layer, Schema } from "effect";
@@ -73,7 +73,7 @@ export const make = Effect.gen(function* () {
 	const connectors = yield* ConnectorStore.Service;
 	const egress = yield* Egress.Service;
 	const serverSettings = yield* ServerSettings.Service;
-	const redirectUrl = `${serverSettings.publicUrl}${API_BASE_PATH}${CONNECTOR_SIGN_IN_CALLBACK_PATH}`;
+	const redirectUrl = `${serverSettings.publicUrl}${API_BASE_PATH}${CONNECTOR_OAUTH_REDIRECT_PATH}`;
 
 	const providerFor = (
 		context: Context.Context<never>,

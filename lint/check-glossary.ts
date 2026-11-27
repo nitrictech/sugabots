@@ -229,8 +229,9 @@ const CHECKED_WORDS: readonly CheckedWord[] = [
 		word: "connection",
 		// Other connections: a socket's, an HTTP request's, a WebSocket's, the
 		// event stream's, a database's, and the computer providers' SDKs' own.
+		// Authorization servers also keep the callback path they registered.
 		otherMeanings:
-			/closeAllConnections|ProviderConnectionLost|ConnectionConfig|connectionConfig|ConnectionOpts|Connections Sugabots makes|viewer's connection|per connection|No connection to|connection never made|dead connection|same connection|(?:[Cc]heck|lost|dropped|refused|open|first|desktop viewer's|hidden page's) (?:the |your )?connection|connection (?:drops|dropped|refused|ended|open|could be made|is made|to (?:one|any other host|the browser|the event stream|\$\{)|holds the computer awake|pool)|(?:A|a) connection (?:to|holds)|direct connection/g,
+			/closeAllConnections|ProviderConnectionLost|ConnectionConfig|connectionConfig|ConnectionOpts|Connections Sugabots makes|viewer's connection|per connection|No connection to|connection never made|dead connection|same connection|(?:[Cc]heck|lost|dropped|refused|open|first|desktop viewer's|hidden page's) (?:the |your )?connection|connection (?:drops|dropped|refused|ended|open|could be made|is made|to (?:one|any other host|the browser|the event stream|\$\{)|holds the computer awake|pool)|(?:A|a) connection (?:to|holds)|direct connection|\/connections\/oauth\/callback\b/g,
 		keptIn: [
 			// A model request's socket, made, refused or dropped.
 			/^packages\/core\/src\/providers\/models\/request-failures\.ts$/,

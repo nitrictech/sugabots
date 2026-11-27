@@ -1,3 +1,7 @@
+import {
+	CONNECTOR_OAUTH_REDIRECT_PATH,
+	CONNECTOR_SIGN_IN_CALLBACK_PATH,
+} from "@sugabots/contracts";
 import { API_BASE_PATH } from "@sugabots/contracts/http";
 import { Effect } from "effect";
 import {
@@ -9,9 +13,8 @@ import {
 
 /**
  * API paths that other systems were given before pods became projects, each
- * with the path that serves it now. Webhook senders and GitHub apps keep the
- * address they were set up with, so these are served for as long as an
- * installation upgraded from then may still be called at them.
+ * with the path that serves it now. Webhook senders, GitHub apps and OAuth
+ * clients keep the addresses they were set up with.
  *
  * A trigger's id never changed, and an address under `/hooks/routines/` has
  * always held a trigger's id, so both old trigger paths reach the same one.
@@ -22,6 +25,7 @@ const RENAMED_PATH_PREFIXES: ReadonlyArray<readonly [before: `/${string}`, now: 
 	["/hooks/connections/", "/webhooks/connectors/"],
 	["/connections/github/made", "/connectors/github/made"],
 	["/connections/github/installed", "/connectors/github/installed"],
+	[CONNECTOR_OAUTH_REDIRECT_PATH, CONNECTOR_SIGN_IN_CALLBACK_PATH],
 ].map(([before, now]) => [`${API_BASE_PATH}${before}`, `${API_BASE_PATH}${now}`] as const);
 
 /**
