@@ -92,7 +92,7 @@ export const readCommittedTransaction = <A, E, R>(body: Effect.Effect<A, E, R>) 
 	);
 
 /**
- * Runs a write, such as parking a call or deciding one, in a transaction
+ * Runs a write in a transaction
  * that first takes the workspace's row `FOR SHARE`, so it waits for a change
  * to who reaches what and sees it, and is refused in a workspace being
  * deleted. If a transaction is already open, it must use `READ COMMITTED`.

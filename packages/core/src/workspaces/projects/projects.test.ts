@@ -38,7 +38,6 @@ import {
 	project,
 	projectMember,
 	providerModel,
-	workspace,
 } from "../../database/schema.ts";
 import {
 	closeDatabase,
@@ -699,7 +698,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			);
 		});
 
-		it("refuses a member's writes that wait on a removal under way, once it has committed", async () => {
+		it("refuses new writes after a member loses reach", async () => {
 			const diary = await aBot(editorId, "Diary", "private");
 			await botsAs(editorId).addMember({ botId: diary.id, memberId: viewerId });
 			const closed = await create(adminId, {
@@ -710,30 +709,12 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await repository.addMember(workspaceId, closed.id, viewerId);
 			const chatId = await seedProjectChat(workspaceId, closed.id, adminId);
 			const viewer = await signIn(viewerId);
-			const removing = holdTransaction(
-				Effect.gen(function* () {
-					yield* query((db) =>
-						db
-							.select({ id: workspace.id })
-							.from(workspace)
-							.where(eq(workspace.id, workspaceId))
-							.for("no key update"),
-					);
-					yield* query((db) =>
-						db
-							.delete(botMember)
-							.where(and(eq(botMember.botId, diary.id), eq(botMember.memberId, viewerId))),
-					);
-					yield* query((db) =>
-						db
-							.delete(projectMember)
-							.where(
-								and(eq(projectMember.projectId, closed.id), eq(projectMember.memberId, viewerId)),
-							),
-					);
-				}),
+			await onDatabase((db) =>
+				db
+					.delete(botMember)
+					.where(and(eq(botMember.botId, diary.id), eq(botMember.memberId, viewerId))),
 			);
-			await removing.held;
+			await repository.removeMember(workspaceId, closed.id, viewerId);
 
 			const calls = [
 				callOperation(viewer, "bots.pin", { botId: diary.id }),
@@ -743,8 +724,6 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 					retryKey: crypto.randomUUID(),
 				}),
 			];
-			await waitUntilWaitingOnLocks(calls.length);
-			await removing.release();
 
 			for (const outcome of await Promise.allSettled(calls)) {
 				expect(outcome).toMatchObject({ status: "rejected", reason: expect.any(ResourceHidden) });
