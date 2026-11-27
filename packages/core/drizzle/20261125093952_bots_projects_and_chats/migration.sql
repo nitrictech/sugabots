@@ -452,6 +452,7 @@ WITH RECURSIVE removed_chat AS (
 	) dependent
 )
 SELECT "id" FROM removed_chat;--> statement-breakpoint
+ALTER TABLE "removed_chat" ADD PRIMARY KEY ("id");--> statement-breakpoint
 DELETE FROM "collaboration_parent" WHERE "chat_id" IN (SELECT "id" FROM "removed_chat");--> statement-breakpoint
 CREATE TEMP TABLE "removed_collaboration_folder" ON COMMIT DROP AS
 SELECT t."id" AS "from_chat_id", parent."id" AS "to_chat_id"
@@ -523,10 +524,10 @@ FROM (SELECT DISTINCT "bot_id" FROM "orphan_file_bot") chosen
 JOIN "agent" a ON a."id" = chosen."bot_id"
 JOIN "pod" p ON p."id" = a."pod_id"
 LEFT JOIN LATERAL (
-	SELECT "id" FROM "thread"
-	WHERE "pod_id" IS NULL AND "host_agent_id" = a."id" AND "type" = 'conversation'
-		AND "id" NOT IN (SELECT "id" FROM "removed_chat")
-	ORDER BY "updated_at" DESC, "id" DESC
+	SELECT t."id" FROM "thread" t
+	WHERE t."pod_id" IS NULL AND t."host_agent_id" = a."id" AND t."type" = 'conversation'
+		AND NOT EXISTS (SELECT 1 FROM "removed_chat" WHERE "id" = t."id")
+	ORDER BY t."updated_at" DESC, t."id" DESC
 	LIMIT 1
 ) latest ON true;--> statement-breakpoint
 INSERT INTO "thread" ("id", "workspace_id", "host_agent_id", "conversation_id", "type", "title", "initiator_user_id")
