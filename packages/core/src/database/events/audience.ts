@@ -18,17 +18,24 @@ import type { ReachChange, StreamEvent } from "@sugabots/contracts";
  * audience rides along in the stored event, under the field below; the stream
  * reads it and takes it off before sending.
  *
- * A notification on a member's own stream names its chat, or the call waiting
- * for approval it asks them to decide (`approval`, with whether it shows the
- * call's chat), and their stream sends it only while they still reach that
- * chat or can still decide that call. One that names neither, such as a
- * test, is always sent.
+ * A notification on a member's own stream names its chat, or the approval it
+ * asks them to decide (`approval`: the call, the approval it was asked for,
+ * and whether it shows the call's chat), and their stream sends it only while
+ * they still reach that chat, or while that approval still waits and they can
+ * decide it. A call asked about again has a new approval, so a notification
+ * for an earlier one is not sent. One that names neither, such as a test, is
+ * always sent.
  */
 export type Group =
 	| { readonly kind: "chat"; readonly chat: string }
 	| { readonly kind: "project"; readonly project: string }
 	| { readonly kind: "bot"; readonly bot: string }
-	| { readonly kind: "approval"; readonly toolCall: string; readonly showsChat: boolean }
+	| {
+			readonly kind: "approval";
+			readonly toolCall: string;
+			readonly approval: string;
+			readonly showsChat: boolean;
+	  }
 	| { readonly kind: "workspace" };
 
 const FIELD = "audience";
@@ -107,8 +114,15 @@ function parse(stored: unknown): Group | undefined {
 		case "bot":
 			return typeof fields.bot === "string" ? { kind: "bot", bot: fields.bot } : undefined;
 		case "approval":
-			return typeof fields.toolCall === "string" && typeof fields.showsChat === "boolean"
-				? { kind: "approval", toolCall: fields.toolCall, showsChat: fields.showsChat }
+			return typeof fields.toolCall === "string" &&
+				typeof fields.approval === "string" &&
+				typeof fields.showsChat === "boolean"
+				? {
+						kind: "approval",
+						toolCall: fields.toolCall,
+						approval: fields.approval,
+						showsChat: fields.showsChat,
+					}
 				: undefined;
 		default:
 			return undefined;

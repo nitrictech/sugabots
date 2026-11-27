@@ -106,12 +106,14 @@ export const notificationDelivery = pgTable(
 		notification: jsonb("notification").$type<NotificationContent>().notNull(),
 		/**
 		 * The call waiting for approval that this notification asks the member
-		 * to decide; null for any other notification. Whether they may still be
-		 * told it depends on whether they can still decide it.
+		 * to decide, and the approval it asks for (`tool_call.approval_id`);
+		 * both null for any other notification. They may still be told it only
+		 * while that approval waits and they can decide it.
 		 */
 		approvalCallId: uuid("approval_call_id").references(() => toolCall.id, {
 			onDelete: "cascade",
 		}),
+		approvalId: text("approval_id"),
 		createdAt: stamp("created_at"),
 		/** When it went to the member's tabs; null until then, so one that didn't is sent again. */
 		sentAt: timestamp("sent_at", { withTimezone: true }),
@@ -126,6 +128,10 @@ export const notificationDelivery = pgTable(
 		index("notification_delivery_unsent_idx")
 			.on(table.createdAt)
 			.where(sql`${table.sentAt} is null`),
+		check(
+			"notification_delivery_approval_whole",
+			sql`(${table.approvalCallId} is null) = (${table.approvalId} is null)`,
+		),
 	],
 );
 

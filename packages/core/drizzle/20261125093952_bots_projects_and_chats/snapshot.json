@@ -15234,6 +15234,44 @@
         "n|col|public.tool_call.id",
         "e|uniqueness|public.tool_call.id"
       ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "notification_delivery",
+        "approval_id"
+      ],
+      "writes": [
+        "s|col|public.notification_delivery.approval_id",
+        "n|col|public.notification_delivery.approval_id",
+        "e|col|public.notification_delivery.approval_id"
+      ],
+      "reads": [
+        "n|tbl|public.notification_delivery",
+        "n|sch|public"
+      ]
+    },
+    {
+      "statementType": "add_check",
+      "statementTarget": [
+        "table",
+        "public",
+        "notification_delivery"
+      ],
+      "writes": [
+        "s|ck|public.notification_delivery.notification_delivery_approval_whole",
+        "n|ck|public.notification_delivery.notification_delivery_approval_whole",
+        "e|ck|public.notification_delivery.notification_delivery_approval_whole",
+        "n|con|public.notification_delivery.notification_delivery_approval_whole"
+      ],
+      "reads": [
+        "n|tbl|public.notification_delivery",
+        "n|sch|public",
+        "n|col|public.notification_delivery.approval_call_id",
+        "n|col|public.notification_delivery.approval_id"
+      ]
     }
   ],
   "deltas": [
@@ -25151,6 +25189,32 @@
         "onUpdate": "NO ACTION",
         "onDelete": "CASCADE",
         "entityType": "fks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "approval_id",
+        "type": "text",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "notification_delivery_approval_whole",
+        "value": "(\"approval_call_id\" is null) = (\"approval_id\" is null)",
+        "entityType": "checks"
       }
     }
   ]

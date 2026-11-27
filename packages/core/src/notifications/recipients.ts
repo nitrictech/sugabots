@@ -49,8 +49,8 @@ import { approvalPath, chatPath } from "../server-settings/web-app-paths.ts";
 export interface Addressed {
 	memberId: string;
 	notification: NotificationContent;
-	/** The call waiting for approval that the notification asks the member to decide, if it asks one. */
-	approvalCallId?: string;
+	/** The approval the notification asks the member to decide, if it asks one. */
+	approval?: { callId: string; approvalId: string };
 }
 
 /** Why a member would want to hear of something. */
@@ -245,7 +245,13 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 	const place = yield* placeOf(db, waiting.chatId);
 	if (!place) return [];
 	const calls = yield* db
-		.select({ id: toolCall.id, tool: toolCall.tool, botId: bot.id, botName: bot.name })
+		.select({
+			id: toolCall.id,
+			approvalId: toolCall.approvalId,
+			tool: toolCall.tool,
+			botId: bot.id,
+			botName: bot.name,
+		})
 		.from(toolCall)
 		.innerJoin(turn, eq(turn.id, toolCall.turnId))
 		.innerJoin(bot, eq(bot.id, turn.botId))
@@ -277,7 +283,8 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 		const member = preferences.find(({ id }) => id === memberId);
 		if (!member || !wants(member, "approval", now)) continue;
 		const [firstDecidable] = decidable;
-		if (!firstDecidable) continue;
+		const approvalId = calls.find(({ id }) => id === firstDecidable?.id)?.approvalId;
+		if (!firstDecidable || !approvalId) continue;
 		const fixedInput = fixedApprovalInput(firstDecidable);
 		const host =
 			fixedInput && typeof fixedInput === "object" && "host" in fixedInput
@@ -286,7 +293,7 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 		const description = decidable.length === 1 ? firstDecidable.tool : `${decidable.length} tools`;
 		addressed.push({
 			memberId,
-			approvalCallId: firstDecidable.id,
+			approval: { callId: firstDecidable.id, approvalId },
 			notification: {
 				title: `${first.botName} needs your approval`,
 				body: reachesChat
@@ -414,9 +421,9 @@ function sharedPreview(names: readonly string[]): string {
 /**
  * Whether `memberId` may still be told a notification for `audience`, read
  * now in the caller's transaction: they reach its chat, or, for an approval,
- * they can still decide the call and reach its chat when the notification
- * shows the chat. A notification for no chat or approval, such as a test,
- * needs neither.
+ * it still waits, they can decide it, and they reach its chat when the
+ * notification shows the chat. A notification for no chat or approval, such
+ * as a test, needs neither.
  */
 export const mayStillBeTold = Effect.fn("Notifications.mayStillBeTold")(function* (
 	db: Executor,
@@ -424,6 +431,18 @@ export const mayStillBeTold = Effect.fn("Notifications.mayStillBeTold")(function
 	audience: Audience.Group | undefined,
 ) {
 	if (audience?.kind === "approval") {
+		const [waiting] = yield* db
+			.select({ id: toolCall.id })
+			.from(toolCall)
+			.where(
+				and(
+					eq(toolCall.id, audience.toolCall),
+					eq(toolCall.approvalId, audience.approval),
+					eq(toolCall.approvalStatus, "pending"),
+				),
+			)
+			.limit(1);
+		if (!waiting) return false;
 		const approvers = yield* approvalAudience(db, [audience.toolCall]);
 		return approvers.some(
 			(approver) => approver.memberId === memberId && (approver.reachesChat || !audience.showsChat),

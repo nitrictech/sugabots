@@ -1016,7 +1016,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			await commit(
 				edsStream,
 				Audience.addressedTo(
-					{ kind: "approval", toolCall: randomUUID(), showsChat: false },
+					{ kind: "approval", toolCall: randomUUID(), approval: randomUUID(), showsChat: false },
 					notification("Not Ed's to decide", null),
 				),
 			);

@@ -185,7 +185,8 @@ export const make = Effect.gen(function* () {
 						deliveryId,
 						memberId: addressed.memberId,
 						notification: addressed.notification,
-						approvalCallId: addressed.approvalCallId,
+						approvalCallId: addressed.approval?.callId,
+						approvalId: addressed.approval?.approvalId,
 					})
 					.onConflictDoNothing()
 					.returning({ id: notificationDelivery.deliveryId }),
@@ -197,7 +198,12 @@ export const make = Effect.gen(function* () {
 				operation(
 					"handler",
 					sendIfStillTold(
-						{ ...addressed, chatId, approvalCallId: addressed.approvalCallId ?? null },
+						{
+							...addressed,
+							chatId,
+							approvalCallId: addressed.approval?.callId ?? null,
+							approvalId: addressed.approval?.approvalId ?? null,
+						},
 						and(
 							eq(notificationDelivery.chatId, chatId),
 							eq(notificationDelivery.deliveryId, deliveryId),
@@ -488,7 +494,7 @@ type NotificationDeliveryRow = typeof notificationDelivery.$inferSelect;
 
 type DeliveryToSend = Pick<
 	NotificationDeliveryRow,
-	"chatId" | "memberId" | "notification" | "approvalCallId"
+	"chatId" | "memberId" | "notification" | "approvalCallId" | "approvalId"
 >;
 
 /** How long the process that wrote a notification has to send it before the sweep does. */
@@ -686,9 +692,14 @@ const shareWorkspaceLock = (workspaceId: string) =>
  * approval, or else those who reach the chat it shows or is about.
  */
 function audienceOf(delivery: DeliveryToSend): Audience.Group {
-	const { approvalCallId, notification } = delivery;
-	return approvalCallId
-		? { kind: "approval", toolCall: approvalCallId, showsChat: notification.chatId !== null }
+	const { approvalCallId, approvalId, notification } = delivery;
+	return approvalCallId && approvalId
+		? {
+				kind: "approval",
+				toolCall: approvalCallId,
+				approval: approvalId,
+				showsChat: notification.chatId !== null,
+			}
 		: { kind: "chat", chat: notification.chatId ?? delivery.chatId };
 }
 

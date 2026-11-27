@@ -710,6 +710,33 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			expect(sentTo(members.bob.id)).toEqual([]);
 		});
 
+		it.each([
+			{ change: "decided", set: () => ({ approvalStatus: "approved" as const }) },
+			{
+				change: "decided and asked about again",
+				set: () => ({ approvalId: crypto.randomUUID(), approvalStatus: "pending" as const }),
+			},
+		])("sends an approval again to nobody once its call is $change", async ({ set }) => {
+			// Only Ada, who made it, reaches a personal bot, so only she may decide its calls.
+			await onDatabase((db) =>
+				db.update(botTable).set({ visibility: "personal" }).where(eq(botTable.id, botId)),
+			);
+			const chat = await chatWithBot([members.ada.id]);
+			const { turnId, callIds } = await turnWaitingOn(chat, ["post_message"]);
+			await recordedUnsent(
+				ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
+			);
+			const [callId] = callIds;
+			if (!callId) throw new Error("No call");
+			await onDatabase((db) => db.update(toolCall).set(set()).where(eq(toolCall.id, callId)));
+
+			await aWhileLater();
+			const { sendLeftBehind } = await notifications();
+			await run(sendLeftBehind);
+
+			expect(sentTo(members.ada.id)).toEqual([]);
+		});
+
 		it("sends each notification once when another sweep runs while the first is still publishing", async () => {
 			const chat = await projectChat();
 			const bob = `@${handleFromName(members.bob.name)}`;
@@ -1326,6 +1353,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 					turnId,
 					tool,
 					approvalComputerProjectId: tool === HOST_REQUEST_TOOL ? projectId : null,
+					approvalId: crypto.randomUUID(),
 					approvalStatus: "pending" as const,
 					input: {},
 					atOffset: index,
