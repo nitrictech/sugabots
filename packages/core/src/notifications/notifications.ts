@@ -208,9 +208,14 @@ export const make = Effect.gen(function* () {
 	 * commits. Whether each member may still be told is checked as it is sent.
 	 */
 	const recordDeliveries = (chatId: string, deliveryId: string, addressed: readonly Addressed[]) =>
-		Effect.forEach(addressed, (one) => transaction(recordDelivery(chatId, deliveryId, one)), {
-			discard: true,
-		});
+		Effect.forEach(
+			addressed,
+			(one) =>
+				transaction(
+					recordDelivery(chatId, approvalDeliveryId(one.approval?.approvalId) ?? deliveryId, one),
+				),
+			{ discard: true },
+		);
 
 	/** Sends a pending notification's notifications, then forgets it. */
 	const send = (pending: PendingNotification) =>

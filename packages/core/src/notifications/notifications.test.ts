@@ -1414,7 +1414,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			{
 				title: "Scout needs your approval",
 				body: "To run post_message in Release notes",
-				tag: `approval:${turnId}`,
+				tag: `approval:${callId}`,
 				path: `/${workspaceSlug}/approvals/${callId}`,
 				chatId: chat,
 			},
@@ -1442,7 +1442,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			{
 				title: "Scout needs your approval",
 				body: `To run ${HOST_REQUEST_TOOL} in Launch`,
-				tag: `approval:${turnId}`,
+				tag: `approval:${networkCallId}`,
 				path: `/${workspaceSlug}/approvals/${networkCallId}`,
 				chatId: chat,
 			},
@@ -1451,11 +1451,48 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			{
 				title: "Scout needs your approval",
 				body: "To run post_message in Launch",
-				tag: `approval:${turnId}`,
+				tag: `approval:${postCallId}`,
 				path: `/${workspaceSlug}/approvals/${postCallId}`,
 				chatId: chat,
 			},
 		]);
+	});
+
+	it("replays a notification for the approval that is still pending", async () => {
+		const chat = await projectChat();
+		const { turnId, callIds } = await turnWaitingOn(chat, ["post_message", "send_digest"]);
+		const [first, second] = callIds;
+		if (!first || !second) throw new Error("Expected two calls");
+		const stream = memberStream(members.ada.id);
+		const store = await runOnPostgres(EventStore.make);
+		const since = (await store.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The member's stream has no cursor");
+
+		await emit(
+			ChatEvent.TurnSuspended({ chatId: chat, workspaceId, turnId, approvalCallIds: callIds }),
+		);
+		await onDatabase((db) =>
+			db.update(toolCall).set({ approvalStatus: "denied" }).where(eq(toolCall.id, first)),
+		);
+		const marker = streamEvent("approvals.changed", { toolCallId: second });
+		const freshBus = EventBus.inProcess();
+		await runOnPostgres(
+			Effect.flatMap(EventOutbox.make, (outbox) =>
+				outbox.publish([{ stream, event: marker }]),
+			).pipe(Effect.provideService(EventBus.Service, freshBus)),
+		);
+		const { follow } = await servedRegistry({ bus: Layer.succeed(EventBus.Service, freshBus) });
+		const ada = await principals(await authenticators()).member(members.ada.id);
+		const resumed = await follow(ada, "events.followOwn", { since });
+		onTestFinished(() => resumed.close());
+		expect(await resumed.next()).toMatchObject({
+			event: {
+				type: "notification",
+				path: `/${workspaceSlug}/approvals/${second}`,
+				body: "To run send_digest in Launch",
+			},
+		});
+		expect(await resumed.next()).toMatchObject({ event: marker });
 	});
 
 	it("notifies the bound computer project’s manager without disclosing the private chat", async () => {
@@ -1486,7 +1523,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			{
 				title: "Scout needs your approval",
 				body: "To let its computer reach docs.example",
-				tag: `approval:${turnId}`,
+				tag: `approval:${callId}`,
 				path: `/${workspaceSlug}/approvals/${callId}`,
 				chatId: null,
 			},
@@ -1525,7 +1562,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		const asked = {
 			title: "Scout needs your approval",
 			body: "To run post_message in Digest",
-			tag: `approval:${turnId}`,
+			tag: `approval:${callId}`,
 			path: `/${workspaceSlug}/approvals/${callId}`,
 			chatId: expect.any(String),
 		};

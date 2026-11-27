@@ -279,34 +279,35 @@ export const forApprovals = Effect.fn("Notifications.forApprovals")(function* (
 		now,
 		audience.map(({ memberId }) => memberId),
 	);
+	const approvalIds = new Map(calls.map(({ id, approvalId }) => [id, approvalId]));
 	const addressed: Addressed[] = [];
 	for (const { memberId, reachesChat, calls: decidable } of audience) {
 		const member = preferences.find(({ id }) => id === memberId);
 		if (!member || !wants(member, "approval", now)) continue;
-		const [firstDecidable] = decidable;
-		const approvalId = calls.find(({ id }) => id === firstDecidable?.id)?.approvalId;
-		if (!firstDecidable || !approvalId) continue;
-		const fixedInput = fixedApprovalInput(firstDecidable);
-		const host =
-			fixedInput && typeof fixedInput === "object" && "host" in fixedInput
-				? fixedInput.host
-				: undefined;
-		const description = decidable.length === 1 ? firstDecidable.tool : `${decidable.length} tools`;
-		addressed.push({
-			memberId,
-			approval: { callId: firstDecidable.id, approvalId },
-			notification: {
-				title: `${first.botName} needs your approval`,
-				body: reachesChat
-					? `To run ${description} in ${place.title}`
-					: typeof host === "string"
-						? `To let its computer reach ${host}`
-						: `To run ${description}`,
-				tag: `approval:${waiting.turnId}`,
-				path: approvalPath(place.workspaceSlug, firstDecidable.id),
-				chatId: reachesChat ? place.rootChatId : null,
-			},
-		});
+		for (const call of decidable) {
+			const approvalId = approvalIds.get(call.id);
+			if (!approvalId) continue;
+			const fixedInput = fixedApprovalInput(call);
+			const host =
+				fixedInput && typeof fixedInput === "object" && "host" in fixedInput
+					? fixedInput.host
+					: undefined;
+			addressed.push({
+				memberId,
+				approval: { callId: call.id, approvalId },
+				notification: {
+					title: `${first.botName} needs your approval`,
+					body: reachesChat
+						? `To run ${call.tool} in ${place.title}`
+						: typeof host === "string"
+							? `To let its computer reach ${host}`
+							: `To run ${call.tool}`,
+					tag: `approval:${call.id}`,
+					path: approvalPath(place.workspaceSlug, call.id),
+					chatId: reachesChat ? place.rootChatId : null,
+				},
+			});
+		}
 	}
 	return addressed;
 });
