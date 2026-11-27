@@ -1,6 +1,6 @@
 language js(typescript)
 
-// The text people read never uses a middle dot as a separator, whether typed as the
+// Text on screen never uses a middle dot as a separator, whether typed as the
 // character, a JavaScript escape or an HTML entity. Short facts on one line are separated
 // with space or layout instead, such as `SpacedText`. `no-middle-dot-css.grit` checks the
 // stylesheets' generated content.
@@ -11,5 +11,5 @@ or {
 	JsTemplateChunkElement()
 } as $text where {
 	$text <: r"[\s\S]*(?:·|\\u00[bB]7|\\u\{0*[bB]7\}|\\x[bB]7|&middot;|&#0*183;|&#[xX]0*[bB]7;)[\s\S]*",
-	register_diagnostic(span=$text, message="Don't put a middle dot in text people read. Separate the parts with space or layout, such as `SpacedText` from `@/ui/spaced-text.tsx`.")
+	register_diagnostic(span=$text, message="Don't put a middle dot in text on screen. Separate the parts with space or layout, such as `SpacedText` from `@/ui/spaced-text.tsx`.")
 }

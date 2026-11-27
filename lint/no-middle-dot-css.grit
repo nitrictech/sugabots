@@ -1,6 +1,6 @@
 language css
 
-// A stylesheet's generated content is text people read too, so it never draws a middle
+// A stylesheet's generated content is text on screen too, so it never draws a middle
 // dot as a separator, as the character or a CSS escape. See `no-middle-dot.grit`.
 CssDeclarationWithSemicolon() as $declaration where {
 	$declaration <: r"^\s*content\s*:[\s\S]*(?:·|\\0*[bB]7)[\s\S]*",
