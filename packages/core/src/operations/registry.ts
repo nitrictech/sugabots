@@ -10,7 +10,7 @@ import type {
 	RequestOperationName,
 } from "@sugabots/contracts/operations";
 import type { DomainError } from "@sugabots/errors";
-import { Context, Effect, Layer, Schema, Scope } from "effect";
+import { Context, Effect, Layer, Scope } from "effect";
 import type { Principal } from "../principal.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { approvalsOperations } from "./approvals/index.ts";
@@ -37,11 +37,8 @@ import { workspaceOperations } from "./workspace/index.ts";
  * (`RunningTurn`): every entrypoint calls these, with the call it is making,
  * and each proves access for itself.
  *
- * Each input is decoded through its contract's input schema before the
- * operation's body sees it, whichever entrypoint called, so checks across
- * fields, such as a message needing text or a file, always hold. An input
- * the schema refuses is a defect: an entrypoint decodes what it is sent
- * first, and answers its mistakes itself.
+ * Each operation decodes its input through its contract's input schema
+ * before its body sees it (see `defineOperation`).
  */
 export type Interface = {
 	readonly [Name in RequestOperationName]: (
@@ -103,10 +100,9 @@ type Operations = typeof operations;
 /** The services the operations' bodies need, supplied once when the registry is built. */
 type Services = ServicesOf<Operations[keyof Operations]>;
 
-/** Any one of the operations, with what its input is forgotten: the registry decodes it and passes it on. */
+/** Any one of the operations, with what its input is forgotten: the registry only passes it on. */
 interface RegisteredOperation {
 	readonly kind: "request" | "longRunning";
-	readonly contract: { readonly input: Schema.Top };
 	readonly run: (
 		principal: Principal,
 		input: never,
@@ -127,25 +123,13 @@ export const make = Effect.gen(function* () {
 	const entriesOf = (kind: RegisteredOperation["kind"]) =>
 		Object.entries<RegisteredOperation>(operations)
 			.filter(([, operation]) => operation.kind === kind)
-			.map(([name, operation]) => {
-				const decodeInput = Schema.decodeUnknownEffect(Schema.toType(operation.contract.input));
-				return [
-					name,
-					(principal: Principal, input: unknown, call: Call) =>
-						decodeInput(input).pipe(
-							Effect.catch((error) =>
-								Effect.die(
-									new Error(`${name} was called with an input its contract refuses`, {
-										cause: error,
-									}),
-								),
-							),
-							Effect.flatMap((decoded) => operation.run(principal, decoded as never, call)),
-							Effect.provideContext(context),
-							Effect.withSpan(name),
-						),
-				];
-			});
+			.map(([name, operation]) => [
+				name,
+				(principal: Principal, input: never, call: Call) =>
+					operation
+						.run(principal, input, call)
+						.pipe(Effect.provideContext(context), Effect.withSpan(name)),
+			]);
 	return Context.make(Service, Object.fromEntries(entriesOf("request")) as Interface).pipe(
 		Context.add(LongRunning, Object.fromEntries(entriesOf("longRunning")) as LongRunningInterface),
 	);

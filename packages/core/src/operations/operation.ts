@@ -19,7 +19,7 @@
 
 import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import type { OperationContract } from "@sugabots/contracts/operations";
-import type { Effect, Scope, Stream } from "effect";
+import { Effect, Schema, type Scope, type Stream } from "effect";
 import type { Principal } from "../principal.ts";
 
 /** Runs the operation's proofs up to Approved, before any write or provider call. */
@@ -82,7 +82,11 @@ export const defineOperation = <
 >(
 	contract: Contract,
 	run: Operation<Contract, Services>["run"],
-): Operation<Contract, Services> => ({ kind: "request", contract, run });
+): Operation<Contract, Services> => ({
+	kind: "request",
+	contract,
+	run: decodingInputFirst(contract, run),
+});
 
 /**
  * A long-running operation's body (see `OperationContract.Kind`): it proves
@@ -111,7 +115,41 @@ export const defineLongRunningOperation = <
 >(
 	contract: Contract,
 	run: LongRunningOperation<Contract, Services>["run"],
-): LongRunningOperation<Contract, Services> => ({ kind: "longRunning", contract, run });
+): LongRunningOperation<Contract, Services> => ({
+	kind: "longRunning",
+	contract,
+	run: decodingInputFirst(contract, run),
+});
+
+/**
+ * `run`, decoding its input through the contract's input schema first, so
+ * checks across fields, such as a message needing text or a file, hold
+ * whoever calls it. An input the schema refuses is a defect: an entrypoint
+ * decodes what it is sent first, and answers its mistakes itself.
+ */
+const decodingInputFirst = <Contract extends OperationContract.Contract, A, E, R>(
+	contract: Contract,
+	run: (
+		principal: Principal,
+		input: OperationContract.Input<Contract>,
+		call: Call,
+	) => Effect.Effect<A, E, R>,
+) => {
+	const decodeInput = Schema.decodeUnknownEffect(Schema.toType(contract.input));
+	return (principal: Principal, input: OperationContract.Input<Contract>, call: Call) =>
+		decodeInput(input).pipe(
+			Effect.catch((error) =>
+				Effect.die(
+					new Error(`${contract.name} was called with an input its contract refuses`, {
+						cause: error,
+					}),
+				),
+			),
+			Effect.flatMap((decoded) =>
+				run(principal, decoded as OperationContract.Input<Contract>, call),
+			),
+		);
+};
 
 /** The services an operation's body needs, which the registry supplies when it is built. */
 export type ServicesOf<Of> = Of extends {
