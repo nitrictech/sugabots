@@ -2528,6 +2528,7 @@ it.skipIf(!process.env.DATABASE_URL)(
 		const cleanup = migration
 			.slice(migration.indexOf("-- A finished asking reply"))
 			.split("--> statement-breakpoint")[0];
+		if (cleanup === undefined) throw new Error("The migration has no collaboration cleanup");
 		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
 			await client.query("begin");
 			try {
