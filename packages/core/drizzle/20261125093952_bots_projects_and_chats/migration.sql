@@ -3324,3 +3324,5 @@ DROP INDEX "migration_file_tool_call_idx";--> statement-breakpoint
 CREATE INDEX "message_author_chat_created_at_idx" ON "message" ("author_member_id","chat_id","created_at" DESC NULLS LAST);
 --> statement-breakpoint
 CREATE INDEX "message_mention_trigram_idx" ON "message" USING gin ("content" gin_trgm_ops) WHERE "content" like '%@%' and "content" <> '' and "status" <> 'writing';
+--> statement-breakpoint
+CREATE INDEX "file_message_name_trigram_idx" ON "file" USING gin ("name" gin_trgm_ops) WHERE "message_id" is not null;

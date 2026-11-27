@@ -15316,6 +15316,26 @@
         "n|sch|public",
         "n|col|public.message.content"
       ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "file",
+        "file_message_name_trigram_idx"
+      ],
+      "writes": [
+        "s|idx|public.file_message_name_trigram_idx",
+        "n|idx|public.file_message_name_trigram_idx",
+        "e|idx|public.file_message_name_trigram_idx",
+        "n|rel|public.file_message_name_trigram_idx"
+      ],
+      "reads": [
+        "n|tbl|public.file",
+        "n|sch|public",
+        "n|col|public.file.name"
+      ]
     }
   ],
   "deltas": [
@@ -25344,6 +25364,33 @@
         ],
         "isUnique": false,
         "where": "\"content\" like '%@%' and \"content\" <> '' and \"status\" <> 'writing'",
+        "with": "",
+        "method": "gin",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "file",
+        "name": "file_message_name_trigram_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "name",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": {
+              "name": "gin_trgm_ops",
+              "default": false
+            }
+          }
+        ],
+        "isUnique": false,
+        "where": "\"message_id\" is not null",
         "with": "",
         "method": "gin",
         "concurrently": false,

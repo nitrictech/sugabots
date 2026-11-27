@@ -77,6 +77,9 @@ export const file = pgTable(
 	(table) => [
 		index("file_chat_updated_at_idx").on(table.chatId, table.updatedAt),
 		index("file_message_idx").on(table.messageId),
+		index("file_message_name_trigram_idx")
+			.using("gin", table.name.op("gin_trgm_ops"))
+			.where(sql`${table.messageId} is not null`),
 		// What `file_version` points at, so a version is only ever a written file's.
 		uniqueIndex("file_id_kind_idx").on(table.id, table.kind),
 		check(

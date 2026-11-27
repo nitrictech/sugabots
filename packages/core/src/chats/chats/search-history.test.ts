@@ -191,6 +191,10 @@ describe.skipIf(!process.env.DATABASE_URL)("searching chat history, against Post
 		]);
 		const chart = attachmentLine("chart.png", "image/png");
 		expect(matchText(await searchFor({ query: "chart.png" }))).toEqual([chart]);
+		expect(matchText(await searchFor({ chat: "all", query: "contract" }))).toEqual([
+			`Here is the signed contract\n${attachmentLine("contract.pdf", "application/pdf")}`,
+		]);
+		expect(matchText(await searchFor({ chat: "all", query: "chart.png" }))).toEqual([chart]);
 		expect(matchText(await searchFor({ after: started.toISOString() }))).toContain(chart);
 	});
 });

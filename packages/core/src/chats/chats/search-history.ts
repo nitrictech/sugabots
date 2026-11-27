@@ -1,8 +1,22 @@
 import type { OutputOf } from "@sugabots/contracts/operations";
 import { HISTORY_SEARCH_MAX_MATCHES } from "@sugabots/contracts/operations/chat-reads";
-import { and, asc, desc, eq, gte, ilike, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	gte,
+	ilike,
+	inArray,
+	isNotNull,
+	lt,
+	ne,
+	or,
+	type SQL,
+	sql,
+} from "drizzle-orm";
 import { DateTime, Effect } from "effect";
-import { type Database, query } from "../../database/database.ts";
+import { type Database, type Executor, query } from "../../database/database.ts";
 import {
 	bot,
 	chatCompaction,
@@ -64,15 +78,15 @@ export const searchHistory = Effect.fn("ChatHistory.searchHistory")(function* <P
 	const beforeKept = current?.keptFrom ? lt(message.createdAt, current.keptFrom) : undefined;
 	const historyLimit = or(otherChat, beforeKept);
 	const matching = words ? wordMatch(words) : undefined;
+	const complete = sql`${message.status} = 'complete'`;
 	const conditions: SQL[] = [
 		scope.kind === "all"
 			? scope.reach.reachesChat(placedChat)
 			: eq(message.chatId, scope.reach.chat.value),
-		eq(message.status, "complete"),
+		complete,
 		...(historyLimit ? [historyLimit] : []),
 		...(before ? [lt(message.createdAt, DateTime.toDate(DateTime.makeUnsafe(before)))] : []),
 		...(after ? [gte(message.createdAt, DateTime.toDate(DateTime.makeUnsafe(after)))] : []),
-		...(matching ? [matching.where] : []),
 	];
 	const rows = yield* query((db) =>
 		db
@@ -81,7 +95,7 @@ export const searchHistory = Effect.fn("ChatHistory.searchHistory")(function* <P
 			.innerJoin(placedChat, eq(placedChat.id, message.chatId))
 			.leftJoin(member, eq(member.id, message.authorMemberId))
 			.leftJoin(bot, eq(bot.id, message.authorBotId))
-			.where(and(...conditions))
+			.where(and(...conditions, matching && matchMessages(db, matching, complete, scope.kind)))
 			.orderBy(
 				...(matching
 					? [...matching.best, desc(message.createdAt)]
@@ -148,29 +162,45 @@ function toHistoryMatch(
  * substring-only matches follow. Each expression is the one its index on
  * `message.content` is built on, so the indexes are used.
  */
-function wordMatch(words: string): { where: SQL; best: SQL[] } {
+function wordMatch(words: string) {
 	const english = sql`to_tsvector('english', ${message.content}) @@ websearch_to_tsquery('english', ${words})`;
 	const simple = sql`to_tsvector('simple', ${message.content}) @@ websearch_to_tsquery('simple', ${words})`;
-	const terms = substringTerms(words);
+	const patterns = substringTerms(words).map((term) => `%${escapeLike(term)}%`);
 	const substring =
-		terms.length > 0
-			? and(...terms.map((term) => ilike(message.content, `%${escapeLike(term)}%`)))
+		patterns.length > 0
+			? and(...patterns.map((pattern) => ilike(message.content, pattern)))
 			: undefined;
-	// A file is found by its name too, as a message with only files says nothing else.
-	const carriesNamed =
-		terms.length > 0
-			? sql`exists (select 1 from ${file} where ${file.messageId} = ${message.id} and ${and(
-					...terms.map((term) => ilike(file.name, `%${escapeLike(term)}%`)),
-				)})`
-			: undefined;
+	const fileName =
+		patterns.length > 0 ? and(...patterns.map((pattern) => ilike(file.name, pattern))) : undefined;
 	const rank = sql`greatest(
 		ts_rank(to_tsvector('english', ${message.content}), websearch_to_tsquery('english', ${words})),
 		ts_rank(to_tsvector('simple', ${message.content}), websearch_to_tsquery('simple', ${words}))
 	)`;
 	return {
-		where: or(english, simple, substring, carriesNamed) as SQL,
+		text: or(english, simple, substring),
+		fileName,
 		best: [desc(sql`(${english}) or (${simple})`), desc(rank)],
 	};
+}
+
+function matchMessages(
+	db: Executor,
+	match: ReturnType<typeof wordMatch>,
+	complete: SQL,
+	scope: HistoryScope<unknown, unknown>["kind"],
+) {
+	if (!match.fileName) return match.text;
+	const files = db.select({ id: sql<string>`${file.messageId}`.as("id") }).from(file);
+	if (scope === "chat") {
+		return or(
+			match.text,
+			sql`exists (${files.where(and(eq(file.messageId, message.id), match.fileName))})`,
+		);
+	}
+
+	const text = db.select({ id: message.id }).from(message).where(and(complete, match.text));
+	const named = files.where(and(isNotNull(file.messageId), match.fileName));
+	return inArray(message.id, text.union(named));
 }
 
 /**
