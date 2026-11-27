@@ -93,25 +93,26 @@ export const readCommittedTransaction = <A, E, R>(body: Effect.Effect<A, E, R>) 
 	);
 
 /**
- * Runs `proveAndRead`, which proves reach to something in the workspace
- * `workspaceOf` finds and reads or writes what it reaches, under a share of
- * the workspace's lock (see {@link underWorkspaceShare}), so no change to who
- * reaches what commits between the proof and the read or write. Nothing found
- * is hidden as `resource`.
+ * Runs `proveAndWrite`, which proves what a write needs in the workspace
+ * `workspaceOf` finds and makes the write, under a share of the workspace's
+ * lock (see {@link underWorkspaceShare}), so no change to who reaches what
+ * commits between the proof and the write. Nothing found is hidden as
+ * `resource`. A read needs no share: one that runs just after a change
+ * commits may still show what was reached before it.
  */
-export const readingUnderWorkspaceShare = <A, E, R>(
+export const writingUnderWorkspaceShare = <A, E, R>(
 	workspaceOf: Effect.Effect<string | undefined, never, Database>,
 	resource: ResourceHidden["resource"],
-	proveAndRead: Effect.Effect<A, E, R>,
+	proveAndWrite: Effect.Effect<A, E, R>,
 ) =>
 	Effect.gen(function* () {
 		const workspaceId = yield* workspaceOf;
 		if (workspaceId === undefined) return yield* new ResourceHidden({ resource });
-		return yield* underWorkspaceShare(workspaceId, proveAndRead);
+		return yield* underWorkspaceShare(workspaceId, proveAndWrite);
 	});
 
 /**
- * Runs an approval write, parking a call or deciding one, in a transaction
+ * Runs a write, such as parking a call or deciding one, in a transaction
  * that first takes the workspace's row `FOR SHARE`, so it waits for a change
  * to who reaches what and sees it, and is refused in a workspace being
  * deleted. If a transaction is already open, it must use `READ COMMITTED`.

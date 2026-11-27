@@ -34,6 +34,7 @@ import {
 	membership,
 	message,
 	modelProvider,
+	pinnedBot,
 	project,
 	projectMember,
 	providerModel,
@@ -698,7 +699,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			);
 		});
 
-		it("reads what a member reaches only once a removal under way has committed, then refuses it", async () => {
+		it("refuses a member's writes that wait on a removal under way, once it has committed", async () => {
 			const diary = await aBot(editorId, "Diary", "private");
 			await botsAs(editorId).addMember({ botId: diary.id, memberId: viewerId });
 			const closed = await create(adminId, {
@@ -735,10 +736,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			await removing.held;
 
 			const calls = [
-				callOperation(viewer, "bots.listMembers", { botId: diary.id }),
-				callOperation(viewer, "chats.messages", { chatId, limit: 1 }),
-				callOperation(viewer, "projects.listBots", { projectId: closed.id }),
-				callOperation(viewer, "projects.listMembers", { projectId: closed.id }),
+				callOperation(viewer, "bots.pin", { botId: diary.id }),
 				callOperation(viewer, "chats.send", {
 					chatId,
 					message: "Sent as I leave",
@@ -755,6 +753,13 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 				db.select({ id: message.id }).from(message).where(eq(message.chatId, chatId)),
 			);
 			expect(sent).toEqual([]);
+			const pinned = await onDatabase((db) =>
+				db
+					.select({ botId: pinnedBot.botId })
+					.from(pinnedBot)
+					.where(and(eq(pinnedBot.botId, diary.id), eq(pinnedBot.memberId, viewerId))),
+			);
+			expect(pinned).toEqual([]);
 		});
 
 		it("lists an administrator of two workspaces only the projects of the one asked about", async () => {

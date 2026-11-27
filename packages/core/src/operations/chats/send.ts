@@ -5,7 +5,7 @@ import { proveIsMember } from "../../proofs/is-member.ts";
 import { proveCanTakePart } from "../../proofs/project-permissions.ts";
 import { named } from "../../proofs/proof.ts";
 import { proveReachesChat } from "../../proofs/reaches-chat.ts";
-import { readingUnderWorkspaceShare } from "../../proofs/workspace-lock.ts";
+import { writingUnderWorkspaceShare } from "../../proofs/workspace-lock.ts";
 import { workspaceOfChat } from "../../workspaces/workspace-reference.ts";
 import { defineOperation } from "../operation.ts";
 
@@ -15,7 +15,7 @@ export const send = defineOperation(chatsContracts["chats.send"], (principal, in
 		// The post commits under the workspace's lock shared, which the proof
 		// took, so it can't commit after the sender's removal has.
 		return yield* named(principal, input.chatId, (principal, chat) =>
-			readingUnderWorkspaceShare(
+			writingUnderWorkspaceShare(
 				workspaceOfChat(chat.value),
 				"chat",
 				Effect.gen(function* () {
