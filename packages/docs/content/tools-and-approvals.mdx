@@ -28,7 +28,8 @@ That's always on.
 ## Tools from connectors
 
 A connector's tools belong to its project, a bot's own to its default
-project. Each tool has its own tool access:
+project. Each tool has its own access setting. These settings apply when
+the member's role and the work the bot is doing allow the call:
 
 | Tool access | What happens |
 | --- | --- |
@@ -53,7 +54,9 @@ can be set on its own.
 
 ## Try it
 
-Set the tool's access and pick what the bot wants to do. A read and a change are treated the same, so only the tool access decides what happens.
+Set the tool's access and pick what the bot wants to do. A member's role and the kind of work the bot is doing can also affect
+whether a call runs or needs approval. For example, Sugabots refuses a call
+that would write to a connector for a viewer in a project, even on **Allow**.
 
 <ApprovalPlayground />
 
@@ -65,13 +68,14 @@ refuses the call.
 
 The first rule that applies decides who can answer:
 
-1. **Requests to add an allowed host.** The workspace's owner and admins
+1. **Requests to change a computer.** The workspace's owner and admins
    answer for projects members made. For a public or private bot's own
    computer, its creator can also answer if they can talk to the bot and have
    a role other than viewer. Only the creator answers for their own personal
-   bot's computer, whatever their role. Approval adds an allowed host for the
-   project, even if the computer is replaced. If the approver cannot open the
-   chat, they see the host requested in the approval.
+   bot's computer, whatever their role. If they cannot open the chat, they
+   still see the details they need to decide, such as the requested host.
+   Approving a request to add an allowed host adds it for the project,
+   even if the computer is replaced.
 2. **Other calls by a personal bot.** Only its creator can answer, including
    for calls it makes during an automation run.
 3. **Other calls made by an automation.** The workspace's owner and admins

@@ -1,6 +1,6 @@
 ---
 title: Bots
-description: AI teammates with a job, a model to think with, and an avatar.
+description: AI teammates with instructions, a model, and an avatar.
 ---
 
 A bot is an AI teammate. Each one has its own instructions and model, and its
@@ -21,13 +21,13 @@ Owners, admins and editors can make bots. Every member can make a
   then `@personal-assistant-2` and so on, as everyone else's are, and no other
   bot may take those. A Personal Assistant you make after deleting one may take
   its handle, so an old link to the deleted one opens the new one.
+- **Model**: what the bot thinks with. Sugabots suggests the workspace's
+  [default model](/docs/models#default-model) when one is set. If no models
+  are available, ask the workspace's owner or an admin to enable one in
+  **Settings → Models**.
 - **Public**, **private** or **personal**: who can talk to it. A public bot
   can be made private later, and a private bot public, but whether a bot is
   personal can't be changed afterwards. See [below](#public-private-and-personal).
-
-A new bot starts on the workspace's [default model](/docs/models#default-model).
-If there's none, connect one in **Settings → Models** first. Bots can't think
-without one.
 
 A new bot is pinned to your sidebar, and opens in a setup chat: it interviews
 you about the work it's for, then asks you to approve the instructions it wrote
@@ -39,11 +39,12 @@ changes its own instructions only in its own chats, and only once you approve.
 - A **public** bot is for everyone in the workspace. Anyone can find it, talk to
   it, and see its chats and files. It can be added to any
   [project](/docs/projects).
-- A **private** bot is for its members: its creator, the owner and admins, and
-  whoever its members invite. Only they can find it, talk to it, and see its
-  chats and files. Any member of the bot except viewers can invite members or
-  remove them in its settings, but its creator stays a member of their own
-  private bot, and the owner and admins stay members of every one. It can be
+- A **private** bot is for its members. They can find it, talk to it, and see
+  its chats and files. Viewers can take part in the chats. Other members of the
+  bot can add or remove workspace members under the bot's **Settings → Members**.
+  The owner and admins are members automatically. The creator, once a
+  member, stays a member while in the workspace. Removing someone from the bot
+  leaves their project memberships in place. The bot can be
   added to [private projects](/docs/projects#public-and-private) only, where
   everyone in the project can talk to it in the project's chats, but not in
   the bot's own chats unless they're its members too. If you made a bot before
@@ -61,7 +62,7 @@ in its settings. So can its creator if they can talk to the bot and have a role
 other than viewer. A bot made private stays in its private projects and leaves
 every public project. If it leads one, choose another lead bot there first.
 Making a bot public opens its chats and files to the workspace and clears its
-member list.
+member list. If you make it private again, add its members back.
 
 Whether a bot is personal is chosen when it's made, and never changes: a public
 or private bot can't be made personal, and a personal bot can't be made public
@@ -139,8 +140,8 @@ Sugabots, so you can't edit them, and it keeps its handle and stays personal.
 
 ## Remove a bot
 
-**Delete bot** is at the bottom of its settings. Its chats, files, automations
-and connectors go with it, and that can't be undone. Its creator, the owner and
-admins can delete it, once another bot leads each project members made that it
-leads. Delete your last Personal Assistant and you have none until you make
-another.
+**Delete bot** is at the bottom of its settings. Deleting it removes its
+chats, files, connectors, automations and everything on its computer. This
+can't be undone. If it leads a project, choose another lead there before
+deleting it. Delete your last Personal Assistant and you have none until you
+make another.

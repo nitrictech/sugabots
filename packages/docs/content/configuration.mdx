@@ -18,7 +18,7 @@ set them under `environment` in `compose.yml`.
 
 | Variable                   | Default                                | Description                                                                                                                                               |
 | -------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                 | `production`                           | `development` or `production`.                                                                                                                            |
+| `NODE_ENV`                 | `development`                          | `development` or `production`. The published Docker image sets `production`.                                                                                                                            |
 | `PORT`                     | `3000`                                 | Port the API binds.                                                                                                                                       |
 | `PUBLIC_URL`               | `http://localhost:` followed by `PORT` | Where a browser reaches the API, without its `/api` path. Links in emails and OAuth redirects start here, so it must not be a container-internal address. |
 | `WEB_APP_URL`              | `PUBLIC_URL`                           | Where the web app is served, when it is hosted apart from the API. Invitation and referral links, and connector sign-ins, return here.                                      |

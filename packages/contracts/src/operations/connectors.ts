@@ -87,7 +87,7 @@ const throughTheBrowser = <const Site extends string>(site: Site) =>
 export const connectorsContracts = {
 	"connectors.searchTools": OperationContract.make("connectors.searchTools", {
 		description:
-			"Find tools your connectors provide. Give a few words for what you want to do, a connector's name, or a tool's full name. The best matches include their input schema. Then run one with call_tool. If nothing matches, try other words before telling the member it can't be done.",
+			"Find tools you can use in this chat, from the project's connectors and any of your own connectors that are on here. Give a few words for what you want to do, a connector's name, or a tool's full name. The best matches include their input schema. Then run one with call_tool. If nothing matches, try other words before telling the member it can't be done.",
 		input: Schema.Struct({
 			query: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
 				description: "What you want to do, such as 'list open issues', or a tool's full name",
@@ -151,7 +151,7 @@ export const connectorsContracts = {
 	}),
 	"connectors.setOnInProject": OperationContract.make("connectors.setOnInProject", {
 		description:
-			"Let the workspace's owner or an admin turn one of a bot's own connectors on or off in a project. If its address has changed since they saw it, they must review the new address before turning it on. Anyone who can talk to the bot in the project can use it while it is on.",
+			"The workspace's owner and admins can turn one of a bot's own connectors on or off in a project. If its address has changed since they saw it, they must review the new address before turning it on. While it is on, the bot can use it for members who can talk to it here, subject to their role and the tool's access setting.",
 		input: Schema.Struct({
 			projectId: uuidSchema,
 			connectorId: uuidSchema,

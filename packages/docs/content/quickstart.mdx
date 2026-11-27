@@ -9,9 +9,9 @@ by yourself.
 
 <Tip title="Setting it up for a team?">
 
-Other members can't reach a server on your computer, and its emails only
-go to its logs. To work with others, host Sugabots somewhere they can reach, with
-email set up: [Deploy with Docker](/docs/deploy-with-docker) covers that.
+Sugabots prints emails to its logs in this setup. To work with others, host
+Sugabots somewhere they can reach and set up email. See
+[Deploy with Docker](/docs/deploy-with-docker).
 
 </Tip>
 
@@ -80,6 +80,10 @@ If your `.env` still uses `CREDENTIALS_ENCRYPTION_KEY`, see how to
 | Web app          | http://localhost:3000              |
 | API              | http://localhost:3000/api          |
 | API health check | http://localhost:3000/api/health   |
+
+Docker publishes port 3000 on all network interfaces. For access from this
+computer only, change the port mapping in `compose.yml` to
+`127.0.0.1:3000:3000` and run `docker compose up -d`.
 
 The web app and the API share one address: the API answers under `/api`. Your
 data lives in the `sugabots_postgres_data` Docker volume, so it survives

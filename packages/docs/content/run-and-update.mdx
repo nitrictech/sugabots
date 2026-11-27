@@ -13,8 +13,8 @@ docker compose up -d    # start
 docker compose down     # stop
 ```
 
-Stopping keeps your data. It lives in the `sugabots_postgres_data` Docker
-volume.
+Stopping keeps your data. By default, PostgreSQL stores it in the
+`sugabots_postgres_data` Docker volume.
 
 ## View the logs
 
@@ -27,23 +27,20 @@ emails such as verification links are printed.
 
 ## Update
 
-Pull the latest image and restart:
+If your version is older than the projects release, stop every copy of
+Sugabots. Back up the database, keys and any file volume together. Start one copy of the new image to apply the
+migration before starting the others. See
+[Upgrading to projects](/docs/upgrading-to-projects).
+
+For other updates, [back up first](/docs/deploy-with-docker#backups), then pull
+the latest image and restart:
 
 ```sh
 docker compose pull
 docker compose up -d
 ```
 
-Sugabots updates its database when it starts. If your server runs a version
-from before projects, read [Upgrading to projects](/docs/upgrading-to-projects)
-first.
-
-<Tip>
-
-Before updating a server with data you want to keep,
-[back it up](/docs/deploy-with-docker#backups).
-
-</Tip>
+Sugabots updates its database when it starts.
 
 ## Reset
 

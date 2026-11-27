@@ -16,9 +16,11 @@ There are two places to chat:
 Members talk to each other in a project's chats: there are no chats
 between members alone.
 
-Anyone in a chat can mark it resolved once its work is finished: it moves
-to the Resolved list at the foot of the sidebar, and opens again when
-someone posts in it or it is reopened.
+In a project, editors, admins and the owner can mark a chat resolved or
+reopen it. Posting a message also reopens it. In a bot's own chats, the owner,
+admins and editors who can talk to it can resolve or reopen a chat. Viewers can
+do this in chats with their own personal bots. Resolved chats are listed at the
+foot of the sidebar.
 
 ## Who answers?
 
@@ -32,6 +34,10 @@ chat:
   otherwise reacts 👀 to show it read it. If the lead bot has no model, the
   message is posted without a bot reply.
 - **Otherwise** the lead bot answers.
+
+If any bot required to reply has no model, Sugabots won't send the message.
+A message addressed only to members can still be sent when it requires no bot
+to reply.
 
 Mentions of bots outside the project are ignored, so in a bot's own chats,
 where it's the only bot, only that bot can answer, by the same rule. Mentioning someone with `@` changes
@@ -92,15 +98,22 @@ finish, then gets an answer of its own.
 
 ## Interrupting a reply
 
-While a bot is working, the message box shows a stop button when it's empty.
-Press it to interrupt the reply: the step under way stops, any approval it was
-waiting for is withdrawn, and the reply ends with what it had so far. A bot
+While a bot is working and the message box is empty, choose **Interrupt reply**.
+The current step ends, any pending approval is withdrawn, and the reply keeps
+what the bot wrote so far. A bot
 that was interrupted doesn't pick up again with what any bots it asked for
 help said.
 
 You can interrupt a reply if you asked for it, or if you can manage the
 project the chat is in. For an automation's run, those who can approve the
 run's tool calls can interrupt it too.
+
+## Working on a computer
+
+The workspace needs an enabled computer provider, and the bot needs
+**Computer use** turned on in its settings. In a project chat, the bot can
+work on the computer for the project's editors, admins and owner. Viewers
+can watch its desktop. See [the project's computer](/docs/projects#computer).
 
 ## Seeing what a bot thought
 

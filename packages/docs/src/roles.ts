@@ -53,12 +53,12 @@ export const roleAbilities: readonly RoleAbility[] = [
 	{
 		label: "Answer approvals from automation runs",
 		roles: EVERYONE,
-		note: "In public or private bots' runs, the owner, admins and any creator who can manage the bot can answer if they can read the run's chat. In a personal bot's runs, its creator answers. See the next rules for host requests and replies in chats",
+		note: "The workspace's owner and admins, and the creator if they can manage the bot doing the run, can answer if they can open the run. The creator answers for their own personal bot. Requests to change a computer follow a separate rule",
 	},
 	{
 		label: "Start automation runs in projects and for public or private bots",
 		roles: ALL_BUT_VIEWERS,
-		note: "Projects they belong to and bots they can talk to",
+		note: "Projects they belong to and public or private bots they can talk to. Paused automations can also be started by hand",
 	},
 	{
 		label: "Answer a bot's approval in a chat",
@@ -102,7 +102,7 @@ export const roleAbilities: readonly RoleAbility[] = [
 	},
 	{
 		label:
-			"Rename and delete projects, manage their connectors, computers and automations, and delete their files",
+			"Change project settings, choose the lead bot, delete projects or their files, and manage project connectors, computers and automations",
 		roles: ADMINISTRATORS,
 	},
 	{ label: "See that personal bots exist, but not their chats", roles: ADMINISTRATORS },

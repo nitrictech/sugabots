@@ -337,17 +337,20 @@ trust with it.
 
 ## Updating
 
-Back up first, then pull the new image and restart:
+If your version is older than the projects release, stop every copy of
+Sugabots. Back up the database, keys and any file volume together. Then start one copy of the new image to
+apply the migration before starting the others. See
+[Upgrading to projects](/docs/upgrading-to-projects).
+
+For other updates, [back up first](#backups), then pull the new image and
+restart:
 
 ```sh
 docker compose pull
 docker compose up -d
 ```
 
-Sugabots applies any database migrations when it starts. If your server runs a
-version from before projects, read
-[Upgrading to projects](/docs/upgrading-to-projects) before you update: that
-upgrade changes more than most.
+Sugabots applies database migrations when it starts.
 
 If your installation uses `CREDENTIALS_ENCRYPTION_KEY`, the new image can still
 read it. To switch to `SECRETS_ENCRYPTION_KEY`, rename the variable in `.env`,
@@ -357,14 +360,15 @@ the variable in the service's settings and keep its value.
 
 To try changes before they're released, use `ghcr.io/nitrictech/sugabots:edge`
 instead of `:latest`. It's rebuilt each time the main branch changes, so it can
-break. Each build is also tagged `sha-` and its commit, such as
-`sha-a1b2c3d`, if you want to stay on one.
+break. Builds from `main` also get a tag such as `sha-a1b2c3d`, so you can
+stay on a specific build.
 
 ## Backups
 
-Back up two things: the database, and the `.env` file holding the keys. Keep
-them together: without its keys, a restored database can't read its saved API
-keys, and everyone has to sign in again.
+PostgreSQL stores Sugabots data by default. Back up the database and keep the
+matching `.env` file with it. Keep the encryption key to read saved credentials
+and the signing key to keep members signed in. If you keep files on a volume,
+back it up with the database. Back up work on provider computers separately.
 
 To write the database to a file:
 

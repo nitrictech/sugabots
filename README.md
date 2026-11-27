@@ -17,8 +17,9 @@ built-in tools and MCP connectors.
   <img alt="A Sugabots project where two members and two bots draft a pricing reply and check a discount together" src="packages/website/public/screenshots/project-chat-mac.webp" width="800">
 </p>
 
-Everything stays in your own database. Bots use the model providers you choose,
-whether that's Anthropic, OpenAI or a model server on your own network.
+Chats and settings are stored in your installation. Bots can send relevant
+chat content to the model providers you choose and to connectors they're
+allowed to use.
 
 ## Try it in one command
 
@@ -60,7 +61,7 @@ replies right there in the same chat, so you can see exactly who said what.
 ### A different model for every bot
 
 Connect Anthropic, OpenAI, any OpenAI- or Anthropic-compatible service, or a
-model running on your own machine. Give each bot the model that suits its job: a
+model running on your own machine. Give each bot the model that suits its work: a
 clever one for research, a cheap one for sorting the inbox, a local one for
 private notes.
 
@@ -72,8 +73,8 @@ away and which wait for someone to say yes.
 
 ### Automations
 
-Give a bot a job to do on a routine, or whenever a webhook or a GitHub event
-calls it. It posts what it did in its automation's feed, where the team can pick it up. Try telling a bot "check in with me every morning at 9".
+An automation lets a bot work on a routine or when a webhook or GitHub event
+starts it. The bot posts the result in the automation's feed for the team.
 
 ### Computers
 
@@ -92,8 +93,8 @@ Bots run code, use software and browse the web on a computer of their own, or th
   and public and private projects.
 - **Personal Assistant**: everyone gets an assistant of their own that nobody
   else can talk to, admins included.
-- **Bots set their own routines**: ask a bot to "check in with me every morning
-  at 9" and it sets up the automation.
+- **Ask a bot to set up an automation with a routine**, such as "check in
+  with me every morning at 9".
 - **Signed webhooks**: automations check calls from GitHub, Stripe, Slack and Linear,
   or any sender using HMAC, bearer, API key or basic auth.
 

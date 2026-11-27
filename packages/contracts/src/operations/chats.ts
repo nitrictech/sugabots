@@ -121,7 +121,7 @@ export const chatsContracts = {
 	}),
 	"chats.startProjectChat": OperationContract.make("chats.startProjectChat", {
 		description:
-			"Start a chat in a project, for everyone in it, with its first message, which its lead bot answers unless it mentions others. A bot's chat starts in its default project.",
+			"Start a project chat with a first message. Mention a project bot to ask it, or the lead bot answers by default. A message mentioning only members may get no reply. A bot's own chat starts in its default project.",
 		input: Schema.Struct({ projectId: uuidOrStringSchema, ...firstChatMessageSchema.fields }),
 		output: startedChatSchema,
 		errors: [...refusals, BotHasNoModel, MessageRetryKeyConflict],
@@ -247,7 +247,7 @@ export const chatsContracts = {
 	}),
 	"chats.removeFile": OperationContract.make("chats.removeFile", {
 		description:
-			"Remove one of your uploads to a chat before it is sent. A missing upload, another member's upload or one already sent is hidden.",
+			"Remove one of your unsent attachments from a chat. You can only remove an attachment you added before sending it.",
 		input: Schema.Struct({ chatId: uuidOrStringSchema, fileId: uuidOrStringSchema }),
 		output: Schema.Void,
 		errors: refusals,

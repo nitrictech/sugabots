@@ -18,8 +18,9 @@ connectors just as a project does.
 
 In its own chats, a bot uses its own connectors. In a project's chat, it uses
 the project's connectors, and those of its own that the project has turned
-on. When both have a connector with the same name, the project's is the one
-it uses. When a bot [asks another for help](/docs/chats#bots-asking-bots),
+on. If a project connector and a bot's own connector have the same
+tool-name prefix, the project's connector takes precedence.
+When a bot [asks another for help](/docs/chats#bots-asking-bots),
 the other bot answers in the same chat, with the project's connectors and
 those of its own the project has turned on.
 
@@ -29,18 +30,22 @@ A bot's own connectors start off in each project it's added to. The workspace's
 owner and admins can turn on each connector for that project. While it's on, the
 bot can send the connector what it reads in the project's chats.
 
-Open the project's **Connectors**. Under **Its bots' own**, each bot lists its
-connectors and whether each is on. The workspace's owner and admins and anyone who can
-see the bot's own connectors also see where each connector sends data.
-Turn one on to let the bot use it in the project's chats, or off to stop it.
-While it's on, the bot uses it for anyone who talks to it in the project's
-chats, including members who can't open the bot's own chats.
+To turn on a connector, the workspace's owner or an admin opens the project's
+**Connectors**, expands the bot under **Its bots' own**, checks where the
+connector sends data, and turns it on. Anyone who can talk to the bot in the
+project can then ask it to use the connector, subject to their role and the
+tool's access setting.
+
+This also applies to tools from the bot's own GitHub app. Repository sign-in
+on the project's computer still comes from the project's GitHub app. Opening the bot's connector settings
+still requires permission on the bot itself.
 
 Changing a connector's address or server turns it off in every project it was
 turned on for, even if the address later changes back. The workspace's owner
 and admins can check the new address and turn it on again for each project. If
 the address changed after you opened the page, check the new address before
-trying again.
+trying again. Someone who manages the bot's connectors may need to sign in
+to the connector again.
 
 ## Who manages them
 

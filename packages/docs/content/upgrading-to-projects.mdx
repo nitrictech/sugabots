@@ -9,31 +9,30 @@ update so far, so plan for it.
 
 ## Before you start
 
-- **Back up first.** See [Backups](/docs/deploy-with-docker#backups). The
-  upgrade can't be undone except by restoring a backup.
-- **Plan for downtime.** Stop every copy of the old version, then start one
-  copy of the new version to run the migration. Wait until it is ready, including
-  the file moves at startup, before starting other replicas. Time the SQL and
-  startup on a restored production snapshot to size the window. Leave room for
-  PostgreSQL's write-ahead log (WAL). An upgrade with about one million messages
-  generated about 3 GiB of WAL.
-- **Check whether the migration committed before restarting the old version.**
-  Restart it only after confirming that the SQL transaction rolled back. If the
-  upgrade fails after commit, continue with the new version or restore the
-  matching database and blob store backup.
-- **Know what migrates the database.** The Docker image migrates it by
-  default, as the new version first starts. Set `SUGABOTS_SKIP_MIGRATIONS` to
-  `true` (see [Configuration](/docs/configuration)) to have the image skip
-  that, and migrate it yourself. A server run from source never migrates its
-  database on its own: run `bun run db:migrate` before you start the new
-  version.
+1. Stop every copy of Sugabots and plan for downtime. Time the migration and
+   startup on a restored copy of your production database to size the window,
+   and leave disk room for PostgreSQL's write-ahead log: an upgrade with about
+   one million messages wrote about 3 GiB.
+2. Back up the database, keys and any file volume together. See
+   [Backups](/docs/deploy-with-docker#backups).
+3. Start one copy of the new version to apply the migration. The Docker image
+   migrates the database as it first starts. If you run from source, or set
+   `SUGABOTS_SKIP_MIGRATIONS=true` (see [Configuration](/docs/configuration)),
+   run `bun run db:migrate` before starting the server. Wait until that copy is
+   ready, including the file moves it makes at startup, then start the others.
+
+If the migration fails, its database changes roll back, and you can restart the
+old version once you've confirmed that. If something fails after the migration
+commits, carry on with the new version or restore the matching database and
+file backup.
 
 ## What changes
 
 - **Shared pods become private projects** with the same members. Each bot of
   a shared pod becomes a private bot whose members are exactly the pod's
-  members, and stays in the project. Its own chats, files, connectors and
-  automations stay with the bot. A creator who was outside the pod at the time
+  members, and stays in the project. Open the new project to find the pod's
+  shared chats and computer. To find a bot's own chats, files, connectors
+  and automations, open that bot. A creator who was outside the pod at the time
   of the upgrade stays outside the bot and cannot manage it. The workspace's
   owner or an admin can add them back.
 - **Each project has a lead bot that answers its chats.** In a pod's chats,
@@ -41,8 +40,10 @@ update so far, so plan for it.
   message that mentions no bot and replies to none goes to the project's lead
   bot. The first bot created in a shared pod becomes its project's lead.
   Projects from pods with no bots share a new lead bot per workspace. It has
-  no model, so it answers only after an owner or admin gives it one. They can
-  also choose a different lead in each project's settings.
+  no model. Before sending a message that needs a bot reply, ask the workspace's
+  owner or an admin to give the lead a model or choose a different lead in the
+  project's settings. Sugabots won't save a message that requires a reply from
+  a bot with no model.
 - **Pod members can run its bots' automations by hand.** A shared pod's
   members become members of its bots, and anyone who reaches a bot, but a
   viewer, may start its automations by hand, paused ones included. Before,
@@ -100,7 +101,7 @@ update so far, so plan for it.
   computer goes to its oldest bot other than a Personal Assistant, or to the
   Personal Assistant if it is the only bot. A personal pod with no bots gives
   its files to a new Personal Assistant for its owner, with no model until they
-  choose one. Only they can see those files. Files kept on disk move to their
-  new folders when the server starts.
+  choose one. Only they can see those files. The new server moves files kept
+  on disk to their new folders before serving them.
 - **Old docs links.** Links to renamed docs pages, such as `/docs/pods`,
   redirect to the page that replaced them.

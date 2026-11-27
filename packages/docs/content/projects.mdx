@@ -56,8 +56,8 @@ private bot you can talk to can be added to a private project. Personal bots
 can't be added. A bot that's made private leaves every public project it was in.
 
 Everyone in the project can talk to its bots in the project's chats, a private
-bot included, and the bots can ask each other for help there. A private bot's
-own chats stay with its members.
+bot included, and the bots can ask each other for help there. A private bot can
+also lead a private project. Its own chats and files stay with its members.
 
 ## Lead bot
 
@@ -84,8 +84,9 @@ message, which is answered like any other (see
 every chat, with all the project's members and bots in it.
 
 The project's own sidebar lists its chats, the most recently active first,
-and can search them or show only some. Opening the project opens its newest
-chat, or, while it has none, starts one.
+and can search them or show only some. On a phone, opening the project
+shows its chat list. On a wider screen it opens the newest chat or, if there
+are none, offers to start one.
 
 Anyone in the project except viewers can mark a chat resolved once its work is finished, which
 moves it to the Resolved list at the foot, where it can be reopened. The
@@ -111,8 +112,9 @@ which its owner and admins configure.
 
 Everyone in the project can see how its computer stands and watch a bot's
 desktop on it, and anyone but viewers can click and type there. The owner and
-admins, who can change the project, choose which internet addresses its
-computer may reach beyond the workspace's, reset or upgrade it, and approve requests to add to the project's allowed hosts.
+admins choose which internet addresses its computer may reach beyond the
+workspace's, reset or upgrade it, and approve requests to add to the
+project's allowed hosts.
 
 ## Connectors
 
@@ -120,8 +122,10 @@ A project has its own [connectors](/docs/connectors): the services and APIs its
 bots work with, and at most one GitHub app. A bot working in the project's
 chats uses the project's connectors, and those of its own that the
 workspace's owner and admins have [turned on](/docs/connectors#a-bots-own-connectors-in-a-project)
-there; where both have one with the same name, the project's is used. The owner and admins add and manage
-them, and everyone in the project can see which ones it has.
+there. If a project connector and a bot's own connector have the same
+tool-name prefix, the project's connector takes precedence.
+The owner and admins add and manage project connectors, and everyone in the
+project can see which ones it has.
 
 ## Automations
 

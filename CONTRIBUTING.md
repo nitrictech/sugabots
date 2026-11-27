@@ -69,8 +69,8 @@ bun run db:migrate
 ```
 
 PostgreSQL stores its data in the `sugabots_postgres_data` Docker volume, so
-restarting or recreating the container does not remove your data. If you want to
-reset your data, just delete the volume.
+restarting or recreating the container keeps your data. To start fresh, see
+[Reset a database](#reset-a-database).
 
 ### 5. Start Sugabots
 
@@ -129,7 +129,16 @@ docker compose stop
 
 ### Update an installation
 
-Stop `bun run dev`, then run:
+Stop Sugabots and back up the database, keys and any file volume together
+before updating. Keep the encryption key to read saved credentials and the
+signing key to keep sessions. Back up work on provider computers separately.
+
+If your version is older than the projects release, stop every copy of
+Sugabots before taking the backup. Run the migration once before starting any
+copies of the new server. See
+[Upgrading to projects](https://sugabots.ai/docs/upgrading-to-projects).
+
+For a local installation, run:
 
 ```sh
 git pull --ff-only
@@ -139,25 +148,34 @@ bun run db:migrate
 bun run dev
 ```
 
-Back up your PostgreSQL volume and `.env` before updating an installation that
-contains data you care about.
-
 If your `.env` uses `CREDENTIALS_ENCRYPTION_KEY`, rename it to
 `SECRETS_ENCRYPTION_KEY` and keep its value so the server can still read saved
 secrets. The old name still works during the upgrade.
 
-### Reset everything
+### Reset a database
 
-The following removes the database volume and all Sugabots data:
+Stop Sugabots or the tests before resetting the database they use. Only reset the
+database named in the settings for the environment you want to clear.
+`DATABASE_URL` names the development database. `TEST_DATABASE_URL` names the
+test template database. When it is unset, the template uses the
+`DATABASE_URL` database name with `_test` appended. Test workers use their own
+numbered copies.
+
+For example, with the local Compose defaults, reset the development database
+named `sugabots` and apply the migrations again:
 
 ```sh
-docker compose down -v
-docker compose up -d
+docker compose exec -T postgres dropdb -U sugabots sugabots
+docker compose exec -T postgres createdb -U sugabots sugabots
 bun run db:migrate
 ```
 
-Do not run `docker compose down -v` unless you intend to delete every account,
-workspace, chat, and saved credential.
+To reset the default test template only, drop `sugabots_test` and let the
+next test run recreate it:
+
+```sh
+docker compose exec -T postgres dropdb -U sugabots sugabots_test
+```
 
 ### Build the Docker image
 

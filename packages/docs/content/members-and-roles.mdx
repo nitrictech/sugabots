@@ -4,8 +4,7 @@ description: Who can join a workspace, and what its owner, admins, editors and v
 ---
 
 Everyone in a workspace has a role: owner, admin, editor or viewer. The role decides
-what they can change. Which bots are public and which projects they're in decide
-what they can see.
+what they can change. A bot's visibility and their project memberships decide what they can see.
 
 ## Who gets in
 
@@ -44,10 +43,19 @@ There are four. Pick one to see what it can do.
 Everyone can talk to the workspace's public bots and find its public projects.
 Private bots and private projects are for their members. The workspace's owner
 and admins are members of every private bot and every project members made.
-They can see that personal bots exist. Only the creator can talk to a personal
-bot and read its chats. Everyone, including viewers, can make Personal
-Assistants and manage, delete and start automation runs for their own personal
-bots.
+Members can talk to the private bots they belong to. Members with any role
+except viewer can add or remove members of those bots.
+
+In a project they belong to, editors can add or remove bots and members,
+start automation runs and use the desktop. The workspace's owner and admins
+can do all of that and are the only ones who can change project settings,
+choose its lead bot or turn on a bot's own connector there.
+
+Everyone can make a Personal Assistant, use its desktop and manage, delete
+and start automation runs for their own personal bots. Only the creator can
+talk to a personal bot and read its chats. The workspace's owner and admins
+can see that it exists, switch off its connectors and automations, or delete
+it.
 
 Each workspace has exactly one owner: whoever created it. The owner can do
 everything an admin can, and is the only one who can make someone an admin, stop

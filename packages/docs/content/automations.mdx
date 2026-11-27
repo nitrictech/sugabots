@@ -26,8 +26,8 @@ The owner, admins and editors can choose **Start a run** there.
 A [personal bot](/docs/bots#public-private-and-personal)'s automations, a
 [Personal Assistant](/docs/bots#personal-assistants)'s included, are its
 creator's to manage and run, whatever their role. Only the creator can read
-the runs and answer their ordinary tool approvals. The owner and admins can
-pause these automations. A run on a routine, or one started by
+the runs and answer their ordinary tool approvals. The workspace's owner and
+admins can see automation names and whether they're on, and can pause them. A run on a routine, or one started by
 hand, works with the creator's permissions, as the bot does, and asks before it
 changes anything. A run a webhook or GitHub event started works only in the
 bot's own chats and files and with its own connectors, and asks before every
@@ -35,8 +35,8 @@ tool call.
 
 ## Who runs it
 
-Each run is done by the project's lead bot when it starts. Choose another lead,
-and the next run is that bot's. The bot that starts a run keeps working on it.
+Each run uses the project's lead bot when the run is queued. If you change the
+lead, the new lead handles runs queued after the change.
 
 ## Make an automation
 
@@ -80,8 +80,9 @@ of your choosing, or at several. Have a go:
 
 <RoutineBuilder />
 
-A routine uses the timezone of whoever created the automation, or the
-workspace's when a bot set it up. If Sugabots was down when a run was due, it
+A routine you add in settings uses your browser's time zone and keeps it.
+A routine a bot sets up in chat uses the workspace's time zone.
+If Sugabots was down when a run was due, it
 does one catch-up run rather than all the missed ones, and an automation never
 runs twice at the same time.
 
@@ -91,7 +92,7 @@ Whoever manages a project's automations can also ask a bot in one of its
 chats: "check in with me every morning at 9" or "move the inbox sweep to 10".
 In its own chats, that's the bot's own automations; in a project's chat, the
 project's, which the project's lead bot runs. It sets up, changes or pauses
-their routines, in the workspace's timezone, and links to the automation in its
+their routines, in the workspace's time zone, and links to the automation in its
 reply. Once an automation has more than one routine or trigger, its routine is
 changed in settings. Anyone in the project can ask what automations it has.
 Webhooks, and deleting an automation, stay in **Automations**.
