@@ -13,7 +13,6 @@ import {
 	AdministratorInEveryProject,
 	type BotNotPublic,
 	EmptyProjectUpdate,
-	type InvalidProjectDetails,
 	type LeadsProjects,
 	NotInProject,
 	NotInWorkspace,
@@ -48,7 +47,7 @@ import type { CanCreateProjects, CanReadWorkspace } from "../../proofs/workspace
 import { reachChanged } from "../../streams/reach-changes.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { projectBots } from "../bots/bot-reads.ts";
-import { newProjectDetails, projectSeenAs } from "./project.ts";
+import { newProjectSlug, projectSeenAs } from "./project.ts";
 import { membersReachingProjectNamed, projectMembers, projectsListedTo } from "./project-reads.ts";
 import { ProjectStore } from "./project-store.ts";
 
@@ -81,12 +80,7 @@ export interface Interface {
 		approved: Approved<P, X, [W, B], "projects.create">,
 	) => Effect.Effect<
 		Project,
-		| InvalidProjectDetails
-		| UnusableProjectName
-		| ProjectSlugTaken
-		| BotNotPublic
-		| PersonalBotInProject
-		| ToolWriteRefusal,
+		UnusableProjectName | ProjectSlugTaken | BotNotPublic | PersonalBotInProject | ToolWriteRefusal,
 		Transaction
 	>;
 	/**
@@ -209,11 +203,11 @@ export const make = Effect.gen(function* () {
 					yield* Transaction;
 					yield* holdTurnOf(approved.principal.value);
 					const workspaceId = lock.workspace.value;
-					const details = yield* newProjectDetails(input);
+					const slug = yield* newProjectSlug(input);
 					// Its creator, the workspace's owner and admins and its lead are in it from the start.
 					const row = yield* store.create(workspaceId, {
 						...input,
-						...details,
+						slug,
 						creatorId: canCreate.actor.memberId,
 						leadBotId: lead.bot.value,
 					});

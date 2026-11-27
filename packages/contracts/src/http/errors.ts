@@ -230,7 +230,6 @@ export const failureForError = {
 	GitHubAppNotInstalled: BadRequest,
 	GitHubRequestFailed: BadRequest,
 	InvalidCursor: BadRequest,
-	InvalidProjectDetails: BadRequest,
 	InvalidRoutineSchedule: BadRequest,
 	ModelListTooLarge: BadRequest,
 	ModelListUnreadable: BadRequest,

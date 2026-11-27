@@ -1,13 +1,12 @@
 import {
 	DEFAULT_PROJECT_COLOR,
-	newProjectSchema,
 	type Project,
 	type ProjectColor,
 	type ProjectPermissions,
 	projectSlugSchema,
 	slugify,
 } from "@sugabots/contracts";
-import { InvalidProjectDetails, UnusableProjectName } from "@sugabots/contracts/errors/projects";
+import { UnusableProjectName } from "@sugabots/contracts/errors/projects";
 import { Effect, Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
 import type { MemberPlace, ProjectFacts } from "../../proofs/facts.ts";
@@ -58,31 +57,15 @@ export function projectColorOf(stored: ProjectColor | null): ProjectColor {
 	return stored ?? DEFAULT_PROJECT_COLOR;
 }
 
-/** A project's name and description, as every caller must give them. */
-const projectDetailsSchema = Schema.Struct({
-	name: newProjectSchema.fields.name,
-	description: newProjectSchema.fields.description,
-});
-
 /**
- * A new project's name and description checked, and its address: `slug`, or
- * one derived from its name when that is left out. Checked here, not only by
- * the HTTP API, for callers that don't come through it, and before anything is
- * written, so a name such as "!!!" is refused for the name rather than as a
- * taken address.
+ * A new project's address: `slug`, or one derived from its name when that is
+ * left out, checked before anything is written, so a name such as "!!!" is
+ * refused for the name rather than as a taken address.
  */
-export const newProjectDetails = (input: {
+export const newProjectSlug = (input: {
 	readonly name: string;
-	readonly description?: string | null | undefined;
 	readonly slug?: string | undefined;
 }) =>
-	Effect.gen(function* () {
-		const details = yield* Schema.decodeEffect(projectDetailsSchema)({
-			name: input.name,
-			description: input.description,
-		}).pipe(Effect.mapError(() => new InvalidProjectDetails()));
-		const slug = yield* Schema.decodeEffect(projectSlugSchema)(
-			input.slug ?? slugify(details.name),
-		).pipe(Effect.mapError(() => new UnusableProjectName()));
-		return { ...details, slug };
-	});
+	Schema.decodeEffect(projectSlugSchema)(input.slug ?? slugify(input.name)).pipe(
+		Effect.mapError(() => new UnusableProjectName()),
+	);

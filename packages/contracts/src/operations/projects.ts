@@ -10,7 +10,6 @@ import {
 	AdministratorInEveryProject,
 	BotNotPublic,
 	EmptyProjectUpdate,
-	InvalidProjectDetails,
 	LeadsProjects,
 	NotInProject,
 	NotInWorkspace,
@@ -110,7 +109,6 @@ export const projectsContracts = {
 		output: projectSchema,
 		errors: [
 			...workspaceRefusals,
-			InvalidProjectDetails,
 			UnusableProjectName,
 			ProjectSlugTaken,
 			BotNotPublic,

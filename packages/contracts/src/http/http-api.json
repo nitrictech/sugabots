@@ -2047,7 +2047,6 @@
 				"ApprovalNeeded": 403,
 				"ApprovalRefused": 403,
 				"BotNotPublic": 400,
-				"InvalidProjectDetails": 400,
 				"PersonalBotInProject": 400,
 				"ProjectSlugTaken": 409,
 				"ResourceHidden": 404,

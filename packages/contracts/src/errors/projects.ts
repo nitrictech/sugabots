@@ -5,7 +5,6 @@
 
 import { DisplayName, type DomainError, userText } from "@sugabots/errors";
 import { ErrorReporter, Schema } from "effect";
-import { PROJECT_DESCRIPTION_MAX_LENGTH, PROJECT_NAME_MAX_LENGTH } from "../projects.ts";
 
 /** No address can be derived from the name a project was given. */
 export class UnusableProjectName
@@ -19,21 +18,6 @@ export class UnusableProjectName
 	}
 	get userMessage() {
 		return userText`That name can't be a project's address. Choose another.`;
-	}
-}
-
-/** A project's name is empty or too long, or its description too long. */
-export class InvalidProjectDetails
-	extends Schema.TaggedError<InvalidProjectDetails>()("InvalidProjectDetails", {})
-	implements DomainError
-{
-	readonly isRetryable = false;
-	override readonly [ErrorReporter.severity] = "Info" as const;
-	override get message() {
-		return "The project's name or description is out of bounds";
-	}
-	get userMessage() {
-		return userText`A project's name must be 1 to ${PROJECT_NAME_MAX_LENGTH} characters, and its description at most ${PROJECT_DESCRIPTION_MAX_LENGTH}.`;
 	}
 }
 
