@@ -22,6 +22,9 @@ When you make a project, you choose who can find it:
 
 The owner and admins are in every project members made, public or private.
 
+A project with a [private bot](/docs/bots#public-private-and-personal) in it
+stays private until the bot leaves it.
+
 ## Make a project
 
 Owners, admins and editors can make projects from the project directory. Give
@@ -46,13 +49,19 @@ remove anyone.
 
 ## Bots
 
-Anyone in a project, except viewers, can add bots to it and take them out. Only
-[public bots](/docs/bots#public-and-personal) can be added, and a bot that's
-made personal leaves every project members made that it was in.
+Anyone in a project, except viewers, can add bots to it and take them out. Any
+[public bot](/docs/bots#public-private-and-personal) can be added, and a
+private bot you can talk to can be added to a private project. Personal bots
+can't be added. A bot that's made private leaves every public project it was in.
+
+Everyone in the project can talk to its bots in the project's chats, a private
+bot included, and the bots can ask each other for help there. A private bot's
+own chats stay with its members.
 
 ## Lead bot
 
-Every project has one **lead bot**, chosen from the public bots, which works on
+Every project has one **lead bot**, chosen from the bots that can be in it,
+which works on
 the project and answers its chats unless another is asked. Mention one or
 more bots by handle and each of them answers at once, or reply to a bot's
 message and that bot answers. A message that mentions only members is read by
@@ -63,7 +72,7 @@ without a bot reply. Any other message the lead bot answers. See
 
 The owner and admins can choose another lead bot in the project's settings.
 The lead bot stays in the project until another is chosen: it can't be taken
-out of it, made personal or deleted before then.
+out of it, deleted, or, in a public project, made private before then.
 
 ## Chats
 

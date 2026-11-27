@@ -20,8 +20,9 @@ Owners, admins and editors can make bots. You choose:
   then `@personal-assistant-2` and so on, as everyone else's are, and no other
   bot may take those. A Personal Assistant you make after deleting one may take
   its handle, so an old link to the deleted one opens the new one.
-- **Public** or **personal**: who can talk to it. You choose once: it can't be
-  changed afterwards. See [below](#public-and-personal).
+- **Public**, **private** or **personal**: who can talk to it. A public bot
+  can be made private later, and a private bot public, but whether a bot is
+  personal can't be changed afterwards. See [below](#public-private-and-personal).
 
 A new bot starts on the workspace's [default model](/docs/models#default-model).
 If there's none, connect one in **Settings → Models** first. Bots can't think
@@ -32,11 +33,18 @@ you about the work it's for, then asks you to approve the instructions it wrote
 for itself. You can read and change them afterwards in its settings. A bot
 changes its own instructions only in its own chats, and only once you approve.
 
-## Public and personal
+## Public, private and personal
 
 - A **public** bot is for everyone in the workspace. Anyone can find it, talk to
-  it, and see its chats and files. Only public bots can be added to
-  [projects](/docs/projects).
+  it, and see its chats and files. It can be added to any
+  [project](/docs/projects).
+- A **private** bot is for its members: its creator, the owner and admins, and
+  whoever its members invite. Only they can find it, talk to it, and see its
+  chats and files. Any member of the bot except viewers can invite members or
+  remove them in its settings, but the owner and admins stay members of every
+  private bot. It can be added to [private projects](/docs/projects#public-and-private)
+  only, where everyone in the project can talk to it in the project's chats,
+  but not in the bot's own chats unless they're its members too.
 - A **personal** bot is for its creator alone, and works with their permissions:
   it can reach whatever they can, in every project they're in, and asks them
   before it changes anything. Nobody else can talk to it or see its chats, and
@@ -44,9 +52,14 @@ changes its own instructions only in its own chats, and only once you approve.
   exists, but not its chats, and can only delete it or switch off its
   automations and connectors.
 
+Its creator, the owner and admins can make a public bot private, or a private
+bot public, in its settings. A bot made private leaves every public project
+it's in, so if it leads one, choose another lead bot there first. A bot made
+public is open to everyone in the workspace, with its chats and files.
+
 Whether a bot is personal is chosen when it's made, and never changes: a public
-bot can't be made personal, and a personal bot can't be made public, since its
-chats hold what it found with your permissions.
+or private bot can't be made personal, and a personal bot can't be made public
+or private, since its chats hold what it found with your permissions.
 
 ## What a bot has
 
@@ -68,12 +81,13 @@ Its creator, the owner and admins can change a bot's settings:
 | Model | What it thinks with. Each bot can use a different one |
 | Instructions | How it should work. It follows these in every chat and project |
 | Tools | Which built-in tools it may use |
+| Computer use | Whether it may run commands and browse on a computer. It's off until its creator or an admin turns it on, and works only while an admin has a computer provider enabled for the workspace |
 
 <Tip title="Writing instructions">
 
 Write them like a note to a new teammate: what it's for, how to sound, and what
-to never do. You have up to 20,000 characters. Everyone who can see a public bot
-can read its instructions, so describe the job, not the member asking.
+to never do. You have up to 20,000 characters. Everyone who can see a bot can
+read its instructions, so describe the job, not the member asking.
 
 </Tip>
 
@@ -97,7 +111,7 @@ Assistants, which always sit at the top.
 
 ## Personal Assistants
 
-A **Personal Assistant** is a [personal bot](#public-and-personal) that knows
+A **Personal Assistant** is a [personal bot](#public-private-and-personal) that knows
 the workspace. Everyone is given one when they join, and anyone can make more
 under **Bots**, say one for each part of their work. Your Personal Assistants
 are always first in your sidebar, oldest first, and the workspace opens on the
