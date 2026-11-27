@@ -247,7 +247,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		it.each([
 			["write_file", { path: "notes.txt", content: "Notes" }],
 			["copy_file_to_computer", { file: "example-file" }],
-			["browser_navigate", { url: "https://example.com/" }],
 		] as const)(
 			"asks before %s in a GitHub run with allowed hosts only",
 			async (toolName, input) => {
@@ -266,6 +265,64 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(await callsOf(turnId)).toMatchObject([{ approvalStatus: "denied" }]);
 			},
 		);
+
+		it("asks again before clicking in a different tab with the same address", async () => {
+			const projectId = await runOnPostgres(defaultProjectOf(botId));
+			const provider = await enableComputers();
+			const providerComputerId = Computers.ComputerId("desktop");
+			await onDatabase((db) =>
+				db.insert(computer).values({
+					workspaceId,
+					projectId,
+					computerProviderId: provider.id,
+					providerComputerId,
+					image: "sugabots-computer:dev",
+				}),
+			);
+			const runChat = await queueOutsideRun(projectId, "github");
+			const browser = standInBrowser();
+			const providerFetch = computerService(
+				providerComputerId,
+				"allowed-hosts-only",
+				browser.fetch,
+			);
+			const input = { target: "Submit order" };
+			const workflow = await loop.runWorkflow(runChat, {
+				model: calling("browser_click", input).model,
+				egress: unimplemented(Egress.Service, {
+					providers: { for: () => providerFetch },
+					validateProviderUrl: () => Effect.void,
+				}),
+				computerSignIn: ComputerSignIn.none,
+			});
+
+			await workflow.suspended();
+			const { parked } = await parkedCallOf(workflow.executionId);
+			const approvals = () => chatsAs(adminId).approvals(workspaceId);
+			expect((await approvals()).waiting).toMatchObject([
+				{
+					call: {
+						id: parked.id,
+						tool: "browser_click",
+						input,
+						approval: { browserUrl: browser.url },
+					},
+				},
+			]);
+
+			browser.selectTab("tab-2");
+			await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+			await workflow.suspended();
+			const [fresh] = (await approvals()).waiting;
+			expect(fresh?.call.approval?.id).toBeDefined();
+			expect(fresh?.call.approval?.id).not.toBe(parked.approvalId);
+			expect(browser.clicked).toEqual([]);
+
+			if (!fresh) throw new Error("No fresh approval");
+			await chatsAs(adminId).decide({ toolCallId: fresh.call.id, decision: "allow_once" });
+			await workflow.completed();
+			expect(browser.clicked).toEqual(["tab-2"]);
+		});
 
 		describe("asking for a host", () => {
 			beforeEach(() => enableComputers());
@@ -611,8 +668,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	},
 );
 
-function computerService(id: Computers.ComputerId, mode: "open" | "allowed-hosts-only") {
-	return vi.fn(async (request: Parameters<typeof fetch>[0]) => {
+function computerService(
+	id: Computers.ComputerId,
+	mode: "open" | "allowed-hosts-only",
+	browser?: (request: Request) => Promise<Response>,
+) {
+	return vi.fn(async (...[request, init]: Parameters<typeof fetch>) => {
 		const url = new URL(request instanceof Request ? request.url : request.toString());
 		if (url.origin === "https://computers.example.com") {
 			if (url.pathname.includes(`/${id}/endpoints/`)) {
@@ -637,10 +698,18 @@ function computerService(id: Computers.ComputerId, mode: "open" | "allowed-hosts
 					});
 				case "/credential-vault":
 					return Response.json({ code: "NOT_FOUND", message: "Missing" }, { status: 404 });
+				case "/mcp":
+					if (browser) return browser(new Request(request, init));
+					break;
 				case "/command":
 					return new Response(
 						[
-							'data: {"type":"stdout","text":"/workspace"}',
+							`data: ${JSON.stringify({
+								type: "stdout",
+								text: browser
+									? "viewer=5900 watch=5901 browser=8930 password=control watch-password=watch"
+									: "/workspace",
+							})}`,
 							'data: {"type":"execution_complete","execution_time":1}',
 							"",
 						].join("\n\n"),
@@ -650,4 +719,47 @@ function computerService(id: Computers.ComputerId, mode: "open" | "allowed-hosts
 		}
 		throw new Error(`Unexpected computer service request to ${url}`);
 	});
+}
+
+function standInBrowser() {
+	let tab = "tab-1";
+	const url = "https://shop.example.com/checkout";
+	const clicked: string[] = [];
+	return {
+		url,
+		clicked,
+		selectTab: (selected: string) => {
+			tab = selected;
+		},
+		fetch: async (request: Request) => {
+			if (request.method !== "POST") return new Response(null, { status: 405 });
+			const { id, method, params } = (await request.json()) as {
+				id?: number;
+				method: string;
+				params?: { protocolVersion?: string; name?: string };
+			};
+			const result = (value: unknown) => Response.json({ jsonrpc: "2.0", id, result: value });
+			if (method === "initialize") {
+				return result({
+					protocolVersion: params?.protocolVersion,
+					capabilities: { tools: {} },
+					serverInfo: { name: "browser-test", version: "1" },
+				});
+			}
+			if (method === "notifications/initialized") return new Response(null, { status: 202 });
+			switch (params?.name) {
+				case "browser_run_code_unsafe": {
+					const target = { browserTab: tab, browserDocument: tab, browserUrl: url };
+					return result({
+						content: [{ type: "text", text: `### Result\n${JSON.stringify(target)}` }],
+					});
+				}
+				case "browser_click":
+					clicked.push(tab);
+					return result({ content: [{ type: "text", text: "Clicked" }] });
+				default:
+					throw new Error(`Unexpected browser request ${method}`);
+			}
+		},
+	};
 }

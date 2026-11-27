@@ -292,6 +292,7 @@ export const toolCallPartSchema = Schema.Struct({
 			approvers: toolApproversSchema,
 			decidedByName: Schema.NullOr(Schema.String),
 			decidedAt: Schema.NullOr(isoTimestampSchema),
+			browserUrl: Schema.optional(Schema.String),
 		}),
 	),
 	error: Schema.NullOr(Schema.String),

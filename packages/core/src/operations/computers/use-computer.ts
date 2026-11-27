@@ -1,4 +1,4 @@
-import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { type ApprovalRefused, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { Effect } from "effect";
@@ -14,7 +14,7 @@ import {
 } from "../../proofs/approved.ts";
 import { proveCanUseChatComputer } from "../../proofs/can-use-computer.ts";
 import { named } from "../../proofs/proof.ts";
-import { type Call, defineOperation } from "../operation.ts";
+import { type Call, defineOperation, type ResolvedTargets } from "../operation.ts";
 
 /**
  * A bot's work on its computer: the computer of the project its turn's chat
@@ -32,6 +32,9 @@ const usingComputer = <N extends ComputerOperation, A, E, R>(
 		step: TurnComputers.CheckedStep<P, C>,
 		approved: Approved<P, X, [C], N>,
 	) => Effect.Effect<A, E, R>,
+	resolveTarget?: <P, C>(
+		step: TurnComputers.CheckedStep<P, C>,
+	) => Effect.Effect<ResolvedTargets, ApprovalRefused>,
 ) =>
 	Effect.gen(function* () {
 		if (principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun") {
@@ -47,14 +50,20 @@ const usingComputer = <N extends ComputerOperation, A, E, R>(
 					const canUse = yield* proveCanUseChatComputer(principal, chat);
 					const computers = yield* TurnComputers.Service;
 					const step = yield* computers.checkStep(canUse);
-					const approved = yield* proveComputerUseApproved(
-						principal,
-						call,
-						rule,
-						approvedInput,
-						canUse,
-					);
-					return yield* work(step, approved);
+					const run = Effect.gen(function* () {
+						const approved = yield* proveComputerUseApproved(
+							principal,
+							call,
+							rule,
+							approvedInput,
+							canUse,
+							resolveTarget?.(step),
+						);
+						return yield* work(step, approved);
+					});
+					return yield* resolveTarget && step.browser
+						? step.browser.calls.withPermits(1)(run)
+						: run;
 				}),
 		);
 	});
@@ -132,6 +141,7 @@ export const useBrowser = defineOperation(
 				approvalRule("computers.useBrowser"),
 				input,
 				(step, approved) => computers.useBrowser(step, approved),
+				(step) => computers.browserTarget(step, input),
 			),
 		),
 );

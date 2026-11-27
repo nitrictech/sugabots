@@ -41,6 +41,7 @@ export function toToolCallPart(
 	row: ToolCallRow,
 	decidedByName: string | null = null,
 ): ToolCallPart {
+	const browserUrl = row.approvalResolvedTargets?.browserUrl;
 	return {
 		type: "tool_call",
 		id: row.id,
@@ -56,6 +57,7 @@ export function toToolCallPart(
 						approvers: approversOf(row.tool),
 						decidedByName,
 						decidedAt: row.decidedAt?.toISOString() ?? null,
+						...(browserUrl && { browserUrl }),
 					}
 				: null,
 		error: row.error,

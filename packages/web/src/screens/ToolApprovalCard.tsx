@@ -101,6 +101,7 @@ export function ToolApprovalCard({
 			<div className="flex min-w-0 max-w-md flex-1 flex-col gap-2.5 rounded-bubble bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
 				<StepHeading step={step} />
 				<div className="min-w-0 md:ml-8">
+					<ApprovalDestination browserUrl={call.approval?.browserUrl} />
 					<FoldedRequest input={call.input} />
 				</div>
 				<div
@@ -135,6 +136,7 @@ export function ToolApprovalCard({
 			</div>
 			<ReviewSheet
 				input={call.input}
+				browserUrl={call.approval?.browserUrl}
 				step={step}
 				open={reviewing}
 				onOpenChange={setReviewing}
@@ -286,6 +288,13 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 	);
 }
 
+export function ApprovalDestination({ browserUrl }: { browserUrl?: string | undefined }) {
+	if (!browserUrl) return null;
+	return (
+		<p className="m-0 pb-1.5 text-muted-foreground text-xs wrap-anywhere">Page {browserUrl}</p>
+	);
+}
+
 export function ExactRequest({ input }: { input: ToolCallPart["input"] }) {
 	return (
 		<pre className="m-0 whitespace-pre-wrap wrap-anywhere rounded-md bg-list px-2.5 py-2 font-mono text-xs">
@@ -306,6 +315,7 @@ const FOLDED_CLASSES_ON_PHONE =
  */
 function ReviewSheet({
 	input,
+	browserUrl,
 	step,
 	open,
 	onOpenChange,
@@ -313,6 +323,7 @@ function ReviewSheet({
 	children,
 }: {
 	input: ToolCallPart["input"];
+	browserUrl: string | undefined;
 	step: Step;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -344,6 +355,7 @@ function ReviewSheet({
 				<ScrollArea className="min-h-0 flex-1">
 					<div className="flex flex-col gap-4 px-4 py-4">
 						<ReviewHeading step={step} bot={bot} headingId={headingId} />
+						<ApprovalDestination browserUrl={browserUrl} />
 						<ExactRequest input={input} />
 					</div>
 				</ScrollArea>

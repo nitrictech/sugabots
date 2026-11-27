@@ -16,7 +16,7 @@ import { ChatLink } from "@/shell/ChatLink.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
 import { EmptyState } from "@/ui/empty-state.tsx";
 import { PageBackLink } from "@/ui/settings-page.tsx";
-import { Answer, ExactRequest } from "./ToolApprovalCard.tsx";
+import { Answer, ApprovalDestination, ExactRequest } from "./ToolApprovalCard.tsx";
 import { awaitsApproval } from "./tool-activity.ts";
 
 /** A request as the member's approvals list it: waiting on their decision, or answered. */
@@ -100,6 +100,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 					</div>
 					<p className="m-0 text-subtle-foreground text-xs max-md:hidden">Asked {askedIn}</p>
 				</header>
+				<ApprovalDestination browserUrl={call.approval?.browserUrl} />
 				<ExactRequest input={call.input} />
 				<div className="flex flex-wrap items-center gap-3 pt-1 max-md:flex-col max-md:items-stretch max-md:gap-4">
 					{found.kind === "answered" ? (

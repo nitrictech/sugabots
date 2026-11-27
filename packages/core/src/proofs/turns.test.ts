@@ -964,6 +964,74 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ApprovalNeeded");
 		});
 
+		it("needs a fresh browser approval after a tab change or a reload at the same URL", async () => {
+			const { a } = world;
+			const computerBot = await seedBot(a.workspace, { createdById: a.ed, usesComputer: true });
+			const project = await seedProject(a.workspace, {
+				leadBotId: computerBot.id,
+				members: [a.ed],
+			});
+			await seedComputer(a.workspace, project);
+			const edsBot = await as.botFor(
+				a.ed,
+				computerBot.id,
+				await seedProjectChat(a.workspace, project, a.ed),
+			);
+			const rule = approvalRule("computers.useBrowser");
+			const input = { tool: "browser_click", arguments: { target: "Submit" } };
+			let browserTab = "tab-1";
+			let browserDocument = "document-1";
+			const approvedFor = (call: Call) =>
+				named(edsBot, edsBot.chat, call, input, (principal, chat, call, approvedInput) =>
+					Effect.gen(function* () {
+						const canUse = yield* proveCanUseChatComputer(principal, chat);
+						yield* proveComputerUseApproved(
+							principal,
+							call,
+							rule,
+							approvedInput,
+							canUse,
+							Effect.sync(() => ({
+								computer: canUse.computer,
+								machine: canUse.machine,
+								provider: canUse.provider,
+								browserTab,
+								browserDocument,
+								browserUrl: "https://example.com/checkout",
+							})),
+						);
+					}),
+				);
+			const checked = await runOnPostgres(
+				approvedFor({ kind: "approvalCheck" }).pipe(
+					Effect.flip,
+					Effect.map((reached) =>
+						reached instanceof ApprovalCheckReached ? reached.details : undefined,
+					),
+				),
+			);
+			const allowed = await seedApprovalCall(edsBot, {
+				tool: input.tool,
+				status: "allowed",
+				decidedBy: a.ed,
+				input: input.arguments,
+			});
+			await onDatabase((db) =>
+				db
+					.update(toolCall)
+					.set({ approvalResolvedTargets: checked?.resolvedTargets ?? null })
+					.where(eq(toolCall.id, allowed)),
+			);
+			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ok");
+
+			browserTab = "tab-2";
+			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ApprovalNeeded");
+
+			browserTab = "tab-1";
+			browserDocument = "document-2";
+			expect(await outcome(approvedFor(toolCallOf(allowed)))).toBe("ApprovalNeeded");
+		});
+
 		it("requires a fresh approval after a provider change before a computer is made", async () => {
 			const { a } = world;
 			const computerBot = await seedBot(a.workspace, { usesComputer: true });

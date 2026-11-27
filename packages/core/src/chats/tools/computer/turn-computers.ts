@@ -4,7 +4,7 @@ import { posix } from "node:path";
 import type { BotColor } from "@sugabots/contracts";
 import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import { ApprovalNeeded, ApprovalRefused } from "@sugabots/contracts/errors/proofs";
-import type { OutputOf } from "@sugabots/contracts/operations";
+import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
 import { MAX_SHARED_FILE_MEGABYTES } from "@sugabots/contracts/operations/computers";
 import { UserText, userText } from "@sugabots/errors";
 import { Context, Effect, Layer, type Scope, Semaphore, Stream } from "effect";
@@ -26,7 +26,12 @@ import {
 } from "../../../proofs/can-use-computer.ts";
 import { named } from "../../../proofs/proof.ts";
 import { processLayer, Tier } from "../../../tiers.ts";
-import { type BrowserSession, browserSession, isBrowserTool } from "../browser/browser.ts";
+import {
+	type BrowserSession,
+	type BrowserTarget,
+	browserSession,
+	isBrowserTool,
+} from "../browser/browser.ts";
 import { type Failed, failed } from "../failed.ts";
 import { MAX_IMAGE_BYTES, shownImageType } from "../images.ts";
 import { unreadableFileRefusal } from "../unreadable-file.ts";
@@ -100,6 +105,10 @@ export interface Interface {
 		step: CheckedStep<P, C>,
 		approved: Approved<P, X, [C], "computers.shareFile">,
 	) => Effect.Effect<OutputOf<"computers.shareFile">, ApprovalNeeded>;
+	readonly browserTarget: <P, C>(
+		step: CheckedStep<P, C>,
+		input: InputOf<"computers.useBrowser">,
+	) => Effect.Effect<ComputerApprovalTarget & BrowserTarget, ApprovalRefused>;
 	/** Calls one of the browser tools in the bot's browser in the chat. */
 	readonly useBrowser: <P, C, X>(
 		step: CheckedStep<P, C>,
@@ -371,6 +380,25 @@ export const make = Effect.gen(function* () {
 				sharing.withPermits(1)(shareFrom(opened, absolute(place, path), name, attach)),
 			);
 		},
+
+		browserTarget: ({ computer, browser, acceptsImages }, input) =>
+			Effect.gen(function* () {
+				if (!browser || !isBrowserTool(input.tool, acceptsImages))
+					return yield* new ApprovalRefused();
+				const opened = yield* openAsApproved(computer, undefined).pipe(Effect.orDie);
+				if ("status" in opened) return yield* new ApprovalRefused();
+				const target = yield* Effect.tryPromise({
+					try: (signal) => browser.target(opened.computer, input.tool, input.arguments, signal),
+					catch: () => new ApprovalRefused(),
+				});
+				if (!target) return yield* new ApprovalRefused();
+				return {
+					...target,
+					provider: opened.providerId,
+					computer: opened.record,
+					machine: opened.computer.id,
+				};
+			}),
 
 		useBrowser: ({ computer, browser, acceptsImages }, approved) =>
 			Effect.gen(function* () {

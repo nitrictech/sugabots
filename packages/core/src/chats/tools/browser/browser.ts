@@ -4,7 +4,7 @@ import { botPalettes } from "@sugabots/avatars/bot-colors";
 import type { BotColor } from "@sugabots/contracts";
 import { DesktopUnavailable } from "@sugabots/contracts/errors/computers";
 import { type UserText, userText } from "@sugabots/errors";
-import { Effect } from "effect";
+import { Effect, Schema, Semaphore } from "effect";
 import { Computers } from "../../../computers/computers.ts";
 import { prepareFoldersCommand } from "../computer/folders.ts";
 import type { Place, TurnComputer } from "../computer/tools.ts";
@@ -28,6 +28,7 @@ interface BrowserResult {
 
 /** A desktop and browser for one bot in one chat, started on first use. */
 export interface BrowserSession {
+	readonly calls: Semaphore.Semaphore;
 	/** Calls `tool` in the browser, giving up on it when `abortSignal` aborts. */
 	readonly call: (
 		computer: Computers.Computer,
@@ -35,6 +36,12 @@ export interface BrowserSession {
 		input: unknown,
 		abortSignal: AbortSignal | undefined,
 	) => Promise<BrowserResult | Failed>;
+	readonly target: (
+		computer: Computers.Computer,
+		tool: string,
+		input: Record<string, unknown>,
+		signal: AbortSignal,
+	) => Promise<BrowserTarget | undefined>;
 	/** Lets go of the connection to the browser. The browser carries on for later turns. */
 	readonly close: () => Promise<void>;
 }
@@ -199,19 +206,34 @@ export function browserSession(
 			: { client };
 	};
 
+	const connectOnce = async (computer: Computers.Computer) => {
+		connecting ??= connect(computer).catch((cause: unknown) => {
+			connecting = undefined;
+			if (cause instanceof Computers.Unavailable)
+				return { status: "failed" as const, error: cause.userMessage };
+			throw cause;
+		});
+		const connected = await connecting;
+		if ("status" in connected) connecting = undefined;
+		return connected;
+	};
+
 	return {
+		calls: Semaphore.makeUnsafe(1),
+		target: async (computer, tool, input, signal) => {
+			const connected = await connectOnce(computer);
+			if ("status" in connected) return undefined;
+			const index =
+				tool === "browser_tabs" &&
+				(input.action === "close" || input.action === "select") &&
+				typeof input.index === "number"
+					? input.index
+					: null;
+			return readBrowserTarget(connected.client, index, signal);
+		},
 		call: async (computer, toolName, input, abortSignal) => {
-			connecting ??= connect(computer).catch((cause: unknown) => {
-				connecting = undefined;
-				if (cause instanceof Computers.Unavailable)
-					return { status: "failed", error: cause.userMessage };
-				throw cause;
-			});
-			const connected = await connecting;
-			if ("status" in connected) {
-				connecting = undefined;
-				return connected;
-			}
+			const connected = await connectOnce(computer);
+			if ("status" in connected) return connected;
 			const result = await connected.client.callTool(
 				{ name: toolName, arguments: input as Record<string, unknown> },
 				undefined,
@@ -229,6 +251,49 @@ export function browserSession(
 }
 
 const RUN_CODE_TOOL = "browser_run_code_unsafe";
+
+const browserTargetSchema = Schema.Struct({
+	browserTab: Schema.NonEmptyString,
+	browserDocument: Schema.NonEmptyString,
+	browserUrl: Schema.NonEmptyString.check(Schema.isMaxLength(8_192)),
+});
+export type BrowserTarget = typeof browserTargetSchema.Type;
+
+const decodeBrowserTarget = Schema.decodeUnknownOption(Schema.fromJsonString(browserTargetSchema));
+
+async function readBrowserTarget(client: Client, index: number | null, signal: AbortSignal) {
+	const result = await client.callTool(
+		{
+			name: RUN_CODE_TOOL,
+			arguments: {
+				code: `async (page) => {
+					const index = ${JSON.stringify(index)};
+					const tab = index === null ? page : page.context().pages()[index];
+					if (!tab) return;
+					const session = await tab.context().newCDPSession(tab);
+					try {
+						const { targetInfo } = await session.send("Target.getTargetInfo");
+						const { frameTree: { frame } } = await session.send("Page.getFrameTree");
+						return {
+							browserTab: targetInfo.targetId,
+							browserDocument: frame.loaderId,
+							browserUrl: frame.url + (frame.urlFragment ?? ""),
+						};
+					} finally {
+						await session.detach();
+					}
+				}`,
+			},
+		},
+		undefined,
+		{ signal },
+	);
+	if (result.isError) return undefined;
+	const { text } = toBrowserResult(result.content, undefined);
+	const json = /^### Result\r?\n([^\r\n]+)/.exec(text)?.[1];
+	const parsed = decodeBrowserTarget(json);
+	return parsed._tag === "Some" ? parsed.value : undefined;
+}
 
 /**
  * Has the browser's MCP server act naturally for the rest of this session,

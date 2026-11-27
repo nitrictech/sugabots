@@ -194,7 +194,9 @@ export const proveComputerUseApproved = <P, X, N extends ComputerOperation, I, C
 	rule: ApprovalRule<OrdinaryApproval, N>,
 	input: Named<I, InputOf<NoInfer<N>>>,
 	computerUse: CanUseChatComputer<NoInfer<P>, C>,
-) => proveApproval(principal, call, rule, input, [computerUse.chat], { computerUse });
+	resolveTarget?: Effect.Effect<ResolvedTargets, ApprovalRefused>,
+) =>
+	proveApproval(principal, call, rule, input, [computerUse.chat], { computerUse, resolveTarget });
 
 /**
  * `proveApproved` for a bot's request to reach a host, bound to the project
@@ -261,18 +263,24 @@ const proveApproval = <
 		computerUse,
 		computerProjectId,
 		resolvedTargets: otherTargets,
+		resolveTarget,
 	}: {
 		connectorUse?: CanUseConnector<P, K>;
 		computerUse?: ComputerUse<NoInfer<P>> | undefined;
 		computerProjectId?: string;
 		resolvedTargets?: ResolvedTargets;
+		resolveTarget?: Effect.Effect<ResolvedTargets, ApprovalRefused> | undefined;
 	} = {},
 ) =>
 	Effect.gen(function* () {
 		if (computerUse && computerUse.principal.value !== principal.value)
 			return yield* new ApprovalRefused();
 		const computer = computerUse && computerApprovalTarget(computerUse);
-		const resolvedTargets = computer ?? otherTargets;
+		const resolveApprovalTargets =
+			resolveTarget ??
+			(rule.operation === "computers.useBrowser"
+				? Effect.fail(new ApprovalRefused())
+				: Effect.succeed(computer ?? otherTargets));
 		const input: InputOf<N> = inputNamed.value;
 		if (typeof input !== "object" || input === null) return yield* new ApprovalRefused();
 		const acting = principal.value;
@@ -330,6 +338,7 @@ const proveApproval = <
 		}
 		if (call.kind === "approvalCheck") {
 			if (connectorUse?.access === "off") return yield* new ApprovalRefused();
+			const resolvedTargets = yield* resolveApprovalTargets;
 			return yield* ApprovalCheckReached.for({
 				...(computerProjectId && { computerProjectId }),
 				...(resolvedTargets && { resolvedTargets }),
@@ -345,6 +354,8 @@ const proveApproval = <
 		if (call.kind !== "toolCall" || !isUuid(call.toolCall))
 			return need === "nothing" && !connectorUse ? approved(null) : yield* new ApprovalNeeded();
 		const decision = yield* readRecordedCall(acting.turn, call.toolCall);
+		const resolvedTargets =
+			decision?.status === "allowed" ? yield* resolveApprovalTargets : undefined;
 		const recorded = decideRecordedCall(decision, {
 			need,
 			name: connectorUse ? connectorToolKey(connectorUse.reach.handle, connectorUse.tool) : tool,

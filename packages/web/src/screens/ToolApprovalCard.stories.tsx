@@ -1,7 +1,7 @@
 import type { ToolCallPart } from "@sugabots/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { expect, screen } from "storybook/test";
+import { expect, screen, waitFor } from "storybook/test";
 import preview from "#storybook/preview";
 import type { MarkedConnector } from "@/lib/connectors.ts";
 import { ToolApprovalCard } from "./ToolApprovalCard.tsx";
@@ -228,6 +228,34 @@ export const ReviewOnAPhoneAsAViewer = meta.story({
 	play: async ({ canvas, userEvent }) => {
 		await userEvent.click(canvas.getByRole("button", { name: "See request" }));
 		await expect(await screen.findByRole("dialog", { name: "Create event" })).toBeInTheDocument();
+	},
+});
+
+/** BrowserPage shows the address of the tab the bot wants to click in. */
+export const BrowserPage = meta.story({
+	globals: PHONE,
+	args: {
+		call: asking({
+			tool: "browser_click",
+			input: { target: "Submit order" },
+			approval: {
+				id: "approval-1",
+				status: "pending",
+				approvers: "chat",
+				decidedByName: null,
+				decidedAt: null,
+				browserUrl: "https://travel.example.com/checkout",
+			},
+		}),
+		connector: undefined,
+	},
+	play: async ({ canvas, userEvent }) => {
+		await waitFor(() =>
+			expect(canvas.getByText("Page https://travel.example.com/checkout")).toBeVisible(),
+		);
+		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
+		const request = await screen.findByRole("dialog");
+		await expect(request).toHaveTextContent("Page https://travel.example.com/checkout");
 	},
 });
 

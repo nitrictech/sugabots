@@ -6,7 +6,7 @@ import { useApprovalToolSource, useAskedIn } from "@/lib/approval-tool-source.ts
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import { useWorkspaceApprovals } from "@/lib/chats.ts";
 import { PendingApprovalAnswer, RequestChatLink } from "@/screens/ApprovalPage.tsx";
-import { FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
+import { ApprovalDestination, FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
@@ -165,6 +165,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 				/>
 			</Link>
 			<div className="ml-9 min-w-0 max-md:ml-0">
+				<ApprovalDestination browserUrl={call.approval?.browserUrl} />
 				<FoldedRequest input={call.input} />
 			</div>
 			<div className="ml-9 flex flex-wrap items-center gap-3 max-md:ml-0 max-md:flex-col max-md:items-stretch">
