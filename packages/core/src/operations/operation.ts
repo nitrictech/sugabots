@@ -22,9 +22,11 @@ import type { OperationContract } from "@sugabots/contracts/operations";
 import { Effect, Schema, type Scope, type Stream } from "effect";
 import type { Principal } from "../principal.ts";
 
-/** Runs an operation up to its approval proof, including resolving the targets it would act on. */
+/** Runs an operation up to its approval proof. */
 export interface ApprovalCheck {
 	readonly kind: "approvalCheck";
+	/** A call plan checks reach and tool access before an approval request resolves connector targets. */
+	readonly deferConnectorTargets?: true;
 }
 
 /**

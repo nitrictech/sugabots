@@ -3,9 +3,12 @@ import { Effect } from "effect";
 import { type ApprovalCheck, ApprovalCheckReached } from "../../operations/operation.ts";
 
 /** Checks the other proofs before an operation reaches its Approved checkpoint. */
-export const checkApproval = (run: (call: ApprovalCheck) => Effect.Effect<unknown, DomainError>) =>
+export const checkApproval = (
+	run: (call: ApprovalCheck) => Effect.Effect<unknown, DomainError>,
+	call: ApprovalCheck = { kind: "approvalCheck" },
+) =>
 	Effect.suspend(() =>
-		run({ kind: "approvalCheck" }).pipe(
+		run(call).pipe(
 			Effect.matchEffect({
 				onFailure: (error) =>
 					Effect.succeed(error instanceof ApprovalCheckReached ? error.details : undefined),

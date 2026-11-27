@@ -6,6 +6,7 @@ import { Effect, Schema } from "effect";
 import { turnFacts } from "../../authentication/turn-facts.ts";
 import { query } from "../../database/database.ts";
 import { connector } from "../../database/schema.ts";
+import type { ApprovalCheck } from "../../operations/operation.ts";
 import type { Operations } from "../../operations/registry.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import { approvalNeed, approvalRule } from "../../proofs/approved.ts";
@@ -61,12 +62,12 @@ export function connectorToolsForStep(
 			return { ...parsed.value, arguments: checked.arguments };
 		});
 
-	const check = (input: InputOf<typeof operation>) =>
-		checkApproval((call) => operations[operation](principal, input, call));
+	const check = (input: InputOf<typeof operation>, approvalCheck?: ApprovalCheck) =>
+		checkApproval((call) => operations[operation](principal, input, call), approvalCheck);
 
 	const approval = (
 		input: unknown,
-		planned?: boolean,
+		phase?: "plan" | "requireApproval",
 	): Effect.Effect<ApprovalAsked | false | undefined> =>
 		Effect.promise(() =>
 			recording.run(
@@ -89,12 +90,17 @@ export function connectorToolsForStep(
 						writeOrDelete: target.writeOrDelete,
 					});
 					if (need === "refused") return false as const;
-					if (!planned && need !== "approver") return undefined;
+					if (phase !== "requireApproval" && need !== "approver") return undefined;
 					const decoded = yield* prepare(target, call.arguments);
 					if ("invalid" in decoded) return false as const;
-					const details = yield* check(decoded);
+					const details = yield* check(
+						decoded,
+						phase === "plan" ? { kind: "approvalCheck", deferConnectorTargets: true } : undefined,
+					);
+
 					if (!details?.connectorAccess) return false as const;
 					if (
+						phase !== "requireApproval" &&
 						approvalNeed(facts, rule, {
 							access: details.connectorAccess,
 							writeOrDelete: details.writeOrDelete,

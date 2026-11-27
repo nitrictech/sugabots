@@ -497,7 +497,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						body: "Keep the order after a refresh.",
 					},
 				});
+				const readsBefore = github.asked.filter(
+					({ method, path }) => method === "GET" && path === "/repos/acme/web",
+				).length;
 				const ran = await loop.runTurn(chatId, { model, connectorTools });
+				expect(
+					github.asked.filter(({ method, path }) => method === "GET" && path === "/repos/acme/web"),
+				).toHaveLength(readsBefore + 1);
 				const [parked] = await callsOf(ran.turnId);
 				if (!parked) throw new Error("No GitHub call parked");
 				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });

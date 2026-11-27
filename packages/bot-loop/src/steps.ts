@@ -348,7 +348,10 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 										} else {
 											const plan = call.plan ?? planned.get(call.toolCallId) ?? dispatch;
 											// The stricter of the kept plan and what the call needs now.
-											const now = yield* offered.approvalOf(call, plan._tag === "AskApproval");
+											const now = yield* offered.approvalOf(
+												call,
+												plan._tag === "AskApproval" ? "requireApproval" : undefined,
+											);
 											const asked =
 												now === false
 													? undefined
@@ -399,7 +402,7 @@ const layerWith = ({ stepTimeout, checkEvery }: Timing) =>
 							/** How a call is to be made now: put to its approvers if it waits for one, else sent. */
 							const planFor = (call: Turns.StepCall) =>
 								Effect.map(
-									offered.approvalOf(call),
+									offered.approvalOf(call, "plan"),
 									(asked): Turns.CallPlan => (asked ? { _tag: "AskApproval", asked } : dispatch),
 								);
 

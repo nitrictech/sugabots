@@ -29,9 +29,11 @@ export const proveConnectorCall = <P, T, K, X, I>(
 		const proveUse = proveCanUseConnector(acting, connector, input.value.tool, listed);
 		const resolve = listed?.resolveApprovalTargets;
 		let resolvedTargets: ResolvedTargets | null | undefined;
-		if (resolve) {
+		const call = calling.value;
+		const planning = call.kind === "approvalCheck" && call.deferConnectorTargets;
+		if (resolve && !planning) {
 			resolvedTargets = null;
-			if (yield* needsConnectorApprovalTargets(running.turn.value, calling.value)) {
+			if (yield* needsConnectorApprovalTargets(running.turn.value, call)) {
 				const use = yield* proveUse;
 				if (use.access === "off") return yield* new ApprovalRefused();
 				resolvedTargets = yield* resolve(input.value.arguments);

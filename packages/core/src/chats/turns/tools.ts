@@ -160,7 +160,7 @@ interface StepTools {
 			readonly toolName: string;
 			readonly input: unknown;
 		},
-		planned?: boolean,
+		phase?: "plan" | "requireApproval",
 	) => Effect.Effect<ApprovalAsked | false | undefined>;
 	/** What the model is given back for a call that returned `output`, as the SDK would give it. */
 	readonly modelOutput: (call: {
@@ -329,17 +329,19 @@ export const make = Effect.gen(function* () {
 						inputSchema: { ...inputSchema },
 					})),
 			);
-			const approvalOf: StepTools["approvalOf"] = (call, planned) =>
+			const approvalOf: StepTools["approvalOf"] = (call, phase) =>
 				Effect.gen(function* () {
 					const operation = dispatched.get(call.toolName);
 					if (operation) {
 						const checked = yield* checkInput(call);
 						return "invalid" in checked
 							? false
-							: yield* Effect.promise(() => operation.approval(checked.input, planned));
+							: yield* Effect.promise(() =>
+									operation.approval(checked.input, phase === "requireApproval"),
+								);
 					}
 					return call.toolName === CALL_TOOL
-						? yield* connectorDispatch.approval(call.input, planned)
+						? yield* connectorDispatch.approval(call.input, phase)
 						: undefined;
 				});
 			const modelOutput: StepTools["modelOutput"] = (call) =>
