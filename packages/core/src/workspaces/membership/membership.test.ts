@@ -265,16 +265,16 @@ describe.skipIf(!process.env.DATABASE_URL)("Membership, against Postgres", () =>
 		expect(await run(ada.id, (m) => m.workspaces)).toEqual([inSydney, inDefault]);
 	});
 
-	it("refuses a time zone Postgres does not have, and creates nothing", async () => {
+	it("refuses a time zone that isn't one, and creates nothing", async () => {
 		const ada = await newMember("Ada");
 
-		expect(
-			await run(ada.id, (m) =>
+		await expect(
+			run(ada.id, (m) =>
 				m.create({
 					details: { name: "Mars", slug: `mars-${unique()}`, timeZone: "Mars/Olympus" },
 				}),
 			),
-		).toEqual({ failed: "TimeZoneUnknown" });
+		).rejects.toThrow("workspaces.create was called with an input its contract refuses");
 		expect(await run(ada.id, (m) => m.workspaces)).toEqual([]);
 	});
 

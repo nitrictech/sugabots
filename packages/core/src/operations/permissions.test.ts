@@ -325,17 +325,20 @@ const fresh = {
 				.returning({ id: modelProvider.id }),
 		);
 		if (!row) throw new Error("Expected a model provider");
-		const modelId = `model-${unique()}`;
-		await onDatabase((db) =>
-			db.insert(providerModel).values({
-				workspaceId: a.workspace,
-				providerId: row.id,
-				modelId,
-				enabled: true,
-				source: "manual",
-			}),
+		const [model] = await onDatabase((db) =>
+			db
+				.insert(providerModel)
+				.values({
+					workspaceId: a.workspace,
+					providerId: row.id,
+					modelId: `model-${unique()}`,
+					enabled: true,
+					source: "manual",
+				})
+				.returning({ id: providerModel.id }),
 		);
-		return { workspace: a.workspace, providerId: row.id, modelId };
+		if (!model) throw new Error("Expected a model");
+		return { workspace: a.workspace, providerId: row.id, modelId: model.id };
 	},
 	/** The membership of a new editor of A. */
 	membership: async ({ a }: Fixture) => {

@@ -272,7 +272,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 		const input = {
 			botId,
 			messageId,
-			content: "\n  Budget   review is Friday\nand bring the numbers",
+			content: "Budget   review is Friday\nand bring the numbers",
 		};
 
 		const started = await startBotChat(chats, input);

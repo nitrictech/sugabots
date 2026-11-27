@@ -150,10 +150,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			});
 		});
 
-		it("refuses a zone the database does not know, and stays where it was", async () => {
+		it("refuses a zone that isn't one, and stays where it was", async () => {
 			await expect(
 				timeZones.change({ workspace: workspaceId, timeZone: "Mars/Olympus" }),
-			).rejects.toMatchObject({ _tag: "TimeZoneUnknown" });
+			).rejects.toThrow("workspaces.changeTimeZone was called with an input its contract refuses");
 			expect(await timeZones.get({ workspace: workspaceId })).toMatchObject({
 				timeZone: "Australia/Sydney",
 			});

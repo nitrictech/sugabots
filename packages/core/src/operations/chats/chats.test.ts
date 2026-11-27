@@ -7,7 +7,7 @@ import {
 	seedProjectChat,
 	seedTurnAnswering,
 } from "../../authentication/seed.test-support.ts";
-import { file, toolCall } from "../../database/schema.ts";
+import { file, message, toolCall } from "../../database/schema.ts";
 import { closeDatabase, onDatabase } from "../../database/testing.ts";
 import type { Principal } from "../../principal.ts";
 import {
@@ -121,6 +121,20 @@ describe("attachments and approvals in a chat", () => {
 		expect(await operationOutcome(call, who.ed, "chats.removeFile", address)).toBe(
 			"ResourceHidden",
 		);
+	});
+
+	it("never runs an operation on an input its contract refuses, whatever calls it", async () => {
+		const retryKey = crypto.randomUUID();
+		// Well typed, but neither text nor a file, which `chats.send`'s schema refuses.
+		const empty = { chatId: a.chat, retryKey, message: "" };
+
+		await expect(call(who.ed, "chats.send", empty)).rejects.toThrow(
+			"chats.send was called with an input its contract refuses",
+		);
+		const sent = await onDatabase((db) =>
+			db.select().from(message).where(eq(message.retryKey, retryKey)),
+		);
+		expect(sent).toEqual([]);
 	});
 
 	describe("approvals.decide", () => {

@@ -7,7 +7,6 @@ import {
 } from "@sugabots/contracts";
 import {
 	AdministratorInEveryProject,
-	InvalidProjectDetails,
 	NotInProject,
 	NotInWorkspace,
 	UnusableProjectName,
@@ -244,7 +243,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 						leadBotId: leadId,
 						...details,
 					}),
-				).rejects.toBeInstanceOf(InvalidProjectDetails);
+				).rejects.toThrow("projects.create was called with an input its contract refuses");
 			}
 			expect(await listedTo(editorId)).toEqual([]);
 		});
@@ -688,10 +687,10 @@ describe.skipIf(!process.env.DATABASE_URL)("projects, against Postgres", () => {
 			expect(await visibleTo(adminId)).toEqual([expect.objectContaining({ id: here.id })]);
 		});
 
-		it("answers no to ids that are not uuids rather than raising", async () => {
+		it("answers no to a workspace that isn't there, and never looks up a project id that isn't a uuid", async () => {
 			await expect(visibleTo(adminId, "nonsense")).rejects.toThrow(ResourceHidden);
 			await expect(projectsAs(adminId).members({ projectId: "nonsense" })).rejects.toThrow(
-				ResourceHidden,
+				"projects.listMembers was called with an input its contract refuses",
 			);
 		});
 	});
