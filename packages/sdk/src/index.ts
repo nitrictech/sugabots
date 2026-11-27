@@ -32,7 +32,7 @@ export type Api = HttpApiClient.ForApi<typeof ApiDefinition>;
 export type ApiUrls = HttpApiClient.UrlBuilder<typeof ApiDefinition>;
 
 interface ClientOptions {
-	/** Where the API is, path included, e.g. `https://example.com/api`. */
+	/** Where the API is, as a whole address with its path, e.g. `https://example.com/api`. */
 	baseUrl: string;
 	/** Overridable for tests, and for runtimes with their own fetch. */
 	fetch?: typeof globalThis.fetch;
