@@ -23,6 +23,7 @@ import type { OperationContract } from "@sugabots/contracts/operations";
 import type { DomainError } from "@sugabots/errors";
 import { Effect, Schema, type Scope, type Stream } from "effect";
 import type { Principal } from "../principal.ts";
+import type { ComputerApprovalTarget } from "../proofs/approved.ts";
 
 /** Runs an operation up to its approval proof. */
 export interface ApprovalCheck {
@@ -57,6 +58,7 @@ function withoutBriefDisplayNames(
 }
 
 interface ApprovalCheckDetails {
+	readonly computerTarget?: ComputerApprovalTarget;
 	readonly computerProjectId?: string;
 	/** What the call's names and ids stand for now, which its approval covers. */
 	readonly resolvedTargets?: ResolvedTargets;

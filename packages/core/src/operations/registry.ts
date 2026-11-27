@@ -20,6 +20,7 @@ import { refreshTurnAdmission } from "../authentication/turn-admission.ts";
 import { isBrowserTool } from "../chats/tools/browser/browser.ts";
 import type { Turns } from "../chats/turns/turns.ts";
 import type { Principal } from "../principal.ts";
+import { type ComputerApprovalTarget, computerApprovalTarget } from "../proofs/approved.ts";
 import { proveCanUseChatComputer } from "../proofs/can-use-computer.ts";
 import {
 	checkConnectorApprovalPermission,
@@ -42,6 +43,7 @@ import {
 	type Call,
 	type LongRunningOperation,
 	type Operation,
+	type ResolvedTargets,
 	type Running,
 	runToApproval,
 	type ServicesOf,
@@ -135,13 +137,15 @@ const checkApprovalPermission = (
 			}
 			if (call.approvalResolvedTargets && "computer" in call.approvalResolvedTargets) {
 				const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
-				const provider = yield* named(principal, principal.chat, (principal, chat) =>
+				const target = yield* named(principal, principal.chat, (principal, chat) =>
 					proveCanUseChatComputer(principal, chat).pipe(
-						Effect.map(({ provider }) => provider),
+						Effect.map(computerApprovalTarget),
 						Effect.mapError(() => forbidden),
 					),
 				);
-				if (provider === null) return "noComputerProvider" as const;
+				if (target.provider === null) return "noComputerProvider" as const;
+				if (computerTargetChanged(call.approvalResolvedTargets, target))
+					return "computerTargetChanged" as const;
 			}
 			return;
 		}
@@ -181,6 +185,11 @@ const checkApprovalPermission = (
 		}
 		const checked = result.success;
 		if (
+			checked.computerTarget &&
+			computerTargetChanged(call.approvalResolvedTargets, checked.computerTarget)
+		)
+			return "computerTargetChanged" as const;
+		if (
 			checked.resolvedTargets &&
 			!sameResolvedTargets(call.approvalResolvedTargets, checked.resolvedTargets)
 		) {
@@ -189,6 +198,17 @@ const checkApprovalPermission = (
 		}
 		return undefined;
 	});
+
+function computerTargetChanged(
+	recorded: ResolvedTargets | null,
+	current: ComputerApprovalTarget,
+): boolean {
+	return (
+		recorded?.provider !== current.provider ||
+		recorded?.computer !== current.computer ||
+		recorded?.machine !== current.machine
+	);
+}
 
 /** Every operation's body, by name: exactly one for each registered contract. */
 const operations = {

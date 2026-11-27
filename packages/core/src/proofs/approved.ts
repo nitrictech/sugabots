@@ -124,7 +124,7 @@ export type ComputerApprovalTarget = Pick<
 >;
 type ComputerUse<P> = ComputerApprovalTarget & Pick<CanUseChatComputer<P, unknown>, "principal">;
 
-function computerApprovalTarget({
+export function computerApprovalTarget({
 	provider,
 	computer,
 	machine,
@@ -375,6 +375,7 @@ const proveApproval = <
 			const resolvedTargets = call.forDecision ? otherTargets : yield* resolveApprovalTargets;
 			return yield* ApprovalCheckReached.for({
 				...(computerProjectId && { computerProjectId }),
+				...(call.forDecision && computer && { computerTarget: computer }),
 				...(resolvedTargets && { resolvedTargets }),
 				...(connectorUse && { connectorAccess: connectorUse.access }),
 				writeOrDelete: connectorUse?.writeOrDelete ?? rule.changes,

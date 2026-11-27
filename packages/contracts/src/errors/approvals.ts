@@ -26,6 +26,7 @@ export const approvalSettingsChangeSchema = Schema.Literals([
 	"connectorChanged",
 	"noComputerProvider",
 	"computerUseChanged",
+	"computerTargetChanged",
 	"hostBlocked",
 ]);
 
@@ -51,6 +52,8 @@ export class ToolApprovalConflict
 				return userText`This approval was closed because the connector or its tool settings changed.`;
 			case "noComputerProvider":
 				return userText`This approval was closed because the workspace has no enabled computer provider.`;
+			case "computerTargetChanged":
+				return userText`This approval was closed because the computer the bot wanted to use changed.`;
 			case "computerUseChanged":
 				return userText`This approval was closed because the bot can no longer use the computer.`;
 			case "hostBlocked":

@@ -281,6 +281,57 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
 		});
 
+		it.each(["computer", "machine"] as const)(
+			"closes a command approval when its %s is replaced before Allow",
+			async (replacement) => {
+				const provider = await enableComputers();
+				const projectId = await runOnPostgres(defaultProjectOf(botId));
+				const providerComputerId = Computers.ComputerId("desktop");
+				const original = {
+					workspaceId,
+					projectId,
+					computerProviderId: provider.id,
+					providerComputerId,
+					image: "sugabots-computer:dev",
+				};
+				await onDatabase((db) => db.insert(computer).values(original));
+				const source = await queueOutsideRun(projectId, "github");
+				const { model, requests } = calling("run_command", command);
+				const providerFetch = computerService(providerComputerId, "allowed-hosts-only");
+				const workflow = await loop.runWorkflow(source, {
+					model,
+					egress: unimplemented(Egress.Service, { providers: { for: () => providerFetch } }),
+					computerSignIn: ComputerSignIn.none,
+				});
+				await workflow.suspended();
+				const { turnId, parked } = await parkedCallOf(workflow.executionId);
+
+				if (replacement === "computer") {
+					await onDatabase((db) => db.delete(computer).where(eq(computer.projectId, projectId)));
+					await onDatabase((db) => db.insert(computer).values(original));
+				} else {
+					await onDatabase((db) =>
+						db
+							.update(computer)
+							.set({ providerComputerId: Computers.ComputerId("new-desktop") })
+							.where(eq(computer.projectId, projectId)),
+					);
+				}
+
+				const error =
+					"This approval was closed because the computer the bot wanted to use changed.";
+				await expect(
+					chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+				).rejects.toMatchObject({ _tag: "ToolApprovalConflict", userMessage: error });
+				await workflow.completed();
+				expect(await callsOf(turnId)).toMatchObject([
+					{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
+				]);
+				expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+				expect(providerFetch).not.toHaveBeenCalled();
+			},
+		);
+
 		it.each([
 			["write_file", { path: "notes.txt", content: "Notes" }],
 			["copy_file_to_computer", { file: "example-file" }],
