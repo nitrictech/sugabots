@@ -80,7 +80,6 @@ export function ToolApprovalCard({
 	const decide = (decision: Decision) =>
 		review.mutate({ call, decision }, { onSuccess: () => setReviewing(false) });
 	const decided = call.approval;
-	const closedMessage = closedApprovalMessage(call, bot.name);
 	// Only an answer given here is announced; one already in the history is just read.
 	const announced = review.isSuccess;
 	const status =
@@ -92,12 +91,12 @@ export function ToolApprovalCard({
 			<Outcome announced={announced} icon={<Check aria-hidden size={12} strokeWidth={2.8} />}>
 				Allowed{decided.decidedByName && ` by ${decided.decidedByName}`}
 			</Outcome>
-		) : closedMessage ? (
+		) : decided?.closedBecause ? (
 			<p
 				role={review.error ? "status" : undefined}
 				className="m-0 text-pretty text-muted-foreground text-xs leading-normal"
 			>
-				{closedMessage}
+				{closedApprovalMessage(call, bot.name)}
 			</p>
 		) : decided?.status === "denied" ? (
 			<Outcome announced={announced} icon={<X aria-hidden size={12} strokeWidth={2.8} />}>

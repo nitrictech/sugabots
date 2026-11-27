@@ -1,6 +1,9 @@
 import { UserText, userText } from "@sugabots/errors";
 import { type Cause, Data, Effect } from "effect";
 import type { TurnEndRequest, TurnStatus } from "../../database/schema.ts";
+import { TURN_INTERRUPTED } from "../tool-call-end-messages.ts";
+
+export { TURN_CANCELLED, TURN_INTERRUPTED } from "../tool-call-end-messages.ts";
 
 /**
  * A turn's lifecycle, as a pure transition function.
@@ -19,14 +22,8 @@ import type { TurnEndRequest, TurnStatus } from "../../database/schema.ts";
  */
 export const MAX_TURN_RUNS = 3;
 
-/** What members are told of a cancelled turn's tool calls that were cut short. */
-export const TURN_CANCELLED = userText`Turn cancelled`;
-
 /** What members are told of a turn's tool calls cut short because its automation run ended. */
 export const RUN_ENDED = userText`Automation run ended`;
-
-/** What members are told of a turn's tool calls cut short because it was interrupted. */
-export const TURN_INTERRUPTED = userText`Turn interrupted`;
 
 /**
  * What members are told of a turn's tool calls left unmade because it ended

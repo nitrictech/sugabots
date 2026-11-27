@@ -292,6 +292,9 @@ export const toolCallPartSchema = Schema.Struct({
 			approvers: toolApproversSchema,
 			decidedByName: Schema.NullOr(Schema.String),
 			decidedAt: Schema.NullOr(isoTimestampSchema),
+			closedBecause: Schema.optional(
+				Schema.Literals(["settingsChanged", "newMessage", "botStopped", "withdrawn"]),
+			),
 			browserUrl: Schema.optional(Schema.String),
 			gitHub: Schema.optional(
 				Schema.Struct({

@@ -1,8 +1,13 @@
 import type { ToolCallPart } from "@sugabots/contracts";
+import {
+	approvalSettingsChangeSchema,
+	ToolApprovalConflict,
+} from "@sugabots/contracts/errors/approvals";
 import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import type { Executor } from "../../database/database.ts";
 import { member, type ToolCallRow, toolCall } from "../../database/schema.ts";
+import { STEERED_AWAY, TURN_CANCELLED, TURN_INTERRUPTED } from "../tool-call-end-messages.ts";
 import { approversOf } from "../tools/approvers.ts";
 
 /**
@@ -50,6 +55,7 @@ export function toToolCallPart(
 		gitHubReviewCommit,
 		gitHubReplyCommentId,
 	} = row.approvalResolvedTargets ?? {};
+	const closedBecause = readApprovalClosure(row);
 	const approvalConnector =
 		row.connectorId && row.connectorRevision !== null
 			? { id: row.connectorId, revision: row.connectorRevision }
@@ -69,6 +75,7 @@ export function toToolCallPart(
 						approvers: approversOf(row.tool),
 						decidedByName,
 						decidedAt: row.decidedAt?.toISOString() ?? null,
+						...(closedBecause && { closedBecause }),
 						...(browserUrl && { browserUrl }),
 						...(briefBotName && {
 							briefDestination: { botName: briefBotName, projectName: briefProjectName ?? null },
@@ -89,4 +96,19 @@ export function toToolCallPart(
 		startedAt: row.startedAt.toISOString(),
 		finishedAt: row.finishedAt?.toISOString() ?? null,
 	};
+}
+
+const settingsChangeMessages = new Set<string>(
+	approvalSettingsChangeSchema.literals.map(
+		(reason) => new ToolApprovalConflict({ reason }).userMessage,
+	),
+);
+
+function readApprovalClosure(row: ToolCallRow) {
+	const { approvalStatus, decidedAt, finishedAt, error } = row;
+	if (approvalStatus !== "denied" || decidedAt || !finishedAt || error === null) return undefined;
+	if (settingsChangeMessages.has(error)) return "settingsChanged";
+	if (error === STEERED_AWAY) return "newMessage";
+	if (error === TURN_CANCELLED || error === TURN_INTERRUPTED) return "botStopped";
+	return "withdrawn";
 }

@@ -181,7 +181,11 @@ export const ClosedAfterAllow = meta.story({
 				status: "failed",
 				error: connectorClosedReason,
 				finishedAt: "2026-11-10T09:02:00.000Z",
-				approval: args.call.approval && { ...args.call.approval, status: "denied" },
+				approval: args.call.approval && {
+					...args.call.approval,
+					status: "denied",
+					closedBecause: "settingsChanged",
+				},
 			}),
 		);
 		const outcome = `${connectorClosedReason} Ask Trip Planner to try again.`;
@@ -189,6 +193,35 @@ export const ClosedAfterAllow = meta.story({
 		await expect(screen.queryByRole("button", { name: "Allow: Create event" })).toBeNull();
 		await userEvent.click(screen.getByRole("button", { name: "Close" }));
 		await expect(await canvas.findByText(outcome)).toBeVisible();
+	},
+});
+
+/** WithdrawnAfterNewMessage shows a request the bot left behind when a new message arrived. */
+export const WithdrawnAfterNewMessage = meta.story({
+	globals: PHONE,
+	args: {
+		call: asking({
+			status: "failed",
+			error: "Withdrawn: a new message reached the bot before this was decided",
+			finishedAt: "2026-11-10T09:02:00.000Z",
+			approval: {
+				id: "approval-1",
+				status: "denied",
+				approvers: "chat",
+				decidedByName: null,
+				decidedAt: null,
+				closedBecause: "newMessage",
+			},
+		}),
+	},
+	play: async ({ canvas, userEvent }) => {
+		const outcome = "No longer waiting. A new message reached the bot.";
+		await waitFor(() => expect(canvas.getByText(outcome)).toBeVisible());
+		await userEvent.click(canvas.getByRole("button", { name: "See request" }));
+		const request = await screen.findByRole("dialog", { name: "Create event" });
+		await expect(request).toHaveTextContent(outcome);
+		await expect(request).not.toHaveTextContent("try again");
+		await expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
 	},
 });
 

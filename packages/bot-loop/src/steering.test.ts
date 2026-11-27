@@ -563,10 +563,20 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 
 		it("is steered by its asker's message, which withdraws the approval, and takes its lane back to read it", async () => {
 			await say(sam, "Wipe the wiki.");
-			const { workflow, turnId, execute, requests } = await parkedWorkflow("Left it alone.");
+			const { workflow, turnId, parked, execute, requests } =
+				await parkedWorkflow("Left it alone.");
 
 			const steer = (await say(sam, "Actually, don't wipe it.")).id;
 
+			expect(await chatsAs(sam).approvals(workspaceId)).toMatchObject({
+				waiting: [],
+				answered: [
+					{
+						call: { id: parked.id, approval: { closedBecause: "newMessage" } },
+						answer: { status: "closed" },
+					},
+				],
+			});
 			// The message steers the waiting turn: no second turn is asked for.
 			expect(await steersOf(turnId)).toEqual([steer]);
 			expect(await runOnPostgres(waitingTurns({ chatId, botId }))).toEqual([]);
@@ -950,6 +960,15 @@ describe.skipIf(!process.env.DATABASE_URL)("steering and interrupting a turn", a
 			expect(await callsOf(ran.turnId)).toMatchObject([
 				{ status: "failed", approvalStatus: "denied", error: "Turn interrupted" },
 			]);
+			expect(await chatsAs(sam).approvals(workspaceId)).toMatchObject({
+				waiting: [],
+				answered: [
+					{
+						call: { approval: { closedBecause: "botStopped" } },
+						answer: { status: "closed" },
+					},
+				],
+			});
 			// The workflow, told of the interrupt, resumes the turn for its next step.
 			const principal = await ran.authentication.authenticate(ran.turnId);
 			expect(

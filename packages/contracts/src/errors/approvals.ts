@@ -21,18 +21,18 @@ export class ToolApprovalNotFound
 	}
 }
 
+export const approvalSettingsChangeSchema = Schema.Literals([
+	"briefDestinationChanged",
+	"connectorChanged",
+	"noComputerProvider",
+	"computerUseChanged",
+	"hostBlocked",
+]);
+
 /** The approval was already decided or its call changed before it could be allowed. */
 export class ToolApprovalConflict
 	extends Schema.TaggedError<ToolApprovalConflict>()("ToolApprovalConflict", {
-		reason: Schema.optional(
-			Schema.Literals([
-				"briefDestinationChanged",
-				"connectorChanged",
-				"noComputerProvider",
-				"computerUseChanged",
-				"hostBlocked",
-			]),
-		),
+		reason: Schema.optional(approvalSettingsChangeSchema),
 	})
 	implements DomainError
 {

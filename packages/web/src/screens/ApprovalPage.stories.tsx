@@ -71,7 +71,17 @@ const answerable = request("01", "awaiting_approval", {
 	...pending,
 	connector: { id: botConnector.id, revision: 2 },
 });
-const stopped = request("02", "failed", pending);
+const closedAt = "2026-09-18T09:04:00.000Z";
+const stoppedRequest = request("02", "failed", {
+	...pending,
+	status: "denied",
+	closedBecause: "botStopped",
+});
+const stopped: AnsweredApproval = {
+	...stoppedRequest,
+	call: { ...stoppedRequest.call, error: "Turn interrupted", finishedAt: closedAt },
+	answer: { status: "closed", closedAt },
+};
 const answered: AnsweredApproval = { ...request("03", "failed", denied), answer: denied };
 const changedBriefBase = request("07", "awaiting_approval", pending);
 const changedBrief: ApprovalRequest = {
@@ -84,7 +94,6 @@ const changedBrief: ApprovalRequest = {
 };
 const briefClosedReason =
 	"This approval was closed because the chat the bot wanted to start changed.";
-const closedAt = "2026-09-18T09:04:00.000Z";
 const closedBrief: AnsweredApproval = {
 	...changedBrief,
 	call: {
@@ -92,7 +101,7 @@ const closedBrief: AnsweredApproval = {
 		status: "failed",
 		error: briefClosedReason,
 		finishedAt: closedAt,
-		approval: { ...pending, status: "denied" },
+		approval: { ...pending, status: "denied", closedBecause: "settingsChanged" },
 	},
 	answer: { status: "closed", closedAt },
 };
@@ -127,8 +136,8 @@ const brief: ApprovalRequest = {
 };
 
 const approvals: WorkspaceApprovals = {
-	waiting: [answerable, stopped, outside, withoutFields, brief],
-	answered: [answered],
+	waiting: [answerable, outside, withoutFields, brief],
+	answered: [answered, stopped, closedBrief],
 };
 
 const meta = preview.meta({
@@ -207,12 +216,29 @@ export const ClosedAfterAllow = meta.story({
 	},
 });
 
-/** NoLongerWaiting is a request whose bot stopped before anyone answered it: nothing to answer. */
+/** NoLongerWaiting shows a request after someone stopped the bot. */
 export const NoLongerWaiting = meta.story({
 	render: at(stopped.call.id),
-	play: async ({ canvas }) => {
-		await expect(await canvas.findByText(/No longer waiting/, undefined)).toBeInTheDocument();
+	play: async ({ canvas, userEvent }) => {
+		const outcome = "No longer waiting. The bot was stopped.";
+		await expect(await canvas.findByText(outcome)).toBeVisible();
+		await expect(canvas.queryByText(/try again/)).toBeNull();
 		await expect(canvas.queryByRole("button", { name: /^Allow/ })).toBeNull();
+		await expect(await canvas.findByRole("link", { name: "Open chat" })).toBeVisible();
+		await userEvent.click(canvas.getByRole("link", { name: "Back to Approvals" }));
+		const row = await canvas.findByRole("link", { name: /Send quote.*No longer waiting/ });
+		await expect(row).not.toHaveTextContent("try again");
+	},
+});
+
+/** SettingsChanged keeps the reason and a way back to the chat when a brief changed before Allow. */
+export const SettingsChanged = meta.story({
+	render: at(closedBrief.call.id),
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(`${briefClosedReason} Ask Growth Desk to try again.`),
+		).toBeVisible();
+		await expect(await canvas.findByRole("link", { name: "Open chat" })).toBeVisible();
 	},
 });
 

@@ -153,8 +153,7 @@ export function PendingApprovalAnswer({
 	if (!awaitsApproval(call)) {
 		return (
 			<p role={review.error ? "status" : undefined} className="m-0 text-xs text-muted-foreground">
-				{closedApprovalMessage(call, bot.name) ??
-					`No longer waiting: ${bot.name} stopped before it was answered.`}
+				{closedApprovalMessage(call, bot.name)}
 			</p>
 		);
 	}

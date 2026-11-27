@@ -45,6 +45,7 @@ import {
 	toMessage,
 	toReactions,
 } from "../store/participants.ts";
+import { STEERED_AWAY } from "../tool-call-end-messages.ts";
 import {
 	executionFence,
 	type FenceRefusal,
@@ -1588,9 +1589,6 @@ type SteerOutcome =
 /** Whether a turn in `state` takes a steer: it is running or waiting for approvals, and nobody interrupted it. */
 const takesSteers = (state: TurnState) =>
 	(state.status === "running" || state.status === "waiting") && state.endRequested === null;
-
-/** What members are told of the calls a steer withdrew from approval. */
-const STEERED_AWAY = userText`Withdrawn: a new message reached the bot before this was decided`;
 
 /** Where a turn stands for whoever runs a step of it (see `standing`). */
 export type TurnStanding =

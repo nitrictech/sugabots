@@ -26,9 +26,15 @@ export function awaitedApprovers(call: ToolCallPart) {
 		: "Waiting for someone with permission to answer this.";
 }
 
-export function closedApprovalMessage(call: ToolCallPart, botName: string): string | undefined {
-	const approval = call.approval;
-	if (approval?.status !== "denied" || approval.decidedAt !== null || !call.error) return undefined;
-	const reason = /[.!?]$/.test(call.error) ? call.error : `${call.error}.`;
-	return `${reason} Ask ${botName} to try again.`;
+export function closedApprovalMessage(call: ToolCallPart, botName: string): string {
+	switch (call.approval?.closedBecause) {
+		case "settingsChanged":
+			return `${call.error ?? "This request closed because its settings changed."} Ask ${botName} to try again.`;
+		case "newMessage":
+			return "No longer waiting. A new message reached the bot.";
+		case "botStopped":
+			return "No longer waiting. The bot was stopped.";
+		default:
+			return "No longer waiting for approval.";
+	}
 }

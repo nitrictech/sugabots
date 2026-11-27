@@ -353,8 +353,9 @@ const approvalsFor = (workspaceId: string, memberId: string, reachesChat: Reache
 		return {
 			waiting: waiting.map(toApprovalRequest),
 			answered: resolved.flatMap((row): AnsweredApproval[] => {
-				const answer = readApprovalOutcome(row);
-				return answer ? [{ ...toApprovalRequest(row), answer }] : [];
+				const request = toApprovalRequest(row);
+				const answer = readApprovalOutcome(request.call);
+				return answer ? [{ ...request, answer }] : [];
 			}),
 		};
 	});
@@ -1149,19 +1150,14 @@ function toApprovalRequest(row: ApprovalRow): ApprovalRequest {
 	};
 }
 
-function readApprovalOutcome(row: ApprovalRow): AnsweredApproval["answer"] | null {
-	const { approvalStatus, decidedAt, finishedAt, error } = row.call;
-	if (approvalStatus !== "allowed" && approvalStatus !== "denied") return null;
+function readApprovalOutcome(call: ApprovalRequest["call"]): AnsweredApproval["answer"] | null {
+	const { approval, finishedAt } = call;
+	if (!approval || (approval.status !== "allowed" && approval.status !== "denied")) return null;
+	const { status, decidedByName, decidedAt, closedBecause } = approval;
 	if (decidedAt) {
-		return {
-			status: approvalStatus,
-			decidedByName: row.decidedByName,
-			decidedAt: decidedAt.toISOString(),
-		};
+		return { status, decidedByName, decidedAt };
 	}
-	return approvalStatus === "denied" && finishedAt && error !== null
-		? { status: "closed", closedAt: finishedAt.toISOString() }
-		: null;
+	return closedBecause && finishedAt ? { status: "closed", closedAt: finishedAt } : null;
 }
 
 /** A member's standing as an approver, loaded when it is first needed. */
