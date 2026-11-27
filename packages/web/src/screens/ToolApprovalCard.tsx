@@ -58,7 +58,7 @@ export function ToolApprovalCard({
 	canApprove: boolean;
 	connector?: MarkedConnector;
 }) {
-	const review = useReviewToolCall(chatId);
+	const review = useReviewToolCall(chatId, call.approval?.id);
 	const [reviewing, setReviewing] = useState(false);
 	const answerable = awaitsApproval(call) && canApprove;
 	const boundConnector = useApprovalConnector(call, projectId, bot.id, answerable);

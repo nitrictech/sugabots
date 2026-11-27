@@ -94,6 +94,42 @@ export const Default = meta.story({
 	},
 });
 
+/** A new approval for the same tool call can be answered as soon as it arrives. */
+export const ReplacementRequest = meta.story({
+	beforeEach({ msw }) {
+		let waiting = approvals.waiting;
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/chats/approvals`, () =>
+				HttpResponse.json({ ...approvals, waiting }),
+			),
+			http.post(`${API}/tool-calls/:toolCallId/approval`, async ({ request: decision }) => {
+				await expect(decision.json()).resolves.toEqual({
+					approvalId: "approval-1",
+					decision: "allow_once",
+				});
+				const replacement = request("01", "stripe__send_quote", {
+					id: "approval-2",
+					status: "pending",
+					approvers: "chat",
+					decidedByName: null,
+					decidedAt: null,
+				});
+				waiting = [
+					{ ...replacement, call: { ...replacement.call, input: { customer: "Northwind" } } },
+				];
+				return new HttpResponse(null, { status: 202 });
+			}),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		const card = within(await canvas.findByRole("article", { name: /Send quote/ }));
+		await userEvent.click(card.getByRole("button", { name: /^Allow/ }));
+		await expect(await card.findByText("Northwind")).toBeVisible();
+		await expect(card.getByRole("button", { name: /^Allow/ })).toBeEnabled();
+		await expect(card.getByRole("button", { name: /^Deny/ })).toBeEnabled();
+	},
+});
+
 /** A request opened in full: every field in a table, Allow and Deny, and its chat. */
 export const Opened = meta.story({
 	render: () => (

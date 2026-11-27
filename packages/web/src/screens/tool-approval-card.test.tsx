@@ -88,6 +88,37 @@ describe("an approval request", () => {
 		});
 	});
 
+	it("allows the replacement request on the same tool call", async () => {
+		const first = asking({ team: "Platform" });
+		const { recorded } = show(first);
+		fireEvent.click(inCard(/^Allow/));
+		await waitFor(() => expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(true));
+
+		recorded(
+			asking(
+				{ team: "Operations" },
+				{
+					id: "approval-2",
+					status: "pending",
+					approvers: "chat",
+					decidedByName: null,
+					decidedAt: null,
+				},
+			),
+		);
+		expect(inCard(/^Allow/).hasAttribute("disabled")).toBe(false);
+		expect(inCard(/^Deny/).hasAttribute("disabled")).toBe(false);
+		fireEvent.click(inCard(/^Allow/));
+		await waitFor(() =>
+			expect(client.api.approvals.decide).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					params: { toolCallId: first.id },
+					payload: { approvalId: "approval-2", decision: "allow_once" },
+				}),
+			),
+		);
+	});
+
 	it.each([
 		{
 			canApprove: true,

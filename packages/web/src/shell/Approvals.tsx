@@ -139,7 +139,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 		awaitsApproval(call),
 	);
 	const { project, askedIn: asked } = useAskedIn(request);
-	const review = useReviewToolCall(request.chatId);
+	const review = useReviewToolCall(request.chatId, call.approval?.id);
 	return (
 		<article
 			aria-label={`${bot.name}: ${action}`}

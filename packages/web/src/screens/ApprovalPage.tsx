@@ -60,7 +60,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 		request,
 		found.kind === "waiting" && awaitsApproval(call),
 	);
-	const review = useReviewToolCall(request.chatId);
+	const review = useReviewToolCall(request.chatId, call.approval?.id);
 	const { project, askedIn } = useAskedIn(request);
 
 	return (

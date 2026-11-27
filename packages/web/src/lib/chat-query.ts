@@ -155,9 +155,10 @@ export function useChat(chatId: string | undefined) {
 	};
 }
 
-export function useReviewToolCall(chatId: string | null) {
+export function useReviewToolCall(chatId: string | null, approvalId: string | undefined) {
 	const queries = useQueryClient();
-	return useMutation({
+	const review = useMutation({
+		mutationKey: ["review-tool-call", approvalId],
 		/**
 		 * Decides the approval the member was shown on `call`: one asked again
 		 * since has a new approval, which this doesn't decide.
@@ -181,6 +182,13 @@ export function useReviewToolCall(chatId: string | null) {
 				refreshEveryWorkspaceApprovals(queries),
 			]),
 	});
+	const current = review.variables?.call.approval?.id === approvalId;
+	return {
+		mutate: review.mutate,
+		isPending: current && review.isPending,
+		isSuccess: current && review.isSuccess,
+		error: current ? review.error : null,
+	};
 }
 
 /**
