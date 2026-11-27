@@ -1333,9 +1333,9 @@ declare const loadedStep: Parameters<Turns.Tools.Interface["forStep"]>[2];
 declare const recorder: Turns.Tools.ToolCallRecorder;
 declare const lostEnding: Parameters<Turns.Records.Interface["endLost"]>[1];
 
-export const turnRecordMistakes = named(principal, "chat", "turn", (principal, chat, turn) =>
+export const turnRecordMistakes = named(principal, "chat", "turn", (principal, _chat, turn) =>
 	Effect.gen(function* () {
-		const running = yield* proveRunsTurn(yield* proveRealReachesChat(principal, chat), turn);
+		const running = yield* proveRunsTurn(principal, turn);
 		const ending = yield* proveEndsTurn(principal, turn);
 
 		// @ts-expect-error TS2739 [from type 'RunsTurn<NameA, NameC>'] Loading step data requires a running turn.

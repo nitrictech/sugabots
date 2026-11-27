@@ -6,8 +6,7 @@
  * principal, so none is an operation with a contract.
  *
  * Each method but `endLost` first proves that the principal runs its turn
- * (`RunsTurn`): it is the turn's own, still reaches the turn's chat, and the
- * turn hasn't ended. Each write then checks again, in its own SQL, that the
+ * (`RunsTurn`): it was admitted to run the turn, and the turn hasn't ended. Each write then checks again, in its own SQL, that the
  * principal's execution of the turn is still the current one, so an execution
  * a newer one took over records nothing more.
  */
@@ -20,7 +19,6 @@ import { Turns, WorkAdmission } from "../chats/turns/turns.ts";
 import type { BotPrincipal } from "../principal.ts";
 import { proveEndsTurn } from "../proofs/ends-turn.ts";
 import { named } from "../proofs/proof.ts";
-import { proveReachesChat } from "../proofs/reaches-chat.ts";
 import { proveRunsTurn, type RunsTurn } from "../proofs/runs-turn.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { Operations } from "./registry.ts";
@@ -142,10 +140,9 @@ export const asRunningTurn = <A, E, R>(
 	principal: BotPrincipal,
 	use: <P, T>(runsTurn: RunsTurn<P, T>) => Effect.Effect<A, E, R>,
 ) =>
-	named(principal, principal.chat, principal.turn, (principal, chat, turn) =>
+	named(principal, principal.turn, (principal, turn) =>
 		Effect.gen(function* () {
-			const reach = yield* proveReachesChat(principal, chat);
-			const runsTurn = yield* proveRunsTurn(reach, turn);
+			const runsTurn = yield* proveRunsTurn(principal, turn);
 			return yield* use(runsTurn);
 		}),
 	);

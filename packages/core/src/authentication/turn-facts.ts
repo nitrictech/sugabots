@@ -38,6 +38,7 @@ export interface TurnFacts {
 	readonly workspace: string;
 	readonly bot: string;
 	readonly status: TurnStatus;
+	readonly executionNumber: number;
 	readonly reason: TurnReason | null;
 	/** The project the turn's chat is in; none for a chat in no project, such as a system chat. */
 	readonly project: string | null;
@@ -83,6 +84,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 				chat: turn.chatId,
 				bot: turn.botId,
 				status: turn.status,
+				executionNumber: turn.executionNumber,
 				reason: turn.reason,
 				workspace: placedChat.workspaceId,
 				project: placedChat.projectId,
@@ -112,6 +114,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 			workspace: row.workspace,
 			bot: row.bot,
 			status: row.status,
+			 executionNumber: row.executionNumber,
 			reason: row.reason,
 			project: row.project,
 			inOwnChats: row.defaultOfBot === row.bot,

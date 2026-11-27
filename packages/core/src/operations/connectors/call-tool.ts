@@ -4,7 +4,6 @@ import { Effect } from "effect";
 import { Turns } from "../../chats/turns/turns.ts";
 import { proveConnectorCall } from "../../proofs/connector-call.ts";
 import { named } from "../../proofs/proof.ts";
-import { proveReachesChat } from "../../proofs/reaches-chat.ts";
 import { proveRunsTurn } from "../../proofs/runs-turn.ts";
 import { ConnectorCalls } from "../../providers/connectors/connector-calls.ts";
 import { defineOperation } from "../operation.ts";
@@ -22,9 +21,9 @@ export const callTool = defineOperation(
 				input.connectorId,
 				call,
 				(acting, turn, connector, calling) =>
-					named(principal.chat, input, (chat, approvedInput) =>
+					named(input, (approvedInput) =>
 						Effect.gen(function* () {
-							const running = yield* proveRunsTurn(yield* proveReachesChat(acting, chat), turn);
+							const running = yield* proveRunsTurn(acting, turn);
 							const described = calls.described(principal, input.connectorId, input.tool);
 							if (!described && calling.value.kind === "approvalCheck")
 								return yield* new ResourceHidden({ resource: "connector" });

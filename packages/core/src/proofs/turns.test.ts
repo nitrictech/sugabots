@@ -21,7 +21,7 @@ import { query } from "../database/database.ts";
 import { computer, connector, projectMember, toolCall, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { ApprovalCheckReached, type Call } from "../operations/operation.ts";
-import type { BotForAsker, Principal } from "../principal.ts";
+import type { Principal } from "../principal.ts";
 import {
 	type ApprovalRule,
 	approvalNeed,
@@ -202,14 +202,9 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 	});
 
 	describe("RunsTurn and EndsTurn", () => {
-		const runs = (principal: BotForAsker | Principal, chatId: string, turnId: string) =>
+		const runs = (principal: Principal, chatId: string, turnId: string) =>
 			outcome(
-				named(principal, chatId, turnId, (p, c, t) =>
-					proveReachesChat(p, c).pipe(
-						Effect.flatMap((reach) => proveRunsTurn(reach, t)),
-						Effect.asVoid,
-					),
-				),
+				named(principal, chatId, turnId, (p, _chat, t) => proveRunsTurn(p, t).pipe(Effect.asVoid)),
 			);
 		const ends = (principal: Principal, turnId: string) =>
 			outcome(named(principal, turnId, (p, t) => proveEndsTurn(p, t).pipe(Effect.asVoid)));
@@ -229,7 +224,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await ends(edsBot, edsBot.turn)).toBe("TurnEnded");
 		});
 
-		it("stops a turn whose asker lost the chat from running, but lets it end", async () => {
+		it("lets an admitted turn carry on after its asker loses reach", async () => {
 			const { a } = world;
 			const projectId = await seedProject(a.workspace, {
 				leadBotId: a.pub.id,
@@ -242,7 +237,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 					.delete(projectMember)
 					.where(and(eq(projectMember.projectId, projectId), eq(projectMember.memberId, a.quinn))),
 			);
-			expect(await runs(quinnsBot, chatId, quinnsBot.turn)).toBe("ResourceHidden");
+			expect(await runs(quinnsBot, chatId, quinnsBot.turn)).toBe("ok");
 			expect(await ends(quinnsBot, quinnsBot.turn)).toBe("ok");
 		});
 

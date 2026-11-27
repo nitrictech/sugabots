@@ -11,14 +11,15 @@ import {
 	type BotForAsker,
 	type TurnBounds,
 } from "../principal.ts";
+import { turnReachesChat } from "../proofs/facts.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { askerOf, hasMemberBounds, type TurnFacts, turnFacts } from "./turn-facts.ts";
 
 /**
  * The authenticator for a turn, which the bot loop calls each time a turn
  * starts or resumes: from the turn's stored ids, who the bot is and who it
- * acts for. It checks no permission; each operation the turn calls proves
- * access for the principal this builds.
+ * acts for. The first execution checks that the bot and its asker reach
+ * the chat. A positive execution number records admission for later executions.
  *
  * Each principal it builds is a new execution of the turn: it raises the
  * turn's execution number, which the principal carries, so the writes of an
@@ -58,6 +59,7 @@ export const make = Effect.gen(function* () {
 					if (project === null) {
 						return yield* new TurnUnavailable({ turn: turnId, reason: "inNoProject" });
 					}
+					const admitted = facts.executionNumber > 0 || (yield* query((db) => turnReachesChat(db, facts)));
 					const asker = askerOf(facts);
 					if (asker !== undefined) {
 						return authenticated.botForAsker({
@@ -67,7 +69,7 @@ export const make = Effect.gen(function* () {
 							askedByAutomation: facts.askedBy.kind === "automation",
 							chat: facts.chat,
 							turn: facts.turn,
-							executionNumber: yield* newExecution(facts.turn),
+							executionNumber: admitted ? yield* newExecution(facts.turn) : 0,
 							bounds: boundsOf(facts, asker, project),
 						});
 					}
@@ -79,7 +81,7 @@ export const make = Effect.gen(function* () {
 							run: facts.run.run,
 							chat: facts.chat,
 							turn: facts.turn,
-							executionNumber: yield* newExecution(facts.turn),
+							executionNumber: admitted ? yield* newExecution(facts.turn) : 0,
 							bounds: { kind: "chat", project },
 						});
 					}
