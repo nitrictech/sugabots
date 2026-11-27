@@ -2,11 +2,17 @@ import type { AnsweredApproval, ApprovalRequest } from "@sugabots/contracts";
 import { Link, linkOptions } from "@tanstack/react-router";
 import { ChevronRight, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { useApprovalToolSource, useAskedIn } from "@/lib/approval-tool-source.ts";
+import {
+	hostRequestPresentation,
+	useApprovalToolSource,
+	useAskedIn,
+} from "@/lib/approval-tool-source.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import { useWorkspaceApprovals } from "@/lib/chats.ts";
+import { stepLabel } from "@/lib/tool-names.ts";
 import { PendingApprovalAnswer, RequestChatLink } from "@/screens/ApprovalPage.tsx";
 import { ApprovalDestination, FoldedRequest } from "@/screens/ToolApprovalCard.tsx";
+import { awaitsApproval } from "@/screens/tool-activity.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { ListTime, Page } from "@/shell/Page.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
@@ -128,7 +134,10 @@ function approvalLink(request: ApprovalRequest) {
  */
 function WaitingCard({ request }: { request: ApprovalRequest }) {
 	const { bot, call } = request;
-	const { action, hostRequest } = useApprovalToolSource(request);
+	const { action, hostRequest, connector, toolSourceName } = useApprovalToolSource(
+		request,
+		awaitsApproval(call),
+	);
 	const { project, askedIn: asked } = useAskedIn(request);
 	const review = useReviewToolCall(request.chatId);
 	return (
@@ -142,6 +151,8 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 			>
 				{hostRequest ? (
 					<ConnectorMark name={action} icon={hostRequest.icon} size="md" />
+				) : connector ? (
+					<ConnectorMark name={toolSourceName} markId={connector.markId} size="md" />
 				) : (
 					<BotAvatar color={bot.color} eyes={bot.eyes} shape={bot.shape} size={24} />
 				)}
@@ -165,7 +176,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 				/>
 			</Link>
 			<div className="ml-9 min-w-0 max-md:ml-0">
-				<ApprovalDestination browserUrl={call.approval?.browserUrl} />
+				<ApprovalDestination browserUrl={call.approval?.browserUrl} connectorUrl={connector?.url} />
 				<FoldedRequest input={call.input} />
 			</div>
 			<div className="ml-9 flex flex-wrap items-center gap-3 max-md:ml-0 max-md:flex-col max-md:items-stretch">
@@ -184,8 +195,9 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 
 /** A request already answered: which bot, what it would have done, which way it went, and when. */
 function ResolvedRow({ request }: { request: AnsweredApproval }) {
-	const { action, hostRequest } = useApprovalToolSource(request);
-	const { bot, answer } = request;
+	const { bot, answer, call } = request;
+	const action = stepLabel(call.tool);
+	const hostRequest = hostRequestPresentation(call.tool, bot.name);
 	return (
 		<Link
 			{...approvalLink(request)}

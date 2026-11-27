@@ -1,6 +1,7 @@
 import type {
 	AnsweredApproval,
 	ApprovalRequest,
+	ProjectBotConnector,
 	ToolCallPart,
 	WorkspaceApprovals,
 } from "@sugabots/contracts";
@@ -8,7 +9,7 @@ import { HttpResponse, http } from "msw";
 import { expect, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { storyApproval } from "@/shell/approval-story.test-support.ts";
-import { revenue } from "@/shell/story-fixtures.test-support.ts";
+import { growthDesk, revenue } from "@/shell/story-fixtures.test-support.ts";
 import { appHandlers, StoryApp, storyWorkspace } from "@/story-app.test-support.tsx";
 
 /*
@@ -55,7 +56,21 @@ const denied = {
 	decidedByName: "Rowan Ellis",
 	decidedAt: "2026-09-18T09:04:00.000Z",
 } as const;
-const answerable = request("01", "awaiting_approval", pending);
+const botConnector: ProjectBotConnector = {
+	id: "0199a3a0-0000-7000-8000-000000000820",
+	name: "Growth Desk Billing",
+	url: "https://billing.example.com/mcp",
+	kind: "mcp",
+	addressRevision: 1,
+	configurationRevision: 2,
+	botId: growthDesk.id,
+	on: true,
+	addressChanged: false,
+};
+const answerable = request("01", "awaiting_approval", {
+	...pending,
+	connector: { id: botConnector.id, revision: 2 },
+});
 const stopped = request("02", "failed", pending);
 const answered: AnsweredApproval = { ...request("03", "failed", denied), answer: denied };
 
@@ -89,6 +104,9 @@ const meta = preview.meta({
 	beforeEach({ msw }) {
 		msw.use(
 			http.get(`${API}/workspaces/:workspace/chats/approvals`, () => HttpResponse.json(approvals)),
+			http.get(`${API}/projects/${revenue.id}/bot-connectors`, () =>
+				HttpResponse.json([botConnector]),
+			),
 			...appHandlers(),
 		);
 	},
@@ -104,6 +122,10 @@ export const Answerable = meta.story({
 	play: async ({ canvas }) => {
 		await expect(await canvas.findByRole("button", { name: /^Allow/ })).toBeEnabled();
 		await expect(canvas.getByRole("button", { name: /^Deny/ })).toBeEnabled();
+		await expect(
+			await canvas.findByText("Growth Desk wants to use Growth Desk Billing"),
+		).toBeVisible();
+		await expect(canvas.getByText("Destination https://billing.example.com/mcp")).toBeVisible();
 	},
 });
 

@@ -145,6 +145,7 @@ export const connectorSchema = Schema.Struct({
 	/** Prefixes the server's tool names for the model: `exa__web_search_exa`. */
 	handle: handleSchema,
 	kind: connectorKindSchema,
+	configurationRevision: Schema.optional(Schema.Int),
 	/** The MCP server's address; for GitHub, the page of the account its app is installed on, or of the app until it is. */
 	url: providerUrlSchema,
 	auth: connectorAuthSchema,
@@ -201,6 +202,7 @@ export const projectBotConnectorSchema = Schema.Struct({
 	id: uuidSchema,
 	name: Schema.String,
 	kind: connectorKindSchema,
+	configurationRevision: Schema.optional(Schema.Int),
 	/**
 	 * Where the connector sends what the bot gives it, now. Null for a member
 	 * who neither manages the project nor sees the bot's own connectors.

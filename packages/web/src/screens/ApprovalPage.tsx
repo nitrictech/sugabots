@@ -56,7 +56,10 @@ function findRequest(
 function ApprovalDetail({ found }: { found: ListedRequest }) {
 	const { request } = found;
 	const { call, bot } = request;
-	const { connector, toolSourceName, action, hostRequest } = useApprovalToolSource(request);
+	const { connector, toolSourceName, action, hostRequest } = useApprovalToolSource(
+		request,
+		found.kind === "waiting" && awaitsApproval(call),
+	);
 	const review = useReviewToolCall(request.chatId);
 	const { project, askedIn } = useAskedIn(request);
 
@@ -100,7 +103,7 @@ function ApprovalDetail({ found }: { found: ListedRequest }) {
 					</div>
 					<p className="m-0 text-subtle-foreground text-xs max-md:hidden">Asked {askedIn}</p>
 				</header>
-				<ApprovalDestination browserUrl={call.approval?.browserUrl} />
+				<ApprovalDestination browserUrl={call.approval?.browserUrl} connectorUrl={connector?.url} />
 				<ExactRequest input={call.input} />
 				<div className="flex flex-wrap items-center gap-3 pt-1 max-md:flex-col max-md:items-stretch max-md:gap-4">
 					{found.kind === "answered" ? (

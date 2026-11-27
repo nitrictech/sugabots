@@ -1,6 +1,6 @@
 import type { ApprovalRequest } from "@sugabots/contracts";
 import { Globe } from "lucide-react";
-import { useMarkedConnectors } from "@/lib/connectors.ts";
+import { useApprovalConnector } from "@/lib/connectors.ts";
 import { formatTimeAfterVerb } from "@/lib/list-time.ts";
 import { useProjects } from "@/lib/projects.ts";
 import { connectorLabel, HOST_REQUEST_TOOL, splitToolKey, stepLabel } from "@/lib/tool-names.ts";
@@ -18,10 +18,14 @@ export function hostRequestPresentation(tool: string, botName: string) {
  * them: its tool source's connector for its mark, the tool source's name, and
  * the action. A step that is not a connector's tool is named by its action.
  */
-export function useApprovalToolSource(request: ApprovalRequest) {
-	const markedConnectorsOf = useMarkedConnectors([request.bot.id], request.projectId);
+export function useApprovalToolSource(request: ApprovalRequest, canApprove: boolean) {
 	const { handle, name } = splitToolKey(request.call.tool);
-	const connector = markedConnectorsOf(request.bot.id).get(handle);
+	const connector = useApprovalConnector(
+		request.call,
+		request.projectId,
+		request.bot.id,
+		canApprove,
+	);
 	const action = stepLabel(request.call.tool, name);
 	return {
 		connector,

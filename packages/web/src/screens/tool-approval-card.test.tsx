@@ -43,7 +43,7 @@ function asking(
 	};
 }
 
-function show(call: ToolCallPart, canApprove = true) {
+function show(call: ToolCallPart, canApprove = true, projectId?: string) {
 	const queries = createQueryClient();
 	const card = (shown: ToolCallPart) => (
 		<QueryClientProvider client={queries}>
@@ -52,6 +52,7 @@ function show(call: ToolCallPart, canApprove = true) {
 				bot={bot}
 				chatId="0199a3a0-0000-7000-8000-0000000000b2"
 				canApprove={canApprove}
+				projectId={projectId}
 				connector={{ name: "Linear", markId: "linear" }}
 			/>
 		</QueryClientProvider>
@@ -86,6 +87,63 @@ describe("an approval request", () => {
 			decision: "allow_once",
 		});
 	});
+
+	it.each([
+		{ canApprove: true, addressVisible: true, revision: 2, showsDestination: true },
+		{ canApprove: false, addressVisible: true, revision: 2, showsDestination: false },
+		{ canApprove: true, addressVisible: false, revision: 2, showsDestination: false },
+		{ canApprove: true, addressVisible: true, revision: 3, showsDestination: false },
+	])(
+		"shows the recorded connector and respects destination access ($canApprove, $addressVisible, revision $revision)",
+		async ({ canApprove, addressVisible, revision, showsDestination }) => {
+			const projectId = "0199a3a0-0000-7000-8000-000000000002";
+			const connectorId = "0199a3a0-0000-7000-8000-000000000003";
+			const url = "https://issues.example.com/mcp";
+			client.api.connectors.list.mockReturnValue(
+				Effect.succeed([
+					{
+						id: "0199a3a0-0000-7000-8000-000000000004",
+						name: "Project Linear",
+						enabled: false,
+						restricted: true,
+					},
+				]),
+			);
+			client.api.connectors.listProjectBots.mockReturnValue(
+				Effect.succeed([
+					{
+						id: connectorId,
+						name: "Bot Linear",
+						url: addressVisible ? url : null,
+						kind: "mcp",
+						addressRevision: 1,
+						configurationRevision: revision,
+						botId: "0199a3a0-0000-7000-8000-000000000005",
+						on: true,
+						addressChanged: false,
+					},
+				]),
+			);
+			show(
+				asking(
+					{ title: "Move the release" },
+					{
+						id: "approval-1",
+						status: "pending",
+						approvers: "chat",
+						decidedByName: null,
+						decidedAt: null,
+						connector: { id: connectorId, revision: 2 },
+					},
+				),
+				canApprove,
+				projectId,
+			);
+
+			await screen.findByText("Linear Handler wants to use Bot Linear");
+			expect(screen.queryByText(`Destination ${url}`) !== null).toBe(showsDestination);
+		},
+	);
 
 	it("keeps the answer given until the turn records it, then announces it", async () => {
 		const { recorded } = show(asking({ team: "Platform" }));

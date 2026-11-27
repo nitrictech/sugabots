@@ -7,6 +7,7 @@ import type {
 	ConnectorWithTools,
 	NewConnector,
 	ProjectBotConnector,
+	ToolCallPart,
 	UnsavedConnector,
 } from "@sugabots/contracts";
 import { connectorMarkFor, connectorSignInFailures, toolAccessCountsOf } from "@sugabots/contracts";
@@ -64,9 +65,10 @@ function connectorListQuery(projectId: string) {
  * The own connectors of a project's bots, each with whether it is on in the
  * project, where a bot uses one only while it is.
  */
-export function useProjectBotConnectors(projectId: string) {
+export function useProjectBotConnectors(projectId: string, enabled = true) {
 	return useQuery({
 		queryKey: projectBotConnectorsKey(projectId),
+		enabled,
 		queryFn: ({ signal }) =>
 			Effect.runPromise(client.api.connectors.listProjectBots({ params: { projectId } }), {
 				signal,
@@ -170,6 +172,32 @@ function markedConnectorsByHandle(connectors: readonly Connector[]): Map<string,
 			{ name: connector.name, markId: connectorMarkFor(connector) },
 		]),
 	);
+}
+
+export function useApprovalConnector(
+	call: ToolCallPart,
+	projectId: string | null | undefined,
+	botId: string | undefined,
+	canApprove: boolean,
+) {
+	const binding = call.approval?.connector;
+	const defaultProjects = useBotDefaultProjects(botId ? [botId] : []);
+	const project = projectId ?? (botId ? defaultProjects.get(botId) : undefined);
+	const enabled = Boolean(project && binding);
+	const { data: projectConnectors } = useQuery({ ...connectorListQuery(project ?? ""), enabled });
+	const { data: botConnectors } = useProjectBotConnectors(project ?? "", enabled);
+	if (!binding) return undefined;
+
+	const connector =
+		projectConnectors?.find(({ id }) => id === binding.id) ??
+		botConnectors?.find(({ id }) => id === binding.id);
+	if (!connector) return undefined;
+	if ("restricted" in connector) return { name: connector.name, markId: undefined, url: null };
+	return {
+		name: connector.name,
+		markId: connectorMarkFor(connector),
+		url: canApprove && connector.configurationRevision === binding.revision ? connector.url : null,
+	};
 }
 
 /**

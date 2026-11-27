@@ -113,6 +113,7 @@ export const client = {
 		},
 		connectors: {
 			list: vi.fn(),
+			listProjectBots: vi.fn(),
 			create: vi.fn(),
 			get: vi.fn(),
 			update: vi.fn(),

@@ -540,6 +540,19 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		expect(await storedCall(pending.id)).toMatchObject({ approvalStatus: "pending" });
 	});
 
+	it("shows the recorded connector when listing a waiting approval", async () => {
+		const pending = await park(askedCall());
+		const approvals = await chatsAs(adminId).approvals(workspaceId);
+		expect(approvals.waiting).toEqual([
+			expect.objectContaining({
+				call: expect.objectContaining({
+					id: pending.id,
+					approval: expect.objectContaining({ connector: { id: connectorId, revision: 1 } }),
+				}),
+			}),
+		]);
+	});
+
 	it("refuses an allowed call after the reviewed connector configuration changes", async () => {
 		const asked = askedCall({ toolCallId: "sdk-revision" });
 		await allowAndResume(asked);

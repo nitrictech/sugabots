@@ -14,7 +14,7 @@ import {
 import { hostRequestPresentation } from "@/lib/approval-tool-source.ts";
 import { awaitedApprovers } from "@/lib/approvals.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
-import type { MarkedConnector } from "@/lib/connectors.ts";
+import { type MarkedConnector, useApprovalConnector } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatCount } from "@/lib/name-list.ts";
 import { connectorLabel, splitToolKey, stepLabel, wordsFromKey } from "@/lib/tool-names.ts";
@@ -38,26 +38,31 @@ import { awaitsApproval } from "./tool-activity.ts";
  * request is read as a page rather than in a box inside the chat.
  */
 
-type Asker = Pick<BotParticipant, "name" | "color" | "eyes" | "shape">;
+type Asker = Pick<BotParticipant, "name" | "color" | "eyes" | "shape"> & { id?: string };
 type Decision = "allow_once" | "deny";
 
 export function ToolApprovalCard({
 	call,
 	bot,
 	chatId,
+	projectId,
 	canApprove,
-	connector,
+	connector: legacyConnector,
 }: {
 	call: ToolCallPart;
 	/** The bot whose reply is waiting on this. */
 	bot: Asker;
 	chatId: string;
+	projectId?: string | null | undefined;
 	/** Whether the reader may answer it. */
 	canApprove: boolean;
 	connector?: MarkedConnector;
 }) {
 	const review = useReviewToolCall(chatId);
 	const [reviewing, setReviewing] = useState(false);
+	const answerable = awaitsApproval(call) && canApprove;
+	const boundConnector = useApprovalConnector(call, projectId, bot.id, answerable);
+	const connector = call.approval?.connector ? boundConnector : legacyConnector;
 	const { handle, name } = splitToolKey(call.tool);
 	const where = handle ? connectorLabel(handle, connector?.name) : "";
 	const action = stepLabel(call.tool, name);
@@ -69,7 +74,6 @@ export function ToolApprovalCard({
 		connector,
 		icon: hostRequest?.icon,
 	};
-	const answerable = awaitsApproval(call) && canApprove;
 	// The answer stays given from when it is sent until the chat's events say
 	// the call is decided, a moment after the decision is accepted.
 	const sent = review.isPending || review.isSuccess;
@@ -101,7 +105,10 @@ export function ToolApprovalCard({
 			<div className="flex min-w-0 max-w-md flex-1 flex-col gap-2.5 rounded-bubble bg-card pt-2.5 pr-3 pb-3 pl-2.5 text-foreground">
 				<StepHeading step={step} />
 				<div className="min-w-0 md:ml-8">
-					<ApprovalDestination browserUrl={call.approval?.browserUrl} />
+					<ApprovalDestination
+						browserUrl={call.approval?.browserUrl}
+						connectorUrl={boundConnector?.url}
+					/>
 					<FoldedRequest input={call.input} />
 				</div>
 				<div
@@ -137,6 +144,7 @@ export function ToolApprovalCard({
 			<ReviewSheet
 				input={call.input}
 				browserUrl={call.approval?.browserUrl}
+				connectorUrl={boundConnector?.url}
 				step={step}
 				open={reviewing}
 				onOpenChange={setReviewing}
@@ -288,10 +296,19 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 	);
 }
 
-export function ApprovalDestination({ browserUrl }: { browserUrl?: string | undefined }) {
-	if (!browserUrl) return null;
+export function ApprovalDestination({
+	browserUrl,
+	connectorUrl,
+}: {
+	browserUrl?: string | undefined;
+	connectorUrl?: string | null | undefined;
+}) {
+	const address = browserUrl ?? connectorUrl;
+	if (!address) return null;
 	return (
-		<p className="m-0 pb-1.5 text-muted-foreground text-xs wrap-anywhere">Page {browserUrl}</p>
+		<p className="m-0 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
+			{browserUrl ? "Page" : "Destination"} {address}
+		</p>
 	);
 }
 
@@ -316,6 +333,7 @@ const FOLDED_CLASSES_ON_PHONE =
 function ReviewSheet({
 	input,
 	browserUrl,
+	connectorUrl,
 	step,
 	open,
 	onOpenChange,
@@ -324,6 +342,7 @@ function ReviewSheet({
 }: {
 	input: ToolCallPart["input"];
 	browserUrl: string | undefined;
+	connectorUrl: string | null | undefined;
 	step: Step;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -355,7 +374,7 @@ function ReviewSheet({
 				<ScrollArea className="min-h-0 flex-1">
 					<div className="flex flex-col gap-4 px-4 py-4">
 						<ReviewHeading step={step} bot={bot} headingId={headingId} />
-						<ApprovalDestination browserUrl={browserUrl} />
+						<ApprovalDestination browserUrl={browserUrl} connectorUrl={connectorUrl} />
 						<ExactRequest input={input} />
 					</div>
 				</ScrollArea>

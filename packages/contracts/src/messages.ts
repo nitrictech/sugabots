@@ -293,6 +293,7 @@ export const toolCallPartSchema = Schema.Struct({
 			decidedByName: Schema.NullOr(Schema.String),
 			decidedAt: Schema.NullOr(isoTimestampSchema),
 			browserUrl: Schema.optional(Schema.String),
+			connector: Schema.optional(Schema.Struct({ id: uuidSchema, revision: Schema.Int })),
 		}),
 	),
 	error: Schema.NullOr(Schema.String),

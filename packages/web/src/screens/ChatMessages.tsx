@@ -234,6 +234,7 @@ export function ChatMessages({
 							participants={participants}
 							membersReachingProject={membersReachingProject}
 							chatKind={chatKind}
+							projectId={projectId}
 							markedConnectors={
 								message.author.kind === "bot"
 									? findMarkedConnectors(message.author.id)
@@ -360,6 +361,7 @@ function ChatMessage({
 	participants,
 	membersReachingProject,
 	chatKind,
+	projectId,
 	markedConnectors,
 	fileNames,
 	approvalPermissions,
@@ -393,6 +395,7 @@ function ChatMessage({
 	participants: Participant[];
 	membersReachingProject: readonly MemberParticipant[];
 	chatKind: ChatKind;
+	projectId?: string | null | undefined;
 	/** The connectors its bot's calls were made with, by handle. */
 	markedConnectors: ReadonlyMap<string, MarkedConnector>;
 	/** The chat's files by id, for the work line's calls that read them. */
@@ -469,6 +472,7 @@ function ChatMessage({
 						call={call}
 						bot={bot}
 						chatId={message.chatId}
+						projectId={projectId}
 						canApprove={mayAnswer(call, message.id, approvalPermissions)}
 						connector={markedConnectors.get(splitToolKey(call.tool).handle)}
 					/>

@@ -42,6 +42,10 @@ export function toToolCallPart(
 	decidedByName: string | null = null,
 ): ToolCallPart {
 	const browserUrl = row.approvalResolvedTargets?.browserUrl;
+	const approvalConnector =
+		row.connectorId && row.connectorRevision !== null
+			? { id: row.connectorId, revision: row.connectorRevision }
+			: undefined;
 	return {
 		type: "tool_call",
 		id: row.id,
@@ -58,6 +62,7 @@ export function toToolCallPart(
 						decidedByName,
 						decidedAt: row.decidedAt?.toISOString() ?? null,
 						...(browserUrl && { browserUrl }),
+						...(approvalConnector && { connector: approvalConnector }),
 					}
 				: null,
 		error: row.error,
