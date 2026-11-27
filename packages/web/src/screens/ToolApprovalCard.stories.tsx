@@ -563,6 +563,39 @@ const askingToChangeRoutine = (routineChange: "add" | "replace") =>
 		},
 	});
 
+export const CreateWithRoutine = meta.story({
+	parameters: {
+		docs: {
+			description: {
+				story: "An approval to create an automation with a weekday routine in Sydney.",
+			},
+		},
+	},
+	args: {
+		call: asking({
+			tool: "create_automation",
+			input: {
+				name: "Morning standup",
+				instructions: "Ask the team what they are working on today.",
+				routineExpression: "0 9 * * 1-5",
+			},
+			approval: {
+				id: "approval-new-routine",
+				status: "pending",
+				approvers: "chat",
+				decidedAt: null,
+				decidedByName: null,
+				routineTimeZone: "Australia/Sydney",
+			},
+		}),
+		connector: undefined,
+	},
+	globals: { theme: "light" },
+	play: async ({ canvas }) => {
+		await waitFor(() => expect(canvas.getByText("Runs in the Sydney time zone.")).toBeVisible());
+	},
+});
+
 export const AddFirstRoutine = meta.story({
 	parameters: {
 		docs: { description: { story: "The first routine shows the time zone it will run in." } },
@@ -576,7 +609,7 @@ export const AddFirstRoutine = meta.story({
 		await waitFor(() =>
 			expect(canvas.getByText("Adds the automation's first routine.")).toBeVisible(),
 		);
-		await expect(canvas.getByText("Runs in the Australia/Sydney time zone.")).toBeVisible();
+		await expect(canvas.getByText("Runs in the Sydney time zone.")).toBeVisible();
 	},
 });
 
@@ -595,6 +628,6 @@ export const ReplaceRoutineOnPhone = meta.story({
 		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
 		const review = await screen.findByRole("dialog");
 		await expect(review).toHaveTextContent(message);
-		await expect(review).toHaveTextContent("Runs in the Australia/Sydney time zone.");
+		await expect(review).toHaveTextContent("Runs in the Sydney time zone.");
 	},
 });

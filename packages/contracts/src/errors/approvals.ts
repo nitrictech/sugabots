@@ -61,7 +61,7 @@ export class ToolApprovalConflict
 			case "automationRemoved":
 				return userText`This approval was closed because the automation was removed.`;
 			case "botCanNoLongerJoinProject":
-				return userText`This approval was closed because that bot can't join this project. Ask for a bot that can join the project.`;
+				return userText`This approval was closed because that bot can't join this project. Ask to add a public bot.`;
 			case "connectorChanged":
 				return userText`This approval was closed because the connector or its tool settings changed.`;
 			case "connectorOff":

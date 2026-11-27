@@ -44,6 +44,7 @@ import {
 	callsOf,
 	failedCall,
 	parkedCallOf,
+	resumeAt,
 	scriptedSteps,
 	toolResultFor,
 } from "./testing.ts";
@@ -309,15 +310,9 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			const parked = await approve(ran);
 			await changeTimeZone();
 
-			const principal = await ran.authentication.authenticate(ran.turnId);
-			expect(
-				await ran.steps.step(ran.run.request, principal, {
-					turnId: ran.turnId,
-					attempt: 0,
-					step: 1,
-				}),
-			).toMatchObject({ _tag: "Waiting" });
-			expect((await chatsAs(adminId).approvals(workspaceId)).waiting).toMatchObject([
+			expect(await resumeAt(ran, 1)).toMatchObject({ _tag: "Waiting" });
+			const admin = chatsAs(adminId);
+			expect((await admin.approvals(workspaceId)).waiting).toMatchObject([
 				{
 					call: {
 						id: parked.id,
@@ -326,10 +321,25 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 				},
 			]);
 			const [reparked] = await callsOf(ran.turnId);
-			expect(reparked?.approvalId).not.toBe(parked.approvalId);
+			if (!reparked?.approvalId) throw new Error("No renewed approval");
+			expect(reparked.approvalId).not.toBe(parked.approvalId);
 			expect((await automationsOf(defaultProject)).map(({ name }) => name)).toEqual(
 				change === "create" ? [] : [standup.name],
 			);
+
+			await admin.decide({
+				toolCallId: parked.id,
+				approvalId: reparked.approvalId,
+				decision: "allow_once",
+			});
+			await resume(ran);
+			expect(await callsOf(ran.turnId)).toMatchObject([
+				{
+					id: parked.id,
+					status: "completed",
+					output: { automation: { when: [{ kind: "routine", timezone: newTimeZone }] } },
+				},
+			]);
 		});
 	});
 

@@ -17,6 +17,7 @@ import { useReviewToolCall } from "@/lib/chat-query.ts";
 import { type MarkedConnector, useApprovalConnector } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { formatCount } from "@/lib/name-list.ts";
+import { timeZonePlace } from "@/lib/time-zones.ts";
 import { connectorLabel, splitToolKey, stepLabel, wordsFromKey } from "@/lib/tool-names.ts";
 import { BotAvatar } from "@/shell/Bot.tsx";
 import { Button } from "@/ui/button.tsx";
@@ -364,7 +365,9 @@ export function ApprovalDestination({
 				</p>
 			)}
 			{routineMessage && <p className="m-0">{routineMessage}</p>}
-			{routineTimeZone && <p className="m-0">Runs in the {routineTimeZone} time zone.</p>}
+			{routineTimeZone && (
+				<p className="m-0">Runs in the {timeZonePlace(routineTimeZone)} time zone.</p>
+			)}
 			{address && (
 				<p className="m-0">
 					{browserUrl ? "On the page" : "Sends to"} {address}
