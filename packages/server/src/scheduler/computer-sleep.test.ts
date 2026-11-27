@@ -497,7 +497,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				eq(computerLease.holderId, HOLDER.id),
 				eq(computerLease.computerId, record.id),
 			);
-			const expiredAt = new Date(Date.now() - 1_000);
+			const now = Date.now();
+			const expiredAt = new Date(now - 1_000);
 			await onDatabase((db) =>
 				db.update(computerLease).set({ expiresAt: expiredAt }).where(ownLease),
 			);
@@ -507,14 +508,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await runOnPostgres(
 				Effect.scoped(
 					Effect.gen(function* () {
+						yield* TestClock.setTime(now);
 						yield* projectComputers.renew(HOLDER);
 						yield* Effect.promise(() => signingIn.hasStarted);
 						try {
 							const [revived] = yield* query((db) =>
 								db.select().from(computerLease).where(ownLease),
 							);
-							expect(revived?.expiresAt.getTime()).toBeGreaterThan(Date.now());
-							const expiresSoon = new Date(Date.now() + 1_000);
+							expect(revived?.expiresAt.getTime()).toBeGreaterThan(now);
+							const expiresSoon = new Date(now + 1_000);
 							yield* query((db) =>
 								db.update(computerLease).set({ expiresAt: expiresSoon }).where(ownLease),
 							);
@@ -527,7 +529,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 							signingIn.finish();
 						}
 					}),
-				),
+				).pipe(Effect.provide(TestClock.layer())),
 			);
 		});
 
