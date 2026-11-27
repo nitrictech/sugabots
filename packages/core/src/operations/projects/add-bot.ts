@@ -1,14 +1,13 @@
 import { projectsContracts } from "@sugabots/contracts/operations/projects";
 import { Effect } from "effect";
-import type { Principal } from "../../principal.ts";
 import { approvalRule, proveApproved } from "../../proofs/approved.ts";
 import {
 	checkProjectMembershipChange,
 	proveCanChangeProjectMembers,
 } from "../../proofs/project-permissions.ts";
-import { type Named, named } from "../../proofs/proof.ts";
+import { named } from "../../proofs/proof.ts";
 import { proveReachesBot } from "../../proofs/reaches-bot.ts";
-import { proveReachesProject } from "../../proofs/reaches-project.ts";
+import { proveReachesProject, type ReachesProject } from "../../proofs/reaches-project.ts";
 import { Projects } from "../../workspaces/projects/projects.ts";
 import { defineOperation, unexpectedApprovalProof } from "../operation.ts";
 import { underProjectsLock } from "./locking.ts";
@@ -24,9 +23,12 @@ export const addBot = defineOperation(
 				call,
 				input,
 				(project, bot, call, approvedInput) => {
-					const checkAddition = <P>(principal: Named<P, Principal>) =>
+					const approveAddition = <P, J>(reach: ReachesProject<P, J>) =>
 						Effect.gen(function* () {
+							const { principal } = reach;
 							const reachesBot = yield* proveReachesBot(principal, bot);
+							if (call.value.kind === "approvalCheck")
+								yield* projects.checkBotAddition(reach, reachesBot);
 							const approved = yield* proveApproved(
 								principal,
 								call,
@@ -41,8 +43,8 @@ export const addBot = defineOperation(
 					if (call.value.kind === "approvalCheck") {
 						return named(principal, (principal) =>
 							proveReachesProject(principal, project).pipe(
-								Effect.flatMap(checkProjectMembershipChange),
-								Effect.andThen(checkAddition(principal)),
+								Effect.tap(checkProjectMembershipChange),
+								Effect.flatMap(approveAddition),
 								Effect.andThen(unexpectedApprovalProof),
 							),
 						);
@@ -53,7 +55,7 @@ export const addBot = defineOperation(
 								lock,
 								yield* proveReachesProject(lock.principal, project),
 							);
-							const { reachesBot, approved } = yield* checkAddition(lock.principal);
+							const { reachesBot, approved } = yield* approveAddition(canChange.reach);
 							return yield* projects.addBot(lock, canChange, reachesBot, approved);
 						}),
 					);

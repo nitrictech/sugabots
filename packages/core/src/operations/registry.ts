@@ -1,6 +1,7 @@
 export * as Operations from "./registry.ts";
 
 import { TriggerSetInSettings } from "@sugabots/contracts/errors/automations";
+import { BotNotPublic, PersonalBotInProject } from "@sugabots/contracts/errors/projects";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { WebToolOff } from "@sugabots/contracts/errors/web";
 import {
@@ -219,6 +220,11 @@ const checkApprovalPermission = (
 		if (result._tag === "Failure") {
 			const computerConflict = computerApprovalFailure(result.failure);
 			if (computerConflict) return computerConflict;
+			if (
+				name === "projects.addBot" &&
+				(result.failure instanceof BotNotPublic || result.failure instanceof PersonalBotInProject)
+			)
+				return "botCanNoLongerJoinProject" as const;
 			if (result.failure instanceof ToolSwitchedOff || result.failure instanceof WebToolOff)
 				return "toolSwitchedOff" as const;
 			if (name === "automations.updateInChat" && result.failure instanceof TriggerSetInSettings)

@@ -396,6 +396,56 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				).toHaveLength(1);
 			});
 
+			it("closes a private bot's approval to join a project that became public", async () => {
+				const editor = await seedMember(workspaceId, "editor");
+				const assistant = await seedBot(workspaceId, {
+					assistantOf: editor,
+					visibility: "personal",
+				});
+				await onDatabase((db) =>
+					db.update(bot).set({ model: "m" }).where(eq(bot.id, assistant.id)),
+				);
+				const other = await seedBot(workspaceId, {
+					visibility: "private",
+					createdById: editor,
+					members: [editor],
+				});
+				const projectId = await seedProject(workspaceId, { leadBotId: botId, members: [editor] });
+				const member = chatsAs(editor);
+				const { chat } = await member.startProjectChat({
+					projectId: assistant.defaultProject,
+					retryKey: crypto.randomUUID(),
+					message: "Add my bot to the project.",
+				});
+				const { model } = calling("add_bot_to_project", { projectId, botId: other.id });
+				const ran = await loop.runTurn(chat.id, { model });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No call parked");
+				expect(parked).toMatchObject({ approvalStatus: "pending" });
+				await loop.call(await chatsAs(adminId).principal(), "projects.update", {
+					projectId,
+					changes: { visibility: "public" },
+				});
+
+				await expect(
+					member.decide({ toolCallId: parked.id, decision: "allow_once" }),
+				).rejects.toMatchObject({
+					_tag: "ToolApprovalConflict",
+					reason: "botCanNoLongerJoinProject",
+				});
+				expect(await member.approvals(workspaceId)).toMatchObject({
+					waiting: [],
+					answered: [
+						{
+							call: {
+								id: parked.id,
+								approval: { closedBecause: "botCanNoLongerJoinProject", decidedAt: null },
+							},
+						},
+					],
+				});
+			});
+
 			it("searches a project joined by this turn, including after the turn resumes", async () => {
 				const editor = await seedMember(workspaceId, "editor");
 				const assistant = await seedBot(workspaceId, {

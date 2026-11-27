@@ -144,6 +144,10 @@ export interface Interface {
 	) => Effect.Effect<Project, ResourceHidden | FenceRefusal, Transaction>;
 	/** The project's bots, by name, as the member acting sees them. */
 	readonly bots: <P, J>(reach: ReachesProject<P, J>) => Effect.Effect<Bot[]>;
+	readonly checkBotAddition: <P, J, B>(
+		reach: ReachesProject<P, J>,
+		bot: ReachesBot<P, B>,
+	) => Effect.Effect<void, BotNotPublic | PersonalBotInProject>;
 	/**
 	 * Adds `bot`: a public bot to any project, a private bot to a private one,
 	 * and a personal bot to none. Adding one already in it changes nothing.
@@ -330,6 +334,12 @@ export const make = Effect.gen(function* () {
 
 		bots: (reach) =>
 			operation("bots", projectBots(reach.project.value, viewerOf(memberActing(reach.as)))),
+
+		checkBotAddition: (reach, bot) =>
+			operation(
+				"checkBotAddition",
+				store.checkBotAddition(reach.workspace, reach.project.value, bot.bot.value),
+			),
 
 		addBot: (lock, canChange, bot, _approved) =>
 			operation(

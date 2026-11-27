@@ -107,6 +107,11 @@ export interface Interface {
 		projectId: string,
 		memberId: string,
 	) => Effect.Effect<"removed" | "not_a_member" | "administrator">;
+	readonly checkBotAddition: (
+		workspaceId: string,
+		projectId: string,
+		botId: string,
+	) => Effect.Effect<void, BotNotPublic | PersonalBotInProject>;
 	/**
 	 * Puts a bot of the workspace in the project: a public bot in any, a
 	 * private bot in a private one, and a personal bot in none. Adding one
@@ -145,56 +150,40 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("ProjectStore");
 
-	/**
-	 * Puts a public bot of the workspace in the project, or a private bot in a
-	 * private project. Adding one already in it changes nothing.
-	 */
+	const checkBotAddition = (
+		workspaceId: string,
+		projectId: string,
+		botId: string,
+		lockRows = false,
+	) =>
+		Effect.gen(function* () {
+			const [pair] = yield* query((db) => {
+				const pair = db
+					.select({ botVisibility: bot.visibility, projectVisibility: project.visibility })
+					.from(project)
+					.innerJoin(bot, eq(bot.workspaceId, project.workspaceId))
+					.where(
+						and(
+							eq(project.id, projectId),
+							eq(project.workspaceId, workspaceId),
+							eq(bot.id, botId),
+							isNull(bot.systemBotKey),
+						),
+					);
+				return lockRows ? pair.for("share", { of: [bot, project] }) : pair;
+			});
+			if (pair?.botVisibility === "public") return;
+			if (pair?.botVisibility !== "private") return yield* new PersonalBotInProject();
+			if (pair.projectVisibility !== "private") return yield* new BotNotPublic();
+		});
+
 	const addBot = (workspaceId: string, projectId: string, botId: string) =>
 		Effect.gen(function* () {
-			// The share locks wait for a change of the bot's or the project's
-			// visibility to commit, then check them as they are: that change
-			// takes the bot out of public projects, or refuses a project with
-			// private bots, and the row added here would otherwise be one it missed.
-			const added = yield* query((db) =>
-				db.execute<{ bot_id: string }>(
-					sql`
-					insert into ${projectBot} ("workspace_id", "project_id", "bot_id")
-					select ${project.workspaceId}, ${project.id}, ${bot.id}
-					from ${project}
-					inner join ${bot}
-						on ${bot.workspaceId} = ${project.workspaceId}
-						and ${bot.id} = ${botId}
-						and (${bot.visibility} = 'public'
-							or (${bot.visibility} = 'private' and ${project.visibility} = 'private'))
-						and ${bot.systemBotKey} is null
-					where ${project.id} = ${projectId}
-					and ${project.workspaceId} = ${workspaceId}
-					for share of ${bot}, ${project}
-					on conflict do nothing
-					returning "bot_id"
-				`,
-					"objects",
-				),
+			// Hold both rows so a visibility change cannot miss the new bot or project membership.
+			yield* checkBotAddition(workspaceId, projectId, botId, true);
+			yield* query((db) =>
+				db.insert(projectBot).values({ workspaceId, projectId, botId }).onConflictDoNothing(),
 			);
-			if (added.length > 0) return;
-			const [present] = yield* query((db) =>
-				db
-					.select({ botId: projectBot.botId })
-					.from(projectBot)
-					.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, botId)))
-					.limit(1),
-			);
-			if (present) return;
-			const [refused] = yield* query((db) =>
-				db
-					.select({ visibility: bot.visibility })
-					.from(bot)
-					.where(and(eq(bot.id, botId), eq(bot.workspaceId, workspaceId), isNull(bot.systemBotKey)))
-					.limit(1),
-			);
-			return yield* refused?.visibility === "private"
-				? new BotNotPublic()
-				: new PersonalBotInProject();
 		});
 
 	/** Refuses to leave the project public while any of its bots is private, naming them. */
@@ -464,8 +453,11 @@ export const make = Effect.gen(function* () {
 				),
 			),
 
+		checkBotAddition: (workspaceId, projectId, botId) =>
+			operation("checkBotAddition", checkBotAddition(workspaceId, projectId, botId)),
+
 		addBot: (workspaceId, projectId, botId) =>
-			operation("addBot", addBot(workspaceId, projectId, botId)),
+			operation("addBot", transaction(addBot(workspaceId, projectId, botId))),
 
 		removeBotFromPublicProjects: (workspaceId, botId) =>
 			operation(
