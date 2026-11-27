@@ -1,18 +1,34 @@
+import { type CssColor, cssColorIn } from "@sugabots/contracts/css-values";
 import { linkMayGoTo } from "@sugabots/contracts/live-document";
 import {
-	bodyOf,
-	fitSlideBody,
+	type NewBoxAttributes,
+	newBox,
 	newSlide,
 	SLIDE,
 	SLIDE_BODY,
-	SLIDE_BOX,
 	SPEAKER_NOTES,
 } from "@sugabots/contracts/live-slides";
-import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
+import {
+	type BoxPadding,
+	type BoxRole,
+	paddingIn,
+	type Stroke,
+	strokeIn,
+	type VerticalAlign,
+} from "@sugabots/contracts/slide-box";
+import { type Frame, frameIn, SLIDE_HEIGHT, SLIDE_WIDTH } from "@sugabots/contracts/slide-geometry";
+import { TEXT_STYLE } from "@sugabots/contracts/slide-text-style";
+import { changedPath, type SvgPath, svgPathIn } from "@sugabots/contracts/svg-path";
 import type { Editor } from "@tiptap/core";
-import type { Fragment, Mark, Node, Schema } from "@tiptap/pm/model";
+import { Fragment, type Mark, type Node, type Schema } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
-import type { Element as ElementOnSlide, Slide as SlideInFile, TableCell } from "pptxtojson";
+import type {
+	Element as ElementOnSlide,
+	Fill,
+	Slide as SlideInFile,
+	TableCell,
+	Table as TableInFile,
+} from "pptxtojson";
 import { ImageNotKept, type KeepImage, keepableImage } from "./file-import.ts";
 import { dispatchAsOneChange } from "./suggesting.ts";
 
@@ -25,8 +41,8 @@ export interface PowerPointImported {
 	imagesLeftOut: number;
 	/**
 	 * How many other things on its slides the deck has no place for, such as
-	 * a chart, a video, SmartArt or a shape. A shape's words are kept, so only
-	 * a shape without any is counted, unless the file marks it as decorative.
+	 * a chart, a video or SmartArt, or a shape it can't paint, as one filled
+	 * with a gradient, unless the file marks that shape as decorative.
 	 */
 	othersLeftOut: number;
 }
@@ -55,19 +71,40 @@ export async function importPowerPointFile(
 
 /**
  * A PowerPoint file's slides as a deck of `schema`, a slide for each of the
- * file's, in order, keeping each image the deck keeps with `keepImage`. A
- * deck is laid out by layouts where a PowerPoint file places boxes, so what
- * the file's slides say is kept and where they put it is not: each slide gets
- * the layout that best fits what it holds (`laidOut`), and its title, its
- * words in the order they are read, with their lists and the marks the deck
- * has, its tables, its images and its notes. A shape's words are kept as
- * paragraphs. Positions, sizes, colours, fonts, backgrounds and the file's
- * masters are left out, and so are shapes without words, charts, videos,
- * sound and SmartArt, which are counted, as are images the deck doesn't keep.
- * A slide's footer, number and date and an empty box are left out without
- * being counted, as the deck draws none, and so is a shape without words the
- * file marks as decorative, as PowerPoint marks one a screen reader passes
- * over, such as a section break's accent bar.
+ * file's, in order, each looking as it does in the file: a slide of no
+ * layout (`blank`), on the file's colour for it, holding a box for each
+ * thing on it, where the file puts it, in the order the file draws them,
+ * its master's and layout's graphics first. A file of a shape other than
+ * 16:9 is scaled to fit the deck's slides and set in their middle.
+ *
+ * - Words, in a text box or a shape, keep their paragraphs and lists, the
+ *   marks the deck has, their links, colour (black where the file gives
+ *   none), size, font, alignment and line spacing, and the box its fill,
+ *   outline, inner margins, where its words sit in it and its turn. A title,
+ *   subtitle or body placeholder's box is for that, and any other is for
+ *   nothing in particular.
+ * - A shape keeps its outline, as a path, and its fill and outline, and a
+ *   line its run, which way the file flips it.
+ * - A picture is kept, with its words, filling its box, a cropped one by
+ *   being cut to the box's shape about its middle.
+ * - A table keeps its cells' words and its columns' widths, its first row
+ *   its header, drawn as the deck draws one. A merged cell's words are in
+ *   the first of the cells it spans, and the rest are empty, so no words are
+ *   lost; a row with fewer cells than the widest is made as wide with empty
+ *   ones.
+ * - Each slide's notes are kept, as plain paragraphs.
+ *
+ * Left out, and counted: charts, videos, sound, SmartArt and equations; a
+ * shape without words or an outline that the deck can't paint, as one filled
+ * with a gradient, a pattern or a picture, unless the file marks it as
+ * decorative; and the images the deck doesn't keep. Left out without being
+ * counted, as the deck draws none: a slide's footer, number and date, an
+ * empty text box or placeholder, and a shape that draws nothing.
+ *
+ * Not kept: a cell's fill and borders, a picture cropped unevenly (it is cut
+ * about its middle), shadows, gradients and pictures filling a shape or a
+ * slide, an outline's dashes and arrowheads, a box's words flipped or set
+ * upright, a paragraph's indents and the space around it.
  *
  * Fails when the file can't be read as a PowerPoint file, or with
  * `ImageNotKept` when an image the deck would keep couldn't be: importing
@@ -79,34 +116,37 @@ export async function deckFromPowerPoint(
 	keepImage: KeepImage,
 ): Promise<PowerPointImported & { deck: Node }> {
 	const { parse } = await import("pptxtojson");
-	const { slides } = await parse(file, { imageMode: "base64" });
+	const { slides, size } = await parse(file, {
+		imageMode: "base64",
+		singleLineSpacingFactor: SINGLE_LINE_SPACING,
+	});
 	const shapes = await shapesOnSlides(file);
+	const placing = placingOf(size);
 	const keep = imageKeeper(keepImage);
 	let imagesLeftOut = 0;
 	let othersLeftOut = 0;
 	const deckSlides: Node[] = [];
 	for (const [index, slide] of slides.entries()) {
-		const read = readSlide(slide, shapes[index] ?? new Map(), schema);
+		const read = readSlide(slide, shapes[index] ?? new Map(), placing, schema);
 		othersLeftOut += read.othersLeftOut;
-		let contentLeftOut = read.contentLeftOut;
-		const pieces: Piece<Node>[] = [];
+		const boxes: Node[] = [];
 		for (const piece of read.pieces) {
-			if (piece.kind !== "image") {
-				pieces.push(piece);
+			if (piece.kind === "box") {
+				boxes.push(piece.box);
 				continue;
 			}
 			const address = await keep(piece.image);
-			if (address !== undefined) {
-				pieces.push({ ...piece, image: imageNode(address, piece.image.words, schema) });
-				continue;
-			}
-			imagesLeftOut++;
-			contentLeftOut = true;
+			if (address === undefined) imagesLeftOut++;
+			else boxes.push(pictureBox(piece.attributes, address, piece.image.words, schema));
 		}
-		const laid = laidOut(inReadingOrder(pieces), { first: index === 0, contentLeftOut }, schema);
-		deckSlides.push(slideOf(laid, notesOf(slide.note, schema), schema));
+		deckSlides.push(
+			nodeOf(schema, SLIDE, [nodeOf(schema, SLIDE_BODY, boxes), notesOf(slide.note, schema)], {
+				layout: "blank",
+				background: colorOfFill(slide.fill),
+			}),
+		);
 	}
-	// A deck holds a slide at least, as markdown that says nothing is an empty title slide.
+	// A deck holds a slide at least, as HTML that says nothing is an empty title slide.
 	const deck = schema.topNodeType.create(
 		null,
 		deckSlides.length > 0 ? deckSlides : [newSlide(schema, "title")],
@@ -115,7 +155,39 @@ export async function deckFromPowerPoint(
 	return { deck, imagesLeftOut, othersLeftOut };
 }
 
-/** Where something sits on a slide, in points from its top left corner. */
+/**
+ * How tall PowerPoint draws a line of text spaced singly, as a multiple of its
+ * size: its line spacing, which the file gives as a multiple of this, as
+ * CSS's line height says it.
+ */
+const SINGLE_LINE_SPACING = 1.2;
+
+/**
+ * Where the file's slides go on the deck's: scaled by `scale`, and moved
+ * `left` across and `top` down, in a slide's pixels. The file measures in
+ * points, which on a 16:9 slide 960 points across are a slide's pixels.
+ */
+interface Placing {
+	scale: number;
+	left: number;
+	top: number;
+}
+
+/** How a file's slides of `size`, in points, fit the deck's: as large as fits, in the middle. */
+function placingOf(size: { width: number; height: number }): Placing {
+	const { width, height } = size;
+	if (!(width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height))) {
+		return { scale: 1, left: 0, top: 0 };
+	}
+	const scale = Math.min(SLIDE_WIDTH / width, SLIDE_HEIGHT / height);
+	return {
+		scale,
+		left: (SLIDE_WIDTH - width * scale) / 2,
+		top: (SLIDE_HEIGHT - height * scale) / 2,
+	};
+}
+
+/** Where something sits on a slide of the file, in points from its top left corner. */
 interface Box {
 	left: number;
 	top: number;
@@ -123,28 +195,28 @@ interface Box {
 	height: number;
 }
 
+/** `box`, on a slide of the file, as a frame on the deck's: `undefined` for one of no size there is. */
+const frameOf = ({ left, top, width, height }: Box, placing: Placing): Frame | undefined =>
+	frameIn({
+		x: hundredths(placing.left + left * placing.scale),
+		y: hundredths(placing.top + top * placing.scale),
+		width: hundredths(width * placing.scale),
+		height: hundredths(height * placing.scale),
+	});
+
+/** `value` to a hundredth, as precise as a slide's pixels need be. */
+const hundredths = (value: number) => Math.round(value * 100) / 100;
+
 /** An image in the file: its bytes as a data URL, empty for one linked from outside the file, and its words. */
 interface ImageInFile {
 	dataUrl: string;
 	words: string;
 }
 
-/** What a text box or a shape says. */
-interface TextPiece {
-	kind: "text";
-	box: Box;
-	blocks: Node[];
-	/** The size of its largest type, in points, or 0 when the file gives none. */
-	typeSize: number;
-	/** Whether it is the slide's title placeholder. */
-	titlePlaceholder: boolean;
-}
-
-/** Something on a slide the deck keeps, with its image as `Image`: as it is in the file, then once kept. */
-type Piece<Image> =
-	| TextPiece
-	| { kind: "table"; box: Box; table: Node }
-	| { kind: "image"; box: Box; image: Image };
+/** Something on a slide the deck keeps: a box made already, or a picture, to be kept before its box is made. */
+type Piece =
+	| { kind: "box"; box: Node }
+	| { kind: "image"; attributes: NewBoxAttributes; image: ImageInFile };
 
 /** What the file says of a shape that the library doesn't: the placeholder it is, if one, an image's words, and whether it only decorates the slide. */
 interface ShapeInFile {
@@ -156,333 +228,223 @@ interface ShapeInFile {
 /** Placeholders that say where a slide is, or when, rather than what it says. */
 const DECORATIVE_PLACEHOLDERS = new Set(["ftr", "sldNum", "dt"]);
 
-const TITLE_PLACEHOLDERS = new Set(["title", "ctrTitle"]);
+/** The role of a placeholder's box, by the placeholder's type: one of no type holds content of any kind, mostly a slide's body. */
+const PLACEHOLDER_ROLES: Readonly<Record<string, BoxRole>> = {
+	title: "title",
+	ctrTitle: "title",
+	subTitle: "subtitle",
+	body: "body",
+	obj: "body",
+};
 
 /**
- * What of a slide the deck keeps, with its images as they are in the file;
- * how many other things on it the deck has no place for; and whether any of
- * those is content, such as a chart, rather than a drawing.
+ * What of a slide the deck keeps, in the order the file draws it, with its
+ * pictures as they are in the file, and how many other things on it the
+ * deck has no place for. `shapes` says what the file says of the slide's own
+ * shapes; its master's and layout's graphics are none of them.
  */
 function readSlide(
 	slide: SlideInFile,
 	shapes: ReadonlyMap<string, ShapeInFile>,
+	placing: Placing,
 	schema: Schema,
-): { pieces: Piece<ImageInFile>[]; othersLeftOut: number; contentLeftOut: boolean } {
-	const pieces: Piece<ImageInFile>[] = [];
+): { pieces: Piece[]; othersLeftOut: number } {
+	const pieces: Piece[] = [];
 	let othersLeftOut = 0;
-	let contentLeftOut = false;
-	for (const { element, box } of elementsOn(slide.elements)) {
-		const read = readElement(element, box, shapes.get(element.id), schema);
-		if (read === "decoration") continue;
-		if (typeof read === "object") {
-			pieces.push(read);
-			continue;
-		}
-		othersLeftOut++;
-		contentLeftOut ||= read === "content";
+	const drawn = [
+		...elementsOn(slide.layoutElements ?? []).map((each) => ({ ...each, shape: undefined })),
+		...elementsOn(slide.elements).map((each) => ({ ...each, shape: shapes.get(each.element.id) })),
+	];
+	for (const { element, box, shape } of drawn) {
+		const read = readElement(element, box, shape, placing, schema);
+		if (typeof read === "object") pieces.push(read);
+		else if (read === "left out") othersLeftOut++;
 	}
-	return { pieces, othersLeftOut, contentLeftOut };
+	return { pieces, othersLeftOut };
 }
 
 /**
- * The slide's elements where they sit on it, a group's as the group places
- * them, the groups themselves left out. A group's turning and flipping are
- * not followed, as only the order they are read in depends on where they sit.
+ * `elements` in the order they are drawn, each where it sits on the slide,
+ * a group's as the group places them, the groups themselves left out. A
+ * group's turning and flipping are not followed.
  */
 function elementsOn(
 	elements: readonly ElementOnSlide[],
 	offset = { left: 0, top: 0 },
 ): { element: Exclude<ElementOnSlide, { type: "group" }>; box: Box }[] {
-	return elements.flatMap((element) => {
-		const box = {
-			left: element.left + offset.left,
-			top: element.top + offset.top,
-			width: element.width,
-			height: element.height,
-		};
-		return element.type === "group" ? elementsOn(element.elements, box) : [{ element, box }];
-	});
+	return [...elements]
+		.sort((one, other) => one.order - other.order)
+		.flatMap((element) => {
+			const box = {
+				left: element.left + offset.left,
+				top: element.top + offset.top,
+				width: element.width,
+				height: element.height,
+			};
+			return element.type === "group" ? elementsOn(element.elements, box) : [{ element, box }];
+		});
 }
 
 /**
- * What the deck keeps of `element`: what it says, its table or its image.
- * Otherwise what is left out: `"decoration"`, not counted, for an empty box,
- * the slide's footer, number or date, or a shape without words marked as
- * decorative; `"drawing"` for another shape without words; and `"content"`
- * for a chart, a video, sound, SmartArt or an equation.
+ * What the deck keeps of `element`, sitting at `box`: a box of its words or
+ * its shape, its table's box, or its picture. Otherwise what is left out:
+ * `"left out"`, counted, for a chart, a video, sound, SmartArt or an
+ * equation, or a shape the deck can't paint (see `deckFromPowerPoint`), and
+ * `"nothing"`, not counted, for what the deck draws none of.
  */
 function readElement(
 	element: Exclude<ElementOnSlide, { type: "group" }>,
 	box: Box,
 	shape: ShapeInFile | undefined,
+	placing: Placing,
 	schema: Schema,
-): Piece<ImageInFile> | "decoration" | "drawing" | "content" {
+): Piece | "left out" | "nothing" {
+	const frame = frameOf(box, placing);
+	if (!frame) return "nothing";
 	switch (element.type) {
 		case "text":
 		case "shape": {
-			if (DECORATIVE_PLACEHOLDERS.has(shape?.placeholder ?? "")) return "decoration";
-			const blocks = blocksOf(element.content, schema);
-			if (blocks.length === 0) {
-				return element.type === "shape" && !shape?.decorative ? "drawing" : "decoration";
-			}
-			return {
-				kind: "text",
-				box,
-				blocks,
-				typeSize: largestTypeIn(element.content),
-				titlePlaceholder: TITLE_PLACEHOLDERS.has(shape?.placeholder ?? ""),
+			if (DECORATIVE_PLACEHOLDERS.has(shape?.placeholder ?? "")) return "nothing";
+			const reading: TextReading = {
+				schema,
+				sizeScale: placing.scale * ((element.autoFit?.fontScale ?? 100) / 100),
+				colored: true,
 			};
+			const blocks = blocksOf(element.content, reading);
+			const worded = blocks.some((block) => block.textContent.trim() !== "");
+			const fill = colorOfFill(element.fill);
+			const stroke = strokeOf(element.borderWidth, element.borderColor, placing);
+			const path = element.type === "shape" ? pathOf(element, frame) : null;
+			if (!worded && !fill && !stroke) {
+				const unpainted = element.type === "shape" && element.fill && !shape?.decorative;
+				return unpainted ? "left out" : "nothing";
+			}
+			const attributes: NewBoxAttributes = {
+				role: PLACEHOLDER_ROLES[shape?.placeholder ?? ""] ?? null,
+				frame,
+				fill,
+				stroke,
+				path,
+				verticalAlign: VERTICAL_ALIGNMENTS[element.vAlign] ?? "top",
+				padding: paddingOf(element.textInset, placing),
+				rotation: element.rotate || 0,
+			};
+			return { kind: "box", box: newBox(schema, attributes, worded ? blocks : []) };
 		}
 		case "table":
-			return element.data.length > 0
-				? { kind: "table", box, table: tableOf(element.data, schema) }
-				: "decoration";
+			if (element.data.length === 0) return "nothing";
+			return {
+				kind: "box",
+				box: newBox(schema, { frame }, [tableOf(element, placing, schema)]),
+			};
 		case "image":
 			return {
 				kind: "image",
-				box,
+				attributes: {
+					role: "image",
+					frame,
+					stroke: strokeOf(element.borderWidth, element.borderColor, placing),
+					rotation: element.rotate || 0,
+				},
 				image: { dataUrl: element.base64, words: shape?.words ?? "" },
 			};
 		default:
-			return "content";
+			return "left out";
 	}
 }
 
-/*
- * Laying a slide out. A PowerPoint slide is boxes placed anywhere; a deck's
- * is one of a few layouts, so each slide gets the one that best fits what it
- * holds, by the rules in `laidOut`.
- */
+/** Where a box's words sit in it, by the file's word for it. */
+const VERTICAL_ALIGNMENTS: Readonly<Record<string, VerticalAlign>> = {
+	up: "top",
+	mid: "middle",
+	down: "bottom",
+};
 
-/** The most characters a line may have to be taken for a title, or a short line for a subtitle or whose words a quote is. */
-const SHORT_LINE_CHARACTERS = 100;
+/** The colour `fill` paints, when it is a colour alone. */
+const colorOfFill = (fill: Fill | null | undefined): CssColor | null =>
+	fill?.type === "color" ? cssColorIn(fill.value) : null;
 
-/** How far two boxes side by side may overlap and still be taken for side by side, in points. */
-const SIDE_BY_SIDE_OVERLAP_PT = 8;
-
-/** A slide's layout, and what its body is to hold. */
-interface LaidOut {
-	layout: SlideLayout;
-	/**
-	 * What the slide's body is to hold, in the order the layout reads it:
-	 * either its boxes, or blocks standing in no box, which the layout shares
-	 * out among its boxes (see `fitSlideBody`).
-	 */
-	bodyContent: Node[];
+/** An outline `width` points wide, of `color`: none when it is no width, as the file says no outline. */
+function strokeOf(width: number, color: string, placing: Placing): Stroke | null {
+	if (!(width > 0)) return null;
+	return strokeIn({ color: cssColorIn(color), width: hundredths(width * placing.scale) });
 }
 
-/** A slide of `layout` holding `bodyContent`, made to fit it, with its notes. An empty one holds what a new slide of its layout does. */
-function slideOf({ layout, bodyContent }: LaidOut, notes: Node, schema: Schema): Node {
-	const body =
-		bodyContent.length > 0
-			? nodeOf(schema, SLIDE_BODY, bodyContent)
-			: bodyOf(newSlide(schema, layout));
-	return nodeOf(schema, SLIDE, [fitSlideBody(body, layout), notes], { layout });
-}
-
-/**
- * The layout a slide of `pieces`, in reading order, gets, and what its body
- * holds, by the first of these that fits it:
- *
- * - Nothing: an empty slide, `title` when it is the first and `bullets`
- *   after.
- * - Only words that are plainly a quote (`quoteIn`): `quote`.
- * - A table: `table`.
- * - Only a title (`titleAmong`), or a title over a short paragraph or two,
- *   with no chart or other content left out beside them: `title` when it is
- *   the first slide, and `section` after.
- * - Things side by side (`sideBySide`): `image` when one side holds the
- *   slide's one image, with the words in its text's box and the image in its
- *   image's box, and `columns` otherwise.
- * - Only an image: `image`, its text's box empty.
- * - Anything else: `bullets`.
- *
- * The title is a heading at the start of the body, but on a section break,
- * where a label may sit above it, everything stays in reading order. What a
- * layout has no box of its own for stays in the body, in reading order, in
- * the box after the title. Side by side, the title, empty or not, and each
- * side are boxes of their own.
- */
-function laidOut(
-	pieces: readonly Piece<Node>[],
-	{ first, contentLeftOut }: { first: boolean; contentLeftOut: boolean },
-	schema: Schema,
-): LaidOut {
-	if (pieces.length === 0) return { layout: first ? "title" : "bullets", bodyContent: [] };
-	const quote = quoteIn(pieces);
-	if (quote) {
-		return {
-			layout: "quote",
-			bodyContent: [nodeOf(schema, "blockquote", quote.quote), ...quote.saidBy],
-		};
-	}
-	const title = titleAmong(pieces);
-	const rest = pieces.filter((piece) => piece !== title);
-	const heading = (level: number) => (title ? [headingOf(title, level, schema)] : []);
-	const flow = (level: number) => [...heading(level), ...rest.flatMap(blocksOfPiece)];
-	if (rest.some((piece) => piece.kind === "table"))
-		return { layout: "table", bodyContent: flow(2) };
-	if (title && !contentLeftOut && holdsAtMostASubtitle(rest)) {
-		if (first) return { layout: "title", bodyContent: flow(1) };
-		return {
-			layout: "section",
-			bodyContent: pieces.flatMap((piece) => (piece === title ? heading(2) : blocksOfPiece(piece))),
-		};
-	}
-	const images = rest.filter((piece) => piece.kind === "image");
-	const titleBox = () => nodeOf(schema, SLIDE_BOX, heading(2));
-	const sides = sideBySide(rest);
-	if (sides) {
-		const [left, right] = sides;
-		if (images.length !== 1) {
-			return {
-				layout: "columns",
-				bodyContent: [titleBox(), boxOf(left, schema), boxOf(right, schema)],
-			};
-		}
-		const [words, image] = left.some((piece) => piece.kind === "image") ? [right, left] : sides;
-		return {
-			layout: "image",
-			bodyContent: [titleBox(), boxOf(words, schema), boxOf(image, schema)],
-		};
-	}
-	if (rest.length === 1 && images.length === 1) {
-		return {
-			layout: "image",
-			bodyContent: [titleBox(), boxOf([], schema), boxOf(images, schema)],
-		};
-	}
-	return { layout: "bullets", bodyContent: flow(2) };
-}
-
-/** `pieces` in the order they are read: from the top of the slide down, and from the left across. */
-const inReadingOrder = <Image>(pieces: readonly Piece<Image>[]): Piece<Image>[] =>
-	[...pieces].sort((one, other) => one.box.top - other.box.top || one.box.left - other.box.left);
-
-/** Whether a slide holding a title holds nothing else but a short paragraph or two, a subtitle. */
-function holdsAtMostASubtitle(rest: readonly Piece<Node>[]): boolean {
-	const [subtitle, ...more] = rest;
-	if (!subtitle) return true;
-	return (
-		more.length === 0 &&
-		subtitle.kind === "text" &&
-		subtitle.blocks.every((block) => block.type.name === "paragraph") &&
-		subtitle.blocks.reduce((characters, block) => characters + block.textContent.length, 0) <=
-			SHORT_LINE_CHARACTERS
-	);
-}
-
-/**
- * The slide's title: the file's title placeholder, when it has words, or the
- * words most likely to be one: a single short paragraph, not a list, in
- * larger type than any other words on the slide. Two such paragraphs in the
- * same size, as headings over two columns are, are neither of them a title.
- */
-function titleAmong(pieces: readonly Piece<Node>[]): TextPiece | undefined {
-	const words = pieces.filter((piece) => piece.kind === "text");
-	const placeholder = words.find((piece) => piece.titlePlaceholder);
-	if (placeholder) return placeholder;
-	const [largest, ...others] = [...words].sort((one, other) => other.typeSize - one.typeSize);
-	if (!largest || !isShortParagraph(largest.blocks)) return undefined;
-	return others.every((other) => other.typeSize < largest.typeSize) ? largest : undefined;
-}
-
-const isShortParagraph = (blocks: readonly Node[]) =>
-	blocks.length === 1 &&
-	blocks[0]?.type.name === "paragraph" &&
-	blocks[0].textContent.length <= SHORT_LINE_CHARACTERS;
-
-/** A paragraph in quotation marks, with nothing after the closing one but the sentence's end. */
-const QUOTED = /^\s*["“‘«„「『][\s\S]*["”’»“」』][.!?…]?\s*$/;
-
-/**
- * The quote a slide holds, when all it holds is words that are plainly one:
- * a single paragraph in quotation marks, alone or over one short paragraph,
- * whose words they are. Words merely set large or alone are not enough, as a
- * title is too.
- */
-function quoteIn(pieces: readonly Piece<Node>[]): { quote: Node; saidBy: Node[] } | undefined {
-	if (pieces.some((piece) => piece.kind !== "text")) return undefined;
-	const [quote, saidBy, ...more] = pieces.flatMap((piece) =>
-		piece.kind === "text" ? piece.blocks : [],
-	);
-	if (!quote || more.length > 0 || quote.type.name !== "paragraph") return undefined;
-	if (!QUOTED.test(quote.textContent)) return undefined;
-	if (!saidBy) return { quote, saidBy: [] };
-	return isShortParagraph([saidBy]) ? { quote, saidBy: [saidBy] } : undefined;
-}
-
-/**
- * `pieces` as the two sides of the slide they sit on, left then right, each
- * in reading order: when a gap runs down between them that none crosses,
- * with what is on each side level with what is on the other. `undefined`
- * when there is no such gap, as when one is above another, or more than one,
- * as with three columns.
- */
-function sideBySide<Image>(
-	pieces: readonly Piece<Image>[],
-): [Piece<Image>[], Piece<Image>[]] | undefined {
-	const byLeft = [...pieces].sort((one, other) => one.box.left - other.box.left);
-	const gaps = byLeft.flatMap((_piece, at) => {
-		if (at === 0) return [];
-		const rightEdge = Math.max(...byLeft.slice(0, at).map(({ box }) => box.left + box.width));
-		const leftEdge = Math.min(...byLeft.slice(at).map(({ box }) => box.left));
-		return rightEdge - SIDE_BY_SIDE_OVERLAP_PT <= leftEdge ? [at] : [];
+/** A box's inner margins, as the file gives them in points. */
+function paddingOf(
+	inset: { l: number; t: number; r: number; b: number } | undefined,
+	placing: Placing,
+): BoxPadding | null {
+	if (!inset) return null;
+	const side = (points: number) => hundredths(points * placing.scale);
+	return paddingIn({
+		top: side(inset.t),
+		right: side(inset.r),
+		bottom: side(inset.b),
+		left: side(inset.l),
 	});
-	const [gap, ...moreGaps] = gaps;
-	if (gap === undefined || moreGaps.length > 0) return undefined;
-	const [left, right] = [byLeft.slice(0, gap), byLeft.slice(gap)];
-	const level = top(left) < bottom(right) && top(right) < bottom(left);
-	return level ? [inReadingOrder(left), inReadingOrder(right)] : undefined;
 }
-
-const top = (pieces: readonly { box: Box }[]) => Math.min(...pieces.map(({ box }) => box.top));
-
-const bottom = (pieces: readonly { box: Box }[]) =>
-	Math.max(...pieces.map(({ box }) => box.top + box.height));
-
-function blocksOfPiece(piece: Piece<Node>): Node[] {
-	switch (piece.kind) {
-		case "text":
-			return piece.blocks;
-		case "table":
-			return [piece.table];
-		case "image":
-			return [nodeOf(piece.image.type.schema, "paragraph", piece.image)];
-	}
-}
-
-const boxOf = (pieces: readonly Piece<Node>[], schema: Schema) =>
-	nodeOf(schema, SLIDE_BOX, pieces.flatMap(blocksOfPiece));
-
-/** The title's words as a heading of `level`, each of its lines after a break. */
-const headingOf = (title: TextPiece, level: number, schema: Schema) =>
-	nodeOf(schema, "heading", withoutBold(joinedLines(linesOf(title.blocks), schema)), { level });
 
 /**
- * `inline` without bold. A heading and a table's header row are drawn bold,
- * and a file sets a title or a header bold for that alone, so it isn't kept
- * as a mark of its own there.
+ * The outline of a shape that isn't a plain rectangle, such as an arrow or a
+ * line, as a path in its box framed at `frame`, flipped as the file flips
+ * it: its path, drawn in the file across its own viewport, stretched across
+ * the box. `null` for a rectangle, or for a shape whose outline the file
+ * gives no path of.
  */
-const withoutBold = (inline: readonly Node[]) =>
-	inline.map((node) => node.mark(node.marks.filter((mark) => mark.type.name !== "bold")));
+function pathOf(shape: Extract<ElementOnSlide, { type: "shape" }>, frame: Frame): SvgPath | null {
+	const path = shape.shapType === "rect" ? null : svgPathIn(shape.path);
+	if (!path) return null;
+	const viewport = shape.pathViewBox ?? { x: 0, y: 0, width: shape.width, height: shape.height };
+	const scaleTo = (size: number, from: number) => (from > 0 ? size / from : 1);
+	const scaleX = scaleTo(frame.width, viewport.width) * (shape.isFlipH ? -1 : 1);
+	const scaleY = scaleTo(frame.height, viewport.height) * (shape.isFlipV ? -1 : 1);
+	return changedPath(path, {
+		scaleX,
+		scaleY,
+		moveX: shape.isFlipH ? frame.width + viewport.x * Math.abs(scaleX) : -viewport.x * scaleX,
+		moveY: shape.isFlipV ? frame.height + viewport.y * Math.abs(scaleY) : -viewport.y * scaleY,
+	});
+}
 
-const imageNode = (address: string, words: string, schema: Schema) =>
-	nodeOf(schema, "image", undefined, { src: address, alt: words || null });
+/** A picture's box, holding the picture kept at `address`, its words `words`, alone, filling the box. */
+const pictureBox = (attributes: NewBoxAttributes, address: string, words: string, schema: Schema) =>
+	newBox(schema, attributes, [
+		nodeOf(
+			schema,
+			"paragraph",
+			nodeOf(schema, "image", undefined, { src: address, alt: words || null }),
+		),
+	]);
 
 /*
  * Reading what a text box says. The library gives it as HTML: paragraphs and
- * lists, each run of text in a `span` styled as the file sets it, and a link
- * as an `a` within.
+ * lists, each run of text in a `span` styled as the file sets it, sizes in
+ * points, and a link as an `a` within.
  */
+
+/** How to read a text box's HTML into the deck's blocks. */
+interface TextReading {
+	schema: Schema;
+	/** What the file's sizes are scaled by, from its points to the deck's pixels, and by how much the file shrinks its text to fit its box. */
+	sizeScale: number;
+	/**
+	 * Whether its text keeps the file's colour, black where the file gives
+	 * none, as it does on a slide of the file's own colour; its size, font,
+	 * alignment and line spacing are kept either way.
+	 */
+	colored: boolean;
+}
 
 /**
  * The paragraphs and lists `html` holds, nested at their levels, each run of
- * text with the marks the deck has for its style. A paragraph that says
- * nothing, and an empty item of a list, are left out.
+ * text with the marks the deck has for its style and the colour, size and
+ * font the file gives it, and each line with its alignment and line spacing.
+ * An empty item of a list is left out; a paragraph holding spaces keeps its
+ * line, as it does on the slide.
  */
-function blocksOf(html: string, schema: Schema): Node[] {
-	return blocksIn(new DOMParser().parseFromString(html, "text/html").body, schema);
+function blocksOf(html: string, reading: TextReading, look: Look = NO_LOOK): Node[] {
+	return blocksIn(new DOMParser().parseFromString(html, "text/html").body, reading, look);
 }
 
 /** The elements that hold blocks, rather than sitting in a line of text. */
@@ -492,14 +454,19 @@ const isElement = (node: ChildNode): node is Element => node.nodeType === node.E
 
 const isList = (element: Element) => element.tagName === "UL" || element.tagName === "OL";
 
-/** The blocks of `parent`, words outside any paragraph in it making one of their own. */
-function blocksIn(parent: Element, schema: Schema): Node[] {
+/**
+ * The blocks of `parent`, its text looking as `look` says unless it says
+ * otherwise, words outside any paragraph in it making one of their own,
+ * which takes `parent`'s alignment and line spacing.
+ */
+function blocksIn(parent: Element, reading: TextReading, look: Look): Node[] {
+	const { schema } = reading;
 	const blocks: Node[] = [];
 	let words: ChildNode[] = [];
 	const endWords = () => {
-		const inline = words.flatMap((word) => inlineOf(word, [], schema));
-		if (inline.some((node) => node.isText && node.text?.trim())) {
-			blocks.push(nodeOf(schema, "paragraph", inline));
+		const inline = words.flatMap((word) => inlineOf(word, look, reading));
+		if (inline.some((node) => node.isText)) {
+			blocks.push(nodeOf(schema, "paragraph", inline, lineAttributesOf(parent, inline, reading)));
 		}
 		words = [];
 	};
@@ -509,26 +476,28 @@ function blocksIn(parent: Element, schema: Schema): Node[] {
 			continue;
 		}
 		endWords();
-		if (isList(child)) blocks.push(...listOf(child, schema));
-		else blocks.push(...blocksIn(child, schema));
+		const within = lookOf(child, look, reading);
+		if (isList(child)) blocks.push(...listOf(child, reading, within));
+		else blocks.push(...blocksIn(child, reading, within));
 	}
 	endWords();
 	return blocks;
 }
 
 /**
- * The list `list` is, with each item's own list nested in it. A list the
- * library puts straight in another, for a level with no item above it, goes
- * in the item before it, or an empty one.
+ * The list `list` is, its text looking as `look` says, with each item's own
+ * list nested in it. A list the library puts straight in another, for a
+ * level with no item above it, goes in the item before it, or an empty one.
  */
-function listOf(list: Element, schema: Schema): Node[] {
+function listOf(list: Element, reading: TextReading, look: Look): Node[] {
+	const { schema } = reading;
 	const items: Node[][] = [];
 	for (const child of list.children) {
 		if (child.tagName === "LI") {
-			const blocks = blocksIn(child, schema);
-			if (blocks.length > 0) items.push(blocks);
+			const blocks = blocksIn(child, reading, lookOf(child, look, reading));
+			if (blocks.some((block) => block.textContent.trim() !== "")) items.push(blocks);
 		} else if (isList(child)) {
-			const nested = listOf(child, schema);
+			const nested = listOf(child, reading, lookOf(child, look, reading));
 			const last = items.at(-1);
 			if (last) last.push(...nested);
 			else if (nested.length > 0) items.push(nested);
@@ -552,23 +521,37 @@ function listOf(list: Element, schema: Schema): Node[] {
 		: [nodeOf(schema, "bulletList", listItems)];
 }
 
-/** `node`, part of a line of text, as the deck's: its text with `marks` and those of what holds it, and a line break as one. */
-function inlineOf(node: ChildNode, marks: readonly Mark[], schema: Schema): Node[] {
-	if (node.nodeType === node.TEXT_NODE) return textOf(node.textContent ?? "", marks, schema);
+/** How a run of text looks, as the file sets it and the deck keeps it: the deck's marks, and its colour, size and font. */
+interface Look {
+	marks: readonly Mark[];
+	color?: CssColor;
+	/** In a slide's pixels. */
+	fontSize?: number;
+	fontFamily?: string;
+}
+
+const NO_LOOK: Look = { marks: [] };
+
+/** `node`, part of a line of text, as the deck's: its text looking as it and what holds it set, and a line break as one. */
+function inlineOf(node: ChildNode, look: Look, reading: TextReading): Node[] {
+	if (node.nodeType === node.TEXT_NODE) return textOf(node.textContent ?? "", look, reading);
 	if (!isElement(node)) return [];
-	if (node.tagName === "BR") return [nodeOf(schema, "hardBreak")];
-	const within = marksOf(node, marks, schema);
-	return [...node.childNodes].flatMap((child) => inlineOf(child, within, schema));
+	if (node.tagName === "BR") return [nodeOf(reading.schema, "hardBreak")];
+	const within = lookOf(node, look, reading);
+	return [...node.childNodes].flatMap((child) => inlineOf(child, within, reading));
 }
 
 /**
- * `text` with `marks`, each line break in it a break of the line. A link is
- * drawn underlined, and the file underlines it for that alone, so its
- * underline isn't kept as a mark of its own.
+ * `text` looking as `look` says, each line break in it a break of the line.
+ * A link is drawn underlined, and the file underlines it for that alone, so
+ * its underline isn't kept as a mark of its own.
  */
-function textOf(text: string, marks: readonly Mark[], schema: Schema): Node[] {
-	const linked = marks.some((mark) => mark.type.name === "link");
-	const kept = linked ? marks.filter((mark) => mark.type.name !== "underline") : marks;
+function textOf(text: string, look: Look, reading: TextReading): Node[] {
+	const { schema } = reading;
+	const linked = look.marks.some((mark) => mark.type.name === "link");
+	const marks = linked ? look.marks.filter((mark) => mark.type.name !== "underline") : look.marks;
+	const styled = textStyleOf(look, reading);
+	const kept = styled ? styled.addToSet(marks) : marks;
 	return text
 		.split(LINE_BREAK)
 		.flatMap((line, index) => [
@@ -578,6 +561,17 @@ function textOf(text: string, marks: readonly Mark[], schema: Schema): Node[] {
 }
 
 const LINE_BREAK = /\r\n|\r|\n/;
+
+/** The colour a run of text is given where the file gives none: what PowerPoint draws it in on a slide of its own colour. */
+const BLACK = cssColorIn("#000000");
+
+/** The text style mark `look` gives a run: its colour, black when the reading keeps colours, its size and its font. */
+function textStyleOf(look: Look, reading: TextReading): Mark | undefined {
+	const color = reading.colored ? (look.color ?? BLACK) : undefined;
+	const attributes = { color, fontSize: look.fontSize, fontFamily: look.fontFamily };
+	if (Object.values(attributes).every((value) => value === undefined)) return undefined;
+	return reading.schema.marks[TEXT_STYLE]?.create(attributes);
+}
 
 /** The marks the deck has for a run's style, by name: what a style says it is. */
 const MARKS_OF_STYLES: Readonly<
@@ -594,8 +588,12 @@ const MARKS_OF_STYLES: Readonly<
 const decorationOf = (style: Readonly<Record<string, string>>) =>
 	`${style["text-decoration"] ?? ""} ${style["text-decoration-line"] ?? ""}`;
 
-/** `marks` with those `element` adds: the ones its style says, and a link where a link may go. */
-function marksOf(element: Element, marks: readonly Mark[], schema: Schema): readonly Mark[] {
+/**
+ * `look` with what `element` adds: the marks its style says, a link where a
+ * link may go, and the colour, size and font it sets.
+ */
+function lookOf(element: Element, look: Look, reading: TextReading): Look {
+	const { schema } = reading;
 	const style = styleOf(element);
 	const href = element.tagName === "A" ? element.getAttribute("href") : null;
 	const added = [
@@ -604,7 +602,16 @@ function marksOf(element: Element, marks: readonly Mark[], schema: Schema): read
 		),
 		...(href && linkMayGoTo(href) ? [schema.marks.link?.create({ href })] : []),
 	];
-	return added.reduce<readonly Mark[]>((set, mark) => (mark ? mark.addToSet(set) : set), marks);
+	const fontSize = pointsIn(style["font-size"]);
+	return {
+		marks: added.reduce<readonly Mark[]>(
+			(set, mark) => (mark ? mark.addToSet(set) : set),
+			look.marks,
+		),
+		color: cssColorIn(style.color) ?? look.color,
+		fontSize: fontSize === undefined ? look.fontSize : hundredths(fontSize * reading.sizeScale),
+		fontFamily: fontFamilyIn(style["font-family"]) ?? look.fontFamily,
+	};
 }
 
 /** An element's inline style, by property. */
@@ -615,38 +622,96 @@ function styleOf(element: Element): Record<string, string> {
 	);
 }
 
-/** The size of the largest type in `html`, in points, or 0 when it sets none. */
-function largestTypeIn(html: string): number {
-	const sizes = [...html.matchAll(/font-size:\s*([\d.]+)pt/g)].map(([, size]) => Number(size));
-	return Math.max(0, ...sizes);
+/** The positive number of points `value` says, as `18pt`: `undefined` for anything else. */
+function pointsIn(value: string | undefined): number | undefined {
+	const [, number] = /^(\d+\.?\d*|\.\d+)pt$/.exec(value ?? "") ?? [];
+	const points = Number(number);
+	return number !== undefined && points > 0 && Number.isFinite(points) ? points : undefined;
 }
 
-/** Each line of `blocks`, its paragraphs' and its lists' items' alike, as its inline content. */
-const linesOf = (blocks: readonly Node[]): Fragment[] =>
-	blocks.flatMap((block) => (block.isTextblock ? [block.content] : linesOf(block.children)));
+/** A font's name the deck keeps: letters, digits, spaces and a few marks, nothing that could end a style. */
+const FONT_NAME = /^[\p{L}\p{N} _.-]+$/u;
 
-/** `lines` as the inline content of one line, a break between each two. */
-function joinedLines(lines: readonly Fragment[], schema: Schema): Node[] {
-	return lines.flatMap((line, index) => [
-		...(index > 0 ? [nodeOf(schema, "hardBreak")] : []),
-		...line.content,
-	]);
+/** Words in a font's name that say it has serifs, such as the browser's default. */
+const SERIF_NAMES =
+	/\b(serif|times|georgia|garamond|cambria|elephant|bodoni|baskerville|palatino|book antiqua|didot|caslon)\b/i;
+
+/**
+ * The font `value`, a `font-family` the file gives, names first, as the deck
+ * keeps it: that font, then whichever of the browser's own serif or sans
+ * serif fonts it is likelier to look like, for a browser that lacks it,
+ * which would otherwise draw it in its default font. `undefined` when it
+ * names no font the deck can keep.
+ */
+function fontFamilyIn(value: string | undefined): string | undefined {
+	const [first] = (value ?? "").split(",");
+	const name = first
+		?.trim()
+		.replace(/^(["'])(.*)\1$/, "$2")
+		.trim();
+	if (!name || !FONT_NAME.test(name)) return undefined;
+	const generic = SERIF_NAMES.test(name) && !/\bsans\b/i.test(name) ? "serif" : "sans-serif";
+	return `"${name}", ${generic}`;
 }
 
 /**
- * A table of the cells' words, the first row its header row, as the deck
- * keeps tables as markdown, whose tables all have one. A cell's paragraphs
- * and items are its lines. A merged cell's words are in the first of the
- * cells it spans, and the rest are empty, so no words are lost; a row with
- * fewer cells than the widest is made as wide with empty ones.
+ * The alignment and line spacing the file gives the line `element` holds,
+ * whose text is `inline`: its line spacing as a multiple of its text's size,
+ * and single spacing (`SINGLE_LINE_SPACING`) where the file gives none. A
+ * spacing the file gives in points is taken as a multiple of the line's
+ * largest text.
  */
-function tableOf(rows: readonly (readonly TableCell[])[], schema: Schema): Node {
+function lineAttributesOf(element: Element, inline: readonly Node[], reading: TextReading) {
+	const style = styleOf(element);
+	const textAlign = ["center", "right", "justify"].includes(style["text-align"] ?? "")
+		? style["text-align"]
+		: null;
+	const multiple = Number(style["line-height"]);
+	const points = pointsIn(style["line-height"]);
+	const largest = Math.max(
+		0,
+		...inline.map(
+			(node) => node.marks.find((mark) => mark.type.name === TEXT_STYLE)?.attrs.fontSize ?? 0,
+		),
+	);
+	const lineHeight =
+		multiple > 0 && Number.isFinite(multiple)
+			? multiple
+			: points !== undefined && largest > 0
+				? (points * reading.sizeScale) / largest
+				: SINGLE_LINE_SPACING;
+	return { textAlign, lineHeight: hundredths(lineHeight) };
+}
+
+/** Each line of `blocks`, its paragraphs' and its lists' items' alike, as its inline content. */
+const linesOf = (blocks: readonly Node[]): (readonly Node[])[] =>
+	blocks.flatMap((block) =>
+		block.isTextblock ? [block.content.content] : linesOf(block.children),
+	);
+
+/**
+ * A table of the cells' words, the first row its header row, drawn as the
+ * deck draws one, so its words take the deck's colours, as the header's fill
+ * isn't kept; the other cells' words keep the file's colours, or the cell's
+ * own. Each column is as wide as the file makes it.
+ */
+function tableOf({ data: rows, colWidths }: TableInFile, placing: Placing, schema: Schema): Node {
 	const width = Math.max(1, ...rows.map((row) => row.length));
-	const cellOf = (cell: TableCell | undefined, header: boolean) => {
-		const words = joinedLines(linesOf(blocksOf(cell?.text ?? "", schema)), schema);
-		return nodeOf(schema, header ? "tableHeader" : "tableCell", [
-			nodeOf(schema, "paragraph", header ? withoutBold(words) : words),
-		]);
+	const columnWidth = (column: number) => {
+		const points = colWidths?.[column];
+		return points && points > 0 ? [Math.round(points * placing.scale)] : null;
+	};
+	const cellOf = (cell: TableCell | undefined, header: boolean, column: number) => {
+		const reading: TextReading = { schema, sizeScale: placing.scale, colored: !header };
+		// A cell holding only spaces keeps its line, at the size the file gives it, as the other cells of its row are.
+		const blocks = blocksOf(cell?.text ?? "", reading, cellLookOf(cell, header, schema));
+		const kept =
+			blocks.length > 0
+				? blocks.map((block) => (header ? withoutBold(block) : block))
+				: [nodeOf(schema, "paragraph")];
+		return nodeOf(schema, header ? "tableHeader" : "tableCell", kept, {
+			colwidth: columnWidth(column),
+		});
 	};
 	return nodeOf(
 		schema,
@@ -655,23 +720,47 @@ function tableOf(rows: readonly (readonly TableCell[])[], schema: Schema): Node 
 			nodeOf(
 				schema,
 				"tableRow",
-				Array.from({ length: width }, (_cell, column) => cellOf(row[column], rowIndex === 0)),
+				Array.from({ length: width }, (_cell, column) =>
+					cellOf(row[column], rowIndex === 0, column),
+				),
 			),
 		),
 	);
 }
 
 /**
+ * How the text of `cell` looks where its runs say nothing: in the cell's
+ * own colour, and bold when the file sets the cell bold, but in the header,
+ * which is drawn as the deck draws one.
+ */
+function cellLookOf(cell: TableCell | undefined, header: boolean, schema: Schema): Look {
+	if (header || !cell) return NO_LOOK;
+	const bold = cell.fontBold ? schema.marks.bold?.create() : undefined;
+	return { marks: bold ? [bold] : [], color: cssColorIn(cell.fontColor) ?? undefined };
+}
+
+/**
+ * `node` without bold. A table's header row is drawn bold, and a file sets a
+ * header bold for that alone, so it isn't kept as a mark of its own there.
+ */
+function withoutBold(node: Node): Node {
+	if (node.isText) return node.mark(node.marks.filter((mark) => mark.type.name !== "bold"));
+	return node.copy(Fragment.fromArray(node.children.map(withoutBold)));
+}
+
+/**
  * A slide's notes as the deck's: plain paragraphs, a line each, with the
- * marks they have. An empty line is left out.
+ * marks they have, in the colours and sizes of the deck's notes. An empty
+ * line is left out.
  */
 function notesOf(html: string, schema: Schema): Node {
-	const lines = linesOf(blocksOf(html, schema)).flatMap((line) => {
+	const reading: TextReading = { schema, sizeScale: 1, colored: false };
+	const lines = linesOf(blocksOf(html, reading)).flatMap((line) => {
 		const split: Node[][] = [[]];
-		line.forEach((inline) => {
+		for (const inline of line) {
 			if (inline.type.name === "hardBreak") split.push([]);
-			else split.at(-1)?.push(inline);
-		});
+			else split.at(-1)?.push(plain(inline));
+		}
 		return split.filter((words) => words.some((word) => word.text?.trim()));
 	});
 	const paragraphs = lines.map((words) => nodeOf(schema, "paragraph", words));
@@ -681,6 +770,10 @@ function notesOf(html: string, schema: Schema): Node {
 		paragraphs.length > 0 ? paragraphs : [nodeOf(schema, "paragraph")],
 	);
 }
+
+/** `inline` without a text style, as the deck's notes are drawn in its own. */
+const plain = (inline: Node): Node =>
+	inline.mark(inline.marks.filter((mark) => mark.type.name !== TEXT_STYLE));
 
 /*
  * Keeping the file's images.
@@ -736,7 +829,7 @@ const DECORATIVE_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2017/d
 /**
  * What the file says of each slide's shapes, in the order of its slides, as
  * the library orders them, by each shape's id. Empty for a file that can't be
- * read so, whose slides are then laid out without it.
+ * read so, whose slides are then read without it.
  */
 async function shapesOnSlides(file: ArrayBuffer): Promise<Map<string, ShapeInFile>[]> {
 	try {

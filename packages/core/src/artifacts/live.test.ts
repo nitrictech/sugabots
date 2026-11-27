@@ -1,13 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import type { Artifact, LiveArtifactKind } from "@sugabots/contracts";
+import { deckFromHtml, htmlOfDeck } from "@sugabots/contracts/deck-html";
 import type { EditRequest } from "@sugabots/contracts/live-document";
-import {
-	bodyOf,
-	isMarkedRemoved,
-	isOffItsSlide,
-	placementOf,
-} from "@sugabots/contracts/live-slides";
 import { eq } from "drizzle-orm";
 import { Effect, Exit, Layer, Scope, Stream } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -17,7 +12,27 @@ import { agent, artifact, pod, thread, user, workspace } from "../database/schem
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { unimplemented } from "../testing.ts";
 import { Artifacts } from "./artifacts.ts";
+import { readHtml } from "./html-reader.ts";
 import { LiveDocuments } from "./live.ts";
+
+/** `slides`, each a slide's HTML, as a deck's HTML is written. */
+const deckOf = (...slides: string[]) => htmlOfDeck(deckFromHtml(slides.join("\n"), readHtml));
+
+/** A slide of `layout` holding `boxes`, each a role and the HTML of what its box holds, placed where the layout puts it. */
+const slideOf = (layout: string, ...boxes: [role: string, content: string][]) =>
+	`<section data-slide data-layout="${layout}"><div data-slide-body>${boxes
+		.map(([role, content]) => `<div data-slide-box data-role="${role}">${content}</div>`)
+		.join("")}</div></section>`;
+
+/** A deck of a title slide and a slide of goals. */
+const LAUNCH_REVIEW = deckOf(
+	slideOf("title", ["title", "<h1>Launch review</h1>"]),
+	slideOf(
+		"bullets",
+		["title", "<h2>Goals</h2>"],
+		["body", "<ul><li><p>Ship on Friday</p></li></ul>"],
+	),
+);
 
 describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", () => {
 	let by: Artifacts.AgentInThread;
@@ -205,11 +220,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 	it("writes an agent's edit to a deck into its live copy, keeping the version as a snapshot of it", async () => {
 		const { authoring, live } = await services();
 		const made = await runOnPostgres(
-			authoring.create(by, {
-				kind: "slides",
-				title: "Launch review",
-				content: "<!-- layout: title -->\n\n# Launch review\n\n---\n\n## Goals\n\n- Ship on Friday",
-			}),
+			authoring.create(by, { kind: "slides", title: "Launch review", content: LAUNCH_REVIEW }),
 		);
 		const person = await joinAsPerson(live, made, "Kim");
 		// Kim retitles the deck in their editor.
@@ -232,8 +243,10 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 
 		expect(written).toMatchObject({
 			version: 2,
-			content:
-				"<!-- layout: title -->\n\n# Launch review (draft 2)\n\n<!-- box -->\n\n---\n\n<!-- layout: bullets -->\n\n## Goals\n\n<!-- box -->\n\n- Ship on Monday",
+			content: LAUNCH_REVIEW.replace("Launch review", "Launch review (draft 2)").replace(
+				"Ship on Friday",
+				"Ship on Monday",
+			),
 		});
 		await until(() => slideTexts(person.document).includes("Ship on Monday"));
 		person.destroy();
@@ -246,12 +259,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 			says: "slides",
 			content: "# Launch plan\n\nShip on Friday.",
 		},
-		{
-			what: "deck",
-			kind: "slides",
-			says: "document",
-			content: "<!-- layout: title -->\n\n# Launch review\n\n---\n\n## Goals\n\n- Ship on Friday",
-		},
+		{ what: "deck", kind: "slides", says: "document", content: LAUNCH_REVIEW },
 	] as const)(
 		"neither deletes nor writes over a live $what whose artifact's row says its kind is $says, which it cannot read as that",
 		async ({ kind, says, content }) => {
@@ -265,9 +273,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 			);
 
 			const rewritten = await Effect.runPromise(
-				live.rewrite(made.id, authorIn(by.threadId), (markdown) =>
-					markdown.replace("Friday", "Monday"),
-				),
+				live.rewrite(made.id, authorIn(by.threadId), (text) => text.replace("Friday", "Monday")),
 			);
 
 			expect(rewritten).toMatchObject({ outcome: "blocked", blocked: "unreadable" });
@@ -277,6 +283,156 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 			person.destroy();
 		},
 	);
+
+	describe("keeping a deck an agent writes", () => {
+		/** A deck as a bot writes one by hand: in a page of its own, some boxes left where the layout puts them. */
+		const WRITTEN = `<!DOCTYPE html>
+<html><head><title>Launch review</title></head><body>
+<section data-slide data-layout="bullets">
+  <div data-slide-body>
+    <div data-slide-box data-role="title"><h2>Goals</h2></div>
+    <div data-slide-box data-role="body"><ul><li>Ship on Friday</li></ul></div>
+    <div data-slide-box style="left:680px;top:144px;width:200px;height:96px;background:#0f766e"><p>On track</p></div>
+  </div>
+</section>
+</body></html>`;
+
+		/** The text version `number` of the artifact keeps, if it has that version. */
+		const versionText = async (artifactId: string, number: number) =>
+			(
+				await runOnPostgres(
+					Effect.flatMap(BlobStore.Service, (blobs) =>
+						Artifacts.readVersionUnchecked(blobs)(by.podId, artifactId, number),
+					),
+				)
+			)?.content;
+
+		/** The deck an agent made of `WRITTEN`, which Kim has opened, so that it is live. */
+		const openedDeck = async () => {
+			const { authoring, live } = await services();
+			const made = await runOnPostgres(
+				authoring.create(by, { kind: "slides", title: "Launch review", content: WRITTEN }),
+			);
+			return { authoring, made, person: await joinAsPerson(live, made, "Kim") };
+		};
+
+		it("keeps a new deck as the deck its HTML reads as, not the page it was written in", async () => {
+			const { authoring } = await services();
+
+			const made = await runOnPostgres(
+				authoring.create(by, { kind: "slides", title: "Launch review", content: WRITTEN }),
+			);
+
+			expect(made.content).toBe(htmlOfDeck(deckFromHtml(WRITTEN, readHtml)));
+			expect(made.content).not.toContain("<!DOCTYPE");
+			expect(await versionText(made.id, 1)).toBe(made.content);
+		});
+
+		it("makes no deck of HTML that says nothing", async () => {
+			const { authoring } = await services();
+
+			const refusal = await runOnPostgres(
+				Effect.flip(
+					authoring.create(by, {
+						kind: "slides",
+						title: "Launch review",
+						content: "<!-- Slides -->",
+					}),
+				),
+			);
+
+			expect(refusal).toMatchObject({ _tag: "ArtifactDeckHtmlRefused", reason: "saysNothing" });
+			expect(await runOnPostgres(authoring.list(by))).toEqual([]);
+		});
+
+		it.each([
+			["empty", ""],
+			["only a comment", "<!-- The slides go here. -->"],
+			["unreadable", `${"<div>".repeat(20_000)}Goals${"</div>".repeat(20_000)}`],
+		])(
+			"leaves a live deck as it was when an agent replaces it with HTML that is %s, saying why",
+			async (_, content) => {
+				const { authoring, made, person } = await openedDeck();
+				const before = (await runOnPostgres(authoring.read(by, made.id))).content;
+
+				const refusal = await runOnPostgres(
+					Effect.flip(authoring.replace(by, { artifactId: made.id, baseVersion: 1, content })),
+				);
+
+				expect(refusal._tag).toBe("ArtifactDeckHtmlRefused");
+				expect(await runOnPostgres(authoring.read(by, made.id))).toMatchObject({
+					version: 1,
+					content: before,
+				});
+				person.destroy();
+			},
+		);
+
+		it("keeps the live deck's own text as the version a replace writes", async () => {
+			const { authoring, made, person } = await openedDeck();
+
+			const written = await runOnPostgres(
+				authoring.replace(by, {
+					artifactId: made.id,
+					baseVersion: 1,
+					content: WRITTEN.replace("Ship on Friday", "Ship on Monday"),
+				}),
+			);
+
+			const live = (await runOnPostgres(authoring.read(by, made.id))).content;
+			expect(live).toContain("Ship on Monday");
+			expect(written).toMatchObject({ version: 2, content: live });
+			expect(await versionText(made.id, 2)).toBe(live);
+			person.destroy();
+		});
+
+		it("keeps the live deck's own text as the version an edit writes", async () => {
+			const { authoring, made, person } = await openedDeck();
+
+			const written = await runOnPostgres(
+				authoring.edit(by, {
+					artifactId: made.id,
+					baseVersion: 1,
+					oldText: "On track",
+					newText: "Behind",
+				}),
+			);
+
+			const live = (await runOnPostgres(authoring.read(by, made.id))).content;
+			expect(live).toContain("Behind");
+			expect(written).toMatchObject({ version: 2, content: live });
+			expect(await versionText(made.id, 2)).toBe(live);
+			person.destroy();
+		});
+
+		it.each([
+			["rounds a box's corners", "background: #0f766e", "background: #0f766e; border-radius: 12px"],
+			["makes a box see-through", "background: #0f766e", "background: #0f766e; opacity: 0.5"],
+			["shades a box", "background: #0f766e", "background: #0f766e; box-shadow: 0 2px 4px #000"],
+			["gives a line a class", "<p>On track</p>", '<p class="badge">On track</p>'],
+			[
+				"sizes words in em",
+				"<p>On track</p>",
+				'<p><span style="font-size: 1.5em">On track</span></p>',
+			],
+		])(
+			"reports an edit that only %s, which a deck doesn't keep, as unchanged, writing no version",
+			async (_, oldText, newText) => {
+				const { authoring, made, person } = await openedDeck();
+
+				const refusal = await runOnPostgres(
+					Effect.flip(
+						authoring.edit(by, { artifactId: made.id, baseVersion: 1, oldText, newText }),
+					),
+				);
+
+				expect(refusal).toMatchObject({ _tag: "ArtifactUnchanged", kind: "slides" });
+				expect((await runOnPostgres(authoring.read(by, made.id))).version).toBe(1);
+				expect(await versionText(made.id, 2)).toBeUndefined();
+				person.destroy();
+			},
+		);
+	});
 
 	it("writes into a blank document someone has opened", async () => {
 		const { authoring, live } = await services();
@@ -289,7 +445,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 			live.rewrite(made.id, authorIn(by.threadId), () => "First line."),
 		);
 
-		expect(rewritten).toMatchObject({ outcome: "written", markdown: "First line." });
+		expect(rewritten).toMatchObject({ outcome: "written", text: "First line." });
 		await until(() => textOf(person.document) === "First line.");
 		person.destroy();
 	});
@@ -304,7 +460,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live document, against Postgres", 
 			}),
 		);
 
-		expect(await runOnPostgres(live.markdownForAgents(made.id))).toBeUndefined();
+		expect(await runOnPostgres(live.textForAgents(made.id))).toBeUndefined();
 		expect(await runOnPostgres(authoring.read(by, made.id))).toMatchObject({
 			content: "Text with a [^1] footnote.",
 		});
@@ -370,15 +526,23 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 
 	const planner = () => authorIn(randomUUID());
 
-	/** Six slides, written as a deck's markdown is: each box after the first started by its comment, empty or not. */
-	const SIX_SLIDES = [
-		"<!-- layout: title -->\n\n# Launch review\n\n<!-- box -->",
-		"<!-- layout: section -->\n\n<!-- box -->\n\n## Where we are",
-		"<!-- layout: bullets -->\n\n## Goals\n\n<!-- box -->\n\n- Ship on Friday\n- Tell support first",
-		"<!-- layout: quote -->\n\n> Nothing a person writes is lost.\n\n<!-- box -->",
-		"<!-- layout: bullets -->\n\n## Risks\n\n<!-- box -->\n\n- None yet",
-		"<!-- layout: section -->\n\n<!-- box -->\n\n## Questions",
-	].join("\n\n---\n\n");
+	/** Six slides, each with every box its layout places, empty or not. */
+	const SIX_SLIDES = deckOf(
+		slideOf("title", ["title", "<h1>Launch review</h1>"], ["subtitle", "<p></p>"]),
+		slideOf("section", ["label", "<p></p>"], ["title", "<h2>Where we are</h2>"]),
+		slideOf(
+			"bullets",
+			["title", "<h2>Goals</h2>"],
+			["body", "<ul><li><p>Ship on Friday</p></li><li><p>Tell support first</p></li></ul>"],
+		),
+		slideOf(
+			"quote",
+			["quote", "<blockquote><p>Nothing a person writes is lost.</p></blockquote>"],
+			["attribution", "<p></p>"],
+		),
+		slideOf("bullets", ["title", "<h2>Risks</h2>"], ["body", "<ul><li><p>None yet</p></li></ul>"]),
+		slideOf("section", ["label", "<p></p>"], ["title", "<h2>Questions</h2>"]),
+	);
 
 	it("changes only the slide a rewrite changes, keeping what a person typed elsewhere before it arrived", async () => {
 		const live = await liveDocuments();
@@ -392,9 +556,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		textInSlide(typing.getXmlFragment("default"), 4).insert("Risks".length, " we see");
 
 		const rewritten = await Effect.runPromise(
-			live.rewrite(made.id, planner(), (markdown) =>
-				markdown.replace("Ship on Friday", "Ship on Monday"),
-			),
+			live.rewrite(made.id, planner(), (text) => text.replace("Ship on Friday", "Ship on Monday")),
 		);
 		await until(() => slideTexts(person.document).includes("Ship on Monday"));
 		applyUpdate(person.document, encodeStateAsUpdate(typing));
@@ -405,47 +567,46 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		expect(elementsAfter).toHaveLength(elementsBefore.length);
 		expect(elementsAfter.every((element, index) => element === elementsBefore[index])).toBe(true);
 		await until(async () =>
-			((await Effect.runPromise(live.markdownForAgents(made.id))) ?? "").includes("Risks we see"),
+			((await Effect.runPromise(live.textForAgents(made.id))) ?? "").includes("Risks we see"),
 		);
-		expect(await Effect.runPromise(live.markdownForAgents(made.id))).toBe(
-			SIX_SLIDES.replace("Ship on Friday", "Ship on Monday").replace("## Risks", "## Risks we see"),
+		expect(await Effect.runPromise(live.textForAgents(made.id))).toBe(
+			SIX_SLIDES.replace("Ship on Friday", "Ship on Monday").replace(
+				"<h2>Risks</h2>",
+				"<h2>Risks we see</h2>",
+			),
 		);
 		person.destroy();
 	});
 
-	it("shows a layout an agent was asked for from inside the deck on the slide, reading as before", async () => {
+	it("colours a slide an agent was asked to from inside the deck at once, and suggests the words it changes there", async () => {
 		const live = await liveDocuments();
 		const made = await aDeck(SIX_SLIDES);
 		const author = planner();
 		const person = await joinAsPerson(live, made, "Kim");
 		person.document.getMap<EditRequest>("editRequests").set(author.threadId, {
-			instruction: "Put the goals in two columns",
+			instruction: "Make the goals stand out, and move them to Monday",
 			agent: "Planner",
 			answered: false,
 		});
 		// Long enough for the request to reach the API's copy of the document, which nothing here can watch.
 		await new Promise((resolve) => setTimeout(resolve, 150));
+		// The goals are the first slide in bullets.
+		const coloured = SIX_SLIDES.replace(
+			'data-layout="bullets"',
+			'data-layout="bullets" style="background: #0f172a"',
+		);
 
 		const rewritten = await Effect.runPromise(
-			live.rewrite(made.id, author, (markdown) =>
-				markdown.replace(
-					"<!-- layout: bullets -->\n\n## Goals",
-					"<!-- layout: columns -->\n\n## Goals",
-				),
-			),
+			live.rewrite(made.id, author, () => coloured.replace("Ship on Friday", "Ship on Monday")),
 		);
 
 		expect(rewritten?.outcome).toBe("suggested");
 		const goals = person.document.getXmlFragment("default").get(2) as XmlElement;
-		await until(() => goals.getAttribute("layout") === "columns");
-		// The slide says, to every editor, the layout it is proposed to have and the one it has.
-		expect(JSON.parse(goals.getAttribute("suggestion") as string)).toMatchObject([
-			{
-				type: "modification",
-				attrs: { attrName: "layout", previousValue: "bullets", newValue: "columns" },
-			},
-		]);
-		expect(await Effect.runPromise(live.markdownForAgents(made.id))).toBe(SIX_SLIDES);
+		await until(() => goals.getAttribute("background") === "#0f172a");
+		expect(goals.getAttribute("suggestion")).toBeUndefined();
+		expect(slideTexts(person.document)).toContain("Monday");
+		// The words read as they did until somebody accepts them.
+		expect(await Effect.runPromise(live.textForAgents(made.id))).toBe(coloured);
 		person.destroy();
 	});
 
@@ -461,7 +622,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		await new Promise((resolve) => setTimeout(resolve, 150));
 
 		const rewritten = await Effect.runPromise(
-			live.rewrite(made.id, planner(), (markdown) => markdown.replace("Friday", "Monday")),
+			live.rewrite(made.id, planner(), (text) => text.replace("Friday", "Monday")),
 		);
 
 		expect(rewritten).toMatchObject({ outcome: "blocked", blocked: "unreadable" });
@@ -496,7 +657,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 			await new Promise((resolve) => setTimeout(resolve, 150));
 
 			expect(held.getXmlFragment("default").toString()).toBe(shown);
-			expect(await Effect.runPromise(restarted.markdownForAgents(made.id))).toBe(made.content);
+			expect(await Effect.runPromise(restarted.textForAgents(made.id))).toBe(made.content);
 			rejoined.destroy();
 		},
 	);
@@ -517,46 +678,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a live deck", () => {
 		await new Promise((resolve) => setTimeout(resolve, 150));
 
 		expect(held.getXmlFragment("default").toString()).toBe(shown);
-		expect(await Effect.runPromise(live.markdownForAgents(made.id))).toBe(SIX_SLIDES);
+		expect(await Effect.runPromise(live.textForAgents(made.id))).toBe(SIX_SLIDES);
 		rejoined.destroy();
-	});
-
-	it("opens a deck nobody has opened with each slide's boxes where its layout puts them, whatever its markdown's comments say of placing or removing them", async () => {
-		const live = await liveDocuments();
-		const made = await aDeck(
-			"<!-- layout: bullets -->\n\n<!-- placement: 0 0 960 100; 0 100 960 440 -->\n\n<!-- removed: 2 -->\n\n## Goals\n\n<!-- box -->\n\n<!-- removed -->",
-		);
-		const person = await joinAsPerson(live, made, "Kim");
-
-		const shown = await Effect.runPromise(live.documentAsShown(made.id));
-
-		expect(shown?.children.map(placementOf)).toEqual([null]);
-		expect(shown?.children.map((slide) => bodyOf(slide).children.map(isMarkedRemoved))).toEqual([
-			[false, false],
-		]);
-		// What they say is kept as their words.
-		expect(shown?.textContent).toContain("<!-- removed: 2 -->");
-		person.destroy();
-	});
-
-	it("reads a stored deck whose boxes say nothing of being removed, as one stored before boxes could be, with every box on its slide, the empty ones too", async () => {
-		const made = await aDeck(SIX_SLIDES);
-		const blobs = new Map<string, Uint8Array>();
-		const firstRun = Effect.runSync(Scope.make());
-		const person = await joinAsPerson(await liveDocuments(blobs, firstRun), made, "Kim");
-		const boxes = elementsIn(person.document.getXmlFragment("default")).filter(
-			(element) => element.nodeName === "slideBox",
-		);
-		expect(boxes.map((box) => Object.keys(box.getAttributes()))).toEqual(Array(12).fill([]));
-		await Effect.runPromise(Scope.close(firstRun, Exit.void));
-		person.destroy();
-
-		// The API starts again, with only what it stored.
-		const shown = await Effect.runPromise((await liveDocuments(blobs)).documentAsShown(made.id));
-
-		expect(shown?.children.map((slide) => bodyOf(slide).children.map(isOffItsSlide))).toEqual(
-			Array(6).fill([false, false]),
-		);
 	});
 });
 

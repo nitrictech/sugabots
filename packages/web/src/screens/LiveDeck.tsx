@@ -2,8 +2,8 @@ import type { HocuspocusProvider } from "@hocuspocus/provider";
 import { imageTypeOf, MAX_ARTIFACT_IMAGE_BYTES } from "@sugabots/contracts";
 import { holdsSuggestion } from "@sugabots/contracts/live-document";
 import { layoutOf } from "@sugabots/contracts/live-slides";
-import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
-import { DOMSerializer } from "@tiptap/pm/model";
+import type { SlideLayout } from "@sugabots/contracts/slide-layouts";
+import { DOMSerializer, type Node } from "@tiptap/pm/model";
 import type { Transaction } from "@tiptap/pm/state";
 import { type Editor, useEditorState } from "@tiptap/react";
 import { ChevronDown, ChevronLeft, ChevronRight, LayoutTemplate, X } from "lucide-react";
@@ -12,6 +12,7 @@ import {
 	type RefObject,
 	useCallback,
 	useEffect,
+	useEffectEvent,
 	useLayoutEffect,
 	useMemo,
 	useRef,
@@ -23,9 +24,9 @@ import {
 	addImage,
 	addSlide,
 	boxesWaitOnSuggestion,
+	canResetLayout,
 	changeLayout,
 	LAYOUT_NAMES,
-	laidOutByHand,
 	moveSlideTo,
 	placeOfMovedSlide,
 	removeSlide,
@@ -50,7 +51,7 @@ import {
 import { IconButton } from "@/ui/icon-button.tsx";
 import { BoxOutlines } from "./box-outlines.tsx";
 import { DeckPresent } from "./DeckPresent.tsx";
-import { deckStage, drawnSlideBody, slideInView } from "./deck-stage.ts";
+import { boxPreviewOf, deckStage, drawnSlideBody, slideInView } from "./deck-stage.ts";
 import { LayoutPicker } from "./LayoutPicker.tsx";
 import { LiveDocumentText } from "./live-document-text.tsx";
 import {
@@ -405,7 +406,7 @@ function DeckView({
 										onPick={(layout: SlideLayout) =>
 											change(changeLayout(editor.state, current, layout))
 										}
-										onReset={laidOutByHand(shown.node) ? resetShownLayout : undefined}
+										onReset={canResetLayout(shown.node) ? resetShownLayout : undefined}
 										className="focus-ring inline-flex h-8 min-w-0 items-center gap-1.5 rounded-sm px-2 text-soft-foreground text-xs transition-colors hover:bg-hover data-popup-open:bg-hover max-md:h-11 max-md:text-sm"
 									>
 										<LayoutTemplate aria-hidden size={16} strokeWidth={1.75} />
@@ -433,7 +434,6 @@ function DeckView({
 										key={keyOfFollowedNode(deck.followed)}
 										editor={editor}
 										slide={shown}
-										followed={deck.followed}
 										stage={stage}
 										menuFor={slideMenu.box}
 									/>
@@ -574,35 +574,47 @@ const CARDS_BESIDE_MIN_PAGE_PX = 1000;
 /**
  * Draws the text of the slide on the stage, the one starting at `slidePos`,
  * at the largest size at which it fits, as its drawings elsewhere are, each
- * time it changes or the stage changes width. Answers whether it runs over
- * even at the smallest.
+ * time it changes, the stage changes width, or a box on it is drawn where a
+ * drag has it, so the text fits the box as it is resized. Answers whether it
+ * runs over even at the smallest.
  */
 function useFittedStage(
 	editor: Editor,
 	stage: RefObject<HTMLDivElement | null>,
 	slidePos: SlidePos | undefined,
-	slide: unknown,
+	slide: Node | undefined,
 ) {
 	const [overflowing, setOverflowing] = useState(false);
-	const measure = useCallback(() => {
+	const measure = useEffectEvent(() => {
 		const element = stage.current;
 		const body = slidePos === undefined ? undefined : drawnSlideBody(editor.view, slidePos);
-		if (!element || !body) return;
-		setOverflowing(fitSlideText(element, body));
-	}, [editor, stage, slidePos]);
+		if (!element || !body || !slide) return;
+		setOverflowing(fitSlideText(element, body, slide));
+	});
 	// biome-ignore lint/correctness/useExhaustiveDependencies: measured again whenever the slide changes.
-	useLayoutEffect(measure, [measure, slide]);
+	useLayoutEffect(() => measure(), [slidePos, slide]);
 	useEffect(() => {
 		const element = stage.current;
 		if (!element) return;
-		const resized = new ResizeObserver(measure);
+		const remeasure = () => measure();
+		const resized = new ResizeObserver(remeasure);
 		resized.observe(element);
-		element.addEventListener("load", measure, true);
+		element.addEventListener("load", remeasure, true);
+		// Heard once the editor has drawn the transaction, so the dragged box is measured where it now is.
+		let preview = boxPreviewOf(editor.state);
+		const dragged = () => {
+			const now = boxPreviewOf(editor.state);
+			if (now === preview) return;
+			preview = now;
+			measure();
+		};
+		editor.on("transaction", dragged);
 		return () => {
 			resized.disconnect();
-			element.removeEventListener("load", measure, true);
+			element.removeEventListener("load", remeasure, true);
+			editor.off("transaction", dragged);
 		};
-	}, [stage, measure]);
+	}, [editor, stage]);
 	return overflowing;
 }
 
@@ -756,9 +768,9 @@ function leftOutInWords({ imagesLeftOut, othersLeftOut }: PowerPointImported): s
 function othersLeftOutInWords(count: number): string {
 	const which =
 		count === 1
-			? "1 chart, shape, video or other thing in the PowerPoint file was"
-			: `${count} charts, shapes, videos or other things in the PowerPoint file were`;
-	return `${which} left out. A deck keeps a slide's text, tables, images and notes.`;
+			? "1 chart, video, SmartArt graphic or other thing in the PowerPoint file was"
+			: `${count} charts, videos, SmartArt graphics or other things in the PowerPoint file were`;
+	return `${which} left out. A deck keeps a slide's text, shapes, pictures, tables and notes, with their colours, fonts and places.`;
 }
 
 const IMAGE_TYPES = "image/png,image/jpeg,image/gif,image/webp";

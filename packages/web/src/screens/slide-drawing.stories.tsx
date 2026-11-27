@@ -1,14 +1,12 @@
+import { deckFromHtml } from "@sugabots/contracts/deck-html";
 import { artifactImageAddress, artifactImageIds } from "@sugabots/contracts/http";
 import { liveDocumentExtensions } from "@sugabots/contracts/live-document";
-import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
-import { layoutOf, PLACEMENT, takeBoxOffSlide } from "@sugabots/contracts/live-slides";
-import { type Frame, placementIn } from "@sugabots/contracts/slides-markdown";
+import { layoutOf } from "@sugabots/contracts/live-slides";
 import { getSchema } from "@tiptap/core";
 import { DOMSerializer, type Node } from "@tiptap/pm/model";
-import { Transform } from "@tiptap/pm/transform";
 import { expect, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { boxesOf, LAYOUT_NAMES } from "@/lib/deck.ts";
+import { LAYOUT_NAMES } from "@/lib/deck.ts";
 import { revenue } from "@/shell/story-fixtures.ts";
 import { DRAWN_BOX, SlideDrawing } from "./slide-drawing.tsx";
 
@@ -33,84 +31,94 @@ const serializer = DOMSerializer.fromSchema(
 	),
 );
 
-const TITLE = "<!-- layout: title -->\n\n# Q4 outreach plan\n\nGrowth Desk, October 2026";
+/** A slide of `layout` holding `boxes`, as a deck's HTML writes it. */
+const slideHtml = (layout: string, ...boxes: string[]) =>
+	`<section data-slide data-layout="${layout}"><div data-slide-body>${boxes.join("")}</div></section>`;
 
-const GOALS = `<!-- layout: bullets -->
+/**
+ * A box for `role` holding `html`, where its layout places it unless `style`
+ * says where, its blocks at the edge `align` says.
+ */
+const box = (
+	role: string,
+	html: string,
+	{ style, align }: { style?: string; align?: string } = {},
+) =>
+	`<div data-slide-box data-role="${role}"${align ? ` data-vertical-align="${align}"` : ""}${style ? ` style="${style}"` : ""}>${html}</div>`;
 
-## Goals
+/** The style of a box framed `x` across and `y` down, `width` wide and `height` tall, in a slide's pixels. */
+const at = (x: number, y: number, width: number, height: number) =>
+	`left: ${x}px; top: ${y}px; width: ${width}px; height: ${height}px`;
 
-- Book 40 discovery calls with mid-market accounts
-- Reactivate the 12 stalled Proposal-stage deals
-- Publish the new pricing page before December`;
+const list = (...items: string[]) =>
+	`<ul>${items.map((item) => `<li><p>${item}</p></li>`).join("")}</ul>`;
 
-const PEOPLE_AND_BOTS = `<!-- layout: columns -->
+const TITLE = slideHtml(
+	"title",
+	box("title", "<h1>Q4 outreach plan</h1>", { align: "bottom" }),
+	box("subtitle", "<p>Growth Desk, October 2026</p>"),
+);
 
-## People and bots
+const GOALS_TITLE = box("title", "<h2>Goals</h2>");
+const GOALS_LIST = list(
+	"Book 40 discovery calls with mid-market accounts",
+	"Reactivate the 12 stalled Proposal-stage deals",
+	"Publish the new pricing page before December",
+);
+const GOALS = slideHtml("bullets", GOALS_TITLE, box("body", GOALS_LIST));
 
-<!-- box -->
+const PEOPLE = `<h3>People</h3>${list("Type in the deck together", "Accept or undo suggestions", "Present from any slide")}`;
+const BOTS = `<h3>Bots</h3>${list("Suggest edits when asked", "Draft new slides", "Read the speaker's notes")}`;
 
-### People
+/** The slide of two columns, its boxes at `frames` when given, in order, and where its layout places them otherwise. */
+const peopleAndBots = (frames: string[] = []) =>
+	slideHtml(
+		"columns",
+		box("title", "<h2>People and bots</h2>", { style: frames[0] }),
+		box("leftColumn", PEOPLE, { style: frames[1] }),
+		box("rightColumn", BOTS, { style: frames[2] }),
+	);
 
-- Type in the deck together
-- Accept or undo suggestions
-- Present from any slide
+const PIPELINE = slideHtml(
+	"image",
+	box("title", "<h2>Pipeline by stage</h2>", { align: "bottom" }),
+	box("text", "<p>Leads doubled since July, and twice as many reach a proposal.</p>"),
+	box(
+		"image",
+		`<p><img alt="Deals at each stage, from lead to won" data-address="${artifactImageAddress(chartIds)}"></p>`,
+		{ align: "middle" },
+	),
+);
 
-<!-- box -->
+const PART_TWO_TITLE = box("title", "<h2>What we build next</h2>", { align: "bottom" });
+const PART_TWO = slideHtml(
+	"section",
+	box("label", "<p>Part 2</p>", { align: "bottom" }),
+	PART_TWO_TITLE,
+);
 
-### Bots
+const QUOTE = slideHtml(
+	"quote",
+	box("quote", "<blockquote><p>Ship the small thing first, then listen.</p></blockquote>", {
+		align: "bottom",
+	}),
+	box("attribution", "<p>The growth team's rule for Q4</p>"),
+);
 
-- Suggest edits when asked
-- Draft new slides
-- Read the speaker's notes`;
+const RISKS = slideHtml(
+	"table",
+	box("title", "<h2>Risks</h2>"),
+	box(
+		"table",
+		"<table><tbody><tr><th><p>Risk</p></th><th><p>Owner</p></th></tr><tr><td><p>Holiday slowdown in December</p></td><td><p>Growth Desk</p></td></tr><tr><td><p>Pricing page still in review</p></td><td><p>Kim</p></td></tr></tbody></table>",
+	),
+);
 
-const PIPELINE = `<!-- layout: image -->
+/** Reads a deck's HTML inert, as the app does. */
+const readHtml = new DOMParser();
 
-## Pipeline by stage
-
-<!-- box -->
-
-Leads doubled since July, and twice as many reach a proposal.
-
-<!-- box -->
-
-![Deals at each stage, from lead to won](${artifactImageAddress(chartIds)})`;
-
-const PART_TWO = "<!-- layout: section -->\n\nPart 2\n\n## What we build next";
-
-const QUOTE = `<!-- layout: quote -->
-
-> Ship the small thing first, then listen.
-
-The growth team's rule for Q4`;
-
-const RISKS = `<!-- layout: table -->
-
-## Risks
-
-| Risk | Owner |
-| --- | --- |
-| Holiday slowdown in December | Growth Desk |
-| Pricing page still in review | Kim |`;
-
-/** The one slide `markdown` says, as a deck read from markdown holds it: every box placed by its layout. */
-const slideOf = (markdown: string): Node => liveDocumentFromMarkdown("slides", markdown).child(0);
-
-/** The one slide `markdown` says, with its boxes placed by hand at `frames`, a frame for each box in order. */
-function slidePlacedAt(markdown: string, frames: Frame[]): Node {
-	const slide = slideOf(markdown);
-	const placement = placementIn(frames, layoutOf(slide));
-	if (!placement) throw new RangeError("The frames are no placement for the slide's layout");
-	return slide.type.create({ ...slide.attrs, [PLACEMENT]: placement }, slide.content, slide.marks);
-}
-
-/** The one slide `markdown` says, with the box at `box` deleted from it, as Delete on the box's outline deletes it. */
-function slideWithoutBox(markdown: string, box: number): Node {
-	const deck = liveDocumentFromMarkdown("slides", markdown);
-	const deleted = boxesOf(deck.child(0))[box];
-	if (!deleted) throw new RangeError(`The slide has no box ${box}`);
-	// The deck holds only this slide, which starts where the deck does.
-	return takeBoxOffSlide(new Transform(deck), deleted.startInSlide).doc.child(0);
-}
+/** The one slide `html`, a deck's HTML, says. */
+const slideOf = (html: string): Node => deckFromHtml(html, readHtml).child(0);
 
 /**
  * The step at which the slide drawn in `figure` draws its text, as a part of
@@ -121,9 +129,9 @@ const textStepOf = (figure: HTMLElement) =>
 
 /** The drawn box of a slide that `element` is in. */
 function drawnBoxOf(element: HTMLElement): HTMLElement {
-	const box = element.closest<HTMLElement>(DRAWN_BOX);
-	if (!box) throw new Error("The element is in no box of the slide");
-	return box;
+	const drawn = element.closest<HTMLElement>(DRAWN_BOX);
+	if (!drawn) throw new Error("The element is in no box of the slide");
+	return drawn;
 }
 
 /** `slide` drawn read only, in a figure named `label`, which says what state the story shows. */
@@ -144,12 +152,12 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 });
 
-const EVERY_LAYOUT = [TITLE, GOALS, PEOPLE_AND_BOTS, PIPELINE, PART_TWO, QUOTE, RISKS].map(slideOf);
+const EVERY_LAYOUT = [TITLE, GOALS, peopleAndBots(), PIPELINE, PART_TWO, QUOTE, RISKS].map(slideOf);
 
 /**
  * A slide of each layout, its boxes where the layout places them, as a deck
- * read from markdown, a bot's included, is drawn in the strip of slides, in
- * present mode and wherever the deck is only read.
+ * a bot writes is drawn in the strip of slides, in present mode and wherever
+ * the deck is only read.
  */
 export const EveryLayout = meta.story({
 	render: () => (
@@ -179,10 +187,13 @@ export const EveryLayoutInLight = meta.story({
 	globals: { theme: "light" },
 });
 
-const GOALS_PLACED = slidePlacedAt(GOALS, [
-	{ x: 80, y: 64, width: 280, height: 160 },
-	{ x: 400, y: 64, width: 480, height: 412 },
-]);
+const GOALS_PLACED = slideOf(
+	slideHtml(
+		"bullets",
+		box("title", "<h2>Goals</h2>", { style: at(80, 64, 280, 160) }),
+		box("body", GOALS_LIST, { style: at(400, 64, 480, 412) }),
+	),
+);
 
 /** A slide whose boxes somebody placed by hand: its title moved beside its bullets, not over them. */
 export const PlacedByHand = meta.story({
@@ -197,7 +208,7 @@ export const PlacedByHand = meta.story({
 	},
 });
 
-/** Sized off its width, a slide placed by hand keeps where its boxes are at a phone's width. */
+/** Scaled as one piece, a slide placed by hand keeps where its boxes are at a phone's width. */
 export const PlacedByHandOnAPhone = meta.story({
 	...PlacedByHand.input,
 	globals: { viewport: { value: "mobile1" }, theme: "light" },
@@ -205,12 +216,14 @@ export const PlacedByHandOnAPhone = meta.story({
 
 /**
  * A two-column slide with its left column deleted. The right column stays on
- * the right, where a file the deck is saved as puts it too.
+ * the right, where it was.
  */
 export const ColumnDeleted = meta.story({
 	render: () => (
 		<DrawnSlide
-			slide={slideWithoutBox(PEOPLE_AND_BOTS, 1)}
+			slide={slideOf(
+				slideHtml("columns", box("title", "<h2>People and bots</h2>"), box("rightColumn", BOTS)),
+			)}
 			label="People and bots, its left column deleted"
 		/>
 	),
@@ -231,28 +244,28 @@ export const ColumnDeleted = meta.story({
 /** A section break with its label deleted, which takes the accent drawn over the label with it. */
 export const SectionLabelDeleted = meta.story({
 	render: () => (
-		<DrawnSlide slide={slideWithoutBox(PART_TWO, 0)} label="Part 2, its label deleted" />
+		<DrawnSlide
+			slide={slideOf(slideHtml("section", PART_TWO_TITLE))}
+			label="Part 2, its label deleted"
+		/>
 	),
 	play: async ({ canvas }) => {
 		const figure = canvas.getByRole("figure", { name: "Part 2, its label deleted" });
 		const slide = within(figure);
 		await expect(slide.queryByText("Part 2")).toBeNull();
 		await expect(slide.getByRole("heading", { name: "What we build next" })).toBeVisible();
-		const label = figure.querySelector<HTMLElement>('[data-box-role="label"]');
-		await expect(label).not.toBeVisible();
+		await expect(figure.querySelector('[data-role="label"]')).toBeNull();
 	},
 });
 
-const RUNS_PAST_ITS_BOX = slidePlacedAt(PEOPLE_AND_BOTS, [
-	{ x: 80, y: 64, width: 800, height: 64 },
-	{ x: 80, y: 160, width: 380, height: 80 },
-	{ x: 500, y: 160, width: 380, height: 316 },
-]);
+const RUNS_PAST_ITS_BOX = slideOf(
+	peopleAndBots([at(80, 64, 800, 64), at(80, 160, 380, 80), at(500, 160, 380, 316)]),
+);
 
 /**
- * A placed slide whose left column holds more than its box: what runs past
- * the foot of the box is drawn under it, at full size, as nothing on the
- * slide is in its way.
+ * A slide whose left column holds more than its box: what runs past the foot
+ * of the box is drawn under it, at full size, as nothing on the slide is in
+ * its way.
  */
 export const TextRunsPastItsBox = meta.story({
 	render: () => (
@@ -272,16 +285,14 @@ export const TextRunsPastItsBox = meta.story({
 	},
 });
 
-const RUNS_OUT_OF_ROOM = slidePlacedAt(PEOPLE_AND_BOTS, [
-	{ x: 80, y: 64, width: 800, height: 64 },
-	{ x: 80, y: 160, width: 380, height: 80 },
-	{ x: 80, y: 300, width: 380, height: 176 },
-]);
+const RUNS_OUT_OF_ROOM = slideOf(
+	peopleAndBots([at(80, 64, 800, 64), at(80, 160, 380, 80), at(80, 300, 380, 176)]),
+);
 
 /**
- * A placed slide whose left column holds more than its box, with the right
- * column placed under it: the slide's text steps down until the left
- * column's words stop short of the box below.
+ * A slide whose left column holds more than its box, with the right column
+ * placed under it: the slide's text steps down until the left column's words
+ * stop short of the box below.
  */
 export const TextSteppedDownToFit = meta.story({
 	render: () => (

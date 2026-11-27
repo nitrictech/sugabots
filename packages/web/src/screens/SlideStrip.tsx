@@ -6,7 +6,7 @@ import {
 	type SuggestionBy,
 	suggestionBy,
 } from "@sugabots/contracts/live-document";
-import type { SlideLayout } from "@sugabots/contracts/slides-markdown";
+import type { SlideLayout } from "@sugabots/contracts/slide-layouts";
 import type { DOMSerializer, Node } from "@tiptap/pm/model";
 import { cn } from "cn";
 import { ArrowDown, ArrowUp, Ellipsis, PenLine, Plus, Sparkles, Trash2 } from "lucide-react";

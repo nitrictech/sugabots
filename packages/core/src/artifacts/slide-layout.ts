@@ -1,80 +1,85 @@
-import { placementOf, SLIDE_TEXT_STEPS } from "@sugabots/contracts/live-slides";
 import {
-	type BoxRole,
+	bodyOf,
+	boxAttributesOf,
+	layoutOf,
+	SLIDE_TEXT_STEPS,
+} from "@sugabots/contracts/live-slides";
+import type { BoxRole, VerticalAlign } from "@sugabots/contracts/slide-box";
+import {
 	type Frame,
-	type Placement,
 	roomBottom,
-	SLIDE_BOX_ROLES,
-	SLIDE_END_MARGIN,
 	SLIDE_HEIGHT,
-	SLIDE_SIDE_MARGINS,
 	SLIDE_UNIT,
 	SLIDE_WIDTH,
-	type SlideLayout,
-} from "@sugabots/contracts/slides-markdown";
+} from "@sugabots/contracts/slide-geometry";
+import type { SlideLayout } from "@sugabots/contracts/slide-layouts";
 import type { Mark, Node } from "@tiptap/pm/model";
 import { metricsOf, type TextType } from "./pdf-fonts.ts";
 import {
 	ACCENT,
 	accentBarOver,
+	alignedOffset,
 	BLOCK_QUOTE_LOOK,
-	type BlocksOfLayout,
-	BOX_PARTS,
+	boxLookOf,
 	CODE_LOOK,
-	COLUMN_GAP_UNITS,
 	COLUMN_LOOK,
-	CONTENT_BOTTOM,
-	CONTENT_HEIGHT,
-	contentWidthOf,
+	cellInsetOf,
+	contentAreaOf,
+	fittedImage,
 	HIGHLIGHT,
-	IMAGE_LAYOUT,
-	IMAGE_RADIUS,
+	hasAccentBar,
 	IMAGE_WORDS_LOOK,
-	LAYOUT_LOOKS,
-	type LayoutLook,
+	imageFillingBox,
+	imageFitOf,
+	imageRadiusOf,
 	LINK_UNDERLINE_OFFSET,
 	LIST_LOOK,
+	lineHeightOf,
 	linkInFile,
-	partLook,
+	ownTextStyleOf,
+	paintOf,
 	QUOTE_LOOK,
 	RULE,
 	RULE_THICKNESS,
 	SCRIPT,
 	SECTION_BAR,
-	type SlideBlocks,
-	type SlidePart,
-	slideBlocksOf,
+	type ShapeLook,
+	shapeLookOf,
 	TABLE_LOOK,
 	TEXT,
+	type TextAlign,
 	type TextLook,
 	TINT,
+	textAlignOf,
 } from "./slide-design.ts";
 
 /*
  * A deck's slides laid out as the app's slide styles lay them out
- * (`slide-design.ts`), measured in its fonts, each at the largest of
- * `SLIDE_TEXT_STEPS` at which it fits, as in the app. A slide whose boxes
- * somebody placed by hand has each box at its frame, as the app draws a
- * placed slide (`placedBoxes`). The PDF draws a slide where it is laid out
- * (`pdf.ts`), and the PowerPoint file sets a slide's text at the step it is
- * laid out at, in boxes as tall as it is laid out (`powerpoint.ts`).
+ * (`slide-design.ts`), measured in its fonts: each box at its frame, in the
+ * order the slide holds them, what it holds within its padding and where its
+ * vertical alignment sits it, and the slide's text at the largest of
+ * `SLIDE_TEXT_STEPS` at which every box's fits, as in the app. The PDF draws a
+ * slide where it is laid out (`pdf.ts`), and the PowerPoint file sets a
+ * slide's text at the step it is laid out at, measuring what it stacks in a
+ * box as it is laid out here (`powerpoint.ts`).
  *
  * Everything is laid out first, measured, and drawn after with a pen where it
  * was laid out, so a slide's text can be laid out again at a smaller step
  * before anything is drawn, and measured without being drawn at all.
  *
- * A slide is cut off at the margin at its foot, or, once its boxes are
- * placed by hand, at its edges, as the app cuts each off; the pen cuts off
- * what is drawn past that (`Pen.clipped`). What is stacked one thing under
+ * A slide is cut off at its edges, as the app cuts it off; the pen cuts off
+ * what is drawn past them (`Pen.clipped`). What is stacked one thing under
  * another leaves out what starts where it is cut off (`stacked`), numbers,
  * rules and links with it, and is laid out only as far as it takes to know
- * the slide can't fit, or as far as the slide shows, so a slide that runs
- * over by any amount costs no more than one that runs over a little.
+ * the box can't fit, or as far as the slide shows, so a slide that runs over
+ * by any amount costs no more than one that runs over a little.
  */
 
 /** How a stretch of text is set, and its colour. */
 export interface Type extends TextType {
 	color: string;
+	/** How opaque it is, from 0 to 1: wholly, unless its own colour says otherwise. */
+	opacity?: number;
 }
 
 /** A width and height, in points. */
@@ -106,17 +111,29 @@ export interface Pen {
 	fill(box: Box, look: { color: string; opacity?: number; radius?: number }): void;
 	/** A dashed outline just inside `box`. */
 	dashed(box: Box, look: { color: string; radius: number }): void;
-	/** The image the deck keeps at `address`, one `Measure.imageSizeAt` gives a size for. */
-	image(address: string, box: Box, radius: number): void;
+	/** A box's own shape at `frame`, as `look` says: its path, in the frame's own points, or the frame's rectangle, its outline within the frame. */
+	shape(frame: Frame, look: ShapeLook): void;
+	/**
+	 * The image the deck keeps at `address`, one `Measure.imageSizeAt` gives a
+	 * size for, drawn upright across `box` and cut off at `clip`, whose corners
+	 * are rounded by `radius`.
+	 */
+	image(address: string, box: Box, clip: Box, radius: number): void;
+	/** Draws what `draw` draws turned `degrees` clockwise about the middle of `frame`. */
+	rotated(frame: Frame, degrees: number, draw: () => void): void;
 	/** Draws what `draw` draws, cut off at the edges of `box`. */
 	clipped(box: Box, draw: () => void): void;
-	/** Whether what is drawn from `y` down is cut off whole: `y` is at or past the foot of a box drawing is cut off at (`clipped`). */
+	/**
+	 * Whether what is drawn from `y` down is cut off whole: `y` is at or past
+	 * the foot of a box drawing is cut off at (`clipped`). Never, within what is
+	 * drawn turned (`rotated`), where `y` is no longer down the slide.
+	 */
 	cutsOffFrom(y: number): boolean;
 	/** A link over `box`, as far as what it is drawn within shows. */
 	link(box: Box, url: string): void;
 }
 
-/** What is inherited down a slide's blocks, as CSS inherits it. */
+/** What is inherited down a box's blocks, as CSS inherits it. */
 interface Setting {
 	measure: Measure;
 	/** The slide's unit at the step its text is drawn at, in points. */
@@ -139,10 +156,10 @@ interface Setting {
 	balancedText: boolean;
 	/** Whether a quote is the slide's large quote, as every one in the quote layout is. */
 	quoteLayout: boolean;
-	/** The most an image may be tall, in points: unbounded but for the image layout's image. */
-	imageMaxHeight: number;
 	/** An image's corners, in ems of its text. */
 	imageRadius: number;
+	/** Whether its tables' cells are padded tightly (`cellInsetOf`). */
+	tightCells: boolean;
 }
 
 /** Something laid out, to draw with its top left at a point. */
@@ -157,8 +174,8 @@ interface Laid {
 
 /**
  * Laying out something under the room left for it, in points: how far below
- * its top it may reach and the slide still fit. Past that, nothing more of it
- * is laid out, and it is taken to reach past the room.
+ * its top it may reach and still be shown, or fit. Past that, nothing more of
+ * it is laid out, and it is taken to reach past the room.
  */
 type LayOut = (room: number) => Laid;
 
@@ -169,36 +186,39 @@ export interface ArrangedSlide {
 	/** One of `SLIDE_TEXT_STEPS`. */
 	step: number;
 	fits: boolean;
-	/** Draws the slide, cut off where the app cuts it off. */
+	/** Draws the slide's boxes, in order, cut off at its edges. */
 	draw: (pen: Pen) => void;
 }
 
-/** How far past the room it has a slide's content may reach and still fit, as the app allows a pixel for rounding. */
+/** How far past the room it has what a box holds may reach and still fit, as the app allows a pixel for rounding. */
 const FIT_ALLOWANCE = 1;
 
-/** The room a slide's content has, from the margin at its top. */
-const SLIDE_ROOM = CONTENT_HEIGHT + FIT_ALLOWANCE;
-
-/** Where a slide its layout places is cut off: at the margin at its foot. */
-const WITHIN_MARGINS: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: CONTENT_BOTTOM };
-
-/** Where a slide whose boxes were placed by hand is cut off: at its edges. */
+/** Where a slide is cut off: at its edges. */
 const WHOLE_SLIDE: Box = { x: 0, y: 0, width: SLIDE_WIDTH, height: SLIDE_HEIGHT };
 
 /**
- * `slide` laid out at the largest step at which it fits, or the smallest: by
- * its layout, or, where somebody placed its boxes by hand, each box at its
- * frame (`placedBoxes`).
+ * `slide`'s boxes laid out at the largest step at which each that holds text
+ * the slide styles size fits (`laidBox`), or the smallest. A box whose text
+ * all has a size of its own is drawn at that size wherever it reaches, as no
+ * step changes it, so only the others are measured, as the app measures them.
  */
 export function arrangedSlide(slide: Node, measure: Measure): ArrangedSlide {
-	const blocks = slideBlocksOf(slide);
-	const placement = placementOf(slide);
-	const cutOffAt = placement ? WHOLE_SLIDE : WITHIN_MARGINS;
+	const layout = layoutOf(slide);
+	const boxes = bodyOf(slide).children;
+	const frames = boxes.map((box) => boxAttributesOf(box).frame);
+	const stepping = boxes.map(holdsSteppedText);
 	const atStep = (step: number): ArrangedSlide => {
-		const { fits, draw } = placement
-			? placedBoxes(blocks, placement, measure, step)
-			: arranged(blocks, measure, step * SLIDE_UNIT);
-		return { step, fits, draw: (pen) => pen.clipped(cutOffAt, () => draw(pen)) };
+		const laid = boxes.map((box, index) =>
+			laidBox(box, layout, measure, step, roomBottom(frames, index)),
+		);
+		return {
+			step,
+			fits: laid.every((box, index) => !stepping[index] || box.fits),
+			draw: (pen) =>
+				pen.clipped(WHOLE_SLIDE, () => {
+					for (const box of laid) box.draw(pen);
+				}),
+		};
 	};
 	const [largest, ...smaller] = SLIDE_TEXT_STEPS;
 	let arrangement = atStep(largest);
@@ -209,60 +229,175 @@ export function arrangedSlide(slide: Node, measure: Measure): ArrangedSlide {
 	return arrangement;
 }
 
-/** Where on a slide blocks are set: in which part of a slide of which layout, at which step, and across how much. */
-export interface Placing {
-	layout: SlideLayout;
-	part: SlidePart;
-	/** One of `SLIDE_TEXT_STEPS`. */
-	step: number;
-	/** In points. */
-	width: number;
-	/**
-	 * How tall the box the blocks are in is, in points, on a slide whose boxes
-	 * somebody placed by hand, where no image in a box is taller than the box:
-	 * `undefined` on a slide its layout places.
-	 */
-	boxHeight: number | undefined;
+/** Whether `box` holds text the slide styles size, which steps down to fit: text with no size of its own. */
+function holdsSteppedText(box: Node): boolean {
+	let stepped = false;
+	box.descendants((node) => {
+		stepped ||= node.isText && ownTextStyleOf(node.marks).fontSize === undefined;
+		return !stepped;
+	});
+	return stepped;
 }
 
 /**
- * How tall `blocks` are, one under another, set as `placing` says, in points;
- * as tall as a slide's content may be and more, when they are taller.
+ * The size a paragraph or heading, `line`, is set at when every stretch of
+ * its text has a size of its own (`ownTextStyleOf`): the largest of them, in
+ * points, as the app sets the line's own element, so its lines are spaced as
+ * their text is sized rather than as the slide styles would size it.
+ * `undefined` for a line holding no text, or any text the slide styles size.
  */
+function ownLineSizeOf(line: Node): number | undefined {
+	let largest: number | undefined;
+	let own = true;
+	line.forEach((inline) => {
+		if (!inline.isText) return;
+		const size = ownTextStyleOf(inline.marks).fontSize;
+		if (size === undefined) own = false;
+		else largest = Math.max(largest ?? 0, size);
+	});
+	return own ? largest : undefined;
+}
+
+/** A box laid out at its frame: whether what it holds fits the room it has, and drawing it. */
+interface LaidBox {
+	fits: boolean;
+	draw: (pen: Pen) => void;
+}
+
+/**
+ * `box`, one of a slide of `layout`'s, laid out at its frame with its text at
+ * `step`: what it holds across its content area (`contentAreaOf`), as far
+ * apart as its role sets its blocks, up and down the area as its vertical
+ * alignment sits it, or, for an image filling the box, the image over the
+ * area (`filledArea`); and over a section break's label, the accent bar. All
+ * of it turns with the box.
+ *
+ * It fits when what it holds reaches no lower than `room`, how far down the
+ * slide it may reach (`roomBottom`), give or take the pixel the app allows.
+ * What rises above its area, as what is set at its foot may, the app doesn't
+ * measure.
+ */
+function laidBox(
+	box: Node,
+	layout: SlideLayout,
+	measure: Measure,
+	step: number,
+	room: number,
+): LaidBox {
+	const attributes = boxAttributesOf(box);
+	const { frame, role, verticalAlign, rotation } = attributes;
+	const area = contentAreaOf(attributes);
+	const setting = settingOf({ layout, role, step, width: area.width }, measure);
+	const laid =
+		filledArea(box, area, layout, setting) ??
+		stackedWithin(
+			layOutsOf(box.children, setting, area.width),
+			boxLookOf(layout, role).gap * setting.unit,
+			heightToLayOut(area, verticalAlign, room),
+		);
+	const top = area.y + alignedOffset(verticalAlign, area.height, laid.height);
+	const bar = hasAccentBar(layout, role) ? accentBarOver(frame, setting.unit) : undefined;
+	const shape = shapeLookOf(attributes);
+	return {
+		fits: top + laid.height <= room + FIT_ALLOWANCE,
+		draw: (pen) =>
+			pen.rotated(frame, rotation, () => {
+				pen.shape(frame, shape);
+				if (bar) pen.fill(bar, { color: ACCENT, radius: SECTION_BAR.radius * setting.unit });
+				laid.draw(pen, area.x, top);
+			}),
+	};
+}
+
+/**
+ * The image `box` holds alone filling its content `area` (`imageFillingBox`),
+ * as tall as the area: drawn over it as `imageFitOf` says, cut to the area,
+ * whose corners it takes but on a blank slide. `undefined` for a box holding
+ * anything else, or an image the file doesn't draw, which is in the text as
+ * its words.
+ */
+function filledArea(
+	box: Node,
+	area: Frame,
+	layout: SlideLayout,
+	setting: Setting,
+): Laid | undefined {
+	const address: unknown = imageFillingBox(box)?.attrs.src;
+	const natural = typeof address === "string" ? setting.measure.imageSizeAt(address) : undefined;
+	if (typeof address !== "string" || !natural) return undefined;
+	const fit = imageFitOf(layout);
+	const radius = fit === "cover" ? 0 : setting.imageRadius * paragraphType(setting).type.size;
+	return {
+		height: area.height,
+		width: area.width,
+		baseline: undefined,
+		draw: (pen, x, y) => {
+			const within = { x, y, width: area.width, height: area.height };
+			pen.image(address, fittedImage(natural, within, fit), within, radius);
+		},
+	};
+}
+
+/**
+ * How tall what a box holds is laid out, at most, in its content `area`, as
+ * `align` sits it there: as tall as it may be and still fit, `room` being how
+ * far down the slide it may reach, or as the slide shows it, whichever is
+ * taller. Past that, it doesn't fit, and is drawn only as far as it is laid
+ * out.
+ */
+function heightToLayOut(area: Frame, align: VerticalAlign, room: number): number {
+	const reach = Math.max(SLIDE_HEIGHT, room);
+	const highest = Math.min(area.y, 0);
+	const bottom = area.y + area.height;
+	const middle = area.y + area.height / 2;
+	const height =
+		align === "top"
+			? reach - area.y
+			: align === "middle"
+				? 2 * Math.max(middle - highest, reach - middle)
+				: bottom - highest;
+	return height + FIT_ALLOWANCE;
+}
+
+/** Where on a slide blocks are set: in a box of which role on a slide of which layout, at which step, and across how much. */
+export interface Placing {
+	layout: SlideLayout;
+	role: BoxRole | null;
+	/** One of `SLIDE_TEXT_STEPS`. */
+	step: number;
+	/** The width of the box's content area (`contentAreaOf`), in points. */
+	width: number;
+}
+
+/** How far down blocks are measured, in points: past a slide's height, they are taken to be that tall and more. */
+const MOST_MEASURED = SLIDE_HEIGHT + FIT_ALLOWANCE;
+
+/** How tall `blocks` are, one under another, set as `placing` says, in points. */
 export function heightOfBlocks(
 	blocks: readonly Node[],
 	placing: Placing,
 	measure: Measure,
 ): number {
 	const setting = settingOf(placing, measure);
-	return stackedWithin(
-		blocks.map((block) => (room) => laidBlock(block, setting, placing.width, room)),
-		partLook(placing.layout, placing.part).gap * setting.unit,
-		SLIDE_ROOM,
-	).height;
+	const { gap } = boxLookOf(placing.layout, placing.role);
+	return stackedWithin(layOutsOf(blocks, setting, placing.width), gap * setting.unit, MOST_MEASURED)
+		.height;
 }
 
 /**
  * How tall each of `table`'s rows is, set as `placing` says, in points: its
- * cells' padding and text, and the rule under it. Rows past as much as a
- * slide's content may be aren't measured.
+ * cells' padding and text, and the rule under it. Rows past a slide's height
+ * aren't measured.
  */
 export function rowHeightsOf(table: Node, placing: Placing, measure: Measure): number[] {
 	const setting = settingOf(placing, measure);
-	return tableRows(table, setting, placing.width, SLIDE_ROOM).map((row) => row.height);
+	return tableRows(table, setting, placing.width, MOST_MEASURED).map((row) => row.height);
 }
 
-/** What blocks set as `placing` says inherit. */
-function settingOf(placing: Placing, measure: Measure): Setting {
-	const setting = settingIn(placing.layout, placing.part, measure, placing.step * SLIDE_UNIT);
-	if (placing.boxHeight === undefined) return setting;
-	return { ...setting, imageMaxHeight: Math.min(setting.imageMaxHeight, placing.boxHeight) };
-}
-
-/** What the blocks in `part` of a slide of `layout` inherit, at `unit`. */
-function settingIn(layout: SlideLayout, part: SlidePart, measure: Measure, unit: number): Setting {
-	const look = partLook(layout, part);
-	const imageColumn = part === "imageColumn";
+/** What the blocks set as `placing` says inherit. */
+function settingOf({ layout, role, step }: Placing, measure: Measure): Setting {
+	const look = boxLookOf(layout, role);
+	const unit = step * SLIDE_UNIT;
 	return {
 		measure,
 		unit,
@@ -276,293 +411,25 @@ function settingIn(layout: SlideLayout, part: SlidePart, measure: Measure, unit:
 		balancedHeadings: layout === "title" || layout === "image",
 		balancedText: false,
 		quoteLayout: layout === "quote",
-		imageMaxHeight: imageColumn
-			? IMAGE_LAYOUT.imageMaxHeight * SLIDE_UNIT
-			: Number.POSITIVE_INFINITY,
-		imageRadius: imageColumn ? IMAGE_LAYOUT.imageRadius : IMAGE_RADIUS,
+		imageRadius: imageRadiusOf(layout, role),
+		tightCells: look.tightCells,
 	};
 }
 
 const REGULAR = 400;
 
-/** A slide laid out: whether it fits within its margins, and drawing it. */
-interface Arrangement {
-	fits: boolean;
-	draw: (pen: Pen) => void;
-}
-
-/** `blocks`, a slide's, laid out by the slide's layout, the slide's unit at its text's step being `unit`. */
-function arranged(blocks: SlideBlocks, measure: Measure, unit: number): Arrangement {
-	const { layout } = blocks;
-	const look = LAYOUT_LOOKS[layout];
-	const setting = settingIn(layout, "flow", measure, unit);
-	switch (blocks.layout) {
-		case "columns":
-			return inColumns(blocks, setting, settingIn(layout, "column", measure, unit));
-		case "image":
-			return besideImage(
-				blocks,
-				setting,
-				settingIn(layout, "imageText", measure, unit),
-				settingIn(layout, "imageColumn", measure, unit),
-			);
-		case "section":
-			return inFlow(
-				blocks.all,
-				setting,
-				look,
-				SLIDE_SIDE_MARGINS[layout],
-				blocks.shows("label") ? sectionBar(setting) : undefined,
-			);
-		default:
-			return inFlow(blocks.all, setting, look, SLIDE_SIDE_MARGINS[layout]);
-	}
-}
-
-const fitsSlide = (height: number) => height <= SLIDE_ROOM;
-
-/**
- * Blocks one under another within `sideMargin` at either side, as far apart
- * as `look` sets them, where it sets them, after `first`.
- */
-function inFlow(
-	blocks: readonly Node[],
-	setting: Setting,
-	look: LayoutLook,
-	sideMargin: number,
-	first?: Laid,
-): Arrangement {
-	const width = SLIDE_WIDTH - 2 * sideMargin;
-	const laid = stackedWithin(
-		[
-			...(first ? [() => first] : []),
-			...blocks.map(
-				(block): LayOut =>
-					(room) =>
-						laidBlock(block, setting, width, room),
-			),
-		],
-		look.gap * setting.unit,
-		SLIDE_ROOM,
-	);
-	const fits = fitsSlide(laid.height);
-	const room = CONTENT_HEIGHT - laid.height;
-	const offset = !fits ? 0 : look.align === "center" ? room / 2 : look.align === "end" ? room : 0;
-	return { fits, draw: (pen) => laid.draw(pen, sideMargin, SLIDE_END_MARGIN + offset) };
-}
-
-/** The title across the top, and the two columns side by side under it. */
-function inColumns(
-	blocks: BlocksOfLayout<"columns">,
-	setting: Setting,
-	columnSetting: Setting,
-): Arrangement {
-	const gap = COLUMN_GAP_UNITS * setting.unit;
-	const width = contentWidthOf("columns");
-	const columnWidth = (width - gap) / 2;
-	const across = blocks.inBox("title").map(
+const layOutsOf = (blocks: readonly Node[], setting: Setting, width: number): LayOut[] =>
+	blocks.map(
 		(block): LayOut =>
 			(room) =>
 				laidBlock(block, setting, width, room),
 	);
-	const columns: LayOut = (room) => {
-		const left = laidColumn(blocks.inBox("leftColumn"), columnSetting, columnWidth, room);
-		const right = laidColumn(blocks.inBox("rightColumn"), columnSetting, columnWidth, room);
-		return {
-			height: Math.max(left.height, right.height),
-			width,
-			baseline: undefined,
-			draw: (pen, x, y) => {
-				left.draw(pen, x, y);
-				right.draw(pen, x + columnWidth + gap, y);
-			},
-		};
-	};
-	const laid = stackedWithin(
-		[...across, columns],
-		LAYOUT_LOOKS.columns.gap * setting.unit,
-		SLIDE_ROOM,
-	);
-	return {
-		fits: fitsSlide(laid.height),
-		draw: (pen) => laid.draw(pen, SLIDE_SIDE_MARGINS.columns, SLIDE_END_MARGIN),
-	};
-}
 
 /**
- * The title, and the text box under it, together in the middle of the left,
- * and the image box in the middle of the right.
+ * `items` one under another, `gap` apart, each at the left. Drawn, those that
+ * start where the pen cuts off what it draws (`Pen.cutsOffFrom`) are left out.
  */
-function besideImage(
-	blocks: BlocksOfLayout<"image">,
-	setting: Setting,
-	textSetting: Setting,
-	imageSetting: Setting,
-): Arrangement {
-	const gap = COLUMN_GAP_UNITS * setting.unit;
-	const sideMargin = SLIDE_SIDE_MARGINS.image;
-	const columnWidth = (contentWidthOf("image") - gap) / 2;
-	const heads = blocks.inBox("title");
-	const head = stackedWithin(
-		heads.map(
-			(block): LayOut =>
-				(room) =>
-					laidBlock(block, setting, columnWidth, room),
-		),
-		IMAGE_LAYOUT.titleBlockGap * setting.unit,
-		SLIDE_ROOM,
-	);
-	const titleGap = heads.length > 0 ? IMAGE_LAYOUT.titleGap * setting.unit : 0;
-	const text = laidColumn(
-		blocks.inBox("text"),
-		textSetting,
-		columnWidth,
-		SLIDE_ROOM - head.height - titleGap,
-	);
-	const image = laidColumn(blocks.inBox("image"), imageSetting, columnWidth, SLIDE_ROOM, "center");
-	const leftHeight = head.height + titleGap + text.height;
-	const height = Math.max(CONTENT_HEIGHT, leftHeight, image.height);
-	return {
-		fits: fitsSlide(Math.max(leftHeight, image.height)),
-		draw: (pen) => {
-			const leftTop = SLIDE_END_MARGIN + (height - leftHeight) / 2;
-			head.draw(pen, sideMargin, leftTop);
-			text.draw(pen, sideMargin, leftTop + head.height + titleGap);
-			image.draw(
-				pen,
-				sideMargin + columnWidth + gap,
-				SLIDE_END_MARGIN + (height - image.height) / 2,
-			);
-		},
-	};
-}
-
-function laidColumn(
-	blocks: readonly Node[],
-	setting: Setting,
-	width: number,
-	room: number,
-	align: "start" | "center" = "start",
-): Laid {
-	return stackedWithin(
-		blocks.map(
-			(block): LayOut =>
-				(blockRoom) =>
-					laidBlock(block, setting, width, blockRoom),
-		),
-		COLUMN_LOOK.gap * setting.unit,
-		room,
-		align === "center" ? width : undefined,
-	);
-}
-
-/**
- * A slide whose boxes somebody placed by hand, its text at `step`: each box
- * it shows at its frame (`placedBox`), and nothing else, whatever its
- * layout's margins, as the app draws a placed slide. It fits when what each
- * box holds ends no lower than the room the box has on the slide
- * (`roomBottom`), give or take the pixel the app allows, as the app fits it.
- */
-function placedBoxes(
-	blocks: SlideBlocks,
-	placement: Placement,
-	measure: Measure,
-	step: number,
-): Arrangement {
-	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[blocks.layout];
-	const shown = roles.map((_, index) => blocks.boxes[index] !== undefined);
-	const boxes = roles.flatMap((role, index) => {
-		const frame = placement[index];
-		const held = blocks.boxes[index];
-		if (!frame || !held) return [];
-		const box = placedBox(blocks.layout, role, held, frame, measure, step);
-		return [{ ...box, fits: box.bottom <= roomBottom(placement, shown, index) + FIT_ALLOWANCE }];
-	});
-	return {
-		fits: boxes.every((box) => box.fits),
-		draw: (pen) => {
-			for (const box of boxes) box.draw(pen);
-		},
-	};
-}
-
-/**
- * What a box of `role` placed at `frame` holds, laid out as the app's styles
- * for a placed slide set it: across the frame, as far apart as the box's
- * role sets its blocks, from the frame's top, but in the middle of the frame
- * both ways in the image layout's image box; no image in it taller than the
- * frame; and over a section break's label, the accent bar. It is laid out as
- * far down as the slide shows, and `bottom` is how far down the slide what it
- * holds reaches.
- */
-function placedBox(
-	layout: SlideLayout,
-	role: BoxRole,
-	blocks: readonly Node[],
-	frame: Frame,
-	measure: Measure,
-	step: number,
-): { bottom: number; draw: (pen: Pen) => void } {
-	const setting = settingOf(
-		{ layout, part: BOX_PARTS[role], step, width: frame.width, boxHeight: frame.height },
-		measure,
-	);
-	const centred = role === "image";
-	const shownBelowTop = SLIDE_HEIGHT - frame.y;
-	const laid = stackedWithin(
-		blocks.map(
-			(block): LayOut =>
-				(room) =>
-					laidBlock(block, setting, frame.width, room),
-		),
-		boxGap(layout, role) * setting.unit,
-		// Centred, what is taller than the frame reaches below it by half as much as it is taller.
-		centred ? 2 * shownBelowTop - frame.height : shownBelowTop,
-		centred ? frame.width : undefined,
-	);
-	const top = centred ? frame.y + (frame.height - laid.height) / 2 : frame.y;
-	const bar = role === "label" ? sectionBar(setting) : undefined;
-	return {
-		bottom: top + laid.height,
-		draw: (pen) => {
-			if (bar) {
-				const over = accentBarOver(frame, setting.unit);
-				bar.draw(pen, over.x, over.y);
-			}
-			laid.draw(pen, frame.x, top);
-		},
-	};
-}
-
-/**
- * The space between the blocks a box of `role` holds, in units of the step,
- * as the app's styles set it: its part's, but in the image layout's title,
- * whose layout sets none between its rows, none.
- */
-const boxGap = (layout: SlideLayout, role: BoxRole) =>
-	layout === "image" && role === "title"
-		? IMAGE_LAYOUT.titleBlockGap
-		: partLook(layout, BOX_PARTS[role]).gap;
-
-/** The section break's accent bar, over its label and title, which goes with its label when that is removed. */
-function sectionBar({ unit }: Setting): Laid {
-	const width = SECTION_BAR.width * unit;
-	const height = SECTION_BAR.height * unit;
-	return {
-		height,
-		width,
-		baseline: undefined,
-		draw: (pen, x, y) =>
-			pen.fill({ x, y, width, height }, { color: ACCENT, radius: SECTION_BAR.radius * unit }),
-	};
-}
-
-/**
- * `items` one under another, `gap` apart, each at the left, or each in the
- * middle of `centredIn` when given. Drawn, those that start where the pen
- * cuts off what it draws (`Pen.cutsOffFrom`) are left out.
- */
-function stacked(items: readonly Laid[], gap: number, centredIn?: number): Laid {
+function stacked(items: readonly Laid[], gap: number): Laid {
 	if (items.length === 0) return NOTHING;
 	const tops: number[] = [];
 	let height = 0;
@@ -577,15 +444,14 @@ function stacked(items: readonly Laid[], gap: number, centredIn?: number): Laid 
 	const first = items[firstWithLines];
 	return {
 		height,
-		width: centredIn ?? widest,
+		width: widest,
 		baseline:
 			first?.baseline === undefined ? undefined : (tops[firstWithLines] ?? 0) + first.baseline,
 		draw: (pen, x, y) => {
 			for (const [index, item] of items.entries()) {
 				const top = y + (tops[index] ?? 0);
 				if (pen.cutsOffFrom(top)) return;
-				const indent = centredIn === undefined ? 0 : (centredIn - item.width) / 2;
-				item.draw(pen, x + indent, top);
+				item.draw(pen, x, top);
 			}
 		},
 	};
@@ -596,22 +462,17 @@ function stacked(items: readonly Laid[], gap: number, centredIn?: number): Laid 
  * them, as far as `room` reaches: one that would start past it isn't laid
  * out, and the stack is taken to reach to where it would have started.
  */
-function stackedWithin(
-	layOuts: readonly LayOut[],
-	gap: number,
-	room: number,
-	centredIn?: number,
-): Laid {
+function stackedWithin(layOuts: readonly LayOut[], gap: number, room: number): Laid {
 	const items: Laid[] = [];
 	let height = 0;
 	for (const layOut of layOuts) {
 		const top = items.length === 0 ? 0 : height + gap;
-		if (top > room) return { ...stacked(items, gap, centredIn), height: top };
+		if (top > room) return { ...stacked(items, gap), height: top };
 		const item = layOut(room - top);
 		items.push(item);
 		height = top + item.height;
 	}
-	return stacked(items, gap, centredIn);
+	return stacked(items, gap);
 }
 
 /*
@@ -643,15 +504,7 @@ function laidBlock(block: Node, setting: Setting, width: number, room: number): 
 		default:
 			return block.isTextblock
 				? laidTextblock(block, paragraphType(setting), setting, width, false, room)
-				: stackedWithin(
-						block.children.map(
-							(child): LayOut =>
-								(childRoom) =>
-									laidBlock(child, setting, width, childRoom),
-						),
-						0,
-						room,
-					);
+				: stackedWithin(layOutsOf(block.children, setting, width), 0, room);
 	}
 }
 
@@ -671,7 +524,7 @@ const paragraphType = ({ text, unit, tracking }: Setting): BlockType => ({
 	lineHeight: text.lineHeight,
 });
 
-/** Headings up to the third take the layout's heading look; those below are the size and weight of what is around them. */
+/** Headings up to the third take the part's heading look; those below are the size and weight of what is around them. */
 function laidHeading(heading: Node, setting: Setting, width: number, room: number): Laid {
 	const level = Number(heading.attrs.level) || 1;
 	if (level > 3) {
@@ -687,7 +540,8 @@ function laidHeading(heading: Node, setting: Setting, width: number, room: numbe
 		return laidTextblock(heading, around, setting, width, false, room);
 	}
 	const look = setting.heading;
-	const size = look.size * setting.unit;
+	// Its letter spacing and the rule under it are in ems of the size it is set at.
+	const size = ownLineSizeOf(heading) ?? look.size * setting.unit;
 	const type: BlockType = {
 		type: {
 			face: { family: "sans", weight: look.weight, italic: false },
@@ -712,7 +566,9 @@ function laidHeading(heading: Node, setting: Setting, width: number, room: numbe
 }
 
 /**
- * A paragraph or heading: its lines, and each image in it on its own, as the
+ * A paragraph or heading: its lines, at its own line height and alignment
+ * where it sets them, and set at the size of its text when all of it has a
+ * size of its own (`ownLineSizeOf`); and each image in it on its own, as the
  * app draws an image as a block of its own between the words around it.
  */
 function laidTextblock(
@@ -723,13 +579,19 @@ function laidTextblock(
 	balanced: boolean,
 	room: number,
 ): Laid {
+	const size = ownLineSizeOf(block) ?? blockType.type.size;
+	const lined: BlockType = {
+		type: { ...blockType.type, size },
+		lineHeight: lineHeightOf(block) ?? blockType.lineHeight,
+	};
+	const align = textAlignOf(block) ?? "left";
 	const parts: LayOut[] = [];
 	let words: Node[] = [];
 	const endWords = () => {
 		if (words.length > 0) {
-			const inlines = inlinesOf(words, blockType.type);
+			const inlines = inlinesOf(words, lined.type);
 			parts.push((partRoom) =>
-				laidLines(inlines, blockType, setting.measure, width, balanced, partRoom),
+				laidLines(inlines, lined, setting.measure, { width, align, balanced }, partRoom),
 			);
 		}
 		words = [];
@@ -740,7 +602,7 @@ function laidTextblock(
 			continue;
 		}
 		endWords();
-		parts.push(() => laidImage(child, blockType, setting, width));
+		parts.push(() => laidImage(child, lined, setting, width));
 	}
 	endWords();
 	return stackedWithin(parts, 0, room);
@@ -754,15 +616,16 @@ function laidImage(image: Node, around: BlockType, setting: Setting, width: numb
 	if (typeof address !== "string" || !natural) {
 		return laidImageWords(String(image.attrs.alt ?? ""), around, measure, width);
 	}
-	const scale = Math.min(1, width / natural.width, setting.imageMaxHeight / natural.height);
+	const scale = Math.min(1, width / natural.width);
 	const box = { width: natural.width * scale, height: natural.height * scale };
 	const link = linkInFile(image.attrs.link);
 	return {
 		...box,
 		baseline: undefined,
 		draw: (pen, x, y) => {
-			pen.image(address, { x, y, ...box }, setting.imageRadius * around.type.size);
-			if (link) pen.link({ x, y, ...box }, link);
+			const at = { x, y, ...box };
+			pen.image(address, at, at, setting.imageRadius * around.type.size);
+			if (link) pen.link(at, link);
 		},
 	};
 }
@@ -771,14 +634,13 @@ function laidImage(image: Node, around: BlockType, setting: Setting, width: numb
 function laidImageWords(words: string, around: BlockType, measure: Measure, width: number): Laid {
 	const { padding, radius, color, border } = IMAGE_WORDS_LOOK;
 	const inset = { x: padding.x + 1, y: padding.y + 1 };
-	const type: BlockType = { ...around, type: { ...around.type, color } };
+	const type: BlockType = { ...around, type: { ...around.type, color, opacity: 1 } };
 	const lines = laidLines(
 		withWhiteSpaceCollapsed([runOf(words, type.type, [], [])]),
 		type,
 		measure,
-		Math.max(0, width - 2 * inset.x),
-		false,
-		SLIDE_ROOM,
+		{ width: Math.max(0, width - 2 * inset.x), align: "left", balanced: false },
+		MOST_MEASURED,
 	);
 	const box = { width, height: Math.max(around.type.size, lines.height + 2 * inset.y) };
 	return {
@@ -882,12 +744,6 @@ const isList = (block: Node) =>
 
 /** A quote: its blocks softer behind a rule, or, in the quote layout, the slide's large quote. */
 function laidQuote(quote: Node, setting: Setting, width: number, room: number): Laid {
-	const childrenOf = (inner: Setting, innerWidth: number) =>
-		quote.children.map(
-			(child): LayOut =>
-				(childRoom) =>
-					laidBlock(child, inner, innerWidth, childRoom),
-		);
 	if (setting.quoteLayout) {
 		const quoteSetting: Setting = {
 			...setting,
@@ -896,12 +752,12 @@ function laidQuote(quote: Node, setting: Setting, width: number, room: number): 
 			tracking: QUOTE_LOOK.tracking * QUOTE_LOOK.size * setting.unit,
 			balancedText: true,
 		};
-		return stackedWithin(childrenOf(quoteSetting, width), 0, room);
+		return stackedWithin(layOutsOf(quote.children, quoteSetting, width), 0, room);
 	}
 	const rule = BLOCK_QUOTE_LOOK.rule * setting.fontSize;
 	const indent = rule + BLOCK_QUOTE_LOOK.padding * setting.fontSize;
 	const inner: Setting = { ...setting, text: { ...setting.text, color: BLOCK_QUOTE_LOOK.color } };
-	const content = stackedWithin(childrenOf(inner, width - indent), 0, room);
+	const content = stackedWithin(layOutsOf(quote.children, inner, width - indent), 0, room);
 	return {
 		height: content.height,
 		width: indent + content.width,
@@ -1014,16 +870,11 @@ function tableRows(table: Node, setting: Setting, width: number, room: number): 
 				},
 				weight: header || firstColumn ? weight : setting.weight,
 			};
-			const padding = header ? TABLE_LOOK.headerPadding : TABLE_LOOK.cellPadding;
-			const inset = { x: padding.x * fontSize, y: padding.y * fontSize };
+			const inset = cellInsetOf(setting.tightCells, header, fontSize);
 			const span = Number(cell.attrs.colspan) || 1;
 			const cellWidth = span * columnWidth;
 			const content = stackedWithin(
-				cell.children.map(
-					(child): LayOut =>
-						(childRoom) =>
-							laidBlock(child, cellSetting, cellWidth - 2 * inset.x, childRoom),
-				),
+				layOutsOf(cell.children, cellSetting, cellWidth - 2 * inset.x),
 				TABLE_LOOK.blockGap * fontSize,
 				room - top - inset.y,
 			);
@@ -1125,9 +976,10 @@ const BACKDROP_MARKS = new Set(["code", "highlight"]);
 const LINE_SEPARATORS = /[\u2028\u2029]/;
 
 /**
- * A textblock's inline nodes as runs of `base` with their marks: each box
- * behind a stretch of them padded at its ends, and each stretch of white
- * space one space, none at a line's start.
+ * A textblock's inline nodes as runs of `base` with their marks, and the
+ * colour and size of their own (`withOwnStyle`): each box behind a stretch of
+ * them padded at its ends, and each stretch of white space one space, none at
+ * a line's start.
  *
  * The app draws each mark as an element, nested in the order the schema
  * lists marks, and a mark's element goes on over the next node only while
@@ -1148,6 +1000,7 @@ function inlinesOf(nodes: readonly Node[], base: Type): Inline[] {
 		}
 	};
 	for (const node of nodes) {
+		const styled = withOwnStyle(base, node.marks);
 		let kept = 0;
 		while (
 			kept < open.length &&
@@ -1158,7 +1011,7 @@ function inlinesOf(nodes: readonly Node[], base: Type): Inline[] {
 		}
 		closeTo(kept);
 		for (const mark of node.marks.slice(kept)) {
-			const backdrop = BACKDROP_MARKS.has(mark.type.name) ? backdropOf(mark, base) : undefined;
+			const backdrop = BACKDROP_MARKS.has(mark.type.name) ? backdropOf(mark, styled) : undefined;
 			open.push({ mark, backdrop });
 			if (backdrop)
 				inlines.push({ kind: "padding", width: backdrop.padding, backdrops: backdrops() });
@@ -1170,11 +1023,22 @@ function inlinesOf(nodes: readonly Node[], base: Type): Inline[] {
 		const text = node.isText ? (node.text ?? "") : node.textContent;
 		for (const [index, line] of text.split(LINE_SEPARATORS).entries()) {
 			if (index > 0) inlines.push({ kind: "break" });
-			inlines.push(runOf(line, base, node.marks, backdrops()));
+			inlines.push(runOf(line, styled, node.marks, backdrops()));
 		}
 	}
 	closeTo(0);
 	return withWhiteSpaceCollapsed(inlines);
+}
+
+/** `base` in the colour and at the size `marks` give their text of its own, a size that never steps down. */
+function withOwnStyle(base: Type, marks: readonly Mark[]): Type {
+	const own = ownTextStyleOf(marks);
+	const paint = paintOf(own.color ?? null);
+	return {
+		...base,
+		size: own.fontSize ?? base.size,
+		...(paint ? { color: paint.color, opacity: paint.opacity } : {}),
+	};
 }
 
 function backdropOf(mark: Mark, base: Type): { backdrop: Backdrop; padding: number } {
@@ -1291,6 +1155,15 @@ interface Line {
 	width: number;
 	above: number;
 	below: number;
+	/** The bits that end a word with a space, but for the last: where a justified line takes its room to spare. */
+	gaps: ReadonlySet<number>;
+}
+
+/** How a textblock's lines are set: across how much, where each sits across it, and whether they are made as even as they can be. */
+interface LineSetting {
+	width: number;
+	align: TextAlign;
+	balanced: boolean;
 }
 
 /** The most lines a browser evens out. */
@@ -1304,12 +1177,17 @@ const SOFT_HYPHEN = "\u00ad";
 /** What a soft hyphen shows at the end of a line that breaks there. */
 const HYPHEN = "-";
 
+/**
+ * `inlines` in lines, each where its alignment sits it across the width: a
+ * justified line that ends where the text wraps is stretched across it at
+ * its spaces, and a line wider than the width starts at its left, as CSS sets
+ * them.
+ */
 function laidLines(
 	inlines: readonly Inline[],
 	blockType: BlockType,
 	measure: Measure,
-	width: number,
-	balanced: boolean,
+	{ width, align, balanced }: LineSetting,
 	room: number,
 ): Laid {
 	// Each line is a line of its block's own type at least, so this many reach past the room.
@@ -1347,11 +1225,15 @@ function laidLines(
 	return stacked(
 		lines.map(({ words, broken }) => {
 			const line = lineOf(words, blockType, broken);
+			const spare = Math.max(0, width - line.width);
+			const indent = align === "center" ? spare / 2 : align === "right" ? spare : 0;
+			const stretch =
+				align === "justify" && broken && line.gaps.size > 0 ? spare / line.gaps.size : 0;
 			return {
 				height: line.above + line.below,
-				width: line.width,
+				width: align === "left" ? line.width : Math.max(width, line.width),
 				baseline: line.above,
-				draw: (pen, x, y) => drawLine(line, x, y, pen),
+				draw: (pen, x, y) => drawLine(line, x + indent, y, pen, stretch),
 			};
 		}),
 		0,
@@ -1510,6 +1392,12 @@ function brokenWord(word: Word, width: number, measure: Measure, mostPieces: num
  */
 function lineOf(words: readonly Word[], { type, lineHeight }: BlockType, broken: boolean): Line {
 	const bits = words.flatMap((word) => word.bits);
+	const gaps = new Set<number>();
+	let ends = -1;
+	for (const word of words.slice(0, -1)) {
+		ends += word.bits.length;
+		if (word.trailing > 0) gaps.add(ends);
+	}
 	const last = bits.at(-1);
 	const lastWord = words.at(-1);
 	const trailing = lastWord?.trailing ?? 0;
@@ -1525,7 +1413,7 @@ function lineOf(words: readonly Word[], { type, lineHeight }: BlockType, broken:
 		bit.inline.kind === "run" && bit.inline.sized && bit.text !== "" ? [bit.inline.type] : [],
 	);
 	const box = lineBoxOf([type, ...sized], lineHeight);
-	return { bits: shown, width: widthOfBits(shown), ...box };
+	return { bits: shown, width: widthOfBits(shown), ...box, gaps };
 }
 
 /**
@@ -1546,14 +1434,18 @@ function lineBoxOf(types: readonly Type[], lineHeight: number): { above: number;
 	return { above, below };
 }
 
-/** A line, with its top at `top`: the boxes behind its text, its text, its lines through and under it, and its links. */
-function drawLine(line: Line, x: number, top: number, pen: Pen) {
+/**
+ * A line, with its top at `top` and `stretch` more room at each of its gaps
+ * (`Line.gaps`): the boxes behind its text, its text, its lines through and
+ * under it, and its links.
+ */
+function drawLine(line: Line, x: number, top: number, pen: Pen, stretch: number) {
 	const baseline = top + line.above;
 	const placed: { bit: Bit; at: number }[] = [];
 	let cursor = x;
-	for (const bit of line.bits) {
+	for (const [index, bit] of line.bits.entries()) {
 		placed.push({ bit, at: cursor });
-		cursor += bit.width;
+		cursor += bit.width + (line.gaps.has(index) ? stretch : 0);
 	}
 	const backdrops = new Map<Backdrop, { from: number; to: number }>();
 	for (const { bit, at } of placed) {
@@ -1593,17 +1485,20 @@ function drawDecorations(
 	pen: Pen,
 ) {
 	const metrics = metricsOf(run.type.face.family);
-	const { size, color } = run.type;
+	const { size, color, opacity } = run.type;
 	if (run.underline) {
 		const offset = run.underline === "link" ? LINK_UNDERLINE_OFFSET : metrics.underlinePosition;
 		pen.fill(
 			{ x, y: baseline + offset * size, width, height: metrics.underlineThickness * size },
-			{ color },
+			{ color, opacity },
 		);
 	}
 	if (run.strike) {
 		const height = metrics.strikeoutThickness * size;
-		pen.fill({ x, y: baseline - metrics.strikeoutPosition * size, width, height }, { color });
+		pen.fill(
+			{ x, y: baseline - metrics.strikeoutPosition * size, width, height },
+			{ color, opacity },
+		);
 	}
 }
 

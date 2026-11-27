@@ -1,14 +1,16 @@
 import { type ContentMatch, Fragment, Mark, type Node, type NodeType } from "@tiptap/pm/model";
 
 /**
- * `node` with everything in it holding what its schema allows, having lost
- * no text: `node` itself when it does already. Markdown can say what a live
- * document's schema has no place for, such as a quote or a list item holding
- * nothing, or code inside a link, and a node its schema can't hold is one the
- * editor can't show. So what a node must hold and doesn't is added, empty;
- * what stands where it is allowed only inside another node is wrapped in that
- * node, as words straight in a list item are in a paragraph; and what can't
- * be wrapped is replaced by what it holds.
+ * `node` with everything in it holding what its schema allows: `node` itself
+ * when it does already. A document's markdown can say what its schema has no
+ * place for, such as a quote or a list item holding nothing, or code inside
+ * a link, and a node its schema can't hold is one the editor can't show. So
+ * what a node must hold and doesn't is added, empty; what stands where it is
+ * allowed only inside another node is wrapped in that node, as words straight
+ * in a list item are in a paragraph; and what can't be wrapped is replaced by
+ * what it holds. What can't be placed anywhere, nor holds anything that can,
+ * is left out, words included: words where no node that holds words may go,
+ * or an image inside code.
  *
  * A mark its node doesn't allow is dropped, as is one that would push out a
  * mark kept already, as code pushes out every other. Marks come in the

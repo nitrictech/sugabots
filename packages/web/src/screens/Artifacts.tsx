@@ -368,7 +368,7 @@ const DELETE_DESCRIPTION =
 /** The file each kind of artifact is kept as, as an export says it. */
 const RAW_FILES = {
 	document: { label: "Markdown", description: "Plain-text .md file", Icon: FileCode },
-	slides: { label: "Markdown", description: "Plain-text .md file", Icon: FileCode },
+	slides: { label: "HTML", description: "The deck's slides as an .html file", Icon: FileCode },
 	html: { label: "Web page", description: ".html file that opens in a browser", Icon: FileText },
 } satisfies Record<Artifact["kind"], Omit<ExportOption, "onSave">>;
 

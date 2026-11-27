@@ -6,7 +6,7 @@ import {
 } from "@sugabots/contracts";
 import { allowedHtmlTag } from "@sugabots/contracts/document-markdown";
 import { type ArtifactImageIds, ownImageAt } from "@sugabots/contracts/http";
-import { markdownOfLiveDocument } from "@sugabots/contracts/live-document-markdown";
+import { markdownOfDocument } from "@sugabots/contracts/live-document-text";
 import type { Node } from "@tiptap/pm/model";
 import htmlToDocx from "@turbodocx/html-to-docx";
 import { Effect } from "effect";
@@ -40,7 +40,7 @@ export const wordFileOf = <E, R>(
 	imageOf: (image: ArtifactImageIds) => Effect.Effect<WordImage | undefined, E, R>,
 ): Effect.Effect<Uint8Array, E, R> =>
 	Effect.gen(function* () {
-		const tokens = new Marked().lexer(markdownOfLiveDocument(document));
+		const tokens = new Marked().lexer(markdownOfDocument(document));
 		const own = ownImagesIn(tokens, { podId: artifact.podId, artifactId: artifact.id });
 		const found = yield* Effect.forEach(own, ([address, ids]) =>
 			Effect.map(imageOf(ids), (image) => [address, image] as const),

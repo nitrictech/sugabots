@@ -1,40 +1,39 @@
+import { pixels } from "@sugabots/contracts/css-values";
 import {
+	backgroundOf,
+	bodyOf,
 	notesOf,
-	PLACEMENT_ATTRIBUTE,
-	placementOf,
-	SLIDE,
+	SLIDE_BOX,
 	SPEAKER_NOTES,
 } from "@sugabots/contracts/live-slides";
-import type { BoxRole, Frame } from "@sugabots/contracts/slides-markdown";
+import type { BoxAttributes, BoxRole } from "@sugabots/contracts/slide-box";
+import type { Frame } from "@sugabots/contracts/slide-geometry";
 import { Extension } from "@tiptap/core";
 import type { Node } from "@tiptap/pm/model";
 import { type EditorState, Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import {
 	boxesOf,
-	keepSlidesFitting,
 	notesStartInSlide,
 	type SlideAt,
 	type SlideIndex,
 	type SlidePos,
-	selectionOutOfRemovedBox,
 	slideIndexAt,
 	slidesOf,
 } from "@/lib/deck.ts";
 import { type FollowedNode, whereFollowedNodeIs } from "@/lib/followed-node.ts";
-import { boxFrameProperties, drawnBoxAttributes } from "./slide-drawing.tsx";
+import { ownTextSizeOf, SLIDE_PAINT_PROPERTY } from "./slide-drawing.tsx";
 
 /*
  * The stage a deck is edited on. One editor holds the whole deck, and the
  * stage shows the slide the selection is in: the others stay in the editor,
  * hidden, so nothing anyone types in them is lost or redrawn. The slide in
- * view says what each of its boxes is for, which its layout's styles place
- * it by, which of them are off it, which they hide, and what goes in each
- * empty part of the others, and holds a place under its body for what the
- * stage puts there. Its boxes are drawn where they were placed by hand, if
- * they were, and while one of them is dragged, where the drag has them, until
- * the drag ends. A caret never stays in a box off its slide
- * (`selectionOutOfRemovedBox`).
+ * view is painted its own colour behind its body alone, not its notes; its
+ * lines of text of a size of their own are drawn at it, as a drawing of the
+ * slide draws them; what goes in each empty part of its boxes is said there;
+ * and it holds a place under its body for what the stage puts there. While
+ * one of its boxes is dragged, that box is drawn where the drag has it,
+ * until the drag ends.
  */
 
 interface Stage {
@@ -54,9 +53,8 @@ export const slideInView = (state: EditorState): SlideIndex =>
  * the slide in view, above its notes, for the stage to put things in, and
  * tells `onUnderSlide` which element that is now, as a change to the one it
  * was: a new one each time it draws one, and none once the one there is gone.
- * `onAddImage` is asked for an image for the empty image box, starting at
- * `boxPos`, of a slide laid out with an image, with the file dropped there if
- * one was.
+ * `onAddImage` is asked for an image for an empty image box, starting at
+ * `boxPos`, with the file dropped there if one was.
  */
 export function deckStage({
 	onUnderSlide,
@@ -95,8 +93,7 @@ export function deckStage({
 		name: "deckStage",
 		addProseMirrorPlugins() {
 			return [
-				keepSlidesFitting,
-				boxFrames,
+				boxPreview,
 				new Plugin<Stage>({
 					key: stageKey,
 					state: {
@@ -111,13 +108,6 @@ export function deckStage({
 							return stageOf(state);
 						},
 					},
-					// It moves only a selection in a box off its slide, or one just moved out of such a box into its
-					// slide's notes, never into such a box, and changes nothing in the deck, only where this person's
-					// selection is, so it settles at once and sends the others nothing.
-					appendTransaction: (transactions, before, state) =>
-						transactions.some(({ docChanged, selectionSet }) => docChanged || selectionSet)
-							? (selectionOutOfRemovedBox(transactions, before, state) ?? null)
-							: null,
 					props: {
 						decorations: (state) => stageKey.getState(state)?.decorations,
 					},
@@ -133,17 +123,10 @@ function decorationsInView(
 	onAddImage: (boxPos: number, file: File | undefined) => void,
 ): Decoration[] {
 	const notesStart = pos + notesStartInSlide(slide);
-	const boxes = boxesOf(slide).flatMap((box) => {
-		const at = pos + box.startInSlide;
-		const attributes = drawnBoxAttributes(box);
-		const drawn =
-			Object.keys(attributes).length > 0
-				? [Decoration.node(at, at + box.node.nodeSize, attributes)]
-				: [];
-		if (!box.role || box.offSlide) return drawn;
-		return [
-			...drawn,
-			...emptyPartsOf(box.node, at, box.role).map(({ node, at: partStart, words }) =>
+	const background = backgroundOf(slide);
+	const boxes = boxesOf(slide).flatMap((box) =>
+		emptyPartsOf(box.node, pos + box.startInSlide, box.attributes).map(
+			({ node, at: partStart, words }) =>
 				words === ADD_IMAGE
 					? Decoration.widget(partStart + 1, imageArea(onAddImage), {
 							key: "add-image",
@@ -155,10 +138,18 @@ function decorationsInView(
 							class: "is-empty",
 							"data-placeholder": words,
 						}),
-			),
-		];
-	});
+		),
+	);
 	return [
+		// The slide's own element holds its notes too: its colour goes to its body (see `app.css`).
+		...(background
+			? [
+					Decoration.node(pos, pos + slide.nodeSize, {
+						style: `background: none; ${SLIDE_PAINT_PROPERTY}: ${background}`,
+					}),
+				]
+			: []),
+		...linesAtTheirTextSize(slide, pos),
 		...boxes,
 		...notesHint(notesOf(slide), notesStart),
 		Decoration.widget(notesStart, underSlide.draw, {
@@ -171,6 +162,25 @@ function decorationsInView(
 	];
 }
 
+/** Each line of the boxes of `slide`, which starts at `slidePos`, whose text has a size of its own, drawn at that size (`ownTextSizeOf`). */
+function linesAtTheirTextSize(slide: Node, slidePos: number): Decoration[] {
+	const decorations: Decoration[] = [];
+	// Past the slide's own start, where its body starts.
+	const bodyPos = slidePos + 1;
+	bodyOf(slide).descendants((node, offset) => {
+		if (!node.isTextblock) return true;
+		const size = ownTextSizeOf(node);
+		if (size !== undefined) {
+			const at = bodyPos + 1 + offset;
+			decorations.push(
+				Decoration.node(at, at + node.nodeSize, { style: `font-size: ${pixels(size)}` }),
+			);
+		}
+		return false;
+	});
+	return decorations;
+}
+
 /** The element the editor draws the body of the slide starting at `slidePos` as, if it draws it. */
 export function drawnSlideBody(view: EditorView, slidePos: SlidePos): HTMLElement | undefined {
 	const drawn = view.nodeDOM(slidePos);
@@ -179,117 +189,90 @@ export function drawnSlideBody(view: EditorView, slidePos: SlidePos): HTMLElemen
 	return body instanceof HTMLElement ? body : undefined;
 }
 
-/** A slide of the deck: where it starts now, and the slide itself, followed through anybody's changes. */
-interface FollowedSlide {
+/** A box of the deck: where it starts now, and the box itself, followed through anybody's changes. */
+interface FollowedBox {
 	pos: number;
 	followed: FollowedNode;
 }
 
-/** Where a drag has the boxes of `slide`, before it is written. */
-interface BoxesPreview {
-	slide: FollowedSlide;
-	frames: readonly Frame[];
+/** Where a drag has the box it drags, before it is written. */
+export interface BoxPreview {
+	box: FollowedBox;
+	frame: Frame;
 }
 
-const boxesPreviewKey = new PluginKey<BoxesPreview | null>("boxesPreview");
+const boxPreviewKey = new PluginKey<BoxPreview | null>("boxPreview");
 
 /**
- * Draws the boxes of `slide` at `frames`, as one of them is dragged, until
- * the drag ends with `withoutBoxesPreview`. It changes nothing in the deck,
- * for anybody: the slide is only drawn placed here, so a drag is written
- * once, when it ends.
+ * Draws `box` at `frame`, as it is dragged, until the drag ends with
+ * `withoutBoxPreview`. It changes nothing in the deck, for anybody: the box
+ * is only drawn there here, so a drag is written once, when it ends.
  */
-export const previewingBoxes = (
-	state: EditorState,
-	slide: FollowedSlide,
-	frames: readonly Frame[],
-): Transaction => state.tr.setMeta(boxesPreviewKey, { slide, frames });
+export const previewingBox = (state: EditorState, box: FollowedBox, frame: Frame): Transaction =>
+	state.tr.setMeta(boxPreviewKey, { box, frame });
 
-/** `transaction`, ending the drawing of a drag's boxes (see `previewingBoxes`) as it is made. */
-export const withoutBoxesPreview = (transaction: Transaction): Transaction =>
-	transaction.setMeta(boxesPreviewKey, null);
+/** `transaction`, ending the drawing of a drag's box (see `previewingBox`) as it is made. */
+export const withoutBoxPreview = (transaction: Transaction): Transaction =>
+	transaction.setMeta(boxPreviewKey, null);
+
+/** Where a drag has the box it drags in `state`, while one does (see `previewingBox`). */
+export const boxPreviewOf = (state: EditorState): BoxPreview | null =>
+	boxPreviewKey.getState(state) ?? null;
+
+/** The attribute a box being dragged is drawn with, and the properties saying where the drag has it (see `app.css`). */
+const DRAGGED_ATTRIBUTE = "data-dragged";
+const DRAGGED_FRAME_PROPERTIES = {
+	x: "--dragged-x",
+	y: "--dragged-y",
+	width: "--dragged-width",
+	height: "--dragged-height",
+} as const satisfies Record<keyof Frame, string>;
 
 /**
- * Drawing each box of the slide in view at its frame, as the placed slide's
- * styles draw it (see `app.css`): where the slide's boxes were placed by hand,
- * or, for the slide one of whose boxes is being dragged, where the drag has
- * them. Only the slide in view is drawn, so only its boxes need their frames.
+ * Drawing the box being dragged where the drag has it, over the frame it
+ * holds, and the rest of its slide as it is, others' changes to it included.
  *
- * The slide a drag is on is followed through anybody's changes as the drag
- * goes on, and its drawing ends once the slide is gone. A change made here
- * moves it step by step; a change from elsewhere, or an undo, replaces each
- * slide it touches whole, which reads as the slide's deletion, so the slide is
- * then looked for where the shared document has it.
+ * The box is drawn there by properties of its own, never by its frame's:
+ * when a decoration's style goes, the editor takes each property it set off
+ * the box, which would take the frame the box's own style draws it at with
+ * it.
+ *
+ * The box is followed through anybody's changes as the drag goes on, and its
+ * drawing ends once it is gone. A change made here moves it step by step; a
+ * change from elsewhere, or an undo, replaces each slide it touches whole,
+ * which reads as the box's deletion, so the box is then looked for where the
+ * shared document has it.
  */
-const boxFrames = new Plugin<BoxesPreview | null>({
-	key: boxesPreviewKey,
+const boxPreview = new Plugin<BoxPreview | null>({
+	key: boxPreviewKey,
 	state: {
 		init: () => null,
 		apply(transaction, preview, _before, state) {
-			const said: BoxesPreview | null | undefined = transaction.getMeta(boxesPreviewKey);
+			const said: BoxPreview | null | undefined = transaction.getMeta(boxPreviewKey);
 			if (said !== undefined) return said;
 			if (!preview || !transaction.docChanged) return preview;
-			const { followed } = preview.slide;
-			const mapped = transaction.mapping.mapResult(preview.slide.pos, 1);
+			const { followed } = preview.box;
+			const mapped = transaction.mapping.mapResult(preview.box.pos, 1);
 			const pos = mapped.deleted ? whereFollowedNodeIs(state.doc, followed) : mapped.pos;
-			return pos === undefined ? null : { ...preview, slide: { pos, followed } };
+			if (pos === undefined || state.doc.nodeAt(pos)?.type.name !== SLIDE_BOX) return null;
+			return { ...preview, box: { pos, followed } };
 		},
 	},
 	props: {
 		decorations(state) {
-			const preview = boxesPreviewKey.getState(state);
-			const previewed = preview ? previewDecorations(state.doc, preview) : [];
-			const inView = slidesOf(state.doc)[slideInView(state)];
-			const previewedInView = previewed.length > 0 && preview?.slide.pos === inView?.pos;
-			const placed = inView && !previewedInView ? placedBoxDecorations(inView) : [];
-			const decorations = [...previewed, ...placed];
-			return decorations.length > 0 ? DecorationSet.create(state.doc, decorations) : null;
+			const preview = boxPreviewKey.getState(state);
+			const box = preview && state.doc.nodeAt(preview.box.pos);
+			if (!preview || box?.type.name !== SLIDE_BOX) return null;
+			const { pos } = preview.box;
+			const frame = Object.entries(DRAGGED_FRAME_PROPERTIES)
+				.map(([side, property]) => `${property}: ${pixels(preview.frame[side as keyof Frame])}`)
+				.join("; ");
+			return DecorationSet.create(state.doc, [
+				Decoration.node(pos, pos + box.nodeSize, { [DRAGGED_ATTRIBUTE]: "", style: frame }),
+			]);
 		},
 	},
 });
-
-/** Each box of `slide` at the frame it was placed at, when its boxes were placed by hand. */
-function placedBoxDecorations({ node: slide, pos }: SlideAt): Decoration[] {
-	const placement = placementOf(slide);
-	if (!placement) return [];
-	return boxesOf(slide).flatMap(({ node: box, index, startInSlide }) => {
-		const frame = placement[index];
-		const at = pos + startInSlide;
-		return frame ? [Decoration.node(at, at + box.nodeSize, { style: frameStyle(frame) })] : [];
-	});
-}
-
-/**
- * The slide `preview` is of, drawn placed, and each of its boxes at the
- * drag's frame for it. Nothing once the slide no longer holds a box for each
- * of the drag's frames.
- */
-function previewDecorations(
-	deck: Node,
-	{ slide: { pos: slidePos }, frames }: BoxesPreview,
-): Decoration[] {
-	const slide = deck.nodeAt(slidePos);
-	if (slide?.type.name !== SLIDE) return [];
-	const boxes = boxesOf(slide);
-	if (boxes.length !== frames.length) return [];
-	const decorations = placementOf(slide)
-		? []
-		: [Decoration.node(slidePos, slidePos + slide.nodeSize, { [PLACEMENT_ATTRIBUTE]: "" })];
-	for (const { node: box, index, startInSlide } of boxes) {
-		const frame = frames[index];
-		const at = slidePos + startInSlide;
-		if (frame) {
-			decorations.push(Decoration.node(at, at + box.nodeSize, { style: frameStyle(frame) }));
-		}
-	}
-	return decorations;
-}
-
-/** The inline style a box is drawn at `frame` by (`boxFrameProperties`). */
-const frameStyle = (frame: Frame) =>
-	Object.entries(boxFrameProperties(frame))
-		.map(([name, value]) => `${name}: ${value}`)
-		.join("; ");
 
 /** Drawing the element under the slide in view, and saying it is gone. */
 interface UnderSlide {
@@ -322,18 +305,24 @@ const EMPTY_LINE_WORDS: Record<BoxRole, string> = {
 	table: "Add text",
 };
 
+/** What goes on an empty line of a text box for nothing in particular. */
+const TEXT_BOX_WORDS = "Add text";
+
 /**
- * The empty parts of a slide's box of `role`, which starts at `start`, with
- * what goes in each: in the image's box, while it holds only an empty line,
- * the image; in any other, on each empty line but those in a table or code,
- * what the box is for, a heading on a heading, and a quote in a quote. In the
- * title's box, the heading it starts with is the title, and a line under it
- * the subtitle.
+ * The empty parts of a slide's box drawn as `attributes` say, which starts
+ * at `start`, with what goes in each: in an image's box, while it holds only
+ * an empty line, the image; in any other, on each empty line but those in a
+ * table or code, what the box is for, a heading on a heading, and a quote in
+ * a quote. In the title's box, the heading it starts with is the title, and a
+ * line under it the subtitle. A box painted as a shape or a panel, as one
+ * from a PowerPoint file, may be empty by design, and says nothing.
  */
-function emptyPartsOf(box: Node, start: number, role: BoxRole): EmptyPart[] {
+function emptyPartsOf(box: Node, start: number, attributes: BoxAttributes): EmptyPart[] {
+	const { role, fill, stroke, path } = attributes;
 	if (role === "image" && holdsOnlyAnEmptyParagraph(box)) {
 		return [{ node: box, at: start, words: ADD_IMAGE }];
 	}
+	if (role === null && (fill || stroke || path)) return [];
 	const parts: EmptyPart[] = [];
 	let titled = false;
 	box.descendants((child, offset, parent) => {
@@ -353,12 +342,12 @@ function emptyPartsOf(box: Node, start: number, role: BoxRole): EmptyPart[] {
 }
 
 /** What goes on `line`, an empty line in `parent`, in a box of `role` that has a heading above it when `titled`. */
-function lineWords(line: Node, parent: Node | null, role: BoxRole, titled: boolean): string {
+function lineWords(line: Node, parent: Node | null, role: BoxRole | null, titled: boolean): string {
 	if (line.type.name === "heading")
 		return role === "title" && !titled ? "Add a title" : "Add a heading";
 	if (parent?.type.name === "blockquote") return "Add a quote";
 	if (role === "title" && titled) return "Add a subtitle";
-	return EMPTY_LINE_WORDS[role];
+	return role ? EMPTY_LINE_WORDS[role] : TEXT_BOX_WORDS;
 }
 
 const holdsOnlyAnEmptyParagraph = (box: Node) =>

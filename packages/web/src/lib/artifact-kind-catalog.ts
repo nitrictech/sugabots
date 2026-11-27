@@ -17,6 +17,6 @@ export const ARTIFACT_KIND_LABELS: Record<ArtifactKind, string> = {
 /** How Download saves it: as `type`, ending in `.extension`. */
 export const ARTIFACT_KIND_FILES: Record<ArtifactKind, { extension: string; type: string }> = {
 	document: { extension: "md", type: "text/markdown" },
-	slides: { extension: "md", type: "text/markdown" },
+	slides: { extension: "html", type: "text/html" },
 	html: { extension: "html", type: "text/html" },
 };

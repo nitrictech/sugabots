@@ -37,8 +37,8 @@ import {
 	SlideBox,
 	SPEAKER_NOTES,
 	SpeakerNotes,
-	slideMarkdownReaders,
 } from "./live-slides.ts";
+import { slideTextStyles } from "./slide-text-style.ts";
 
 /*
  * What a live document holds, for the two places that hold one: the editor in
@@ -98,7 +98,10 @@ const SuggestionSchema = Extension.create({
 		return [
 			{
 				types: NODES_SUGGESTED_WHOLE,
-				attributes: { [NODE_SUGGESTION]: { default: null, rendered: false } },
+				attributes: {
+					// Never read from HTML, which anybody may write: a suggestion is made in the editor.
+					[NODE_SUGGESTION]: { default: null, rendered: false, parseHTML: () => null },
+				},
 			},
 		];
 	},
@@ -150,21 +153,52 @@ export function nodeSuggestion(node: Node): string | null {
 	return marks.length === 0 ? null : JSON.stringify(marks.map((mark) => mark.toJSON()));
 }
 
-/** The suggestion marks a node's attribute says it has. */
+/**
+ * The suggestion marks a node's attribute says it has: none when it says
+ * anything but a list of the suggesting library's marks, as `nodeSuggestion`
+ * writes one. The attribute arrives through the sync layer from any tab, so
+ * nothing it says may stop the document being read.
+ */
 export function marksOfNodeSuggestion(node: Node): SuggestionMarkOnNode[] {
 	const said: unknown = node.attrs[NODE_SUGGESTION];
-	if (typeof said !== "string") return [];
-	return (JSON.parse(said) as unknown[]).map((mark) => node.type.schema.markFromJSON(mark));
+	const marks = typeof said === "string" ? jsonIn(said) : undefined;
+	if (!Array.isArray(marks) || !marks.every(isSuggestionMarkJson)) return [];
+	try {
+		return marks.map((mark) => node.type.schema.markFromJSON(mark));
+	} catch (error) {
+		// A mark missing an attribute its type requires, as a modification's kind.
+		if (error instanceof RangeError) return [];
+		throw error;
+	}
+}
+
+/** What `text` says as JSON, or `undefined` when it isn't JSON. */
+function jsonIn(text: string): unknown {
+	try {
+		return JSON.parse(text);
+	} catch (error) {
+		if (error instanceof SyntaxError) return undefined;
+		throw error;
+	}
+}
+
+/** Whether `value` is one of the suggesting library's marks as JSON: its name, and an id the library takes, a string or a number. */
+function isSuggestionMarkJson(value: unknown): boolean {
+	if (typeof value !== "object" || value === null) return false;
+	const { type, attrs } = value as { type?: unknown; attrs?: unknown };
+	if (typeof type !== "string" || !(type in suggestionSpecs)) return false;
+	const id =
+		typeof attrs === "object" && attrs !== null ? (attrs as { id?: unknown }).id : undefined;
+	return typeof id === "string" || typeof id === "number";
 }
 
 /** Whether the node is of a kind that says its suggestion in an attribute. */
 export const saysNodeSuggestion = (node: Node) => !node.isText && NODE_SUGGESTION in node.attrs;
 
 /**
- * Whether a suggestion waits on `node` itself or on anything in it. A slide
- * holding one keeps its layout, whoever would change it, in the editor or
- * through the API: a new layout replaces the boxes it changes, and a
- * suggestion in one of them would be lost.
+ * Whether a suggestion waits on `node` itself or on anything in it, which a
+ * change that replaces the node, such as deleting a box or redrawing it in a
+ * new layout, would lose.
  */
 export function holdsSuggestion(node: Node): boolean {
 	let holds = node.marks.some(isSuggestionMark);
@@ -263,7 +297,7 @@ const blocksHoldingBlocks = [
  * What each kind of live document is made of beyond the blocks they share,
  * each node holding others allowing them a suggestion's marks too: a
  * document's top, which holds blocks, or a deck's, which holds slides, with
- * the parts of a slide and what reads a deck's markdown.
+ * the parts of a slide and the styles its text may have.
  */
 const KIND_NODES: Record<LiveArtifactKind, Extensions> = {
 	document: [Document.extend(SUGGESTIONS_ON_CHILDREN)],
@@ -271,12 +305,21 @@ const KIND_NODES: Record<LiveArtifactKind, Extensions> = {
 		...[Deck, Slide, SlideBody, SlideBox, SpeakerNotes].map((node) =>
 			node.extend(SUGGESTIONS_ON_CHILDREN),
 		),
-		...slideMarkdownReaders,
+		...slideTextStyles,
 	],
 };
 
-/** A table, which holds rows and allows them a suggestion's marks too, in a wrapper that scrolls sideways when wider than the page. */
-const DocumentTable = Table.extend(SUGGESTIONS_ON_CHILDREN).configure({ renderWrapper: true });
+/** A table, which holds rows and allows them a suggestion's marks too. */
+const LiveTable = Table.extend(SUGGESTIONS_ON_CHILDREN);
+
+/**
+ * Each kind's table: a document's in a wrapper that scrolls sideways when it
+ * is wider than the page, and a slide's as wide as its box, in none.
+ */
+const KIND_TABLES: Record<LiveArtifactKind, typeof LiveTable> = {
+	document: LiveTable.configure({ renderWrapper: true }),
+	slides: LiveTable.configure({ renderWrapper: false }),
+};
 
 /*
  * The marks markdown has no sign for are written as their HTML tags, and a
@@ -374,6 +417,14 @@ export interface OwnImages {
  * link in a message, and asks before the link leaves the app.
  */
 const DocumentLink = Link.extend({
+	addAttributes() {
+		const attributes = this.parent?.() ?? {};
+		return {
+			...attributes,
+			// An empty class says none, and linkedom, which reads HTML on the server, gives one for a link without.
+			class: { ...attributes.class, parseHTML: (element) => element.getAttribute("class") || null },
+		};
+	},
 	parseMarkdown: (token, helpers) => {
 		const link = { href: token.href, title: token.title || null };
 		const content = helpers
@@ -569,8 +620,8 @@ function holdsLinkedImage(slice: Slice, image: NodeType, link: MarkType): boolea
  * standard one lifts it out to stand as a block, which an image here isn't),
  * and writes a line of its words that markdown would read as a rule, or as
  * the underline making the line above it a heading, with its first character
- * escaped. Written as it is, a line of `---` in a deck would split its slide
- * in two, and in a document would become a rule.
+ * escaped. Written as it is, a line of `---` in a document would become a
+ * rule.
  */
 const DocumentParagraph = Paragraph.extend({
 	parseMarkdown(token, helpers) {
@@ -599,8 +650,7 @@ const RULE_OR_UNDERLINE = /^([ \t]*)(?=([-*_=])(?:[ \t]*\2)*[ \t]*$)/;
 /**
  * A heading, as the standard one, but written as its marks alone, such as
  * `##`, when it holds nothing, where the standard one writes nothing at all
- * and so is gone when its markdown is read back. A new slide's title is such
- * a heading until somebody types in it.
+ * and so is gone when its markdown is read back.
  */
 const DocumentHeading = Heading.extend({
 	renderMarkdown(node, helpers, context) {
@@ -627,7 +677,7 @@ const standardKit = {
 	dropcursor: false,
 } as const;
 
-/** What each kind leaves out of the standard kit: a slide holds no horizontal rule, as one is the line between slides. */
+/** What each kind leaves out of the standard kit: a slide holds no horizontal rule, as a line on a slide is a shape. */
 const KIND_KIT: Record<LiveArtifactKind, { horizontalRule?: false }> = {
 	document: {},
 	slides: { horizontalRule: false },
@@ -655,7 +705,7 @@ export const liveDocumentExtensions = ({
 	}),
 	...KIND_NODES[kind],
 	...blocksHoldingBlocks,
-	DocumentTable,
+	KIND_TABLES[kind],
 	DocumentParagraph,
 	DocumentHeading,
 	TaskBoxAsText,
@@ -699,7 +749,7 @@ export function suggestionBy(id: unknown): SuggestionBy {
  * for another number, such as one left open across an update, must not join:
  * it would delete or write over what newer tabs wrote.
  */
-export const LIVE_DOCUMENT_SCHEMA = 8;
+export const LIVE_DOCUMENT_SCHEMA = 9;
 
 /** The shared type holding the document's content, which the editor's collaboration extension binds to. */
 export const LIVE_DOCUMENT_CONTENT = "default";

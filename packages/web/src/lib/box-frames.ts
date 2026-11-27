@@ -2,34 +2,18 @@ import {
 	type Frame,
 	SLIDE_END_MARGIN,
 	SLIDE_HEIGHT,
-	SLIDE_SIDE_MARGINS,
 	SLIDE_WIDTH,
-	type SlideLayout,
 	SMALLEST_BOX_BY_HAND,
-} from "@sugabots/contracts/slides-markdown";
+} from "@sugabots/contracts/slide-geometry";
+import { SLIDE_SIDE_MARGINS, type SlideLayout } from "@sugabots/contracts/slide-layouts";
 
 /*
  * Where a box on a slide goes when a person moves or resizes it by hand, in
- * a slide's pixels (see `Frame`): kept on the slide, no smaller than a person
- * can still grab (`SMALLEST_BOX_BY_HAND`), and snapped to what it comes close
- * to lining up with.
+ * a slide's pixels (see `Frame`): kept on the slide, or no further off it
+ * than it was, as a picture that bleeds off an edge is; no smaller than a
+ * person can still grab (`SMALLEST_BOX_BY_HAND`); and snapped to what it
+ * comes close to lining up with.
  */
-
-/**
- * Where a box removed from a slide of `layout` its layout places is put when
- * somebody places the slide's other boxes by hand, as it isn't drawn to be
- * measured: across the slide within the layout's margins, so whatever is put
- * in it later, as by a bot writing in it, shows in full until it is moved.
- */
-export function removedBoxFrame(layout: SlideLayout): Frame {
-	const sideMargin = SLIDE_SIDE_MARGINS[layout];
-	return {
-		x: sideMargin,
-		y: SLIDE_END_MARGIN,
-		width: SLIDE_WIDTH - 2 * sideMargin,
-		height: SLIDE_HEIGHT - 2 * SLIDE_END_MARGIN,
-	};
-}
 
 /** How near a moving edge or centre must come to a line to snap to it. */
 const SNAP_DISTANCE_SLIDE_PX = 6;
@@ -129,10 +113,20 @@ const clamp = (value: number, least: number, most: number) =>
 	Math.min(Math.max(value, least), most);
 
 /**
+ * Where a side of a box `size` long, which starts at `start` along a slide
+ * `room` long, may start: on the slide, or, for a box already past an edge,
+ * or longer than the slide, no further past it than it was.
+ */
+const startsWithin = (start: number, size: number, room: number) => ({
+	least: Math.min(0, room - size, start),
+	most: Math.max(0, room - size, start),
+});
+
+/**
  * `start` moved by `shift`, with its left edge, centre or right edge snapped
  * to the nearest line down the slide, and its top, middle or bottom to the
- * nearest across it, then kept on the slide. A line it no longer touches once
- * kept on the slide draws no guide.
+ * nearest across it, then kept on the slide, or no further off it than it
+ * was. A line it no longer touches once kept so draws no guide.
  */
 export function movedFrame(start: Frame, { dx, dy }: Shift, lines: SnapLines): Arranged {
 	const { width, height } = start;
@@ -140,8 +134,10 @@ export function movedFrame(start: Frame, { dx, dy }: Shift, lines: SnapLines): A
 	const top = start.y + dy;
 	const across = nearestSnap([left, left + width / 2, left + width], lines.down);
 	const down = nearestSnap([top, top + height / 2, top + height], lines.across);
-	const x = Math.round(clamp(left + across.shift, 0, SLIDE_WIDTH - width));
-	const y = Math.round(clamp(top + down.shift, 0, SLIDE_HEIGHT - height));
+	const xRange = startsWithin(start.x, width, SLIDE_WIDTH);
+	const yRange = startsWithin(start.y, height, SLIDE_HEIGHT);
+	const x = Math.round(clamp(left + across.shift, xRange.least, xRange.most));
+	const y = Math.round(clamp(top + down.shift, yRange.least, yRange.most));
 	const guides: Guide[] = [];
 	if (across.at !== undefined && touches([x, x + width / 2, x + width], across.at)) {
 		guides.push({ direction: "down", at: across.at });
@@ -161,9 +157,10 @@ const touches = (points: readonly number[], at: number) =>
 
 /**
  * `start` resized by dragging its `handle` by `shift`: each edge the handle
- * moves snapped to the nearest line it comes close to, and kept on the slide
- * and at least the smallest box from the edge facing it. A box smaller than
- * that already, as a deck can hold, is kept at least as big as it is.
+ * moves snapped to the nearest line it comes close to, and kept on the slide,
+ * or no further off it than it was, and at least the smallest box from the
+ * edge facing it. A box smaller than that already, as a deck can hold, is
+ * kept at least as big as it is.
  */
 export function resizedFrame(
 	start: Frame,
@@ -191,16 +188,18 @@ export function resizedFrame(
 		return moved;
 	};
 	if (movesEdge(handle, "left")) {
-		left = moveEdge(left, dx, lines.down, 0, right - leastWidth, "down");
+		left = moveEdge(left, dx, lines.down, Math.min(0, left), right - leastWidth, "down");
 	}
 	if (movesEdge(handle, "right")) {
-		right = moveEdge(right, dx, lines.down, left + leastWidth, SLIDE_WIDTH, "down");
+		const most = Math.max(SLIDE_WIDTH, right);
+		right = moveEdge(right, dx, lines.down, left + leastWidth, most, "down");
 	}
 	if (movesEdge(handle, "top")) {
-		top = moveEdge(top, dy, lines.across, 0, bottom - leastHeight, "across");
+		top = moveEdge(top, dy, lines.across, Math.min(0, top), bottom - leastHeight, "across");
 	}
 	if (movesEdge(handle, "bottom")) {
-		bottom = moveEdge(bottom, dy, lines.across, top + leastHeight, SLIDE_HEIGHT, "across");
+		const most = Math.max(SLIDE_HEIGHT, bottom);
+		bottom = moveEdge(bottom, dy, lines.across, top + leastHeight, most, "across");
 	}
 	return { frame: { x: left, y: top, width: right - left, height: bottom - top }, guides };
 }
@@ -210,28 +209,3 @@ export const sameFrame = (one: Frame, other: Frame) =>
 	one.y === other.y &&
 	one.width === other.width &&
 	one.height === other.height;
-
-/** The window's pixels a box or slide is drawn at, as `getBoundingClientRect` gives them. */
-interface DrawnRect {
-	left: number;
-	top: number;
-	width: number;
-	height: number;
-}
-
-/**
- * The frame of a box drawn at `box` on a slide drawn at `slide`: where it is
- * drawn, in the slide's whole pixels, no smaller than the smallest box, and
- * cut at the slide's edges where it runs past them. Its size is rounded up,
- * so what the box holds still fits it once it is drawn at its frame.
- */
-export function frameOfDrawnBox(box: DrawnRect, slide: Omit<DrawnRect, "height">): Frame {
-	const windowPxPerSlidePx = slide.width / SLIDE_WIDTH;
-	const toSlidePx = (windowPx: number) => windowPx / windowPxPerSlidePx;
-	const smallest = SMALLEST_BOX_BY_HAND;
-	const x = clamp(Math.round(toSlidePx(box.left - slide.left)), 0, SLIDE_WIDTH - smallest.width);
-	const y = clamp(Math.round(toSlidePx(box.top - slide.top)), 0, SLIDE_HEIGHT - smallest.height);
-	const width = clamp(Math.ceil(toSlidePx(box.width)), smallest.width, SLIDE_WIDTH - x);
-	const height = clamp(Math.ceil(toSlidePx(box.height)), smallest.height, SLIDE_HEIGHT - y);
-	return { x, y, width, height };
-}

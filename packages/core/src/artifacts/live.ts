@@ -9,6 +9,7 @@ import {
 	isEditedLive,
 	type LiveArtifactKind,
 } from "@sugabots/contracts";
+import { type DeckUnreadable, UnreadableDeckHtml } from "@sugabots/contracts/deck-html";
 import {
 	type EditRequest,
 	LIVE_DOCUMENT_CONTENT,
@@ -17,10 +18,7 @@ import {
 	suggestionsAsAttributes,
 	suggestionsFromAttributes,
 } from "@sugabots/contracts/live-document";
-import {
-	liveDocumentFromMarkdown,
-	liveDocumentSchema,
-} from "@sugabots/contracts/live-document-markdown";
+import { liveDocumentFromText, liveDocumentSchema } from "@sugabots/contracts/live-document-text";
 import type { Node } from "@tiptap/pm/model";
 import {
 	prosemirrorToYXmlFragment,
@@ -28,13 +26,20 @@ import {
 	yXmlFragmentToProseMirrorRootNode,
 } from "@tiptap/y-tiptap";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer, Stream } from "effect";
+import { Context, Data, Effect, Layer, Stream } from "effect";
 import { applyUpdate, Doc, encodeStateAsUpdate, XmlElement, type XmlFragment, XmlText } from "yjs";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { Database, query } from "../database/database.ts";
 import { artifact } from "../database/schema.ts";
 import { Ids } from "../ids/ids.ts";
-import { type Blocked, changedTo, markdownForAgents, withoutSuggestions } from "./suggestions.ts";
+import { readHtml } from "./html-reader.ts";
+import {
+	type Blocked,
+	changedTo,
+	type TextRefused,
+	textForAgents,
+	withoutSuggestions,
+} from "./suggestions.ts";
 
 /**
  * A `document` or `slides` artifact while it is being edited: one copy held
@@ -42,66 +47,72 @@ import { type Blocked, changedTo, markdownForAgents, withoutSuggestions } from "
  * socket from the editor, and an agent's tools change it here, so neither
  * waits for the other and both see each other's work as it lands.
  *
- * What the copy holds, and how it is read and written as markdown, is the
- * artifact's kind's. Every operation reads the kind from the artifact's row,
- * which the editor's kind comes from too: content written as another kind
- * would be deleted by every editor, whose schema can't hold it.
+ * What the copy holds, and how it is read and written as text, is the
+ * artifact's kind's: a document's markdown, or a deck's HTML. Every
+ * operation reads the kind from the artifact's row, which the editor's kind
+ * comes from too: content written as another kind would be deleted by every
+ * editor, whose schema can't hold it.
  *
  * A document becomes live the first time a person opens it, and stays live:
- * its state is kept in the blob store beside its versions. Its versions are
- * then snapshots of `markdownForAgents`, which says nothing of where people
- * placed a deck's boxes or which boxes they removed; `documentAsShown` says
- * both, and is never for an agent.
+ * its state is kept in the blob store beside its versions, and each version
+ * an agent's change writes after that is `textForAgents` as the change left
+ * it (see `artifacts.ts`).
  */
 export interface Interface {
 	/**
 	 * Joins a person to the live document of `artifact`, which starts from
-	 * `artifact.content` if nobody has opened it before. Only a caller that
-	 * knows the person may read the artifact joins them. What the document
-	 * sends them goes to `outgoing`, and what they send goes to the
-	 * participant returned. Dies if the artifact is gone or isn't of a kind
-	 * people edit live.
+	 * `artifact.content`, its last version, if nobody has opened it before.
+	 * Only a caller that knows the person may read the artifact joins them.
+	 * What the document sends them goes to `outgoing`, and what they send goes
+	 * to the participant returned. Fails with `Unreadable` when it starts from
+	 * a deck's HTML that can't be read whole. Dies if the artifact is gone or
+	 * isn't of a kind people edit live.
 	 */
 	readonly join: (
 		artifact: Pick<Artifact, "id" | "content">,
 		outgoing: Outgoing,
-	) => Effect.Effect<Participant>;
+	) => Effect.Effect<Participant, Unreadable>;
 	/**
 	 * The live document of the artifact `artifactId` as an agent reads it: as
-	 * markdown, without the suggestions pending in it, which says nothing of
-	 * where people placed a deck's boxes or which boxes they removed.
-	 * `undefined` if it has none: it has never been opened live, or it isn't
-	 * of a kind people edit live.
+	 * its text, a document's markdown or a deck's HTML, without the
+	 * suggestions pending in it. `undefined` if it has none: it has never been
+	 * opened live, or it isn't of a kind people edit live. Fails with
+	 * `Unreadable` for a live deck holding what no deck can, which can't be
+	 * written as a deck's HTML.
 	 */
-	readonly markdownForAgents: (artifactId: string) => Effect.Effect<string | undefined>;
+	readonly textForAgents: (artifactId: string) => Effect.Effect<string | undefined, Unreadable>;
 	/**
-	 * The live document of the artifact `artifactId` as people see it until
-	 * somebody accepts a suggestion pending in it: with a deck's boxes where
-	 * people placed them, and those they removed off their slides, as a file
-	 * the deck is saved as draws them. Never for an agent, which may neither
-	 * read nor set either (see `markdownForAgents`). `undefined` when it has
-	 * none, as for `markdownForAgents`.
+	 * The artifact's live document as people see it until somebody accepts a
+	 * suggestion pending in it, as a file it is saved as draws it; or, when
+	 * nobody has opened it, the document `artifact.content`, its last version,
+	 * opens as. Fails with `Unreadable` for a deck that is neither: a live one
+	 * holding what no deck can, or a last version whose HTML can't be read
+	 * whole. Dies if the artifact is gone or isn't of a kind people edit live.
 	 */
-	readonly documentAsShown: (artifactId: string) => Effect.Effect<Node | undefined>;
+	readonly documentAsShown: (
+		artifact: Pick<Artifact, "id" | "content">,
+	) => Effect.Effect<Node, Unreadable>;
 	/**
 	 * Changes the live document of the artifact `artifactId` as `change` asks,
 	 * showing `author` to the people in it: `change` is given the document as
-	 * `markdownForAgents` gives it, and returns that markdown changed. Only
-	 * what it changed is written. Every block it left as it was stays as the
-	 * document holds it, even where markdown can't say all of that, and what
-	 * people are typing elsewhere is kept. A `change` returning `undefined`
-	 * changes nothing. `undefined` if the artifact has no live document, as
-	 * for `markdownForAgents`.
+	 * `textForAgents` gives it, and returns that text changed. Only what it
+	 * changed is written. Every block it left as it was stays as the document
+	 * holds it, even where its text can't say all of that, and what people are
+	 * typing elsewhere is kept. A `change` returning `undefined` changes
+	 * nothing, and one returning a deck's HTML that says nothing or can't be
+	 * read whole is refused (see `TextRefused`). `undefined` if the artifact
+	 * has no live document, as for `textForAgents`.
 	 *
 	 * A change the agent makes in a thread somebody started by asking for an
-	 * edit from inside the document is not made: it is shown to the people in
-	 * the document as a suggestion, and the document reads as before until one
-	 * of them accepts it.
+	 * edit from inside the document is shown to the people in it as a
+	 * suggestion, the document reading as before until one of them accepts
+	 * it; but what it changes in how a deck looks is made at once, as in any
+	 * agent's change (see `changedTo`).
 	 */
 	readonly rewrite: (
 		artifactId: string,
 		author: Author,
-		change: (markdown: string) => string | undefined,
+		change: (text: string) => string | undefined,
 	) => Effect.Effect<Rewritten | undefined>;
 }
 
@@ -144,12 +155,8 @@ export const make = Effect.gen(function* () {
 						const state = await Effect.runPromise(stored(documentName));
 						if (state) applyUpdate(document, state);
 						else if (context.startFrom !== undefined) {
-							const { kind, markdown } = context.startFrom;
-							prosemirrorToYXmlFragment(
-								liveDocumentFromMarkdown(kind, markdown),
-								fragmentOf(document),
-							);
-							// A build from markdown is new content each time, which an editor
+							prosemirrorToYXmlFragment(context.startFrom, fragmentOf(document));
+							// A build from text is new content each time, which an editor
 							// still holding an earlier build would merge in beside it, doubling
 							// every block. So it is stored before anyone is given it, or the load
 							// fails: otherwise it is stored only once someone changes it, and an
@@ -181,6 +188,14 @@ export const make = Effect.gen(function* () {
 		).pipe(
 			Effect.map(([row]) => (row && isEditedLive(row) ? row.kind : undefined)),
 			Effect.provideService(Database, database),
+		);
+
+	/** The kind of the artifact `artifactId`, from its row: dies if it is gone or isn't of a kind people edit live. */
+	const kindOfLive = (artifactId: string) =>
+		Effect.flatMap(liveKindOf(artifactId), (kind) =>
+			kind === undefined
+				? Effect.die(new Error(`Artifact ${artifactId} has no live document`))
+				: Effect.succeed(kind),
 		);
 
 	/**
@@ -222,10 +237,9 @@ export const make = Effect.gen(function* () {
 	return Service.of({
 		join: ({ id: artifactId, content }, outgoing) =>
 			Effect.gen(function* () {
-				const kind = yield* liveKindOf(artifactId);
-				if (kind === undefined) {
-					return yield* Effect.die(new Error(`Artifact ${artifactId} has no live document`));
-				}
+				const kind = yield* kindOfLive(artifactId);
+				// Read here, rather than as the document loads, so that a last version that can't be read is refused to the caller.
+				const startFrom = (yield* isLive(artifactId)) ? undefined : yield* opened(kind, content);
 				let open = true;
 				const connection = hocuspocus.handleConnection(
 					{
@@ -242,7 +256,7 @@ export const make = Effect.gen(function* () {
 						},
 					},
 					new Request(`http://live.invalid/${artifactId}`),
-					{ artifactId, startFrom: { kind, markdown: content } },
+					{ artifactId, startFrom },
 				);
 				return {
 					receive: (bytes: Uint8Array) => connection.handleMessage(bytes),
@@ -253,20 +267,22 @@ export const make = Effect.gen(function* () {
 				};
 			}),
 
-		markdownForAgents: (artifactId) =>
+		textForAgents: (artifactId) =>
 			Effect.gen(function* () {
 				const kind = yield* openedKindOf(artifactId);
 				if (kind === undefined) return undefined;
-				return yield* withDocument(artifactId, (document) => markdownForAgentsIn(document, kind));
+				const live = yield* withDocument(artifactId, (document) => read(document, kind));
+				if (live.outcome === "notADeck") return yield* new Unreadable({ reason: "notADeck" });
+				return textForAgents(live.content);
 			}),
 
-		documentAsShown: (artifactId) =>
+		documentAsShown: ({ id: artifactId, content: lastVersion }) =>
 			Effect.gen(function* () {
-				const kind = yield* openedKindOf(artifactId);
-				if (kind === undefined) return undefined;
-				return yield* withDocument(artifactId, (document) =>
-					withoutSuggestions(read(document, kind).content),
-				);
+				const kind = yield* kindOfLive(artifactId);
+				if (!(yield* isLive(artifactId))) return yield* opened(kind, lastVersion);
+				const live = yield* withDocument(artifactId, (document) => read(document, kind));
+				if (live.outcome === "notADeck") return yield* new Unreadable({ reason: "notADeck" });
+				return withoutSuggestions(live.content);
 			}),
 
 		rewrite: (artifactId, author, change) =>
@@ -275,12 +291,14 @@ export const make = Effect.gen(function* () {
 				if (kind === undefined) return undefined;
 				const unique = yield* ids.next;
 				const rewritten = yield* withDocument(artifactId, (document): Rewritten => {
-					const { content, unreadable } = read(document, kind);
-					const markdown = markdownForAgents(content);
-					const wanted = change(markdown);
-					if (wanted === undefined) return { markdown, outcome: "unchanged" };
+					const live = read(document, kind);
+					if (live.outcome === "notADeck") return { outcome: "blocked", blocked: "unreadable" };
+					const text = textForAgents(live.content);
+					const wanted = change(text);
+					if (wanted === undefined) return { text, outcome: "unchanged" };
 					// Writing what could be read back would write over what could not.
-					if (unreadable) return { markdown, outcome: "blocked", blocked: "unreadable" };
+					if (live.outcome === "partly") return { outcome: "blocked", blocked: "unreadable" };
+					const { content } = live;
 					const requests = document.getMap<EditRequest>(LIVE_DOCUMENT_EDIT_REQUESTS);
 					const request = requests.get(author.threadId);
 					const after = changedTo(
@@ -290,19 +308,23 @@ export const make = Effect.gen(function* () {
 							? { suggestionId: suggestionId(unique, { kind: "agent", name: author.name }) }
 							: "edit",
 					);
-					if (after === "unchanged") return { markdown, outcome: "unchanged" };
-					if (typeof after === "string") return { markdown, outcome: "blocked", blocked: after };
+					if (after === "unchanged") return { text, outcome: "unchanged" };
+					if (typeof after === "string") return { outcome: "blocked", blocked: after };
 					document.awareness.setLocalState({
 						user: { name: author.name, color: AGENT_COLOR, agent: author.look },
 					});
-					updateYFragment(document, fragmentOf(document), suggestionsAsAttributes(after), {
+					updateYFragment(document, fragmentOf(document), suggestionsAsAttributes(after.document), {
 						mapping: new Map(),
 						isOMark: new Map(),
 					});
 					if (request) requests.set(author.threadId, { ...request, answered: true });
+					const written = read(document, kind);
+					if (written.outcome === "notADeck") {
+						throw new Error(`A rewrite left the live deck ${artifactId} holding what no deck can`);
+					}
 					return {
-						markdown: markdownForAgentsIn(document, kind),
-						outcome: request ? "suggested" : "written",
+						text: textForAgents(written.content),
+						outcome: after.suggested ? "suggested" : "written",
 					};
 				});
 				if (rewritten.outcome === "written" || rewritten.outcome === "suggested") {
@@ -346,40 +368,80 @@ export interface Author {
 }
 
 /**
- * What `rewrite` did, and the live document's markdown after it: `written`
- * into the document, `suggested` to the people in it, `unchanged` because the
- * change asked for nothing, or `blocked`, none of it made: it couldn't be
- * made as asked for a suggestion's sake (see `Blocked`), or the document
- * holds content this version of the app cannot read (`unreadable`), which a
- * write would lose.
+ * What `rewrite` did, with the live document's text after it, but when it was
+ * `blocked`: `written` into the document; `suggested` to the people in it,
+ * what it changed in how a deck looks written all the same; `unchanged`
+ * because the change asked for nothing, or asked for only what the document
+ * can't hold; or `blocked`, none of it made: it couldn't be made as asked for
+ * a suggestion's sake (see `Blocked`), the text it wrote can't be what the
+ * document reads as (see `TextRefused`), or the document holds content this
+ * version of the app cannot read (`unreadable`), which a write would lose.
  */
 export type Rewritten =
-	| { readonly markdown: string; readonly outcome: "written" | "suggested" | "unchanged" }
-	| {
-			readonly markdown: string;
-			readonly outcome: "blocked";
-			readonly blocked: Blocked | "unreadable";
-	  };
+	| { readonly text: string; readonly outcome: "written" | "suggested" | "unchanged" }
+	| { readonly outcome: "blocked"; readonly blocked: Blocked | TextRefused | "unreadable" };
+
+/**
+ * A deck that can't be read as one, so it can be neither opened nor written
+ * as a file, nor read by an agent: its last version's HTML can't be read
+ * whole (see `DeckUnreadable`), or its live copy holds what no deck can
+ * (`notADeck`), as a document's blocks do.
+ */
+export class Unreadable extends Data.TaggedError("LiveDocumentUnreadable")<{
+	readonly reason: DeckUnreadable | "notADeck";
+}> {}
 
 interface ConnectionContext {
 	artifactId: string;
-	/** The markdown a document nobody has opened before starts from, and the kind it is written as. */
-	startFrom?: { kind: LiveArtifactKind; markdown: string };
+	/** What a document nobody has opened before starts from: its last version, read. */
+	startFrom?: Node;
 }
+
+/**
+ * `text`, an artifact's last version, as the live document it opens as (see
+ * `liveDocumentFromText`): fails with `Unreadable` for a deck's HTML that
+ * can't be read whole.
+ */
+const opened = (kind: LiveArtifactKind, text: string): Effect.Effect<Node, Unreadable> =>
+	Effect.suspend(() => {
+		try {
+			return Effect.succeed(liveDocumentFromText(kind, text, readHtml));
+		} catch (error) {
+			if (!(error instanceof UnreadableDeckHtml)) throw error;
+			return Effect.fail(new Unreadable({ reason: error.reason }));
+		}
+	});
 
 const fragmentOf = (document: Document) => document.getXmlFragment(LIVE_DOCUMENT_CONTENT);
 
 /**
- * The content of a document of `kind`, with what is suggested for whole
- * blocks marked on them as the document carries it, and whether all of it
- * could be read.
+ * What a live document's content reads as, told apart so that each caller
+ * acts on each:
+ *
+ * - `whole`: all of it, as its kind's schema holds it.
+ * - `partly`: what reading could make of it, which a write would lose the
+ *   rest of: reading deleted what the schema can't hold, such as a block
+ *   written by a newer version of the app, or what is left isn't what the
+ *   schema allows, as a document holding no block. A document's markdown can
+ *   still be written from it.
+ * - `notADeck`: a deck's content that isn't what a deck's schema allows, as
+ *   a document's blocks read as a deck, which no deck's HTML can be written
+ *   from.
+ */
+type LiveContent =
+	| { readonly outcome: "whole" | "partly"; readonly content: Node }
+	| { readonly outcome: "notADeck" };
+
+/**
+ * The content of a document of `kind` (see `LiveContent`), with what is
+ * suggested for whole blocks marked on them as the document carries it.
  *
  * Reading shared content deletes whatever this schema cannot hold, such as a
  * block written by a newer version of the app, or all of it when read as
  * another kind. So it is read from a copy, which is thrown away, and the
  * document itself keeps everything.
  */
-function read(document: Document, kind: LiveArtifactKind): { content: Node; unreadable: boolean } {
+function read(document: Document, kind: LiveArtifactKind): LiveContent {
 	const copy = new Doc();
 	applyUpdate(copy, encodeStateAsUpdate(document));
 	const shared = copy.getXmlFragment(LIVE_DOCUMENT_CONTENT);
@@ -389,7 +451,9 @@ function read(document: Document, kind: LiveArtifactKind): { content: Node; unre
 	);
 	const after = sizeOf(shared);
 	const lost = after.blocks !== before.blocks || after.text !== before.text;
-	return { content, unreadable: lost || !fitsSchema(content) };
+	const fits = fitsSchema(content);
+	if (kind === "slides" && !fits) return { outcome: "notADeck" };
+	return { outcome: lost || !fits ? "partly" : "whole", content };
 }
 
 /**
@@ -420,10 +484,6 @@ function sizeOf(shared: XmlFragment | XmlElement): { blocks: number; text: numbe
 	}
 	return { blocks, text };
 }
-
-/** `document`, of `kind`, as an agent reads it (`markdownForAgents`), as far as it can be read. */
-const markdownForAgentsIn = (document: Document, kind: LiveArtifactKind) =>
-	markdownForAgents(read(document, kind).content);
 
 /** Beside the artifact's versions, so it is deleted with them. */
 const stateKey = (artifactId: string) => BlobStore.key("artifacts", artifactId, "live");

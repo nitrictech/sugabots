@@ -14,6 +14,7 @@ import {
 	MAX_ARTIFACT_IMAGE_BYTES,
 	MAX_ARTIFACT_IMAGES_BYTES,
 } from "@sugabots/contracts";
+import { htmlOfDeck, readDeckHtml } from "@sugabots/contracts/deck-html";
 import { type ArtifactImageIds, artifactImageIds } from "@sugabots/contracts/http";
 import { userText } from "@sugabots/errors";
 import { and, desc, eq } from "drizzle-orm";
@@ -34,8 +35,9 @@ import {
 } from "../database/schema.ts";
 import { Ids, isUuid } from "../ids/ids.ts";
 import { sizeForPeople, type UserFacing } from "../user-message.ts";
+import { readHtml } from "./html-reader.ts";
 import { LiveDocuments } from "./live.ts";
-import type { Blocked } from "./suggestions.ts";
+import type { Blocked, TextRefused } from "./suggestions.ts";
 
 /**
  * Reading a pod's artifacts, for people, and keeping the images a document
@@ -107,21 +109,30 @@ export class Service extends Context.Service<Service, Interface>()("@sugabots/co
  * was based on and is refused with `Stale` if another landed first,
  * so one writer never silently overwrites another.
  *
- * A `document` or `slides` deck people have opened in the editor is live
- * (see `live.ts`): its content is what the live document holds, an agent's
- * change is made to that, and the version the change writes is a snapshot of
- * it, people's edits included. A change made in a thread somebody started by
- * asking for an edit from inside the document writes nothing and is refused
- * as `Suggested`: it waits in the document for one of the people there to
- * accept it.
+ * A `document`'s content is markdown, and a `slides` deck's is HTML (see
+ * `deck-html.ts`), which is read when an agent writes it and kept as the deck
+ * it reads as, refused with `DeckHtmlRefused` when it says nothing or can't
+ * be read whole. One people have opened in the editor is live (see
+ * `live.ts`): its content is what the live document holds, an agent's change
+ * is made to that, and the version the change writes is the live document's
+ * text after it, people's edits included; a change that leaves it reading as
+ * it did writes none and is refused as `Unchanged`. A change made in a
+ * thread somebody started by asking for an edit from inside the document
+ * writes no version and is refused as `Suggested`: what it changes in words,
+ * and the blocks, boxes and slides it adds or removes, wait in the document
+ * for one of the people there to accept them, though what it changes in how
+ * a deck looks is made at once.
  */
 export interface AuthoringInterface {
 	readonly list: (by: AgentInPod) => Effect.Effect<ArtifactSummary[]>;
-	readonly read: (by: AgentInPod, artifactId: string) => Effect.Effect<Artifact, NotFound>;
+	readonly read: (
+		by: AgentInPod,
+		artifactId: string,
+	) => Effect.Effect<Artifact, NotFound | Unreadable>;
 	readonly create: (
 		by: AgentInThread,
 		input: { kind: ArtifactKind; title: string; content: string },
-	) => Effect.Effect<Artifact, TooLarge>;
+	) => Effect.Effect<Artifact, TooLarge | DeckHtmlRefused>;
 	readonly replace: (
 		by: AgentInThread,
 		input: {
@@ -291,8 +302,9 @@ export const makeAuthoring = Effect.gen(function* () {
 	/** The artifact with what its live document holds, when it has one. */
 	const withLiveContent = (shown: Artifact) =>
 		isEditedLive(shown)
-			? Effect.map(live.markdownForAgents(shown.id), (markdown) =>
-					markdown === undefined ? shown : { ...shown, content: markdown },
+			? live.textForAgents(shown.id).pipe(
+					Effect.map((text) => (text === undefined ? shown : { ...shown, content: text })),
+					Effect.catchTag("LiveDocumentUnreadable", () => Effect.fail(new Unreadable())),
 				)
 			: Effect.succeed(shown);
 
@@ -324,7 +336,7 @@ export const makeAuthoring = Effect.gen(function* () {
 	const withContent = <A, E, R>(
 		artifactId: string,
 		kind: ArtifactKind,
-		content: string,
+		content: VersionText,
 		record: (stored: StoredContent) => Effect.Effect<A, E, R>,
 	) =>
 		Effect.gen(function* () {
@@ -387,6 +399,75 @@ export const makeAuthoring = Effect.gen(function* () {
 			);
 		});
 
+	/**
+	 * The text of the version that `content` replacing `found`'s writes: the
+	 * live document's own after the change, where it is live; otherwise
+	 * `content` read as the artifact's kind (`versionTextOf`). Fails with why
+	 * no version is written, as for a deck whose HTML says what it does
+	 * already.
+	 */
+	const replacementText = (
+		by: AgentInThread,
+		found: FoundArtifact,
+		baseVersion: number,
+		content: string,
+	) =>
+		Effect.gen(function* () {
+			const { artifact: row } = found;
+			if (isEditedLive(row)) {
+				// Checked again under the lock. Here it keeps a stale write out of the live document.
+				if (baseVersion !== row.currentVersion) {
+					return yield* new Stale({ currentVersion: row.currentVersion });
+				}
+				const rewritten = yield* live.rewrite(row.id, yield* authorOfChange(by), () => content);
+				if (rewritten) return yield* versionOfLive(rewritten, row.kind);
+			}
+			const text = yield* versionTextOf(row.kind, content);
+			// A deck's HTML is kept in one form, so the same deck is the same text.
+			if (
+				row.kind === "slides" &&
+				text === (yield* atVersion(found, row.currentVersion))?.content
+			) {
+				return yield* new Unchanged({ kind: row.kind });
+			}
+			return text;
+		});
+
+	/**
+	 * The text of the version that replacing the one place `oldText` appears
+	 * in `found`'s content with `newText` writes: the live document's own
+	 * after the change, where it is live; otherwise the current version's
+	 * content so changed, read as the artifact's kind (`versionTextOf`). Fails
+	 * with `EditTextUnmatched` when `oldText` isn't there exactly once, and
+	 * with why no version is written for any other change that writes none.
+	 */
+	const editedText = (by: AgentInThread, found: FoundArtifact, oldText: string, newText: string) =>
+		Effect.gen(function* () {
+			const { artifact: row } = found;
+			const inLive = isEditedLive(row)
+				? yield* live.rewrite(row.id, yield* authorOfChange(by), (text) =>
+						replacedOnce(text, oldText, newText),
+					)
+				: undefined;
+			if (inLive) {
+				// Left as it was, it may be that the edit's text isn't in it exactly once.
+				if (inLive.outcome === "unchanged" && occurrences(inLive.text, oldText) !== 1) {
+					return yield* new EditTextUnmatched({ matches: occurrences(inLive.text, oldText) });
+				}
+				return yield* versionOfLive(inLive, row.kind);
+			}
+			const current = (yield* atVersion(found, row.currentVersion))?.content ?? "";
+			const edited = replacedOnce(current, oldText, newText);
+			if (edited === undefined) {
+				return yield* new EditTextUnmatched({ matches: occurrences(current, oldText) });
+			}
+			const text = yield* versionTextOf(row.kind, edited);
+			// A deck's HTML is kept in one form, so the same deck is the same text.
+			if (row.kind === "slides" && text === current)
+				return yield* new Unchanged({ kind: row.kind });
+			return text;
+		});
+
 	return Authoring.of({
 		list: (by) => operation("list", summariesIn(by.podId)),
 
@@ -404,8 +485,10 @@ export const makeAuthoring = Effect.gen(function* () {
 		create: (by, input) =>
 			operation(
 				"create",
-				Effect.flatMap(ids.next, (artifactId) =>
-					withContent(artifactId, input.kind, input.content, (stored) =>
+				Effect.gen(function* () {
+					const text = yield* versionTextOf(input.kind, input.content);
+					const artifactId = yield* ids.next;
+					return yield* withContent(artifactId, input.kind, text, (stored) =>
 						transaction(
 							Effect.gen(function* () {
 								const row = yield* query((db) =>
@@ -424,16 +507,11 @@ export const makeAuthoring = Effect.gen(function* () {
 								).pipe(Effect.flatMap(writtenRow("artifact")));
 								const version = yield* insertVersion(row.id, 1, stored, by.agentId);
 								const author = yield* agentNamed(by.agentId);
-								return toArtifact(
-									{ artifact: row, creator: author },
-									version,
-									author,
-									input.content,
-								);
+								return toArtifact({ artifact: row, creator: author }, version, author, text);
 							}),
 						),
-					),
-				),
+					);
+				}),
 			),
 
 		replace: (by, { artifactId, baseVersion, content, title, inPlace, kind }) =>
@@ -444,19 +522,11 @@ export const makeAuthoring = Effect.gen(function* () {
 					if (kind && kind !== before.artifact.kind) {
 						return yield* new KindFixed({ kind: before.artifact.kind });
 					}
-					if (isEditedLive(before.artifact)) {
-						// Checked again under the lock below. Here it keeps a stale write out of the live document.
-						if (baseVersion !== before.artifact.currentVersion) {
-							return yield* new Stale({ currentVersion: before.artifact.currentVersion });
-						}
-						yield* writtenOrNot(
-							yield* live.rewrite(before.artifact.id, yield* authorOfChange(by), () => content),
-						);
-					}
+					const text = yield* replacementText(by, before, baseVersion, content);
 					const written = yield* withContent(
 						before.artifact.id,
 						before.artifact.kind,
-						content,
+						text,
 						(stored) =>
 							transaction(
 								Effect.flatMap(requireArtifact(by, artifactId), (found) =>
@@ -468,7 +538,7 @@ export const makeAuthoring = Effect.gen(function* () {
 								),
 							),
 					);
-					return { ...written, content };
+					return { ...written, content: text };
 				}),
 			),
 
@@ -485,28 +555,14 @@ export const makeAuthoring = Effect.gen(function* () {
 						if (baseVersion !== found.artifact.currentVersion) {
 							return yield* new Stale({ currentVersion: found.artifact.currentVersion });
 						}
-						const inLive = isEditedLive(found.artifact)
-							? yield* live.rewrite(found.artifact.id, yield* authorOfChange(by), (markdown) =>
-									replacedOnce(markdown, oldText, newText),
-								)
-							: undefined;
-						yield* writtenOrNot(inLive);
-						const current =
-							inLive?.markdown ??
-							(yield* atVersion(found, found.artifact.currentVersion))?.content ??
-							"";
-						const edited =
-							inLive?.outcome === "written" ? current : replacedOnce(current, oldText, newText);
-						if (edited === undefined) {
-							return yield* new EditTextUnmatched({ matches: occurrences(current, oldText) });
-						}
+						const text = yield* editedText(by, found, oldText, newText);
 						const written = yield* withContent(
 							found.artifact.id,
 							found.artifact.kind,
-							edited,
+							text,
 							(stored) => writeVersion(by, found, baseVersion, { stored, inPlace }),
 						);
-						return { ...written, content: edited };
+						return { ...written, content: text };
 					}),
 				),
 			),
@@ -535,17 +591,74 @@ export const readVersionUnchecked =
 			return yield* atVersionIn(blobs)(found, version);
 		});
 
-/** Fails with why a change to a live document wrote nothing to it, where the agent should hear why. */
-const writtenOrNot = (rewritten: LiveDocuments.Rewritten | undefined) =>
-	rewritten?.outcome === "suggested"
-		? Effect.fail(new Suggested())
-		: rewritten?.outcome === "blocked"
-			? Effect.fail(
-					rewritten.blocked === "unreadable"
-						? new Unreadable()
-						: new SuggestionBlocked({ blocked: rewritten.blocked }),
-				)
-			: Effect.void;
+declare const versionTextMade: unique symbol;
+
+/**
+ * The text a version of an artifact keeps: a deck's HTML as `htmlOfDeck`
+ * writes it, so that it is what the deck opens as, or a document's markdown
+ * or a page's HTML. Only `versionTextOf`, which reads what an agent wrote,
+ * and `versionOfLive`, which takes a live document's own text, make one, so a
+ * deck's HTML is never kept as an agent wrote it.
+ */
+type VersionText = string & { readonly [versionTextMade]: true };
+
+/**
+ * `content`, as an agent wrote it for an artifact of `kind`, as the text a
+ * version keeps: a deck's HTML read and written again as `htmlOfDeck` writes
+ * it, and a document's markdown or a page's HTML as it is. Fails with
+ * `DeckHtmlRefused` for a deck's HTML that says nothing or can't be read
+ * whole, which would make the deck empty or lose some of it.
+ */
+function versionTextOf(
+	kind: ArtifactKind,
+	content: string,
+): Effect.Effect<VersionText, DeckHtmlRefused> {
+	if (kind !== "slides") return Effect.succeed(content as VersionText);
+	const reading = readDeckHtml(content, readHtml);
+	switch (reading.outcome) {
+		case "deck":
+			return Effect.succeed(htmlOfDeck(reading.deck) as VersionText);
+		case "nothing":
+			return Effect.fail(new DeckHtmlRefused({ reason: "saysNothing" }));
+		case "unreadable":
+			return Effect.fail(new DeckHtmlRefused({ reason: reading.reason }));
+	}
+}
+
+/**
+ * The text a version keeps of a live document an agent's change was made
+ * to: the document's own, as the change left it. Fails with why no version
+ * is written when the change wrote nothing a version would keep.
+ */
+function versionOfLive(
+	rewritten: LiveDocuments.Rewritten,
+	kind: ArtifactKind,
+): Effect.Effect<VersionText, NotWritten> {
+	switch (rewritten.outcome) {
+		case "written":
+			return Effect.succeed(rewritten.text as VersionText);
+		case "unchanged":
+			return Effect.fail(new Unchanged({ kind }));
+		case "suggested":
+			return Effect.fail(new Suggested());
+		case "blocked":
+			return Effect.fail(whyBlocked(rewritten.blocked));
+	}
+}
+
+/** Why a change to a live document was blocked, as the failure the agent hears. */
+function whyBlocked(
+	blocked: Blocked | TextRefused | "unreadable",
+): Unreadable | SuggestionBlocked | DeckHtmlRefused {
+	switch (blocked) {
+		case "unreadable":
+			return new Unreadable();
+		case "unmarkable":
+			return new SuggestionBlocked({ blocked });
+		default:
+			return new DeckHtmlRefused({ reason: blocked });
+	}
+}
 
 /** How many times `text` appears in `content`. */
 const occurrences = (content: string, text: string) =>
@@ -568,7 +681,7 @@ interface StoredContent {
 
 const CONTENT_TYPES: Record<ArtifactKind, string> = {
 	document: "text/markdown; charset=utf-8",
-	slides: "text/markdown; charset=utf-8",
+	slides: "text/html; charset=utf-8",
 	html: "text/html; charset=utf-8",
 };
 
@@ -642,17 +755,18 @@ export class TooLarge extends Data.TaggedError("ArtifactTooLarge")<{
 }> {}
 
 /**
- * The change was not made: somebody asked for it from inside the document,
- * so it is shown there and takes effect if one of the people in it accepts.
+ * The change wrote no version: somebody asked for it from inside the
+ * document, so what it changes in words, and the blocks, boxes and slides it
+ * adds or removes, wait there as a suggestion, which takes effect if one of
+ * the people in it accepts it. What it changes in how a deck looks was made
+ * at once.
  */
 export class Suggested extends Data.TaggedError("ArtifactChangeSuggested") {}
 
 /**
  * The change couldn't be made as asked, for a suggestion's sake, and none of
  * it was made: it was to be a suggestion, and what it changes can't carry a
- * suggestion's marks (`unmarkable`), as a code block can't; or it changes a
- * slide whose new layout waits as a suggestion (`layoutPending`); or it
- * changes the layout of a slide holding a suggestion (`suggestionPending`).
+ * suggestion's marks (`unmarkable`), as a code block can't.
  */
 export class SuggestionBlocked extends Data.TaggedError("ArtifactSuggestionBlocked")<{
 	readonly blocked: Blocked;
@@ -660,12 +774,36 @@ export class SuggestionBlocked extends Data.TaggedError("ArtifactSuggestionBlock
 
 /**
  * The live document holds content this version of the app cannot read, as a
- * newer version's would be, so changing it here would lose that content.
+ * newer version's would be, or a deck holds what no deck can: it can't be
+ * read whole, and changing it here would lose that content.
  */
 export class Unreadable extends Data.TaggedError("ArtifactUnreadable") {}
 
-/** Why a change to a live document left it and its versions as they were. */
-export type NotWritten = Suggested | SuggestionBlocked | Unreadable;
+/**
+ * The HTML an agent wrote for a deck can't be the deck, so nothing was
+ * changed: it holds no slide and nothing a slide could (`saysNothing`), or
+ * it can't be read whole (see `DeckUnreadable`).
+ */
+export class DeckHtmlRefused extends Data.TaggedError("ArtifactDeckHtmlRefused")<{
+	readonly reason: TextRefused;
+}> {}
+
+/**
+ * The change asks for nothing the artifact, of `kind`, keeps, so it was left
+ * as it was and no version was written: it says what the artifact says
+ * already, or, for a deck, adds only what a deck doesn't keep, as a CSS
+ * property it has no place for.
+ */
+export class Unchanged extends Data.TaggedError("ArtifactUnchanged")<{
+	readonly kind: ArtifactKind;
+}> {}
+
+/**
+ * Why a change wrote no version. `Suggested` wrote its suggestion into the
+ * live document, and what it changes in how a deck looks; the others left
+ * the artifact as it was.
+ */
+export type NotWritten = Suggested | SuggestionBlocked | Unreadable | DeckHtmlRefused | Unchanged;
 
 /** An image for a document is over `maxSize` bytes, the most kept. */
 export class ImageTooLarge

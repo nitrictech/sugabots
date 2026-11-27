@@ -60,14 +60,20 @@ const plan: Artifact = {
 
 const ILLUSTRATED_ID = randomUUID();
 
+/** A slide of `layout` whose title box holds `title`, and, under it, `body`, placed where the layout puts them. */
+const slide = (layout: string, title: string, body?: string) =>
+	`<section data-slide data-layout="${layout}"><div data-slide-body><div data-slide-box data-role="title">${title}</div>${body === undefined ? "" : `<div data-slide-box data-role="body">${body}</div>`}</div></section>`;
+
 /** A deck of two slides, which is edited live as a document is. */
 const deck: Artifact = {
 	...plan,
 	id: DECK_ID,
 	kind: "slides",
 	title: "Launch review",
-	content:
-		"<!-- layout: title -->\n\n# Launch review\n\n---\n\n<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Friday",
+	content: [
+		slide("title", "<h1>Launch review</h1>"),
+		slide("bullets", "<h2>Goals</h2>", "<ul><li><p>Ship on Friday</p></li></ul>"),
+	].join("\n"),
 };
 
 /** The address of an image kept for `artifactId`. */
@@ -202,8 +208,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a document's live WebSocket", () => 
 		expect(textOf(person.document)).toBe("Launch planShip on Friday.");
 
 		await Effect.runPromise(
-			live.rewrite(ARTIFACT_ID, PLANNER, (markdown) =>
-				markdown.replace("Ship on Friday.", "Ship on Monday."),
+			live.rewrite(ARTIFACT_ID, PLANNER, (text) =>
+				text.replace("Ship on Friday.", "Ship on Monday."),
 			),
 		);
 
@@ -219,9 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a document's live WebSocket", () => 
 		expect(textOfDeck()).toContain("Ship on Friday");
 
 		await Effect.runPromise(
-			live.rewrite(DECK_ID, PLANNER, (markdown) =>
-				markdown.replace("Ship on Friday", "Ship on Monday"),
-			),
+			live.rewrite(DECK_ID, PLANNER, (text) => text.replace("Ship on Friday", "Ship on Monday")),
 		);
 
 		await until(() => textOfDeck().includes("Ship on Monday"));
@@ -269,7 +273,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a document's live WebSocket", () => 
 			live.rewrite(
 				DECK_ID,
 				PLANNER,
-				(markdown) => `${markdown}\n\n---\n\n<!-- layout: section -->\n\n## Next steps`,
+				(text) => `${text}\n${slide("section", "<h2>Next steps</h2>")}`,
 			),
 		);
 
@@ -305,11 +309,8 @@ describe.skipIf(!process.env.DATABASE_URL)("a document's live WebSocket", () => 
 	it("downloads a deck as a PDF holding what the live deck holds", async () => {
 		const person = await joinAs("session=good", deck);
 		await Effect.runPromise(
-			live.rewrite(
-				DECK_ID,
-				PLANNER,
-				() =>
-					"<!-- layout: title -->\n\n# Launch review\n\n---\n\n## Goals\n\n- Ship on Friday\n\n---\n\n<!-- layout: section -->\n\n## Next steps",
+			live.rewrite(DECK_ID, PLANNER, () =>
+				[deck.content, slide("section", "<h2>Next steps</h2>")].join("\n"),
 			),
 		);
 

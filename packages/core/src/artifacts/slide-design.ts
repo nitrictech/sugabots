@@ -1,44 +1,36 @@
 import type { ArtifactImageType } from "@sugabots/contracts";
+import { type CssColor, cssColorIn } from "@sugabots/contracts/css-values";
 import { type ArtifactImageIds, ownImageAt } from "@sugabots/contracts/http";
 import { linkMayGoTo } from "@sugabots/contracts/live-document";
-import { layoutOf, shownBoxesOf } from "@sugabots/contracts/live-slides";
 import {
+	type BoxAttributes,
+	type BoxPadding,
 	type BoxRole,
-	type BoxRoleOf,
-	type Frame,
-	SLIDE_BOX_ROLES,
-	SLIDE_END_MARGIN,
-	SLIDE_HEIGHT,
-	SLIDE_SIDE_MARGINS,
-	SLIDE_WIDTH,
-	type SlideLayout,
-} from "@sugabots/contracts/slides-markdown";
-import type { Node } from "@tiptap/pm/model";
+	DEFAULT_BOX_PADDING,
+	type VerticalAlign,
+} from "@sugabots/contracts/slide-box";
+import type { Frame } from "@sugabots/contracts/slide-geometry";
+import type { SlideLayout } from "@sugabots/contracts/slide-layouts";
+import { TEXT_STYLE } from "@sugabots/contracts/slide-text-style";
+import type { SvgPath } from "@sugabots/contracts/svg-path";
+import type { Mark, Node } from "@tiptap/pm/model";
+import { formatHex, parse } from "culori";
 
 /*
  * A deck's slides as the app draws them, in its light colours, for the files
  * a deck is saved as: a PowerPoint file (`powerpoint.ts`) and a PDF
- * (`pdf.ts`). It follows the slide styles in the web app's `app.css`, which
- * size everything in the slide's unit (`SLIDE_UNIT`). Its text is drawn at
- * full size, or at the largest of `SLIDE_TEXT_STEPS` at which it fits, and
- * everything sized in ems of the slide's text steps down with it, while its
- * margins, which are in the unit alone, stay.
+ * (`pdf.ts`). Each box is drawn at its frame, in the order the slide holds
+ * them, with its own fill, outline, shape, padding and rotation. Text that
+ * says nothing of its own look is drawn as the slide styles in the web app's
+ * `app.css` draw text of its box's role on a slide of its layout, which size
+ * everything in the slide's unit (`SLIDE_UNIT`): at full size, or at the
+ * largest of `SLIDE_TEXT_STEPS` at which the slide fits, everything sized in
+ * ems of the slide's text stepping down with it. Text given a colour, size or
+ * font of its own (see `slide-text-style.ts` in the contracts) keeps it.
  *
  * Positions and sizes in points are a slide's pixels (`SLIDE_WIDTH` across),
  * a point to each.
  */
-
-/** How wide a slide of `layout` is within the margins at its sides, in points. */
-export const contentWidthOf = (layout: SlideLayout) => SLIDE_WIDTH - 2 * SLIDE_SIDE_MARGINS[layout];
-
-/** How far down a slide the margin at its foot starts, in points. */
-export const CONTENT_BOTTOM = SLIDE_HEIGHT - SLIDE_END_MARGIN;
-
-/** How tall a slide is within the margins at its top and foot, in points. */
-export const CONTENT_HEIGHT = SLIDE_HEIGHT - 2 * SLIDE_END_MARGIN;
-
-/** The space between a slide's two columns, in units. */
-export const COLUMN_GAP_UNITS = 3.5;
 
 /** The light colours, as hex: a deck holds no theme, and a file to hand on is light. */
 export const BACKGROUND = "FFFFFF";
@@ -67,16 +59,14 @@ export interface TextLook {
 /** The weight from which a format with only regular and bold draws text bold. */
 export const BOLD_WEIGHT = 600;
 
-/** How a layout sets out the blocks a slide holds, one under another. */
-export interface LayoutLook {
+/** How a layout styles the blocks its slides' boxes hold, one under another. */
+interface LayoutLook {
 	/** Each heading's look, whatever its level up to the third, as all are drawn alike. */
 	heading: TextLook;
 	/** The look of its paragraphs, and of its lists' and quotes' text. */
 	text: TextLook;
-	/** The space between its blocks, in units of its text's step. */
+	/** The space between a box's blocks, in units of its text's step. */
 	gap: number;
-	/** Where its blocks sit within its padding when they take less than its height. */
-	align: "start" | "center" | "end";
 }
 
 const HEADING: TextLook = {
@@ -88,42 +78,41 @@ const HEADING: TextLook = {
 };
 const BODY_TEXT: TextLook = { size: 1.5, color: TEXT, weight: 400, lineHeight: 1.4, tracking: 0 };
 const SMALL_TEXT: TextLook = { ...BODY_TEXT, size: 1.25 };
-const BODY: LayoutLook = { heading: HEADING, text: BODY_TEXT, gap: 2, align: "start" };
+const BODY: LayoutLook = { heading: HEADING, text: BODY_TEXT, gap: 2 };
 
 /** Each layout's look, as `[data-layout=…]` sets it. */
 export const LAYOUT_LOOKS: Readonly<Record<SlideLayout, LayoutLook>> = {
-	/** A large title, and its subtitle under it, in the middle. */
+	/** A large title, and its subtitle in grey. */
 	title: {
 		heading: { ...HEADING, size: 3.75, weight: 700, lineHeight: 1.1, tracking: -0.02 },
 		text: { ...BODY_TEXT, color: SECONDARY },
 		gap: 1.25,
-		align: "center",
 	},
 	bullets: BODY,
-	/** The title across the top, and the columns side by side under it (`COLUMN_LOOK`). */
+	/** The columns themselves are set as `COLUMN_LOOK` says. */
 	columns: BODY,
-	/** The title over the text box on the left, and the image box on the right (`IMAGE_LAYOUT`). */
+	/** Its text box and image box are set as `IMAGE_LAYOUT` says. */
 	image: BODY,
-	/** An accent bar (`SECTION_BAR`), a label and a very large title, at the foot of the slide. */
+	/** An accent bar (`SECTION_BAR`) over its label, and a very large title. */
 	section: {
 		heading: { ...HEADING, size: 4, weight: 700, lineHeight: 1.05, tracking: -0.02 },
 		text: { ...SMALL_TEXT, color: SECONDARY, weight: 500 },
 		gap: 1,
-		align: "end",
 	},
-	/** The quote large (`QUOTE_LOOK`), and who said it under it, in the middle, within wider margins. */
-	quote: { ...BODY, text: { ...SMALL_TEXT, color: SECONDARY }, gap: 1.75, align: "center" },
+	/** The quote large (`QUOTE_LOOK`), and who said it in grey. */
+	quote: { ...BODY, text: { ...SMALL_TEXT, color: SECONDARY }, gap: 1.75 },
 	table: { ...BODY, text: SMALL_TEXT },
+	blank: BODY,
 };
 
 /**
- * The look of a column of the columns layout, and, but for their text, of
- * the image layout's text box and image box: smaller text and headings,
- * nearer each other.
+ * The look of a column box (`COLUMN_ROLES`): smaller text and headings, nearer
+ * each other, its text otherwise as its layout's.
  */
 export const COLUMN_LOOK = {
 	heading: { ...HEADING, size: 1.375, lineHeight: 1.2, tracking: 0 },
-	text: SMALL_TEXT,
+	/** Its text's size, in units. */
+	textSize: 1.25,
 	/** Between its blocks, in units of the step. */
 	gap: 0.9,
 	/** Between its lists' items, in ems of their text. */
@@ -132,15 +121,23 @@ export const COLUMN_LOOK = {
 	headingRuleGap: 0.6,
 } as const;
 
-/**
- * The parts of a slide that set their blocks each their own way: the slide's
- * own flow, a column of the columns layout, and the image layout's text box
- * and image box. A box's part is its role's (`BOX_PARTS`).
- */
-export type SlidePart = "flow" | "column" | "imageText" | "imageColumn";
+/** The roles whose boxes take `COLUMN_LOOK`: the columns, and the text and image beside each other. */
+const COLUMN_ROLES: ReadonlySet<BoxRole> = new Set(["leftColumn", "rightColumn", "text", "image"]);
 
-/** How a part of a slide sets its blocks, one under another. */
-export interface PartLook {
+/** The image layout's text box and image box: their text larger, softer and further apart than a column's. */
+export const IMAGE_LAYOUT = {
+	text: { ...BODY_TEXT, size: 1.375, color: SECONDARY, lineHeight: 1.5 },
+} as const;
+
+/**
+ * Between the blocks of a box for nothing in particular, and of every box on
+ * a blank slide, as a slide imported from a presentation app has, in units of
+ * the step: as near as the app spaces a text box's paragraphs.
+ */
+const TEXT_BOX_GAP = 0.5;
+
+/** How a box sets the blocks it holds, one under another. */
+export interface BoxLook {
 	heading: TextLook;
 	text: TextLook;
 	/** Between its blocks, in units of the step. */
@@ -149,74 +146,32 @@ export interface PartLook {
 	listGap: number;
 	/** Whether each heading has a rule under it, `COLUMN_LOOK.headingRuleGap` below. */
 	ruledHeadings: boolean;
-	/** Where its blocks sit across it: the image box centres each. */
-	align: "start" | "center";
+	/** Whether its tables' cells are padded as a presentation app pads them (`cellInsetOf`). */
+	tightCells: boolean;
 }
 
 /**
- * The part of its slide a box of each role is, which sets what the box holds
- * as `[data-box-role=…]` sets it: a column of the columns layout, the image
- * layout's text box and image box, and the slide's own flow for every other.
+ * How a box of `role` on a slide of `layout` sets its blocks, as the slide
+ * styles cascade: its layout's look (`[data-layout=…]`); a column box's
+ * smaller one (`COLUMN_LOOK`), its text the image layout's own there
+ * (`IMAGE_LAYOUT`); headings ruled off in the columns layout's columns; and
+ * a box for nothing in particular, or any box on a blank slide, its blocks
+ * nearer (`TEXT_BOX_GAP`), the former's tables' cells padded tighter.
  */
-export const BOX_PARTS: Readonly<Record<BoxRole, SlidePart>> = {
-	title: "flow",
-	subtitle: "flow",
-	body: "flow",
-	leftColumn: "column",
-	rightColumn: "column",
-	text: "imageText",
-	image: "imageColumn",
-	label: "flow",
-	quote: "flow",
-	attribution: "flow",
-	table: "flow",
-};
-
-/** How `part` of a slide of `layout` sets its blocks, as `[data-layout=…]` and `[data-box-role=…]` set them. */
-export function partLook(layout: SlideLayout, part: SlidePart): PartLook {
+export function boxLookOf(layout: SlideLayout, role: BoxRole | null): BoxLook {
 	const look = LAYOUT_LOOKS[layout];
-	if (part === "flow") {
-		return {
-			heading: look.heading,
-			text: look.text,
-			gap: look.gap,
-			listGap: LIST_LOOK.gap,
-			ruledHeadings: false,
-			align: "start",
-		};
-	}
-	const column: PartLook = {
-		heading: { ...COLUMN_LOOK.heading, weight: look.heading.weight },
-		text: COLUMN_LOOK.text,
-		gap: COLUMN_LOOK.gap,
-		listGap: COLUMN_LOOK.listGap,
-		ruledHeadings: part === "column",
-		align: "start",
-	};
-	if (part === "column") return column;
+	const column = role !== null && COLUMN_ROLES.has(role);
+	const besideImage = layout === "image" && (role === "text" || role === "image");
+	const columnText = { ...look.text, size: COLUMN_LOOK.textSize };
 	return {
-		...column,
-		text: IMAGE_LAYOUT.text,
-		align: part === "imageColumn" ? "center" : "start",
+		heading: column ? { ...COLUMN_LOOK.heading, weight: look.heading.weight } : look.heading,
+		text: besideImage ? IMAGE_LAYOUT.text : column ? columnText : look.text,
+		gap: role === null || layout === "blank" ? TEXT_BOX_GAP : column ? COLUMN_LOOK.gap : look.gap,
+		listGap: column ? COLUMN_LOOK.listGap : LIST_LOOK.gap,
+		ruledHeadings: layout === "columns" && (role === "leftColumn" || role === "rightColumn"),
+		tightCells: role === null,
 	};
 }
-
-/**
- * The image layout: its title over its text box, together in the middle of
- * the left, and its image box filling the right.
- */
-export const IMAGE_LAYOUT = {
-	/** The text of its text box and of its image box. */
-	text: { ...BODY_TEXT, size: 1.375, color: SECONDARY, lineHeight: 1.5 },
-	/** Between the title and the text, in units of the step. */
-	titleGap: 1.25,
-	/** Between the title's own blocks: none, as the layout sets nothing between its rows. */
-	titleBlockGap: 0,
-	/** The image's most height, in units: it doesn't step down with the text. */
-	imageMaxHeight: 25,
-	/** Its image's corners, in ems of its text. */
-	imageRadius: 0.75,
-} as const;
 
 /**
  * The quote layout's quote, the blocks of its first block quote. Its letter
@@ -231,19 +186,15 @@ export const QUOTE_LOOK: TextLook = {
 	tracking: -0.01 / 2.5,
 };
 
-/** The section break's accent bar, in units of the step: its size and its corners. A slide whose label was removed shows none. */
+/** The section break's accent bar, in units of the step: its size and its corners. */
 export const SECTION_BAR = { width: 3, height: 0.3, radius: 0.15 } as const;
 
 /**
- * Where the section break's accent bar is, at `unit`, on a slide whose boxes
- * somebody placed by hand: over its label's box, placed at `label`, from the
- * box's left, as far above it as the layout sets its blocks apart, as it goes
- * wherever the label goes. In points.
+ * Where the section break's accent bar is, at `unit`: over its label's box,
+ * at `label`, from the box's left, as far above it as the layout sets its
+ * blocks apart, as it goes wherever the label goes. In points.
  */
-export function accentBarOver(
-	label: Frame,
-	unit: number,
-): { x: number; y: number; width: number; height: number } {
+export function accentBarOver(label: Frame, unit: number): Frame {
 	const height = SECTION_BAR.height * unit;
 	return {
 		x: label.x,
@@ -252,6 +203,10 @@ export function accentBarOver(
 		height,
 	};
 }
+
+/** Whether a box of `role` on a slide of `layout` has the section break's accent bar over it: its label does. */
+export const hasAccentBar = (layout: SlideLayout, role: BoxRole | null) =>
+	layout === "section" && role === "label";
 
 /** A table: its text, and its header row's, on a tint, a rule under each row. */
 export const TABLE_LOOK = {
@@ -262,9 +217,22 @@ export const TABLE_LOOK = {
 	/** The padding of its header cells and other cells, in ems of their text. */
 	headerPadding: { y: 0.6, x: 0.8 },
 	cellPadding: { y: 0.7, x: 0.8 },
+	/** The padding of every cell of a table in a box for nothing in particular, in points, which doesn't step down: as a presentation app pads one. */
+	tightPadding: { y: 4, x: 7 },
 	/** Between a cell's blocks, in ems of its text. */
 	blockGap: 0.4,
 } as const;
+
+/**
+ * How far in from a table cell's edges its text starts, in points, the cell's
+ * text being `fontSize` points: as a presentation app pads it when `tight`, in
+ * a box whose look says so (`BoxLook.tightCells`).
+ */
+export function cellInsetOf(tight: boolean, header: boolean, fontSize: number) {
+	if (tight) return TABLE_LOOK.tightPadding;
+	const padding = header ? TABLE_LOOK.headerPadding : TABLE_LOOK.cellPadding;
+	return { x: padding.x * fontSize, y: padding.y * fontSize };
+}
 
 /** A list: the space between its items and the indent of their text, in ems of their text. */
 export const LIST_LOOK = {
@@ -290,8 +258,69 @@ export const CODE_LOOK = {
 	inlineRadius: 0.25,
 } as const;
 
-/** An image's corners, in ems of the text around it. */
-export const IMAGE_RADIUS = 0.5;
+/*
+ * Images. An image is drawn upright, as its EXIF orientation says, as a
+ * browser draws it. One in the text is as large as it is, but no wider than
+ * what it is in. One alone in a box of the image role (`imageFillingBox`)
+ * fills the box's content area instead, larger than it is or smaller, as
+ * `imageFitOf` says.
+ */
+
+/**
+ * An image's corners, in ems of the text around it: rounder in the image
+ * layout's image box. An image filling a box on a blank slide has square
+ * corners (`imageFitOf`).
+ */
+export const imageRadiusOf = (layout: SlideLayout, role: BoxRole | null) =>
+	layout === "image" && role === "image" ? 0.75 : 0.5;
+
+/** How an image fills a box, as CSS's `object-fit` says it: whole within it, or over all of it and cut to it. */
+export type ImageFit = "contain" | "cover";
+
+/**
+ * How an image alone in a box of the image role fills it on a slide of
+ * `layout`: whole within it, in its middle, on a slide made from a template;
+ * over all of it, in its middle, cut to it, and with square corners, on a
+ * blank slide, as a cropped picture is in a presentation app.
+ */
+export const imageFitOf = (layout: SlideLayout): ImageFit =>
+	layout === "blank" ? "cover" : "contain";
+
+/**
+ * The image `box` holds alone, when it fills the box (`imageFitOf`): when the
+ * box is of the image role and holds one paragraph holding the image and
+ * nothing else. An image with a link is drawn inside the link, so it is in
+ * the text, as any other image is. `undefined` for any other box.
+ */
+export function imageFillingBox(box: Node): Node | undefined {
+	if (box.attrs.role !== "image" || box.childCount !== 1) return undefined;
+	const paragraph = box.child(0);
+	if (paragraph.type.name !== "paragraph" || paragraph.childCount !== 1) return undefined;
+	const image = paragraph.child(0);
+	return image.type.name === "image" && !image.attrs.link ? image : undefined;
+}
+
+/**
+ * Where an image whose upright size is `natural` is drawn filling `area` as
+ * `fit` says: scaled to its width or its height, whichever keeps it whole, or
+ * whichever covers the area, in the area's middle.
+ */
+export function fittedImage(
+	natural: { width: number; height: number },
+	area: Frame,
+	fit: ImageFit,
+): Frame {
+	const scales = [area.width / natural.width, area.height / natural.height];
+	const scale = fit === "contain" ? Math.min(...scales) : Math.max(...scales);
+	const width = natural.width * scale;
+	const height = natural.height * scale;
+	return {
+		x: area.x + (area.width - width) / 2,
+		y: area.y + (area.height - height) / 2,
+		width,
+		height,
+	};
+}
 
 /**
  * Where a link in a file a deck is saved as goes: an absolute address a link
@@ -333,60 +362,129 @@ export const IMAGE_WORDS_LOOK = {
 	radius: 4,
 } as const;
 
+/** A colour as a file draws it: six hex digits of sRGB, and how opaque it is, from 0 to 1. */
+export interface Paint {
+	color: string;
+	opacity: number;
+}
+
+/**
+ * `color` as a file draws it, its channels brought within sRGB: `undefined`
+ * for one CSS draws as nothing a file can say, such as `currentcolor`, or one
+ * wholly transparent.
+ */
+export function paintOf(color: CssColor | null): Paint | undefined {
+	const parsed = color === null ? undefined : parse(color);
+	const hex = formatHex(parsed);
+	const opacity = parsed?.alpha ?? 1;
+	if (!hex || !(opacity > 0)) return undefined;
+	return { color: hex.slice(1).toUpperCase(), opacity: Math.min(1, opacity) };
+}
+
+/** How a box itself is drawn, under what it holds: its shape, filled and outlined. */
+export interface ShapeLook {
+	/** Its outline, in its frame's own points, or `null` for its frame's rectangle. */
+	path: SvgPath | null;
+	fill: Paint | undefined;
+	/** Its outline's colour and width, in points. */
+	stroke: { paint: Paint; width: number } | undefined;
+}
+
+/** How `box` itself is drawn: nothing of a fill or outline whose colour a file can't draw. */
+export function shapeLookOf({ path, fill, stroke }: BoxAttributes): ShapeLook {
+	const strokePaint = paintOf(stroke?.color ?? null);
+	return {
+		path,
+		fill: paintOf(fill),
+		stroke: stroke && strokePaint ? { paint: strokePaint, width: stroke.width } : undefined,
+	};
+}
+
+/**
+ * How far in from each edge of a box's frame what it holds starts, in
+ * points: its padding, and inside its outline, which the app draws within the
+ * frame of a box that is no shape. A shape's outline is drawn on its path,
+ * which takes no room from what it holds.
+ */
+export function insetsOf({ padding, stroke, path }: BoxAttributes): BoxPadding {
+	const { top, right, bottom, left } = padding ?? DEFAULT_BOX_PADDING;
+	const outline = path ? 0 : (stroke?.width ?? 0);
+	return {
+		top: top + outline,
+		right: right + outline,
+		bottom: bottom + outline,
+		left: left + outline,
+	};
+}
+
+/** Where what a box holds is laid out: its frame within its insets (`insetsOf`). */
+export function contentAreaOf(box: BoxAttributes): Frame {
+	const { top, right, bottom, left } = insetsOf(box);
+	const { x, y, width, height } = box.frame;
+	return {
+		x: x + left,
+		y: y + top,
+		width: Math.max(0, width - left - right),
+		height: Math.max(0, height - top - bottom),
+	};
+}
+
+/**
+ * How far below the top of a box's content area what it holds starts, when
+ * it is `height` tall in an area `room` tall, as the box's vertical alignment
+ * sits it: what is taller than the area runs past both its edges when in the
+ * middle, and past its top when at the foot.
+ */
+export function alignedOffset(align: VerticalAlign, room: number, height: number): number {
+	if (align === "middle") return (room - height) / 2;
+	return align === "bottom" ? room - height : 0;
+}
+
+/** A stretch of text's own colour, font and size (see `slide-text-style.ts`): `undefined` where it says none. */
+export interface OwnTextStyle {
+	color: CssColor | undefined;
+	/** As CSS lists families, such as `"Source Serif", Georgia, serif`. */
+	fontFamily: string | undefined;
+	/** In points, never stepped down. */
+	fontSize: number | undefined;
+}
+
+/** The text style `marks`, a stretch of text's, give it, each part read as its type. */
+export function ownTextStyleOf(marks: readonly Mark[]): OwnTextStyle {
+	const attributes: Readonly<Record<string, unknown>> =
+		marks.find((mark) => mark.type.name === TEXT_STYLE)?.attrs ?? {};
+	const { color, fontFamily, fontSize } = attributes;
+	return {
+		color: cssColorIn(color) ?? undefined,
+		fontFamily: typeof fontFamily === "string" && fontFamily.trim() !== "" ? fontFamily : undefined,
+		fontSize:
+			typeof fontSize === "number" && Number.isFinite(fontSize) && fontSize > 0
+				? fontSize
+				: undefined,
+	};
+}
+
+/** How a paragraph's or heading's lines sit across it. */
+export type TextAlign = "left" | "center" | "right" | "justify";
+
+const TEXT_ALIGNS: readonly unknown[] = ["left", "center", "right", "justify"];
+
+/** `block`'s own alignment, or `undefined` when it sets none and its part's is used. */
+export const textAlignOf = (block: Node): TextAlign | undefined =>
+	TEXT_ALIGNS.includes(block.attrs.textAlign) ? (block.attrs.textAlign as TextAlign) : undefined;
+
+/** `block`'s own line height, as a multiple of its text's size, or `undefined` when it sets none. */
+export function lineHeightOf(block: Node): number | undefined {
+	const lineHeight: unknown = block.attrs.lineHeight;
+	return typeof lineHeight === "number" && Number.isFinite(lineHeight) && lineHeight > 0
+		? lineHeight
+		: undefined;
+}
+
 /** An image a deck keeps: its bytes, and their media type. */
 export interface DeckImage {
 	contentType: ArtifactImageType;
 	bytes: Uint8Array;
-}
-
-/** What a slide of layout `L` holds, as its layout places it, its boxes off the slide left out. */
-export interface BlocksOfLayout<L extends SlideLayout> {
-	layout: L;
-	/**
-	 * The blocks of each of its boxes, in the order of its layout's roles
-	 * (`SLIDE_BOX_ROLES`): `undefined` for a box off the slide.
-	 */
-	boxes: readonly (readonly Node[] | undefined)[];
-	/** Whether it shows its box of `role`: one that isn't off the slide. */
-	shows(role: BoxRoleOf<L>): boolean;
-	/**
-	 * The blocks of its box of `role`, as the layouts that set boxes beside
-	 * each other place them: none when it doesn't show it.
-	 */
-	inBox(role: BoxRoleOf<L>): readonly Node[];
-	/**
-	 * Every block in the boxes it shows, in order: what the layouts that set a
-	 * slide's blocks one under another set, box after box, as far apart as
-	 * each other.
-	 */
-	all: readonly Node[];
-}
-
-/** What a slide holds (`BlocksOfLayout`), told apart by its layout. */
-export type SlideBlocks = { [L in SlideLayout]: BlocksOfLayout<L> }[SlideLayout];
-
-export function childNamed(node: Node, name: string): Node {
-	const child = node.children.find((each) => each.type.name === name);
-	if (!child) throw new Error(`A slide holds no ${name}`);
-	return child;
-}
-
-export const isEmptyParagraph = (block: Node) =>
-	block.type.name === "paragraph" && block.childCount === 0;
-
-/** What `slide`, its body fitted to its layout, holds, as its layout places it. */
-export function slideBlocksOf(slide: Node): SlideBlocks {
-	const layout = layoutOf(slide);
-	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[layout];
-	const boxes = shownBoxesOf(slide).map((box) => box?.children);
-	const blocksOf = (role: BoxRole) => boxes[roles.indexOf(role)];
-	return {
-		layout,
-		boxes,
-		shows: (role: BoxRole) => blocksOf(role) !== undefined,
-		inBox: (role: BoxRole) => blocksOf(role) ?? [],
-		all: boxes.flatMap((blocks) => blocks ?? []),
-	};
 }
 
 /** The images in the deck that `artifact` keeps, once each, by address. */

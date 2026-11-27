@@ -9,7 +9,6 @@ import {
 } from "@sugabots/contracts";
 import { API_BASE_PATH, type ArtifactImageIds } from "@sugabots/contracts/http";
 import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
-import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
 import { Artifacts } from "@sugabots/core/artifacts/artifacts";
 import { LiveDocuments } from "@sugabots/core/artifacts/live";
 import { PDF_CONTENT_TYPE, pdfFileOf } from "@sugabots/core/artifacts/pdf";
@@ -91,16 +90,16 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 				}
 				const { artifact } = yield* requestedArtifact;
 				if (!isEditedLive(artifact)) return yield* new Refused({ status: 404 });
-				const socket = yield* request.upgrade;
 				// An editor built for another schema or another kind of artifact would delete what it could not hold.
 				if (!isBuiltFor(request.url, artifact.kind)) {
-					yield* refuseEditor(socket);
+					yield* refuseEditor(yield* request.upgrade);
 					return HttpServerResponse.empty();
 				}
-				yield* edit(socket, (outgoing) => live.join(artifact, outgoing));
+				yield* edit(request, (outgoing) => live.join(artifact, outgoing));
 				return HttpServerResponse.empty();
 			}).pipe(
 				Effect.catchTag("DocumentRefused", refusal),
+				Effect.catchTag("LiveDocumentUnreadable", unreadableDeck),
 				Effect.catchCause((cause) =>
 					Effect.logWarning("A live document's connection ended badly", cause).pipe(
 						Effect.as(HttpServerResponse.empty({ status: 502 })),
@@ -116,10 +115,7 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 				Effect.gen(function* () {
 					const { artifact, asHolder } = yield* requestedArtifact;
 					if (artifact.kind !== download.kind) return yield* new Refused({ status: 404 });
-					// As people see it where the artifact is live; otherwise as its last version reads, which is how it opens.
-					const document =
-						(yield* live.documentAsShown(artifact.id)) ??
-						liveDocumentFromMarkdown(download.kind, artifact.content);
+					const document = yield* live.documentAsShown(artifact);
 					const file = yield* download.fileOf(artifact, document, (image, kinds) =>
 						keptImage(image, kinds).pipe(asHolder),
 					);
@@ -133,6 +129,7 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 					// Reading the images asks again whether the person may read the artifact, as they may have been taken out of its pod meanwhile.
 					Effect.catchTags({ ...refusedAsStatus, ...storeOutagesAsDefects }),
 					Effect.catchTag("DocumentRefused", refusal),
+					Effect.catchTag("LiveDocumentUnreadable", unreadableDeck),
 				),
 			);
 		}
@@ -140,7 +137,7 @@ export const liveDocumentRoutes = Layer.effectDiscard(
 );
 
 /** A live document as the editor's schema holds it. */
-type LiveDocument = ReturnType<typeof liveDocumentFromMarkdown>;
+type LiveDocument = Effect.Success<ReturnType<LiveDocuments.Interface["documentAsShown"]>>;
 
 /** A file a live artifact of one kind downloads as, built from the document as people see it and the images it keeps. */
 interface Download {
@@ -233,18 +230,29 @@ class Refused extends Data.TaggedError("DocumentRefused")<{
 const refusal = ({ status }: Refused) => Effect.succeed(HttpServerResponse.empty({ status }));
 
 /**
- * Passes frames between the person's socket and the live document they
- * `join`, until the socket closes. What the document sends is queued, because
- * it sends from callbacks and the frames must leave in the order it sent them.
+ * The answer to a request for a deck that can't be read (see
+ * `LiveDocuments.Unreadable`), which can be neither opened nor saved as a
+ * file until its content is fixed, so asking again changes nothing.
  */
-function edit(
-	socket: Socket.Socket,
-	join: (outgoing: LiveDocuments.Outgoing) => Effect.Effect<LiveDocuments.Participant>,
+const unreadableDeck = ({ reason }: LiveDocuments.Unreadable) =>
+	Effect.logWarning("A deck can't be read", reason).pipe(
+		Effect.as(HttpServerResponse.text("This deck can't be read", { status: 422 })),
+	);
+
+/**
+ * Joins the person to the live document they `join`, then opens their
+ * socket and passes frames between the two until it closes. It joins before
+ * the socket opens, so that a document that can't be opened fails with why
+ * rather than with a socket that closes at once. What the document sends is
+ * queued, because it sends from callbacks, from before the socket opens, and
+ * the frames must leave in the order it sent them.
+ */
+function edit<E>(
+	request: HttpServerRequest.HttpServerRequest,
+	join: (outgoing: LiveDocuments.Outgoing) => Effect.Effect<LiveDocuments.Participant, E>,
 ) {
 	return Effect.scoped(
 		Effect.gen(function* () {
-			const reader = yield* socket.reader;
-			const writer = yield* socket.writer;
 			const toPerson = yield* Queue.unbounded<Uint8Array | Socket.CloseEvent>();
 			const participant = yield* Effect.acquireRelease(
 				join({
@@ -253,18 +261,31 @@ function edit(
 				}),
 				(joined) => Effect.sync(joined.leave),
 			);
-			const send = Queue.take(toPerson).pipe(Effect.flatMap(writer.write), Effect.forever);
-			const receive = reader.pull.pipe(
-				Effect.tap((frames) =>
-					Effect.sync(() => {
-						for (const frame of frames) {
-							if (typeof frame !== "string") participant.receive(frame);
-						}
-					}),
-				),
-				Effect.forever,
-			);
-			return yield* Effect.raceFirst(send, receive);
+			yield* passFrames(request, participant, toPerson).pipe(Effect.ignore);
 		}),
-	).pipe(Effect.ignore);
+	);
 }
+
+/** Opens the person's socket and passes frames between it and `participant` until it closes. */
+const passFrames = (
+	request: HttpServerRequest.HttpServerRequest,
+	participant: LiveDocuments.Participant,
+	toPerson: Queue.Queue<Uint8Array | Socket.CloseEvent>,
+) =>
+	Effect.gen(function* () {
+		const socket = yield* request.upgrade;
+		const reader = yield* socket.reader;
+		const writer = yield* socket.writer;
+		const send = Queue.take(toPerson).pipe(Effect.flatMap(writer.write), Effect.forever);
+		const receive = reader.pull.pipe(
+			Effect.tap((frames) =>
+				Effect.sync(() => {
+					for (const frame of frames) {
+						if (typeof frame !== "string") participant.receive(frame);
+					}
+				}),
+			),
+			Effect.forever,
+		);
+		return yield* Effect.raceFirst(send, receive);
+	});

@@ -4,7 +4,7 @@ import {
 	artifactImageAddress,
 	artifactImageIds,
 } from "@sugabots/contracts/http";
-import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
+import { documentFromMarkdown } from "@sugabots/contracts/live-document-text";
 import { Effect } from "effect";
 import JSZip from "jszip";
 import mammoth from "mammoth";
@@ -59,7 +59,7 @@ const keptImages = new Map(
 async function wordFile(markdown: string) {
 	const asked: ArtifactImageIds[] = [];
 	const file = await Effect.runPromise(
-		wordFileOf(ARTIFACT, liveDocumentFromMarkdown("document", markdown), (image) => {
+		wordFileOf(ARTIFACT, documentFromMarkdown(markdown), (image) => {
 			asked.push(image);
 			return Effect.succeed(keptImages.get(image.imageId));
 		}),

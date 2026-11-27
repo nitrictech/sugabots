@@ -8,9 +8,9 @@ export const MAX_ARTIFACT_CONTENT_CHARACTERS = 500_000;
 
 /**
  * What an artifact holds, which decides how it is shown: a `document` is
- * markdown, drawn as text; a `slides` deck is markdown too, slide after slide,
- * each laid out by one of a few layouts (see `slides-markdown.ts`); an `html`
- * page runs in an isolated frame.
+ * markdown, drawn as text; a `slides` deck is HTML, slide after slide, each
+ * holding boxes placed freely on it (see `deck-html.ts`); an `html` page runs
+ * in an isolated frame.
  */
 export const artifactKindSchema = Schema.Literals(["document", "slides", "html"]);
 export type ArtifactKind = typeof artifactKindSchema.Type;

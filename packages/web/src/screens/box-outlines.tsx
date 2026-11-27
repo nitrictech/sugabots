@@ -1,10 +1,6 @@
-import { layoutOf, placementOf } from "@sugabots/contracts/live-slides";
-import {
-	type BoxRole,
-	type Frame,
-	SLIDE_HEIGHT,
-	SLIDE_WIDTH,
-} from "@sugabots/contracts/slides-markdown";
+import { layoutOf } from "@sugabots/contracts/live-slides";
+import type { BoxRole } from "@sugabots/contracts/slide-box";
+import { type Frame, SLIDE_HEIGHT, SLIDE_WIDTH } from "@sugabots/contracts/slide-geometry";
 import type { Node } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
@@ -24,14 +20,11 @@ import {
 } from "react";
 import {
 	type Arranged,
-	frameOfDrawnBox,
-	type Guide,
 	HANDLES,
 	type Handle,
 	movedFrame,
 	movesEdge,
 	NO_SNAP_LINES,
-	removedBoxFrame,
 	resizedFrame,
 	type Shift,
 	sameFrame,
@@ -46,17 +39,16 @@ import {
 	boxIndexIn,
 	boxRemovalBlocked,
 	placeBox,
+	placeOfFollowedBox,
 	removeBox,
 	type SlideAt,
 	type SlideIndex,
 	type SlidePos,
 	slidesOf,
-	whereFollowedSlideIs,
 } from "@/lib/deck.ts";
-import type { FollowedNode } from "@/lib/followed-node.ts";
+import { type FollowedNode, followNode } from "@/lib/followed-node.ts";
 import { IS_MAC } from "@/lib/platform.ts";
-import { drawnSlideBody, previewingBoxes, withoutBoxesPreview } from "./deck-stage.ts";
-import { DRAWN_BOX } from "./slide-drawing.tsx";
+import { drawnSlideBody, previewingBox, withoutBoxPreview } from "./deck-stage.ts";
 
 /*
  * Moving and resizing the boxes of the slide on a deck's stage by hand, as
@@ -70,11 +62,11 @@ import { DRAWN_BOX } from "./slide-drawing.tsx";
  * outline moves it, snapping to what it comes close to lining up with,
  * and dragging inside it selects its words, as ever. With its outline
  * focused, by a click or by Tab, the arrow keys move it, Delete or Backspace
- * removes it from the slide, one box a press however long the key is held,
- * and Escape goes back to its words. Each of its controls says so in words to
- * assistive technology, which is told where a box a key moved now is, and why
- * a box can't be removed when it can't. The slide's menu, right-clicking its
- * outline or its words, offers to remove it too (see `slide-menu.tsx`), and
+ * deletes it, one box a press however long the key is held, and Escape goes
+ * back to its words. Each of its controls says so in words to assistive
+ * technology, which is told where a box a key moved now is, and why a box
+ * can't be deleted when it can't. The slide's menu, right-clicking its
+ * outline or its words, offers to delete it too (see `slide-menu.tsx`), and
  * the box stays outlined while the menu is open for it. Pressed on an
  * outline, which is outside the editor, the keys that undo and redo in the
  * editor (`historyKey`) undo and redo there too.
@@ -82,10 +74,8 @@ import { DRAWN_BOX } from "./slide-drawing.tsx";
  * A drag is drawn as it goes, in this editor only, and written to the deck
  * once, when it ends, so it is one change to undo, and one for the others to
  * receive. It keeps to its slide through anybody's changes, and ends,
- * unwritten, once the slide, or the box it drags, is gone. The first box
- * moved on a slide its layout places places them all where the layout draws
- * them, so nothing else on it moves. A box removed from the slide has no
- * outline, and nothing snaps to it.
+ * unwritten, once the slide, or the box it drags, is gone. An outline is
+ * drawn at its box's frame, unturned however the box is turned.
  */
 
 /**
@@ -116,7 +106,19 @@ const ARROWS: Partial<Record<string, Direction>> = {
 	ArrowDown: { across: 0, down: 1 },
 };
 
-/** What a box of each role is called on its outline's controls: a noun phrase, as read in "Move …" and in "Resize … from the top left". */
+/**
+ * What `box` is called on its outline's controls: a noun phrase, as read in
+ * "Move …" and in "Resize … from the top left". A box for nothing in
+ * particular is called for what it holds, or for its shape.
+ */
+function boxNameOf({ node, attributes }: BoxOfSlide): string {
+	if (attributes.role) return BOX_NAMES[attributes.role];
+	if (node.firstChild?.type.name === "table") return "the table";
+	if (attributes.path) return "the shape";
+	return "the text box";
+}
+
+/** What a box of each role is called on its outline's controls. */
 const BOX_NAMES: Record<BoxRole, string> = {
 	title: "the title",
 	subtitle: "the subtitle",
@@ -143,9 +145,9 @@ export function outlinedBoxOf(element: Element, slide: Node): BoxIndex | undefin
 }
 
 /**
- * Removes the box at `box` from the slide starting at `slidePos`, if it can be
- * removed now (`removeBox`), and gives the slide's words the focus, as the
- * box's outline goes with it. Answers whether it removed it.
+ * Deletes the box at `box` from the slide starting at `slidePos`, if it can be
+ * deleted now (`removeBox`), and gives the slide's words the focus, as the
+ * box's outline goes with it. Answers whether it deleted it.
  */
 export function removeBoxFocusingWords(editor: Editor, slidePos: SlidePos, box: BoxIndex): boolean {
 	const removing = removeBox(editor.state, slidePos, box);
@@ -165,14 +167,11 @@ export function removeBoxFocusingWords(editor: Editor, slidePos: SlidePos, box: 
 export function BoxOutlines({
 	editor,
 	slide,
-	followed,
 	stage,
 	menuFor,
 }: {
 	editor: Editor;
 	slide: SlideAt;
-	/** `slide`, followed through anybody's changes (see `followNode`). */
-	followed: FollowedNode;
 	stage: RefObject<HTMLElement | null>;
 	/** The box that the slide's menu is open for, which is the one being edited until it closes. */
 	menuFor: BoxIndex | undefined;
@@ -194,16 +193,16 @@ export function BoxOutlines({
 	const hints = { move: useId(), resize: useId() };
 	const overlay = useRef<HTMLDivElement>(null);
 	const boxes = boxesOf(slide.node);
-	// Which boxes, by place, have an outline: those on the slide that are for something.
-	const outlined = boxes.map(({ role, offSlide }) => role !== undefined && !offSlide);
-	const { drag, startDrag } = useBoxDrag(editor, slide, followed, outlined);
-	const frames = drag?.moved?.frames ?? placementOf(slide.node) ?? drawn?.frames;
+	const { drag, dragged, startDrag } = useBoxDrag(editor, slide);
+	const frames = boxes.map(({ attributes }, index) =>
+		index === dragged && drag?.moved ? drag.moved.frame : attributes.frame,
+	);
 
 	const hover = useEffectEvent((event: globalThis.PointerEvent) => {
 		// The box being dragged stays the one outlined, wherever the pointer goes.
 		if (drag) return;
 		const area = overlay.current?.getBoundingClientRect();
-		setHovered(area && frames ? boxUnder(frames, boxes, outlined, area, event) : undefined);
+		setHovered(area ? boxUnder(frames, area, event) : undefined);
 	});
 	useEffect(() => {
 		const element = stage.current;
@@ -218,13 +217,13 @@ export function BoxOutlines({
 		};
 	}, [stage]);
 
-	const withOutline = (box: BoxIndex | undefined) =>
-		box !== undefined && outlined[box] ? box : undefined;
+	const onSlide = (box: BoxIndex | undefined) =>
+		box !== undefined && box < boxes.length ? box : undefined;
 	const editing =
-		drag?.box ??
-		withOutline(menuFor) ??
-		withOutline(focused) ??
-		(stageFocused && actedOnSlide ? withOutline(holdingCaret) : undefined);
+		dragged ??
+		onSlide(menuFor) ??
+		onSlide(focused) ??
+		(stageFocused && actedOnSlide ? onSlide(holdingCaret) : undefined);
 
 	// An outline can lose the focus without a blur, as when it goes with its box: what says it has
 	// the focus is then let go, and the focus, unless something else has taken it, goes back to the
@@ -245,7 +244,7 @@ export function BoxOutlines({
 		[editor],
 	);
 
-	if (!drawn || !frames) return null;
+	if (!drawn) return null;
 
 	const announce = (words: string) =>
 		setAnnounced((before) => ({ words, count: (before?.count ?? 0) + 1 }));
@@ -253,7 +252,7 @@ export function BoxOutlines({
 	/**
 	 * Acts on a key pressed on the outline of the box at `box`, or on its
 	 * `handle`: an arrow moves the box, or the handle's sides; Delete or
-	 * Backspace removes it; the editor's keys for undo and redo undo and redo
+	 * Backspace deletes it; the editor's keys for undo and redo undo and redo
 	 * there; and Escape goes back to its words, or, during a drag, ends it.
 	 */
 	function actOnKey(event: KeyboardEvent<HTMLElement>, box: BoxIndex, handle: Handle | undefined) {
@@ -284,15 +283,14 @@ export function BoxOutlines({
 		const direction = ARROWS[event.key];
 		if (!direction) return;
 		event.preventDefault();
-		const start = drawnSlide(editor.view, slide)?.frames;
-		const startFrame = start?.[box];
-		if (!start || !startFrame) return;
+		const startFrame = boxes[box]?.attributes.frame;
+		if (!startFrame) return;
 		const step = event.shiftKey ? NUDGE_WITH_SHIFT_SLIDE_PX : NUDGE_SLIDE_PX;
 		const by: Shift = { dx: direction.across * step, dy: direction.down * step };
 		const { frame } = handle
 			? resizedFrame(startFrame, handle, by, NO_SNAP_LINES)
 			: movedFrame(startFrame, by, NO_SNAP_LINES);
-		const placing = placeBox(editor.state, slide.pos, box, frame, start);
+		const placing = placeBox(editor.state, slide.pos, box, frame);
 		if (!placing) return;
 		editor.view.dispatch(placing);
 		announce(
@@ -315,19 +313,19 @@ export function BoxOutlines({
 				} as CSSProperties
 			}
 		>
-			{boxes.map(({ index, role }) => {
+			{boxes.map((box) => {
+				const { index } = box;
 				const frame = frames[index];
-				if (!frame || !role || !outlined[index] || (index !== editing && index !== hovered)) {
-					return null;
-				}
+				if (!frame || (index !== editing && index !== hovered)) return null;
 				return (
 					<BoxOutline
 						// A box has no lasting id, so its place is its key, which keeps a drag's element through a drag.
 						key={index}
 						box={index}
 						frame={frame}
-						name={BOX_NAMES[role]}
+						name={boxNameOf(box)}
 						editing={index === editing}
+						dragging={index === dragged && drag?.moved !== undefined}
 						hints={hints}
 						onFocusChange={(focusing) =>
 							setFocused((now) => (focusing ? index : now === index ? undefined : now))
@@ -351,12 +349,12 @@ export function BoxOutlines({
 				/>
 			))}
 			<span id={hints.move} hidden>
-				Arrow keys move the box, further with Shift held. Delete removes it from the slide. Escape
-				goes back to its text.
+				Arrow keys move the box, further with Shift held. Delete deletes it. Escape goes back to its
+				text.
 			</span>
 			<span id={hints.resize} hidden>
-				Arrow keys resize the box from here, further with Shift held. Delete removes it from the
-				slide. Escape goes back to its text.
+				Arrow keys resize the box from here, further with Shift held. Delete deletes it. Escape goes
+				back to its text.
 			</span>
 			<span role="status" className="sr-only">
 				{announced && <span key={announced.count}>{announced.words}</span>}
@@ -367,35 +365,33 @@ export function BoxOutlines({
 
 /** A drag under way of one of a slide's boxes. */
 interface BoxDrag {
-	/** The box being dragged. */
-	box: BoxIndex;
-	/** Where the drag has the slide's boxes, and the lines the dragged one has snapped to, once it has moved. */
-	moved?: { frames: readonly Frame[]; guides: readonly Guide[] };
+	/** The box being dragged, followed through anybody's changes (see `followNode`). */
+	followed: FollowedNode;
+	/** Where the drag has the box, and the lines it has snapped to, once it has moved. */
+	moved?: Arranged;
 	/** Ends the drag without writing it. */
 	cancel: () => void;
 }
 
 /**
  * Dragging the boxes of `slide`, the slide on the stage, by their outlines:
- * the drag under way, if there is one, and how to start one from a press on
- * the outline of the box at `box`, or on its `handle`. The drag is the
- * pointer's wherever it goes, whatever becomes of the element pressed, and
- * keeps to its slide, `followed`, through anybody's changes. It ends,
- * unwritten, once the slide is gone, once the box it drags has no outline
- * (`outlined`), or once the outlines go.
+ * the drag under way, if there is one, the place on the slide now of the box
+ * it drags, which others' changes can shift, and how to start one from a
+ * press on the outline of the box at `box`, or on its `handle`. The drag is
+ * the pointer's wherever it goes, whatever becomes of the element pressed,
+ * and keeps to its box through anybody's changes, as they go on drawing
+ * theirs. It ends, unwritten, once the box is gone from the slide, or once
+ * the outlines go.
  */
-function useBoxDrag(
-	editor: Editor,
-	slide: SlideAt,
-	followed: FollowedNode,
-	outlined: readonly boolean[],
-) {
+function useBoxDrag(editor: Editor, slide: SlideAt) {
 	const [drag, setDrag] = useState<BoxDrag>();
 	const cancelDrag = drag?.cancel;
 	// Ends the drag under way when the outlines go. When a drag ends otherwise, this runs too, and
 	// does nothing.
 	useLayoutEffect(() => cancelDrag, [cancelDrag]);
-	const boxGone = drag !== undefined && !outlined[drag.box];
+	const place = drag && placeOfFollowedBox(editor.state.doc, drag.followed);
+	const dragged = place?.slidePos === slide.pos ? place.box : undefined;
+	const boxGone = drag !== undefined && dragged === undefined;
 	useEffect(() => {
 		if (boxGone) cancelDrag?.();
 	}, [boxGone, cancelDrag]);
@@ -403,16 +399,17 @@ function useBoxDrag(
 	function startDrag(event: PointerEvent<HTMLElement>, box: BoxIndex, handle: Handle | undefined) {
 		if (event.button !== 0 || event.pointerType === "touch" || drag) return;
 		const start = drawnSlide(editor.view, slide);
-		const startFrame = start?.frames[box];
-		if (!start || !startFrame) return;
+		const startBox = boxesOf(slide.node)[box];
+		const followed = startBox && followNode(editor.state, slide.pos + startBox.startInSlide);
+		if (!start || !startBox || !followed) return;
+		const startFrame = startBox.attributes.frame;
 		event.preventDefault();
 		const control = event.currentTarget;
 		const { pointerId } = event;
 		control.focus({ preventScroll: true });
 		control.setPointerCapture(pointerId);
-		const startFrames = start.frames;
 		const lines = snapLinesAround(
-			startFrames.filter((_, index) => index !== box && outlined[index]),
+			start.frames.filter((_, index) => index !== box),
 			layoutOf(slide.node),
 		);
 		const from = pointOnSlide(start, event);
@@ -427,12 +424,9 @@ function useBoxDrag(
 		 * page scrolls.
 		 */
 		const follow = () => {
-			const slidePos = whereFollowedSlideIs(editor.state.doc, followed);
-			const area =
-				slidePos === undefined
-					? undefined
-					: drawnSlideBody(editor.view, slidePos)?.getBoundingClientRect();
-			if (slidePos === undefined || !area?.width) return end("discard");
+			const place = placeOfFollowedBox(editor.state.doc, followed);
+			const area = place && drawnSlideBody(editor.view, place.slidePos)?.getBoundingClientRect();
+			if (!place || !area?.width) return end("discard");
 			const at = pointOnSlide(area, pointer);
 			const by: Shift = { dx: at.x - from.x, dy: at.y - from.y };
 			const movedWindowPx = Math.hypot(by.dx, by.dy) * (area.width / SLIDE_WIDTH);
@@ -440,9 +434,10 @@ function useBoxDrag(
 			arranged = handle
 				? resizedFrame(startFrame, handle, by, lines)
 				: movedFrame(startFrame, by, lines);
-			const frames = withFrame(startFrames, box, arranged.frame);
-			setDrag({ box, moved: { frames, guides: arranged.guides }, cancel });
-			editor.view.dispatch(previewingBoxes(editor.state, { pos: slidePos, followed }, frames));
+			setDrag({ followed, moved: arranged, cancel });
+			editor.view.dispatch(
+				previewingBox(editor.state, { pos: place.boxPos, followed }, arranged.frame),
+			);
 		};
 		const move = (moving: globalThis.PointerEvent) => {
 			if (moving.pointerId !== pointerId) return;
@@ -456,7 +451,7 @@ function useBoxDrag(
 			if (stopped.pointerId === pointerId) end("discard");
 		};
 		/** Ends the drag, writing where it has the box to the deck, or discarding it. */
-		function end(outcome: "write" | "discard") {
+		const end = (outcome: "write" | "discard") => {
 			if (ended) return;
 			ended = true;
 			window.removeEventListener("pointermove", move);
@@ -466,33 +461,34 @@ function useBoxDrag(
 			if (control.hasPointerCapture(pointerId)) control.releasePointerCapture(pointerId);
 			setDrag(undefined);
 			if (!arranged || editor.isDestroyed) return;
-			const slidePos = whereFollowedSlideIs(editor.state.doc, followed);
+			const place = placeOfFollowedBox(editor.state.doc, followed);
 			const placing =
-				outcome === "write" && slidePos !== undefined
-					? placeBox(editor.state, slidePos, box, arranged.frame, startFrames)
+				outcome === "write" && place
+					? placeBox(editor.state, place.slidePos, place.box, arranged.frame)
 					: undefined;
-			editor.view.dispatch(withoutBoxesPreview(placing ?? editor.state.tr));
-		}
+			editor.view.dispatch(withoutBoxPreview(placing ?? editor.state.tr));
+		};
 		// On the window, which outlasts the element pressed: it can go mid-drag, with its box.
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", release);
 		window.addEventListener("pointercancel", interrupted);
 		window.addEventListener("scroll", follow, { capture: true, passive: true });
-		setDrag({ box, cancel });
+		setDrag({ followed, cancel });
 	}
 
-	return { drag, startDrag };
+	return { drag, dragged, startDrag };
 }
 
 /**
  * One box's outline: the band along it that moves the box, and, while it is
- * being edited, the handles that resize it.
+ * being edited, the handles that resize it, hidden while it is dragged.
  */
 function BoxOutline({
 	box,
 	frame,
 	name,
 	editing,
+	dragging,
 	hints,
 	onFocusChange,
 	onDragStart,
@@ -503,6 +499,8 @@ function BoxOutline({
 	/** What the box is called, as `BOX_NAMES` says it. */
 	name: string;
 	editing: boolean;
+	/** Whether the box is being moved or resized by a drag, when its outline is a line and nothing else. */
+	dragging: boolean;
 	/** The ids of the elements that say in words what the keys do on its band, and on a handle. */
 	hints: { move: string; resize: string };
 	/** Told when its band or one of its handles takes the focus, and when the focus leaves all of them. */
@@ -526,8 +524,9 @@ function BoxOutline({
 			ref={outline}
 			className="box-outline"
 			data-editing={editing ? "" : undefined}
+			data-dragging={dragging ? "" : undefined}
 			{...{ [OUTLINED_BOX_ATTRIBUTE]: box }}
-			style={frameStyle(frame)}
+			style={outlineStyle(frame)}
 		>
 			<button
 				type="button"
@@ -580,16 +579,13 @@ function handleStyle(handle: Handle): CSSProperties {
 
 const percent = (fraction: number) => `${fraction * 100}%`;
 
-/** Where a box is drawn over the slide, as parts of the slide's width and height. */
-const frameStyle = ({ x, y, width, height }: Frame): CSSProperties => ({
+/** Where an outline is drawn over the slide for a box framed at `frame`, as parts of the slide's width and height. */
+const outlineStyle = ({ x, y, width, height }: Frame): CSSProperties => ({
 	left: percent(x / SLIDE_WIDTH),
 	top: percent(y / SLIDE_HEIGHT),
 	width: percent(width / SLIDE_WIDTH),
 	height: percent(height / SLIDE_HEIGHT),
 });
-
-const withFrame = (frames: readonly Frame[], box: BoxIndex, frame: Frame) =>
-	frames.map((each, index) => (index === box ? frame : each));
 
 /** Where the pointer is in the window, as a pointer event gives it. */
 interface ClientPoint {
@@ -621,9 +617,7 @@ interface DrawnSlide extends DrawnArea {
 /**
  * Where the editor draws the body of `slide` now, measured from the top left
  * corner of `relativeTo`, or of the window without it, and where its boxes
- * are on it: where it places them, or, on a slide its layout places, where
- * the layout draws them, and `removedBoxFrame` for one off the slide, which
- * isn't drawn.
+ * are on it: at their frames.
  */
 function drawnSlide(
 	view: EditorView,
@@ -634,25 +628,17 @@ function drawnSlide(
 	if (!body) return undefined;
 	const area = body.getBoundingClientRect();
 	const origin = relativeTo?.getBoundingClientRect() ?? { left: 0, top: 0 };
-	const drawnAt = { left: area.left - origin.left, top: area.top - origin.top, width: area.width };
-	const placed = placementOf(slide.node);
-	if (placed) return { ...drawnAt, frames: placed };
-	const drawnBoxes = [...body.children].filter((child) => child.matches(DRAWN_BOX));
-	const boxes = boxesOf(slide.node);
-	if (drawnBoxes.length !== boxes.length) return undefined;
 	return {
-		...drawnAt,
-		frames: drawnBoxes.map((drawnBox, index) =>
-			boxes[index]?.offSlide
-				? removedBoxFrame(layoutOf(slide.node))
-				: frameOfDrawnBox(drawnBox.getBoundingClientRect(), area),
-		),
+		left: area.left - origin.left,
+		top: area.top - origin.top,
+		width: area.width,
+		frames: boxesOf(slide.node).map(({ attributes }) => attributes.frame),
 	};
 }
 
 /**
  * Where `slide` is drawn in `stage`, measured again whenever it changes or
- * anything on it changes size, as its text does when it steps down to fit.
+ * the stage or the slide changes size.
  */
 function useDrawnSlide(
 	view: EditorView,
@@ -665,13 +651,13 @@ function useDrawnSlide(
 		const now = element ? drawnSlide(view, slide, element) : undefined;
 		setDrawn((before) => (before && now && sameDrawnSlide(before, now) ? before : now));
 	});
-	// Each element whose size moves the slide or its boxes is watched once, from when it is first drawn.
+	// Each element whose size moves the slide is watched once, from when it is first drawn.
 	const resized = useRef<{ observer: ResizeObserver; watched: WeakSet<Element> }>(undefined);
 	const watchSizes = useEffectEvent(() => {
 		const body = drawnSlideBody(view, slide.pos);
 		if (!resized.current || !stage.current || !body) return;
 		const { observer, watched } = resized.current;
-		for (const element of [stage.current, body, ...body.children]) {
+		for (const element of [stage.current, body]) {
 			if (watched.has(element)) continue;
 			watched.add(element);
 			observer.observe(element);
@@ -706,30 +692,25 @@ const sameDrawnSlide = (one: DrawnSlide, other: DrawnSlide) =>
 	});
 
 /**
- * The last of `boxes`, the one drawn over any before it, among those
- * `outlined` says have an outline, whose frame in `frames`, or band, is under
- * the pointer at `event`, on a slide drawn at `area` in the window.
+ * The last of the boxes framed at `frames`, the one drawn over any before
+ * it, whose frame, or band, is under the pointer at `event`, on a slide
+ * drawn at `area` in the window.
  */
 function boxUnder(
 	frames: readonly Frame[],
-	boxes: readonly BoxOfSlide[],
-	outlined: readonly boolean[],
 	area: DrawnArea,
 	event: globalThis.PointerEvent,
 ): BoxIndex | undefined {
 	const reachSlidePx = (BAND_OUTSIDE_WINDOW_PX * SLIDE_WIDTH) / area.width;
 	const { x, y } = pointOnSlide(area, event);
-	return boxes.findLast(({ index }) => {
-		const frame = frames[index];
-		return (
-			frame !== undefined &&
-			outlined[index] &&
+	const index = frames.findLastIndex(
+		(frame) =>
 			x >= frame.x - reachSlidePx &&
 			x <= frame.x + frame.width + reachSlidePx &&
 			y >= frame.y - reachSlidePx &&
-			y <= frame.y + frame.height + reachSlidePx
-		);
-	})?.index;
+			y <= frame.y + frame.height + reachSlidePx,
+	);
+	return index < 0 ? undefined : (index as BoxIndex);
 }
 
 /**

@@ -413,7 +413,7 @@ describe.skipIf(!process.env.DATABASE_URL)("artifacts, against Postgres", () => 
 				service.create(by, {
 					kind,
 					title: "Plan",
-					content: kind === "html" ? "<p>Plan</p>" : "# Plan",
+					content: kind === "document" ? "# Plan" : "<p>Plan</p>",
 				}),
 			);
 			return { podId: by.podId, artifactId: made.id };

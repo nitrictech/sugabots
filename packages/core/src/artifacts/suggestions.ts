@@ -5,47 +5,40 @@ import {
 	suggestChangesKey,
 	transformToSuggestionTransaction,
 } from "@handlewithcare/prosemirror-suggest-changes";
+import type { DeckUnreadable } from "@sugabots/contracts/deck-html";
 import {
-	holdsSuggestion,
 	NODE_SUGGESTION,
 	SUGGESTED_INSERTION,
-	SUGGESTED_MODIFICATION,
 	suggestionsAsAttributes,
 } from "@sugabots/contracts/live-document";
 import {
-	liveDocumentFromMarkdown,
+	liveDocumentFromText,
 	liveDocumentKind,
-	markdownOfLiveDocument,
-} from "@sugabots/contracts/live-document-markdown";
-import {
-	fitSlideBody,
-	laidOutAnew,
-	layoutOf,
-	SLIDE,
-	SLIDE_BOX,
-} from "@sugabots/contracts/live-slides";
+	readLiveDocumentText,
+	textOfLiveDocument,
+} from "@sugabots/contracts/live-document-text";
+import { boxAttributesOf, SLIDE, SLIDE_BOX } from "@sugabots/contracts/live-slides";
+import { TEXT_STYLE } from "@sugabots/contracts/slide-text-style";
 import { Fragment, Mark, type Node, Slice } from "@tiptap/pm/model";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
-import type { Mappable } from "@tiptap/pm/transform";
+import { type Mappable, Transform } from "@tiptap/pm/transform";
+import { readHtml } from "./html-reader.ts";
 
 /*
- * An agent's change to a live document. The agent reads the document as
- * markdown (`markdownForAgents`), and writes the markdown it should read as
- * instead. `changedTo` applies only what the agent changed in that markdown:
- * everything else stays as the document holds it, which may be more than its
- * markdown says. The difference is found block by block, then word by word,
- * and only that much is changed, so what people are typing elsewhere, and the
- * suggestions waiting there, are left alone. The change is either made, or
- * handed to the suggesting library to write into the document as a
- * suggestion, exactly as it writes a person's.
+ * An agent's change to a live document. The agent reads the document as its
+ * text (`textForAgents`), a document's markdown or a deck's HTML, and writes
+ * the text it should read as instead. `changedTo` applies only what the agent
+ * changed in that text: everything else stays as the document holds it,
+ * which may be more than its text says. The difference is found block by
+ * block, then word by word, and only that much is changed, so what people are
+ * typing elsewhere, and the suggestions waiting there, are left alone.
  *
- * The markdown says nothing of where people placed a deck's boxes by hand or
- * which boxes they removed, so an agent can neither read nor set either. A
- * slide whose layout the agent leaves keeps its boxes where they are, and a
- * box removed from it, which holds nothing, reads as an empty box, which is
- * back on the slide once the agent writes in it. A slide the agent gives a
- * new layout is laid out anew by it (`laidOutAnew`), as a person's change of
- * layout is: placed by the layout, with every box on it.
+ * What it changes in the words, and the blocks, boxes and slides it adds or
+ * removes, is either made, or handed to the suggesting library to write into
+ * the document as a suggestion, exactly as it writes a person's. What it
+ * changes in how a deck looks is made at once either way: where its boxes
+ * are and how they and its slides are drawn (`isDesignAttribute`), and how
+ * its text is styled (`TEXT_STYLE`).
  */
 
 /** How a change is made: at once, or as the suggestion with this id. */
@@ -53,118 +46,124 @@ export type ChangeAs = "edit" | { suggestionId: string };
 
 /**
  * Why a change can't be made as asked, in which case none of it is made:
- *
- * - `unmarkable`: it was to be a suggestion, and it is inside text that can't
- *   carry a suggestion's marks, as a code block's can't.
- * - `layoutPending`: it changes or removes a slide while a new layout
- *   suggested for that slide waits. Until somebody settles that suggestion,
- *   the slide holds its boxes as they are and as the new layout changes them,
- *   one copy proposed for removal and the other for adding, so a change to
- *   its words would be made to one copy and lost when the suggestion went the
- *   other way; and its suggestion's mark keeps the layout to go back to, so
- *   it has no layout of its own to change.
- * - `suggestionPending`: it changes the layout of a slide holding a
- *   suggestion. A new layout replaces the boxes it changes, so a suggestion
- *   in one of them would be lost. People are held to the same rule in the
- *   editor.
+ * `unmarkable` when it was to be a suggestion, and it changes text that can't
+ * carry a suggestion's marks, as a code block's can't.
  */
-export type Blocked = "unmarkable" | "layoutPending" | "suggestionPending";
+export type Blocked = "unmarkable";
 
 /**
- * The document as people see it until somebody accepts a suggestion pending
- * in it: every pending suggestion left out, a deck's boxes where people
- * placed them, and those they removed off their slides.
+ * Why the text an agent wrote can't be what the document reads as, in which
+ * case nothing is changed: a deck's HTML that holds no slide and nothing a
+ * slide could (`saysNothing`), as a deck always has a slide and HTML only
+ * says none by mistake; or one that can't be read whole (see
+ * `DeckUnreadable`). A document's markdown always reads as a document.
  */
+export type TextRefused = "saysNothing" | DeckUnreadable;
+
+/** An agent's change as made: the document after it, and whether any of it waits in it as a suggestion. */
+export interface Changed {
+	readonly document: Node;
+	readonly suggested: boolean;
+}
+
+/** The document as people see it until somebody accepts a suggestion pending in it: every pending suggestion left out. */
 export function withoutSuggestions(document: Node): Node {
 	return plain(reverted(document));
 }
 
 /**
- * The document as an agent reads it, and changes it with `changedTo`: as
- * markdown, without its pending suggestions, which says nothing of where
- * people placed a deck's boxes or which boxes they removed.
+ * The document as an agent reads it, and changes it with `changedTo`: as its
+ * text (see `textOfLiveDocument`), without its pending suggestions.
  */
-export const markdownForAgents = (document: Node): string =>
-	markdownOfLiveDocument(withoutSuggestions(document));
+export const textForAgents = (document: Node): string =>
+	textOfLiveDocument(withoutSuggestions(document));
 
 /**
- * `live` changed as an agent asks, by writing `wanted` in place of the
- * markdown it read, `markdownForAgents(live)`. What it left as it read it
- * stays as `live` holds it; what it changed is made to read, pending
- * suggestions aside, as `wanted` says. `unchanged` when that is nothing. A
- * `Blocked` reason when the change can't be made as asked.
+ * `live` changed as an agent asks, by writing `wanted` in place of the text
+ * it read, `textForAgents(live)`. What it left as it read it stays as `live`
+ * holds it; what it changed is made to read, pending suggestions aside, as
+ * `wanted` says, made `as` asked, but for how a deck looks, which is made at
+ * once. `unchanged` when that is nothing. A `Blocked` reason when the change
+ * can't be made as asked, and a `TextRefused` one when `wanted` can't be what
+ * the document reads as.
  */
-export function changedTo(live: Node, wanted: string, as: ChangeAs): Node | "unchanged" | Blocked {
+export function changedTo(
+	live: Node,
+	wanted: string,
+	as: ChangeAs,
+): Changed | "unchanged" | Blocked | TextRefused {
+	const kind = liveDocumentKind(live);
+	const reading = readLiveDocumentText(kind, wanted, readHtml);
+	if (reading.outcome === "nothing") return "saysNothing";
+	if (reading.outcome === "unreadable") return reading.reason;
 	const revert = reverted(live);
 	const before = plain(revert);
-	const read = (markdown: string) => liveDocumentFromMarkdown(liveDocumentKind(live), markdown);
-	const target = withChangesOf(before, read(markdownForAgents(live)), read(wanted));
-	const found: Found = { replacements: [], attributes: [], slides: [], unmarkable: false };
+	// The document's own text always reads back as a document of its kind.
+	const shown = liveDocumentFromText(kind, textOfLiveDocument(before), readHtml);
+	const target = withChangesOf(before, shown, reading.document);
+	const found: Found = { replacements: [], attributes: [], restyles: [], unmarkable: false };
 	findDifferences(before, target, 0, found);
-	if (found.replacements.length === 0 && found.attributes.length === 0) return "unchanged";
+	const { replacements, attributes, restyles } = found;
+	if (replacements.length === 0 && attributes.length === 0 && restyles.length === 0) {
+		return "unchanged";
+	}
 	if (as !== "edit" && found.unmarkable) return "unmarkable";
 	// The differences are places in the document without its suggestions, so each is found in the live one.
 	const inLive = revert.mapping.invert();
-	const blocked = blockedBySlide(live, found, inLive);
-	if (blocked) return blocked;
-	const attributes = found.attributes.map((change) => ({
-		...change,
-		at: inLive.map(change.at, 1),
-	}));
+	// How a deck looks changes at once, however its words do. That moves nothing, so every place found stays where it is.
+	const change = new Transform(live);
+	for (const { at, name, value } of attributes) {
+		change.setNodeAttribute(inLive.map(at, 1), name, value);
+	}
+	for (const restyle of restyles) setTextStyle(change, restyle, inLive);
+	if (as === "edit" || replacements.length === 0) {
+		return { document: replaced(change, replacements, inLive).doc, suggested: false };
+	}
+	const designed = EditorState.create({ doc: change.doc, plugins: [suggestChanges()] });
+	const state = designed.apply(designed.tr.setMeta(suggestChangesKey, { enabled: true }));
+	const words = replaced(state.tr, replacements, inLive);
+	const suggestion = transformToSuggestionTransaction(words, state, () => as.suggestionId);
+	return { document: suggestion.doc, suggested: true };
+}
 
-	const suggesting = EditorState.create({ doc: live, plugins: [suggestChanges()] });
-	const state =
-		as === "edit"
-			? suggesting
-			: suggesting.apply(suggesting.tr.setMeta(suggestChangesKey, { enabled: true }));
-	const change = state.tr;
-	// First, as changing an attribute moves nothing still to be changed.
-	for (const { at, name, value } of attributes) change.setNodeAttribute(at, name, value);
-	// From the end, so a change never moves the places still to be changed.
-	for (const { from, to, slice } of found.replacements.toReversed()) {
+/**
+ * `change` with each replacement made, found in the live document by
+ * `inLive`: from the end, so a replacement never moves the places still to
+ * be replaced.
+ */
+function replaced<T extends Transform>(
+	change: T,
+	replacements: readonly Replacement[],
+	inLive: Mappable,
+): T {
+	for (const { from, to, slice } of replacements.toReversed()) {
 		// Stopping short of what somebody proposes adding at either edge, which is theirs to settle.
 		const start = inLive.map(from, 1);
 		change.replace(start, Math.max(start, inLive.map(to, -1)), slice);
 	}
-	if (as === "edit") return change.doc;
-	return transformToSuggestionTransaction(change, state, () => as.suggestionId).doc;
+	return change;
 }
 
-/**
- * Why the change can't touch one of the slides it changes or removes, found
- * in `live` by `inLive`, if it can't (see `Blocked`).
- */
-function blockedBySlide(live: Node, found: Found, inLive: Mappable): Blocked | undefined {
-	for (const at of found.slides) {
-		const slide = live.nodeAt(inLive.map(at, 1));
-		if (!slide) continue;
-		if (hasSuggestedAttribute(slide, LAYOUT)) return "layoutPending";
-		const relaidOut = found.attributes.some((change) => change.at === at && change.name === LAYOUT);
-		if (relaidOut && holdsSuggestion(slide)) return "suggestionPending";
-	}
-	return undefined;
+/** Gives the stretch of text `restyle` says, found in the live document by `inLive`, the text style it says. */
+function setTextStyle(change: Transform, { from, to, style }: Restyle, inLive: Mappable): void {
+	const [start, end] = [inLive.map(from, 1), inLive.map(to, -1)];
+	const textStyle = change.doc.type.schema.marks[TEXT_STYLE];
+	if (!textStyle || end <= start) return;
+	change.removeMark(start, end, textStyle);
+	if (style) change.addMark(start, end, style);
 }
-
-/** The attribute a slide's layout is in. */
-const LAYOUT = "layout";
 
 /**
  * `before` with the changes an agent made, and no others. The agent read
- * `before` as markdown, which `shown` is read back from, and wrote the
- * markdown `wanted` is read from. Wherever `wanted` holds what `shown` does,
- * `before`'s own blocks stay, so what markdown can't say about them, such as
- * spaces at the end of a slide's notes, is never lost to a change made
+ * `before` as text, which `shown` is read back from, and wrote the text
+ * `wanted` is read from. Wherever `wanted` holds what `shown` does,
+ * `before`'s own blocks stay, so what the text can't say about them, as
+ * markdown can't say all a document holds, is never lost to a change made
  * elsewhere. Where it doesn't, `wanted`'s blocks take their place, a block
  * holding others having its own changes found inside it the same way.
  */
 function withChangesOf(before: Node, shown: Node, wanted: Node): Node {
 	if (shown.eq(wanted)) return before;
-	if (before.type.name === SLIDE) return slideWithChangesOf(before, shown, wanted);
-	return withChildrenChanged(before, shown, wanted);
-}
-
-/** `before` with the changes an agent made to its attributes and inside it (see `withChangesOf`). */
-function withChildrenChanged(before: Node, shown: Node, wanted: Node): Node {
 	const content = Fragment.fromArray(childrenWithChangesOf(before, shown, wanted));
 	// Blocks of `before` beside blocks of `wanted` might not be what this block may hold; then it is `wanted`'s.
 	if (!before.type.validContent(content)) return wanted;
@@ -175,50 +174,6 @@ function withChildrenChanged(before: Node, shown: Node, wanted: Node): Node {
 		]),
 	);
 	return before.type.create(attributes, content, before.marks);
-}
-
-/**
- * `before`, a slide, with the changes an agent made to it (see
- * `withChangesOf`), its body holding what its layout says (`fitSlideBody`),
- * as every slide read from markdown does, so a removed box the agent wrote in
- * is back on the slide. A slide the agent gives a new layout is laid out anew
- * by it (`laidOutAnew`). When the agent changed nothing in the slide's boxes
- * but the layout, what they hold is moved as a person's change of layout
- * moves it, by what each box is for. When it wrote the boxes anew, they are
- * in the order it wrote them, the new layout's.
- */
-function slideWithChangesOf(before: Node, shown: Node, wanted: Node): Node {
-	const layout = layoutOf(wanted);
-	if (layout === layoutOf(shown)) {
-		const changed = withChildrenChanged(before, shown, wanted);
-		const body = changed.child(0);
-		const fitted = fitSlideBody(body, layout);
-		return fitted === body ? changed : changed.copy(changed.content.replaceChild(0, fitted));
-	}
-	if (leftBoxesAsRead(shown, wanted)) {
-		const relaidOut = laidOutAnew(before, layout);
-		const notes = withChangesOf(before.child(1), shown.child(1), wanted.child(1));
-		return relaidOut.copy(relaidOut.content.replaceChild(1, notes));
-	}
-	return laidOutAnew(withChildrenChanged(before, shown, wanted), layout);
-}
-
-/**
- * Whether `wanted`, a slide an agent gave a layout other than `shown`'s,
- * holds in its boxes just what the agent read in them: what `shown`, the
- * slide as it read it, reads back as with the new layout's comment in place
- * of the old. The boxes after a layout's comment are then still in the old
- * layout's order, as the agent read them.
- */
-function leftBoxesAsRead(shown: Node, wanted: Node): boolean {
-	const relabelled = shown.type.create(
-		{ ...shown.attrs, layout: layoutOf(wanted) },
-		shown.content,
-		shown.marks,
-	);
-	const alone = shown.type.schema.topNodeType.create(null, relabelled);
-	const readBack = liveDocumentFromMarkdown("slides", markdownOfLiveDocument(alone));
-	return readBack.child(0).child(0).eq(wanted.child(0));
 }
 
 /** `before`'s children, with the changes an agent made to them (see `withChangesOf`). */
@@ -273,9 +228,9 @@ const oneBlockHoldingOthers = (before: Node, shown: Node, wanted: Node) =>
 
 /**
  * A run of `before`'s blocks and the run of blocks they read back as from
- * their markdown. Mostly one block each; but reading markdown back may join
- * two blocks into one, as two lists side by side, or make none of a block,
- * so a run is what stands between blocks that read back as they were.
+ * their text. Mostly one block each; but reading markdown back may join two
+ * blocks into one, as two lists side by side, or make none of a block, so a
+ * run is what stands between blocks that read back as they were.
  */
 interface ReadAs {
 	before: readonly Node[];
@@ -360,60 +315,69 @@ interface AttributeChange {
 	value: unknown;
 }
 
+/** A stretch of a line of the document without its suggestions, and the text style to give it: none to take its style away. */
+interface Restyle {
+	from: number;
+	to: number;
+	style: Mark | undefined;
+}
+
 interface Found {
 	replacements: Replacement[];
+	/** Changes to how a deck looks, made at once (see `isDesignAttribute`). */
 	attributes: AttributeChange[];
-	/** Where each slide that changes, or is removed, starts. */
-	slides: number[];
-	/** Whether a difference is inside text that can't carry a suggestion's marks. */
+	/** Changes to how a deck's text is styled, made at once. */
+	restyles: Restyle[];
+	/** Whether a replacement is inside text that can't carry a suggestion's marks. */
 	unmarkable: boolean;
 }
 
-/**
- * Whether `node` is suggested a new value for its attribute `name` already,
- * which it holds, keeping the value it would replace in the suggestion's mark.
- */
-const hasSuggestedAttribute = (node: Node | null, name: string) =>
-	node?.marks.some(
-		(mark) => mark.type.name === SUGGESTED_MODIFICATION && mark.attrs.attrName === name,
-	) ?? false;
+const isSlide = (node: Node) => node.type.name === SLIDE;
+
+const isBox = (node: Node) => node.type.name === SLIDE_BOX;
+
+/** The attributes of a paragraph or heading that say how a deck's text looks (see `slide-text-style.ts`). */
+const LINE_DESIGN_ATTRIBUTES: ReadonlySet<string> = new Set(["textAlign", "lineHeight"]);
 
 /**
- * Whether a node keeps its place when its attributes change, so that it is
- * compared inside and its attributes changed, as a slide is when its layout
- * changes. The boxes the new layout leaves as they are, such as the slide's
- * title, are kept, with what somebody is typing in them, and a suggestion
- * shows the new layout over what the slide holds rather than a whole slide
- * removed and another added. The boxes it changes are replaced, which a
- * suggestion in one wouldn't survive (see `Blocked`). A box an agent writes
- * in after it was removed is put back on its slide the same way, keeping its
- * place. Any other node whose attributes change, as a heading's level, is
- * replaced.
+ * Whether `name` is an attribute of `node` that says how a deck looks, which
+ * an agent's change sets at once rather than suggesting: any of a slide's and
+ * a box's, which say where a box is and how it and its slide are drawn, and a
+ * line's alignment and line height.
  */
-const keepsPlaceWhenAttributesChange = (node: Node) =>
-	node.type.name === SLIDE || node.type.name === SLIDE_BOX;
+const isDesignAttribute = (node: Node, name: string) =>
+	isSlide(node) || isBox(node) || LINE_DESIGN_ATTRIBUTES.has(name);
 
-/** Whether `was` and `becomes` are compared inside, rather than one replacing the other. */
+/** The attributes `becomes` has that `was` doesn't, compared by value, but for what is suggested for it. */
+const differingAttributes = (was: Node, becomes: Node): string[] =>
+	Object.keys(becomes.attrs).filter(
+		(name) => name !== NODE_SUGGESTION && !isDeepStrictEqual(was.attrs[name], becomes.attrs[name]),
+	);
+
+/**
+ * Whether `was` and `becomes` are one node, compared inside, rather than one
+ * replacing the other: of one kind that holds others, and alike but for how
+ * a deck looks (`isDesignAttribute`), which is changed on it where it is. So
+ * a slide or a box keeps its place, with what somebody is typing in it, when
+ * it is moved or restyled. Any other node whose attributes change, as a
+ * heading's level, is replaced.
+ */
 const comparedInside = (was: Node, becomes: Node) =>
 	!was.isLeaf &&
-	(was.sameMarkup(becomes) || (was.type === becomes.type && keepsPlaceWhenAttributesChange(was)));
+	was.type === becomes.type &&
+	Mark.sameSet(was.marks, becomes.marks) &&
+	differingAttributes(was, becomes).every((name) => isDesignAttribute(was, name));
 
-/**
- * The attributes `becomes` has that `was`, at `at`, doesn't, compared by
- * value, as a slide's placement is a list, but for what is suggested for it.
- */
+/** The attributes `becomes` has that `was`, at `at`, doesn't (see `differingAttributes`). */
 const attributeChanges = (was: Node, becomes: Node, at: number): AttributeChange[] =>
-	Object.entries(becomes.attrs)
-		.filter(
-			([name, value]) => name !== NODE_SUGGESTION && !isDeepStrictEqual(was.attrs[name], value),
-		)
-		.map(([name, value]) => ({ at, name, value }));
+	differingAttributes(was, becomes).map((name) => ({ at, name, value: becomes.attrs[name] }));
 
 /**
  * Adds to `found` what must be replaced for `before`'s children to read as
- * `after`'s do. A child that reads the same is left, one of the same kind is
- * compared inside, and the rest are removed or added, a run at a time.
- * `start` is where `before`'s content begins in the document.
+ * `after`'s do. A child that reads the same is left, one compared inside
+ * (`comparedInside`) has its differences found inside it, and the rest are
+ * removed or added, a run at a time. `start` is where `before`'s content
+ * begins in the document.
  */
 function findDifferences(before: Node, after: Node, start: number, found: Found): void {
 	let position = start;
@@ -431,8 +395,6 @@ function findDifferences(before: Node, after: Node, start: number, found: Found)
 		run = undefined;
 	};
 	for (const { was, becomes } of aligned(before.content.content, after.content.content)) {
-		const slideChanges = was?.type.name === SLIDE && !(becomes && was.eq(becomes));
-		if (slideChanges) found.slides.push(position);
 		if (was && becomes && comparedInside(was, becomes)) {
 			endRun();
 			if (!was.eq(becomes)) {
@@ -451,17 +413,23 @@ function findDifferences(before: Node, after: Node, start: number, found: Found)
 }
 
 /**
- * Adds to `found` the words of a paragraph that differ and the words that
- * replace them. Whole words, so a suggestion reads as "~~Friday~~ Monday" and
- * not "~~Fri~~Mon". A word differs when its text, its marks or an image in it
- * does, so a change that only marks a word, or swaps an image, is found too.
- * `start` is where the paragraph's text begins in the document.
+ * Adds to `found` the words of a line that differ and the words that replace
+ * them, and the text styles that differ around them. Whole words, so a
+ * suggestion reads as "~~Friday~~ Monday" and not "~~Fri~~Mon". A word
+ * differs when its text, its marks or an image in it does, so a change that
+ * only marks a word, or swaps an image, is found too; but a change of its
+ * text style alone is a restyle, made at once. `start` is where the line's
+ * text begins in the document.
  */
 function findTextDifference(before: Node, after: Node, start: number, found: Found): void {
 	const [was, becomes] = [lineOf(before), lineOf(after)];
 	const shorter = Math.min(was.length, becomes.length);
 	let same = 0;
 	while (same < shorter && samePlace(was[same], becomes[same])) same++;
+	if (same === was.length && same === becomes.length) {
+		found.restyles.push(...restylesOf(was, becomes, keptAtEnds(was, becomes, same, 0), start));
+		return;
+	}
 	while (same > 0 && !isSpace(was[same - 1])) same--;
 	let sameAtEnd = 0;
 	while (
@@ -471,6 +439,9 @@ function findTextDifference(before: Node, after: Node, start: number, found: Fou
 		sameAtEnd++;
 	}
 	while (sameAtEnd > 0 && !isSpace(was.at(-sameAtEnd))) sameAtEnd--;
+	found.restyles.push(
+		...restylesOf(was, becomes, keptAtEnds(was, becomes, same, sameAtEnd), start),
+	);
 	found.replacements.push({
 		from: start + same,
 		to: start + was.length - sameAtEnd,
@@ -508,14 +479,66 @@ function lineOf(textblock: Node): Place[] {
 	return places;
 }
 
+const isTextStyle = (mark: Mark) => mark.type.name === TEXT_STYLE;
+
+const withoutTextStyle = (marks: readonly Mark[]) => marks.filter((mark) => !isTextStyle(mark));
+
+/** Whether two places hold the same, their text styles aside, which a restyle changes. */
 const samePlace = (one: Place | undefined, other: Place | undefined) =>
 	one !== undefined &&
 	other !== undefined &&
 	one.character === other.character &&
-	Mark.sameSet(one.marks, other.marks) &&
-	(one.node && other.node ? one.node.eq(other.node) : one.node === other.node);
+	Mark.sameSet(withoutTextStyle(one.marks), withoutTextStyle(other.marks)) &&
+	(one.node && other.node
+		? one.node.mark(Mark.none).eq(other.node.mark(Mark.none))
+		: one.node === other.node);
 
 const isSpace = (place: Place | undefined) => place !== undefined && /\s/.test(place.character);
+
+/**
+ * The places two lines keep when the first `same` of each and the last
+ * `sameAtEnd` of each stay, as pairs of an index in `was` and one in
+ * `becomes`.
+ */
+function keptAtEnds(
+	was: readonly Place[],
+	becomes: readonly Place[],
+	same: number,
+	sameAtEnd: number,
+): (readonly [number, number])[] {
+	const atStart = Array.from({ length: same }, (_, index) => [index, index] as const);
+	const atEnd = Array.from(
+		{ length: sameAtEnd },
+		(_, back) => [was.length - sameAtEnd + back, becomes.length - sameAtEnd + back] as const,
+	);
+	return [...atStart, ...atEnd];
+}
+
+/**
+ * What gives `was`, a line starting at `start`, the text styles of
+ * `becomes` at the places they share, each pair an index in `was` and one in
+ * `becomes`: a restyle for each run of places given one style.
+ */
+function restylesOf(
+	was: readonly Place[],
+	becomes: readonly Place[],
+	shared: readonly (readonly [number, number])[],
+	start: number,
+): Restyle[] {
+	const restyles: Restyle[] = [];
+	for (const [index, indexBecomes] of shared) {
+		const style = becomes[indexBecomes]?.marks.find(isTextStyle);
+		if (sameStyle(was[index]?.marks.find(isTextStyle), style)) continue;
+		const at = start + index;
+		const last = restyles.at(-1);
+		if (last && last.to === at && sameStyle(last.style, style)) last.to = at + 1;
+		else restyles.push({ from: at, to: at + 1, style });
+	}
+	return restyles;
+}
+
+const sameStyle = (one: Mark | undefined, other: Mark | undefined) =>
+	one === undefined || other === undefined ? one === other : one.eq(other);
 
 /** Whether every line of text in the node can carry a suggestion's marks, which a code block's can't. */
 function canHoldSuggestions(node: Node): boolean {
@@ -539,18 +562,47 @@ interface Step {
 /** Whether two blocks are taken for the same one, one way of matching them. */
 type Matching = (was: Node, becomes: Node) => boolean;
 
+/** What a box says: its words, and each image in it as its address. */
+const sayingOf = (box: Node) =>
+	box.textBetween(0, box.content.size, "\n", (leaf) =>
+		leaf.type.name === "image" ? `[${String(leaf.attrs.src)}]` : "",
+	);
+
 /**
- * The ways blocks are matched, strictest first. Those that read the same; then
- * slides with the same title, so a slide added beside one that changed isn't
- * taken for it; then blocks of the same kind, so a paragraph is compared with
- * a paragraph and never with the list beside it.
+ * The ways two of a slide's boxes are taken for the same box, strictest
+ * first, as an agent may move, restyle and reword a box, and add and remove
+ * others beside it. Boxes matched no way are removed and added.
+ */
+const BOX_MATCHINGS: readonly Matching[] = [
+	// Saying the same, as a box moved or restyled.
+	(was, becomes) => sayingOf(was) !== "" && sayingOf(was) === sayingOf(becomes),
+	// Where it was, as a box reworded.
+	(was, becomes) => isDeepStrictEqual(boxAttributesOf(was).frame, boxAttributesOf(becomes).frame),
+	// For the same thing, as a title moved and reworded.
+	(was, becomes) => {
+		const { role } = boxAttributesOf(was);
+		return role !== null && role === boxAttributesOf(becomes).role;
+	},
+	// Saying nothing, as a shape moved or restyled.
+	(was, becomes) => sayingOf(was) === "" && sayingOf(becomes) === "",
+];
+
+/**
+ * The ways blocks are matched, strictest first. Those that read the same;
+ * then slides with the same title, so a slide added beside one that changed
+ * isn't taken for it; then boxes, as `BOX_MATCHINGS` matches them; then any
+ * other blocks of one kind, so a paragraph is compared with a paragraph and
+ * never with the list beside it.
  */
 const MATCHINGS: readonly Matching[] = [
 	(was, becomes) => was.eq(becomes),
-	(was, becomes) =>
-		was.type.name === SLIDE && was.type === becomes.type && titleOf(was) === titleOf(becomes),
-	(was, becomes) =>
-		was.sameMarkup(becomes) || (was.type === becomes.type && keepsPlaceWhenAttributesChange(was)),
+	(was, becomes) => isSlide(was) && isSlide(becomes) && titleOf(was) === titleOf(becomes),
+	...BOX_MATCHINGS.map(
+		(matching): Matching =>
+			(was, becomes) =>
+				isBox(was) && isBox(becomes) && matching(was, becomes),
+	),
+	(was, becomes) => !isBox(was) && (was.sameMarkup(becomes) || comparedInside(was, becomes)),
 ];
 
 /** A slide's title: the words of the first line in it. */

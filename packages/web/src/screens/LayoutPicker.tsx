@@ -1,5 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
-import { SLIDE_LAYOUTS, type SlideLayout } from "@sugabots/contracts/slides-markdown";
+import { SLIDE_LAYOUTS, type SlideLayout } from "@sugabots/contracts/slide-layouts";
 import { cn } from "cn";
 import { RotateCcw } from "lucide-react";
 import { type CSSProperties, type ReactNode, useState } from "react";
@@ -11,8 +11,8 @@ import { LAYOUT_NAMES } from "@/lib/deck.ts";
  * slide's layout is chosen, under `heading` "New slide", and how a slide's
  * is changed, under "Change layout", with the `current` one ringed. While
  * `unavailable` says why no layout can be chosen, it says that instead.
- * Given `onReset`, it ends with a row that puts the slide's boxes back where
- * its layout places them, even while no layout can be chosen.
+ * Given `onReset`, it ends with a row that puts the boxes the slide's layout
+ * places back where it places them, even while no layout can be chosen.
  */
 export function LayoutPicker({
 	heading,
@@ -28,7 +28,7 @@ export function LayoutPicker({
 	current?: SlideLayout;
 	unavailable?: string;
 	onPick: (layout: SlideLayout) => void;
-	/** Resets the slide's layout, for a slide laid out by hand; `undefined` offers no reset. */
+	/** Resets the slide's layout, for a slide whose layout's boxes have moved; `undefined` offers no reset. */
 	onReset?: () => void;
 	/** Names the button for assistive technology, when its own words don't. */
 	label?: string;
@@ -87,7 +87,7 @@ export function LayoutPicker({
 									<span className="flex flex-col gap-0.5">
 										<span className="text-foreground">Reset layout</span>
 										<span className="text-subtle-foreground">
-											Put every box back where this layout places it.
+											Put this layout's boxes back where it places them.
 										</span>
 									</span>
 								</button>
@@ -173,6 +173,8 @@ const TABLE_CELLS = Array.from({ length: TABLE_COLUMNS * 3 }, (_, cell) => cell)
 
 /** Where each layout's parts go, as the design sketches them: how the sketch arranges them, and the parts. */
 const SKETCHES: Record<SlideLayout, { arrangement: CSSProperties; parts: ReactNode }> = {
+	/** No parts at all, for boxes put anywhere. */
+	blank: { arrangement: {}, parts: null },
 	title: {
 		arrangement: { padding: "10%", justifyContent: "center", gap: 6 },
 		parts: (

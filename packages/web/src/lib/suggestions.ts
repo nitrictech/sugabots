@@ -7,7 +7,7 @@ import {
 	suggestionBy,
 } from "@sugabots/contracts/live-document";
 import { SLIDE } from "@sugabots/contracts/live-slides";
-import { isSlideLayout, type SlideLayout } from "@sugabots/contracts/slides-markdown";
+import { isSlideLayout, type SlideLayout } from "@sugabots/contracts/slide-layouts";
 import type { Mark, Node } from "@tiptap/pm/model";
 import type { Command } from "@tiptap/pm/state";
 

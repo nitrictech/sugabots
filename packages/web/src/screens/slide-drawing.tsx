@@ -1,159 +1,141 @@
-import {
-	bodyOf,
-	layoutOf,
-	PLACEMENT_ATTRIBUTE,
-	placementOf,
-	SLIDE_TEXT_STEPS,
-} from "@sugabots/contracts/live-slides";
-import {
-	type Frame,
-	placementText,
-	roomBottom,
-	SLIDE_WIDTH,
-} from "@sugabots/contracts/slides-markdown";
+import { backgroundOf, bodyOf, layoutOf, SLIDE_TEXT_STEPS } from "@sugabots/contracts/live-slides";
+import { type Frame, roomBottom } from "@sugabots/contracts/slide-geometry";
+import { TEXT_STYLE } from "@sugabots/contracts/slide-text-style";
 import type { DOMSerializer, Node } from "@tiptap/pm/model";
 import { cn } from "cn";
-import { memo, useLayoutEffect, useRef } from "react";
-import { type BoxOfSlide, boxesOf } from "@/lib/deck.ts";
+import { type CSSProperties, memo, useLayoutEffect, useRef } from "react";
+import { boxesOf } from "@/lib/deck.ts";
 
 /*
  * A deck's slide drawn read only, as the stage draws it while it is edited:
- * in the strip of slides, in present mode, and wherever a deck is only read.
- * Everything on a slide is sized off its width (see the slide styles in
- * `app.css`), so one drawing serves at any size.
+ * in the strip of slides, in present mode and wherever a deck is only read.
+ * A slide is laid out in its own pixels, 960 across, and drawn scaled as one
+ * piece to the width it is given (see the slide styles in `app.css`), so one
+ * drawing serves at any size.
  */
 
-/** The style property, on an element holding a slide, that sets the size its text is drawn at. */
+/** The style property, on an element holding a slide, that sets the size its role-sized text is drawn at. */
 const TEXT_STEP_PROPERTY = "--slide-fit";
 
-/** How tall a slide is for its width. */
-const SLIDE_HEIGHT_PER_WIDTH = 9 / 16;
+/**
+ * The style property, on an element holding a slide or on the slide itself,
+ * that says the colour its body is painted, when the slide has one of its
+ * own (`backgroundOf`). The slide's own element holds its notes too, so on
+ * the stage its colour is painted on its body alone.
+ */
+export const SLIDE_PAINT_PROPERTY = "--slide-paint";
 
 /** Finds a slide's drawn boxes, as the schema draws each (see `SlideBox` in `live-slides.ts`). */
 export const DRAWN_BOX = "[data-slide-box]";
 
-/**
- * The attribute a slide's drawn box is drawn with while it is off the slide
- * (`isOffItsSlide`), which the slide styles hide it by. Whoever draws the
- * slide works it out, as the schema can't (see `SlideBox`).
- */
-export const REMOVED_ATTRIBUTE = "data-removed";
-
-/** The attribute a slide's drawn box says what it is for in, which its layout's styles place it by. */
-export const BOX_ROLE_ATTRIBUTE = "data-box-role";
+/** The elements a slide's lines of text are drawn as: its paragraphs and headings. */
+const DRAWN_LINES = "p, h1, h2, h3, h4, h5, h6";
 
 /**
- * The attributes `box`, one of a slide's boxes, is drawn with, on the stage
- * and in a drawing alike: what it is for, and whether it is off the slide.
+ * The size `line`, a paragraph or heading, is drawn at when every bit of its
+ * text has a size of its own (see `slide-text-style.ts`): the largest of
+ * them, in a slide's pixels. A line is as tall as the size its own element is
+ * drawn at, whatever its text's, so a line of text smaller than the slide
+ * styles draw it would otherwise be spaced as if it were their size.
+ * `undefined` for a line holding no text, or any text sized by the slide
+ * styles.
  */
-export function drawnBoxAttributes({ role, offSlide }: BoxOfSlide): Record<string, string> {
-	return {
-		...(role ? { [BOX_ROLE_ATTRIBUTE]: role } : {}),
-		...(offSlide ? { [REMOVED_ATTRIBUTE]: "" } : {}),
-	};
+export function ownTextSizeOf(line: Node): number | undefined {
+	let largest: number | undefined;
+	let styled = true;
+	line.forEach((inline) => {
+		if (!inline.isText) return;
+		const size = sizeOfText(inline);
+		if (size === undefined) styled = false;
+		else largest = Math.max(largest ?? 0, size);
+	});
+	return styled ? largest : undefined;
+}
+
+/** The size `text`, a run of a slide's text, has of its own, if it has one. */
+function sizeOfText(text: Node): number | undefined {
+	const size: unknown = text.marks.find((mark) => mark.type.name === TEXT_STYLE)?.attrs.fontSize;
+	return typeof size === "number" ? size : undefined;
+}
+
+/** Whether `box` holds text the slide styles size, which steps down to fit (see `ownTextSizeOf`). */
+function holdsTextSizedByStyles(box: Node): boolean {
+	let sized = false;
+	box.descendants((node) => {
+		sized ||= node.isText && sizeOfText(node) === undefined;
+		return !sized;
+	});
+	return sized;
 }
 
 /**
- * The custom properties a box of a slide whose boxes were placed by hand is
- * drawn at `frame` by, on the stage and in a drawing alike, in a slide's
- * pixels: `--box-w` for its width and `--box-h` for its height.
+ * Draws the text of the slide `slide`, whose body is drawn as `body`, inside
+ * `holder`, at the largest step at which it fits. Answers whether it runs
+ * over even at the smallest. Only the boxes holding text the slide styles
+ * size are measured, as text of a size of its own is drawn at it wherever it
+ * reaches. Nothing about it is stored: each drawing works it out.
  */
-export function boxFrameProperties({ x, y, width, height }: Frame): Record<string, string> {
-	return {
-		"--box-x": String(x),
-		"--box-y": String(y),
-		"--box-w": String(width),
-		"--box-h": String(height),
-	};
-}
-
-/**
- * Draws the text of the slide whose body is `body`, inside `holder`, at the
- * largest step at which it fits. Answers whether it runs over even at the
- * smallest. Nothing about it is stored: each drawing works it out.
- */
-export function fitSlideText(holder: HTMLElement, body: HTMLElement): boolean {
+export function fitSlideText(holder: HTMLElement, body: HTMLElement, slide: Node): boolean {
+	const stepping = boxesOf(slide).map(({ node }) => holdsTextSizedByStyles(node));
 	for (const step of SLIDE_TEXT_STEPS) {
 		holder.style.setProperty(TEXT_STEP_PROPERTY, String(step));
-		if (fits(body)) return false;
+		if (everyBoxFits(body, stepping)) return false;
 	}
 	return true;
 }
 
 /**
- * Whether the slide whose body is `body` holds no more than fits it, give or
- * take a pixel of rounding: in the room each box has, for a slide whose boxes
- * were placed by hand, and in the body for one its layout places.
+ * Whether what each box of `body` that `stepping` says steps holds stays
+ * within the room the box has on the slide (`roomBottom`). What runs past
+ * the foot of its box is drawn there, and only what runs past its room is
+ * more than fits. The boxes are measured where they are drawn, in the
+ * slide's own pixels, so a drag's boxes are measured where the drag has
+ * them.
  */
-const fits = (body: HTMLElement) =>
-	body.parentElement?.hasAttribute(PLACEMENT_ATTRIBUTE) ? everyBoxFits(body) : bodyFits(body);
-
-/**
- * Whether what the body holds is no taller than a slide as wide as it. A
- * body that clips scrolls what runs over; one that doesn't, as the stage's,
- * grows to hold it.
- */
-const bodyFits = (body: HTMLElement) =>
-	Math.max(body.scrollHeight, body.offsetHeight) <= body.offsetWidth * SLIDE_HEIGHT_PER_WIDTH + 1;
-
-/**
- * Whether what each box shown in the body holds stays within the room the
- * box has on the slide (`roomBottom`). What runs past the foot of its box is
- * drawn there, and only what runs past its room is more than fits. The boxes
- * are measured where they are drawn, so a drag's boxes are measured where the
- * drag has them.
- */
-function everyBoxFits(body: HTMLElement): boolean {
+function everyBoxFits(body: HTMLElement, stepping: readonly boolean[]): boolean {
 	// A slide not drawn, as one hidden, has nothing to measure.
 	if (body.offsetWidth === 0) return true;
-	const windowPxPerSlidePx = body.offsetWidth / SLIDE_WIDTH;
 	const boxes = [...body.querySelectorAll<HTMLElement>(DRAWN_BOX)];
 	const frames = boxes.map(
 		(box): Frame => ({
-			x: box.offsetLeft / windowPxPerSlidePx,
-			y: box.offsetTop / windowPxPerSlidePx,
-			width: box.offsetWidth / windowPxPerSlidePx,
-			height: box.offsetHeight / windowPxPerSlidePx,
+			x: box.offsetLeft,
+			y: box.offsetTop,
+			width: box.offsetWidth,
+			height: box.offsetHeight,
 		}),
 	);
-	const shown = boxes.map((box) => !box.hasAttribute(REMOVED_ATTRIBUTE));
 	return boxes.every(
 		(box, index) =>
-			!shown[index] ||
-			box.offsetTop + box.scrollHeight <= roomBottom(frames, shown, index) * windowPxPerSlidePx + 1,
+			!stepping[index] || box.offsetTop + box.scrollHeight <= roomBottom(frames, index) + 1,
 	);
 }
 
 /**
- * Draws each box of `body`, the drawn body of `slide`, as the stage draws the
- * slide it shows: saying what it is for and whether it is off the slide
- * (`drawnBoxAttributes`), and, on a slide whose boxes were placed by hand,
- * where it was placed (`boxFrameProperties`). A body's boxes hold no boxes, so
- * the boxes drawn in it are its own, in its order.
+ * Draws each line of `body`, the drawn body of `slide`, whose text all has a
+ * size of its own at that size (`ownTextSizeOf`), as the stage draws it. The
+ * lines are drawn in the order the slide holds them.
  */
-function drawBoxes(body: HTMLElement, slide: Node) {
-	const boxes = boxesOf(slide);
-	const placement = placementOf(slide);
-	body.querySelectorAll<HTMLElement>(DRAWN_BOX).forEach((drawn, index) => {
-		const box = boxes[index];
-		if (!box) return;
-		for (const [name, value] of Object.entries(drawnBoxAttributes(box))) {
-			drawn.setAttribute(name, value);
-		}
-		const frame = placement?.[index];
-		if (!frame) return;
-		for (const [name, value] of Object.entries(boxFrameProperties(frame))) {
-			drawn.style.setProperty(name, value);
-		}
+function sizeLinesByTheirText(body: HTMLElement, slide: Node) {
+	const lines: Node[] = [];
+	bodyOf(slide).descendants((node) => {
+		if (node.type.name === "paragraph" || node.type.name === "heading") lines.push(node);
+		return !node.isTextblock;
+	});
+	const drawn = body.querySelectorAll<HTMLElement>(DRAWN_LINES);
+	if (drawn.length !== lines.length) return;
+	drawn.forEach((element, index) => {
+		const line = lines[index];
+		const size = line && ownTextSizeOf(line);
+		if (size !== undefined) element.style.fontSize = `${size}px`;
 	});
 }
 
 /**
  * A drawing of `slide`, a slide of a live deck: what its body holds, with
- * no notes, at the size its text fits, and its boxes where they were placed
- * by hand if they were. `serializer` draws each node as the editor does. It
- * is drawn again only for a new `slide` node, which a change to the slide
- * makes, so a change to one slide redraws no other.
+ * no notes, on its own colour, with its role-sized text at the size it fits.
+ * `serializer` draws each node as the editor does. It is drawn again only for
+ * a new `slide` node, which a change to the slide makes, so a change to one
+ * slide redraws no other.
  */
 export const SlideDrawing = memo(function SlideDrawing({
 	slide,
@@ -178,8 +160,8 @@ export const SlideDrawing = memo(function SlideDrawing({
 		const body = serializer.serializeNode(bodyOf(slide));
 		element.replaceChildren(body);
 		if (!(body instanceof HTMLElement)) return;
-		drawBoxes(body, slide);
-		const refit = () => fitSlideText(element, body);
+		sizeLinesByTheirText(body, slide);
+		const refit = () => fitSlideText(element, body, slide);
 		refit();
 		// Its text is measured again once something that changes its size arrives: a font, or an image.
 		element.addEventListener("load", refit, true);
@@ -191,14 +173,16 @@ export const SlideDrawing = memo(function SlideDrawing({
 			resized.disconnect();
 		};
 	}, [slide, serializer]);
-	const placement = placementOf(slide);
+	const layout = layoutOf(slide);
+	const background = backgroundOf(slide);
 	return (
 		<div
 			ref={holder}
 			inert={hidden}
 			data-slide=""
-			data-layout={layoutOf(slide)}
-			{...(placement ? { [PLACEMENT_ATTRIBUTE]: placementText(placement) } : {})}
+			// As the schema draws a slide: a blank one says no layout.
+			data-layout={layout === "blank" ? undefined : layout}
+			style={background ? ({ [SLIDE_PAINT_PROPERTY]: background } as CSSProperties) : undefined}
 			className={cn("slide-drawing", className)}
 		/>
 	);

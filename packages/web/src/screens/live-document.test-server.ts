@@ -9,10 +9,11 @@ import {
 import { artifactImageAddress, artifactImageIds } from "@sugabots/contracts/http";
 import { LIVE_DOCUMENT_SCHEMA } from "@sugabots/contracts/live-document";
 import {
-	liveDocumentFromMarkdown,
+	documentFromMarkdown,
 	liveDocumentSchema,
-	markdownOfLiveDocument,
-} from "@sugabots/contracts/live-document-markdown";
+	markdownOfDocument,
+} from "@sugabots/contracts/live-document-text";
+import type { Node } from "@tiptap/pm/model";
 import {
 	prosemirrorToYXmlFragment,
 	updateYFragment,
@@ -50,11 +51,58 @@ const DECK_IDS = new Set([
 const kindOf = (artifactId: string): LiveArtifactKind =>
 	DECK_IDS.has(artifactId) ? "slides" : "document";
 
+/** A slide of `layout` holding a box for each of `boxes`' roles, holding its block, and empty notes. */
+const slideHolding = (layout: string, boxes: { role: string; block: object }[]) => ({
+	type: "slide",
+	attrs: { layout },
+	content: [
+		{
+			type: "slideBody",
+			content: boxes.map(({ role, block }) => ({
+				type: "slideBox",
+				attrs: { role },
+				content: [block],
+			})),
+		},
+		{ type: "speakerNotes", content: [{ type: "paragraph" }] },
+	],
+});
+
+const words = (text: string) => [{ type: "text", text }];
+
 /** What the stand-in holds of each kind before anybody changes it. */
-const STARTING_MARKDOWN: Record<LiveArtifactKind, string> = {
-	document: "# Launch plan\n\nShip on Friday.",
-	slides:
-		"<!-- layout: title -->\n\n# Launch review\n\n---\n\n<!-- layout: bullets -->\n\n## Goals\n\n- Ship on Friday",
+const STARTING_CONTENT: Record<LiveArtifactKind, () => Node> = {
+	document: () => documentFromMarkdown("# Launch plan\n\nShip on Friday."),
+	slides: () =>
+		liveDocumentSchema("slides").nodeFromJSON({
+			type: "doc",
+			content: [
+				slideHolding("title", [
+					{
+						role: "title",
+						block: { type: "heading", attrs: { level: 1 }, content: words("Launch review") },
+					},
+				]),
+				slideHolding("bullets", [
+					{
+						role: "title",
+						block: { type: "heading", attrs: { level: 2 }, content: words("Goals") },
+					},
+					{
+						role: "body",
+						block: {
+							type: "bulletList",
+							content: [
+								{
+									type: "listItem",
+									content: [{ type: "paragraph", content: words("Ship on Friday") }],
+								},
+							],
+						},
+					},
+				]),
+			],
+		}),
 };
 
 /** How many editors each artifact's route has refused. */
@@ -70,10 +118,7 @@ const server = new Server({
 	quiet: true,
 	onLoadDocument: async ({ documentName, document }) => {
 		const kind = kindOf(documentName);
-		prosemirrorToYXmlFragment(
-			liveDocumentFromMarkdown(kind, STARTING_MARKDOWN[kind]),
-			document.getXmlFragment("default"),
-		);
+		prosemirrorToYXmlFragment(STARTING_CONTENT[kind](), document.getXmlFragment("default"));
 	},
 	onUpgrade: async ({ request, socket, head }) => {
 		const [, artifactId = ""] = LIVE_ROUTE.exec(request.url ?? "") ?? [];
@@ -136,7 +181,7 @@ process.on("message", async ({ artifactId, ask, markdown }: Asked) => {
 		if (ask === "count blocks") return void process.send?.({ blocks: content.length });
 		if (ask === "markdown") {
 			const held = yXmlFragmentToProseMirrorRootNode(content, liveDocumentSchema("document"));
-			return void process.send?.({ markdown: markdownOfLiveDocument(held) });
+			return void process.send?.({ markdown: markdownOfDocument(held) });
 		}
 		if (ask === "unknown block") return void content.push([new XmlElement("fromANewerVersion")]);
 		document.awareness.setLocalState({
@@ -149,7 +194,7 @@ process.on("message", async ({ artifactId, ask, markdown }: Asked) => {
 		updateYFragment(
 			document,
 			content,
-			liveDocumentFromMarkdown("document", markdown ?? "# Launch plan\n\nShip on Monday."),
+			documentFromMarkdown(markdown ?? "# Launch plan\n\nShip on Monday."),
 			{ mapping: new Map(), isOMark: new Map() },
 		);
 	});

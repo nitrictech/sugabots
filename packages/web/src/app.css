@@ -1089,11 +1089,19 @@
  * A deck's slide, drawn the same wherever it shows: on the stage while the
  * deck is edited (`screens/LiveDeck.tsx`), and read only in the strip of
  * slides, in present mode and wherever a deck is only read
- * (`screens/slide-drawing.tsx`). Everything on it is sized off its width, in
- * a unit that is 16px on a slide 960px wide, so one set of styles draws it at
- * any size. Its text is drawn at the step `--slide-fit` gives, the largest at
- * which it fits. Each layout, and each of a slide's boxes by what it is for
- * (`data-box-role`), sets the sizes of what it holds, in the unit.
+ * (`screens/slide-drawing.tsx`). Its body is laid out in a slide's own
+ * pixels, 960 across and 540 down, in which every length a deck stores is,
+ * and scaled as one piece to the width of what holds it. Each box is drawn at
+ * its frame, with its fill, border, padding and turn as the schema writes
+ * them inline (see `SlideBox` in `live-slides.ts`), each over those before it.
+ * The slide is painted its own colour, when it has one (`--slide-paint`), and
+ * the theme's otherwise.
+ *
+ * Text is sized in a unit of 16 of the slide's pixels, a 60th of its width.
+ * Each layout, and each box by what it is for (`data-role`), sets the sizes
+ * of what it holds in the unit, drawn at the step `--slide-fit` gives, the
+ * largest at which the slide's text fits. Text given a size of its own is
+ * drawn at that size, whatever the step.
  */
 .live-deck section[data-slide],
 .slide-drawing {
@@ -1101,7 +1109,13 @@
 }
 
 :is(.live-deck, .slide-drawing) [data-slide-body] {
-	--slide-unit: 1.6667cqw;
+	/*
+	 * How many of the window's pixels one of the slide's is, at the width
+	 * holding it, as a number: CSS divides no length by another, but the
+	 * tangent of the angle two lengths make is the one over the other.
+	 */
+	--slide-scale: tan(atan2(100cqw, 960px));
+	--slide-unit: 16px;
 	--slide-text: calc(var(--slide-unit) * var(--slide-fit, 1));
 	--slide-text-size: 1.5;
 	--slide-text-color: var(--slide-foreground);
@@ -1109,28 +1123,37 @@
 	--slide-heading-weight: 600;
 	--slide-heading-leading: 1.15;
 	--slide-heading-tracking: -0.01em;
-	/* Between the slide's blocks, its boxes' as much as its own. */
+	/* Between the blocks a box holds. */
 	--slide-gap: 2em;
+	position: relative;
 	box-sizing: border-box;
-	display: flex;
-	flex-direction: column;
-	gap: var(--slide-gap);
-	aspect-ratio: 16 / 9;
-	/* In the unit alone, so the margins stay as the text steps down. */
-	padding: calc(4 * var(--slide-unit)) calc(5 * var(--slide-unit));
+	width: 960px;
+	height: 540px;
+	/* What runs past the slide's edges is cut there, on the stage too. */
+	overflow: clip;
+	transform: scale(var(--slide-scale));
+	transform-origin: 0 0;
 	overflow-wrap: break-word;
-	background: var(--slide-background);
+	background: var(--slide-paint, var(--slide-background));
 	color: var(--slide-foreground);
 	font-family: var(--font-sans);
 	font-size: var(--slide-text);
 	line-height: 1.4;
 }
 
-/* A drawing clips what runs over; the stage lets the body grow, so what runs over can still be edited. */
-.slide-drawing [data-slide-body] {
+/* A drawing is as tall as the slide is at its width, its corners cutting the slide's. */
+.slide-drawing {
+	position: relative;
+	aspect-ratio: 16 / 9;
 	overflow: hidden;
-	/* The body paints the slide, so it takes the corners its holder is rounded to. */
-	border-radius: inherit;
+}
+
+.slide-drawing [data-slide-body] {
+	position: absolute;
+	top: 0;
+	left: 0;
+	/* As the editor keeps its words, so a drawing breaks its lines where the stage does. */
+	white-space: break-spaces;
 }
 
 :is(.live-deck, .slide-drawing) [data-slide-body] :is(p, ul, ol, li, pre, th, td) {
@@ -1245,39 +1268,106 @@
 }
 
 /*
- * A box on a slide, a part its layout places, holding blocks one under
- * another as far apart as the slide's own, so a layout that sets its boxes
- * one under another draws their blocks as one flow.
+ * A box on a slide, at its frame, its border and padding inside it. What it
+ * holds is in an element of its own: a column of blocks as far apart as the
+ * box's role sets them, at the box's full height, set at its top, middle or
+ * foot (`data-vertical-align`). A shape's drawing fills the box under it.
  */
 :is(.live-deck, .slide-drawing) [data-slide-box] {
-	display: flex;
+	position: absolute;
+	box-sizing: border-box;
 	min-width: 0;
+}
+
+:is(.live-deck, .slide-drawing) [data-box-content] {
+	position: relative;
+	display: flex;
+	height: 100%;
 	flex-direction: column;
 	gap: var(--slide-gap);
 }
 
+:is(.live-deck, .slide-drawing) [data-vertical-align="middle"] > [data-box-content] {
+	justify-content: center;
+}
+
+:is(.live-deck, .slide-drawing) [data-vertical-align="bottom"] > [data-box-content] {
+	justify-content: flex-end;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-box] > svg {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+	pointer-events: none;
+}
+
+/*
+ * A box for nothing in particular, as a text box added by hand, and any box
+ * on a slide of no layout, as one from a PowerPoint file: its blocks nearer
+ * each other, as a presentation app spaces a text box's paragraphs, and a
+ * table's cells in the first as tight as it sets them.
+ */
+:is(.live-deck, .slide-drawing) [data-slide-box]:not([data-role]),
+[data-slide]:not([data-layout]) [data-slide-box] {
+	--slide-gap: 0.5em;
+}
+
+:is(.live-deck, .slide-drawing) [data-slide-box]:not([data-role]) :is(th, td) {
+	padding: 4px 7px;
+}
+
+/*
+ * A box holding an image alone: the image filling it, whole, in its middle.
+ * On a slide of no layout, as one from a PowerPoint file, the image fills the
+ * box to its edges, cut where it must be, as a cropped picture is there.
+ */
+:is(.live-deck, .slide-drawing) [data-role="image"] > [data-box-content] > p:only-child {
+	min-height: 0;
+	flex: 1;
+	/* Only the image takes room: the editor draws a caret's place after it as a line of its own. */
+	line-height: 0;
+}
+
+/* The editor's marks of the caret's places either side of the image, out of the image's way. */
+.live-deck [data-role="image"] > [data-box-content] > p:only-child > .ProseMirror-separator {
+	position: absolute;
+}
+
+:is(.live-deck, .slide-drawing)
+	[data-role="image"]
+	> [data-box-content]
+	> p:only-child
+	> img:not(.ProseMirror-separator) {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+[data-slide]:not([data-layout])
+	[data-role="image"]
+	> [data-box-content]
+	> p:only-child
+	> img:not(.ProseMirror-separator) {
+	border-radius: 0;
+	object-fit: cover;
+}
+
 /* The columns of a slide in two columns, and the text and image of one with an image: smaller, and nearer each other. */
 :is(.live-deck, .slide-drawing)
-:is(
-	[data-box-role="leftColumn"],
-	[data-box-role="rightColumn"],
-	[data-box-role="text"],
-	[data-box-role="image"]
-) {
+:is([data-role="leftColumn"], [data-role="rightColumn"], [data-role="text"], [data-role="image"]) {
 	--slide-text-size: 1.25;
 	--slide-heading-size: 1.375;
 	--slide-heading-leading: 1.2;
 	--slide-heading-tracking: 0;
-	gap: 0.9em;
+	--slide-gap: 0.9em;
 }
 
 :is(.live-deck, .slide-drawing)
-	:is(
-		[data-box-role="leftColumn"],
-		[data-box-role="rightColumn"],
-		[data-box-role="text"],
-		[data-box-role="image"]
-	)
+	:is([data-role="leftColumn"], [data-role="rightColumn"], [data-role="text"], [data-role="image"])
 	:is(ul, ol) {
 	gap: 0.6em;
 }
@@ -1305,7 +1395,7 @@
 	text-decoration: line-through;
 }
 
-/* Title: a large title, and a subtitle under it, in the middle. */
+/* Title: a large title, and a subtitle under it. */
 [data-slide][data-layout="title"] > [data-slide-body] {
 	--slide-heading-size: 3.75;
 	--slide-heading-weight: 700;
@@ -1313,7 +1403,6 @@
 	--slide-heading-tracking: -0.02em;
 	--slide-text-color: var(--slide-sub);
 	--slide-gap: 1.25em;
-	justify-content: safe center;
 }
 
 [data-slide][data-layout="title"] > [data-slide-body] :is(h1, h2, h3),
@@ -1321,7 +1410,7 @@
 	text-wrap: balance;
 }
 
-/* Section break: a short accent, a label, and a very large title, at the foot of the slide. */
+/* Section break: a short accent, a label, and a very large title. */
 [data-slide][data-layout="section"] > [data-slide-body] {
 	--slide-heading-size: 4;
 	--slide-heading-weight: 700;
@@ -1331,15 +1420,10 @@
 	--slide-text-color: var(--slide-sub);
 	--slide-gap: 1em;
 	--section-accent-height: 0.3em;
-	justify-content: safe flex-end;
 }
 
-/*
- * The accent, over the label wherever the label is, a slide's gap above it,
- * and gone with it. On a slide its layout places, the label keeps room above
- * it for the accent and the gap, as the slide's first block would take.
- */
-[data-slide][data-layout="section"] [data-box-role="label"]::before {
+/* The accent, over the label wherever the label is, a slide's gap above it, and gone with it. */
+[data-slide][data-layout="section"] [data-role="label"]::before {
 	content: "";
 	position: absolute;
 	bottom: calc(100% + var(--slide-gap));
@@ -1350,22 +1434,15 @@
 	background: var(--slide-accent);
 }
 
-[data-slide][data-layout="section"]:not([data-placement]) [data-box-role="label"] {
-	position: relative;
-	margin-top: calc(var(--section-accent-height) + var(--slide-gap));
-}
-
 [data-slide][data-layout="section"] > [data-slide-body] p {
 	font-weight: 500;
 }
 
-/* Quote: the quote large, and who said it under it, in the middle. */
+/* Quote: the quote large, and who said it under it. */
 [data-slide][data-layout="quote"] > [data-slide-body] {
 	--slide-text-size: 1.25;
 	--slide-text-color: var(--slide-sub);
 	--slide-gap: 1.75em;
-	justify-content: safe center;
-	padding-inline: calc(7 * var(--slide-unit));
 }
 
 [data-slide][data-layout="quote"] > [data-slide-body] blockquote {
@@ -1379,124 +1456,28 @@
 	text-wrap: balance;
 }
 
-/* Two columns: the title across the top, and the columns side by side under it, each heading ruled off. */
-[data-slide][data-layout="columns"] > [data-slide-body] {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	align-content: start;
-	gap: var(--slide-gap) 3.5em;
-}
-
-/* The title, and a box that is no column, as one proposed for removal, across the top. */
+/* Two columns: each column's heading ruled off. */
 [data-slide][data-layout="columns"]
-[data-slide-box]:not([data-box-role="leftColumn"], [data-box-role="rightColumn"]) {
-	grid-column: 1 / -1;
-}
-
-/* The right column on the right, even with the left one removed, as a file the deck is saved as draws it. */
-[data-slide][data-layout="columns"] [data-box-role="rightColumn"] {
-	grid-column: 2;
-}
-
-[data-slide][data-layout="columns"]
-	:is([data-box-role="leftColumn"], [data-box-role="rightColumn"])
+	:is([data-role="leftColumn"], [data-role="rightColumn"])
 	:is(h1, h2, h3) {
 	padding-bottom: 0.6em;
 	border-bottom: 1px solid var(--slide-rule);
 }
 
-/* Image and text: the title and its text on the left, in the middle, and the image filling the right. */
-[data-slide][data-layout="image"] > [data-slide-body] {
-	/* Nothing between its rows, nor between its title's blocks: the title keeps its own room under it. */
-	--slide-gap: 0;
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	grid-template-rows: 1fr auto auto 1fr;
-	gap: var(--slide-gap) 3.5em;
-}
-
-/* The title, and a box that is neither text nor image, as one proposed for removal, over the text. */
-[data-slide][data-layout="image"]
-[data-slide-box]:not([data-box-role="text"], [data-box-role="image"]) {
-	grid-column: 1;
-	grid-row: 2;
-	margin-bottom: calc(1.25 * var(--slide-text));
-}
-
-[data-slide][data-layout="image"] :is([data-box-role="text"], [data-box-role="image"]) {
+/* Image and text: the text beside the image softer, and its lines further apart. */
+[data-slide][data-layout="image"] :is([data-role="text"], [data-role="image"]) {
 	--slide-text-size: 1.375;
 	--slide-text-color: var(--slide-sub);
-	grid-column: 1;
-	grid-row: 3;
 	line-height: 1.5;
 }
 
-[data-slide][data-layout="image"] [data-box-role="image"] {
-	position: relative;
-	grid-column: 2;
-	grid-row: 1 / -1;
-	align-items: center;
-	justify-content: center;
-}
-
-[data-slide][data-layout="image"] [data-box-role="image"] img {
-	max-height: calc(25 * var(--slide-unit));
+[data-slide][data-layout="image"] [data-role="image"] img {
 	border-radius: 0.75em;
 }
 
 /* Table: a title, and the table under it. */
 [data-slide][data-layout="table"] > [data-slide-body] {
 	--slide-text-size: 1.25;
-}
-
-/*
- * A slide whose boxes were placed by hand (`data-placement`): each box drawn
- * at its frame, measured in a slide's pixels from the slide's top left
- * corner, whatever its layout's padding, and scaled with it. Its layout still
- * styles what each box holds by what the box is for; only where the layout
- * would put its boxes, and how it would space them, gives way. What a box
- * holds starts at its top, but for an image layout's image, which stays in
- * the middle of its box, and what runs past its foot is cut at the slide's
- * edge, on the stage too.
- *
- * Whoever draws the slide gives each box its frame as `--box-x`, `--box-y`,
- * `--box-w` for its width and `--box-h` for its height (`boxFrameProperties`
- * in `slide-drawing.tsx`). Where these rules say the same as one of the
- * layouts', they are as specific as it and come after it, so they win.
- */
-[data-slide][data-placement] > [data-slide-body] {
-	/* A pixel of a slide 960 wide, on which the unit is 16. */
-	--slide-pixel: calc(var(--slide-unit) / 16);
-	position: relative;
-	display: block;
-	overflow: clip;
-}
-
-/* biome-ignore lint/style/noDescendingSpecificity: it says where a box goes, which the rules colouring a box proposed for adding or removing say nothing of. */
-[data-slide][data-placement] [data-slide-box] {
-	position: absolute;
-	top: calc(var(--box-y) * var(--slide-pixel));
-	left: calc(var(--box-x) * var(--slide-pixel));
-	width: calc(var(--box-w) * var(--slide-pixel));
-	height: calc(var(--box-h) * var(--slide-pixel));
-}
-
-/* An image no taller than its box, nor than its layout draws it. */
-[data-slide][data-placement] [data-slide-box] img {
-	max-height: calc(var(--box-h) * var(--slide-pixel));
-}
-
-[data-slide][data-layout="image"][data-placement] [data-box-role="image"] img {
-	max-height: min(calc(25 * var(--slide-unit)), calc(var(--box-h) * var(--slide-pixel)));
-}
-
-/*
- * A box off its slide (`isOffItsSlide`), which whoever draws the slide says
- * with `data-removed`: not drawn, and taking no room among the others. A
- * section break's accent, which its label draws, goes with the label.
- */
-:is(.live-deck, .slide-drawing) [data-slide-box][data-removed] {
-	display: none;
 }
 
 /*
@@ -1517,9 +1498,43 @@
 	display: none;
 }
 
+/*
+ * The slide's body takes the room it is drawn in, scaled, so its notes follow
+ * it, and keeps its corners as round at any scale. The slide's own element
+ * holds the notes too, so whoever draws the stage paints the slide's colour
+ * behind its body alone (see `deck-stage.ts`).
+ */
 .live-deck [data-slide-body] {
-	border-radius: 10px;
+	--stage-radius: 10px;
+	align-self: flex-start;
+	margin-right: calc(960px * (var(--slide-scale) - 1));
+	margin-bottom: calc(540px * (var(--slide-scale) - 1));
+	border-radius: calc(var(--stage-radius) / var(--slide-scale));
 	box-shadow: var(--slide-shadow);
+}
+
+/*
+ * A box being dragged on the stage (`deck-stage.ts`): drawn where the drag
+ * has it, over the frame its own inline style holds, which stays as it is.
+ * Only an important rule draws over an inline style; a decoration's style
+ * would do it too, but the editor takes each property it sets off the box
+ * when it goes, the box's own frame with it. A shape's outline keeps its
+ * width as the box stretches, as it will once the drag is written and the
+ * shape's path stretched with the box.
+ */
+.live-deck [data-slide-box][data-dragged] {
+	/* biome-ignore lint/complexity/noImportantStyles: over the box's inline frame, as said above. */
+	left: var(--dragged-x) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: over the box's inline frame, as said above. */
+	top: var(--dragged-y) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: over the box's inline frame, as said above. */
+	width: var(--dragged-width) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: over the box's inline frame, as said above. */
+	height: var(--dragged-height) !important;
+}
+
+.live-deck [data-slide-box][data-dragged] > svg > path {
+	vector-effect: non-scaling-stroke;
 }
 
 /* What the stage puts under the body (`deck-stage.ts`): a slide that runs over, and suggestions without room beside it. */
@@ -1561,7 +1576,7 @@
 
 @media (width < 48rem) {
 	.live-deck [data-slide-body] {
-		border-radius: 8px;
+		--stage-radius: 8px;
 	}
 
 	.live-deck [data-speaker-notes] {
@@ -1575,8 +1590,8 @@
 }
 
 .live-deck ins[data-id] > section[data-slide] > [data-slide-body] {
-	outline: 2px dashed var(--suggestion);
-	outline-offset: 4px;
+	outline: calc(2px / var(--slide-scale)) dashed var(--suggestion);
+	outline-offset: calc(4px / var(--slide-scale));
 }
 
 .live-deck del[data-id]:has(> section[data-slide]) {
@@ -1623,11 +1638,14 @@
 
 /*
  * Moving and resizing the boxes of the slide on the stage, drawn over it
- * (`screens/box-outlines.tsx`): the box being edited outlined in the
- * slide's accent, with a handle at each corner and side to resize it from; a
+ * (`screens/box-outlines.tsx`): the box being edited outlined by a hairline
+ * in the slide's accent, with a handle at each corner and side to resize it
+ * from, but for while it is dragged, when the line alone shows its edges; a
  * fainter outline round a box the pointer is over; along either outline, a
- * band that moves the box; and a line across the slide wherever a box being
- * dragged lines up with something.
+ * band that moves the box, drawn as nothing itself; and a line across the
+ * slide wherever a box being dragged lines up with something. A box whose
+ * band has the focus is the box being edited, which its outline and handles
+ * show.
  */
 .box-outlines {
 	position: absolute;
@@ -1648,7 +1666,12 @@
 }
 
 .box-outlines .box-outline[data-editing]::before {
-	outline: 1.5px solid var(--slide-accent);
+	outline: 1px solid var(--slide-accent);
+}
+
+/* The box being edited over a box the pointer is over, so its handles are never under the other's band. */
+.box-outlines .box-outline[data-editing] {
+	z-index: 1;
 }
 
 /*
@@ -1684,10 +1707,6 @@
 	);
 }
 
-.box-outlines .box-move:focus-visible {
-	box-shadow: inset 0 0 0 var(--band) var(--ring-halo);
-}
-
 /* A handle: a small square on the outline, in a larger area that is easier to grab, which a pen drags rather than the page. */
 .box-outlines .box-handle {
 	position: absolute;
@@ -1707,13 +1726,18 @@
 	box-sizing: border-box;
 	width: 10px;
 	height: 10px;
-	border: 1.5px solid var(--slide-accent);
+	border: 1px solid var(--slide-accent);
 	border-radius: 2px;
 	background: var(--slide-background);
 }
 
 .box-outlines .box-handle:focus-visible > span {
 	box-shadow: var(--ring-shadow);
+}
+
+/* Hidden, not gone, while the box is dragged: a handle being dragged keeps the pointer. */
+.box-outlines .box-outline[data-dragging] .box-handle {
+	visibility: hidden;
 }
 
 .box-outlines .box-guide {

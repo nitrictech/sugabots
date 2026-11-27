@@ -1,12 +1,13 @@
 import type { Artifact, ArtifactImageType } from "@sugabots/contracts";
 import type { ArtifactImageIds } from "@sugabots/contracts/http";
-import { SLIDE_HEIGHT, SLIDE_WIDTH } from "@sugabots/contracts/slides-markdown";
+import { backgroundOf } from "@sugabots/contracts/live-slides";
+import { SLIDE_HEIGHT, SLIDE_WIDTH } from "@sugabots/contracts/slide-geometry";
 import type { Node } from "@tiptap/pm/model";
 import { Clock, Effect } from "effect";
 import { imageSize } from "image-size";
 import PDFDocument from "pdfkit";
 import { piecesIn, type Typesetter, typesetterOn, widthOfSpaces } from "./pdf-fonts.ts";
-import { BACKGROUND, type DeckImage, ownImagesIn } from "./slide-design.ts";
+import { BACKGROUND, type DeckImage, ownImagesIn, paintOf } from "./slide-design.ts";
 import { arrangedSlide, type Box, type Measure, type Pen, type Size } from "./slide-layout.ts";
 
 /** The media type of a PDF. */
@@ -15,18 +16,22 @@ export const PDF_CONTENT_TYPE = "application/pdf";
 /**
  * `deck`, a `slides` deck as people see it, as a PDF titled as the artifact
  * is: a page for each of the deck's slides, in order, that is the slide, 16:9
- * and edge to edge, drawn as the app draws it in its light colours
- * (`slide-design.ts`), its boxes where people placed them and without those
- * they removed. Its text is real text in the app's fonts, which the file
- * holds as much of as it draws (`pdf-fonts.ts`), and a slide's text is drawn
- * at the largest of the app's steps at which it fits, as in the app
- * (`slide-layout.ts`); what runs over even at the smallest is cut off where
- * the app cuts it off, at the margin at its foot, or at the slide's edges once
- * its boxes are placed by hand. A link to an absolute address can be followed. An
- * image the deck keeps is drawn when it is a PNG or a JPEG PDFKit can read
- * and hold, within the pixels a deck may have unpacked to draw it
- * (`drawnImagesIn`); any other image is its words in a dashed box, as the app
- * shows an image it doesn't load. Speaker notes are left out.
+ * and edge to edge, on its background, or white. Each box is drawn at its
+ * frame, in the order the slide holds them, turned as it is turned: its fill,
+ * its outline and its shape's path, then what it holds, within its padding and
+ * where its vertical alignment sits it (`slide-layout.ts`). Its text is real
+ * text in the app's fonts, which the file holds as much of as it draws
+ * (`pdf-fonts.ts`), whatever font a stretch of it names; text in its own
+ * colour and size keeps them, and text that says none is drawn as the app
+ * draws text of its box's role (`slide-design.ts`), at the largest of the
+ * app's steps at which the slide fits. What runs past the slide's edges is
+ * cut off there. A link to an absolute address can be followed. An image the
+ * deck keeps is drawn upright, as its EXIF orientation says, filling its box
+ * when it is alone in a box of the image role (`imageFitOf`), when it is a PNG
+ * or a JPEG PDFKit can read and hold, within the pixels a deck may have
+ * unpacked to draw it (`drawnImagesIn`); any other image is its words in a
+ * dashed box, as the app shows an image it doesn't load. Speaker notes are
+ * left out.
  *
  * A character no font holds is drawn as the font's mark for a missing
  * character, marked with the character it stands for, which a reader that
@@ -86,7 +91,11 @@ async function pdfOf(
 	for (const slide of deck.children) {
 		document.addPage({ size: [PAGE.width, PAGE.height], margin: 0 });
 		document.scale(PAGE.width / SLIDE_WIDTH);
-		document.rect(0, 0, SLIDE_WIDTH, SLIDE_HEIGHT).fill(hex(BACKGROUND));
+		pen.fill({ x: 0, y: 0, width: SLIDE_WIDTH, height: SLIDE_HEIGHT }, { color: BACKGROUND });
+		const background = paintOf(backgroundOf(slide));
+		if (background) {
+			pen.fill({ x: 0, y: 0, width: SLIDE_WIDTH, height: SLIDE_HEIGHT }, background);
+		}
 		arrangedSlide(slide, measure).draw(pen);
 	}
 	document.end();
@@ -228,8 +237,10 @@ function embeddedIn(document: PDFKit.PDFDocument, bytes: Uint8Array): OpenedImag
 
 function penOn(document: PDFKit.PDFDocument, typesetter: Typesetter, images: DrawnImages): Pen {
 	const reading = document as unknown as ImageReading;
-	/** The boxes drawing is cut off at, outermost first. */
+	/** The boxes drawing is cut off at, outermost first, down the slide. */
 	const clips: Box[] = [];
+	/** How many turns what is drawn is within, which take it off the slide's own lines. */
+	let turns = 0;
 	return {
 		text(type, text, x, baseline) {
 			let at = x;
@@ -242,7 +253,7 @@ function penOn(document: PDFKit.PDFDocument, typesetter: Typesetter, images: Dra
 				if (!drawn) continue;
 				// A character no font holds is drawn as missing, so what it says is given for copying and searching.
 				if (piece.kind === "missing") document.markContent("Span", { actual: piece.text });
-				document.fillColor(hex(type.color)).text(drawn, at, baseline, {
+				document.fillColor(hex(type.color), type.opacity ?? 1).text(drawn, at, baseline, {
 					lineBreak: false,
 					baseline: "alphabetic",
 					features: type.features,
@@ -252,13 +263,13 @@ function penOn(document: PDFKit.PDFDocument, typesetter: Typesetter, images: Dra
 				at += typesetter.setWidthOf(type, drawn);
 			}
 		},
-		fill({ x, y, width, height }, { color, opacity, radius = 0 }) {
+		fill({ x, y, width, height }, { color, opacity = 1, radius = 0 }) {
 			document.save();
-			if (opacity !== undefined) document.fillOpacity(opacity);
+			document.fillColor(hex(color), opacity);
 			(radius > 0
 				? document.roundedRect(x, y, width, height, radius)
 				: document.rect(x, y, width, height)
-			).fill(hex(color));
+			).fill();
 			document.restore();
 		},
 		dashed({ x, y, width, height }, { color, radius }) {
@@ -270,30 +281,65 @@ function penOn(document: PDFKit.PDFDocument, typesetter: Typesetter, images: Dra
 				.stroke(hex(color));
 			document.restore();
 		},
-		image(address, { x, y, width, height }, radius) {
+		shape({ x, y, width, height }, { path, fill, stroke }) {
+			document.save();
+			document.translate(x, y);
+			if (fill) {
+				document.fillColor(hex(fill.color), fill.opacity);
+				(path ? document.path(path) : document.rect(0, 0, width, height)).fill();
+			}
+			if (stroke) {
+				// The app draws a box's outline within its frame, and a shape's on its path.
+				const inset = path ? 0 : stroke.width / 2;
+				const outline = path
+					? document.path(path)
+					: document.rect(
+							inset,
+							inset,
+							Math.max(0, width - stroke.width),
+							Math.max(0, height - stroke.width),
+						);
+				outline
+					.lineWidth(stroke.width)
+					.strokeColor(hex(stroke.paint.color), stroke.paint.opacity)
+					.stroke();
+			}
+			document.restore();
+		},
+		// PDFKit turns and mirrors an image upright as its EXIF orientation says, as a browser does.
+		image(address, { x, y, width, height }, clip, radius) {
 			const image = images.at(address);
 			if (!image) return;
 			document.save();
-			document.roundedRect(x, y, width, height, radius).clip();
+			document.roundedRect(clip.x, clip.y, clip.width, clip.height, radius).clip();
 			reading.image(image, x, y, { width, height });
+			document.restore();
+		},
+		rotated({ x, y, width, height }, degrees, draw) {
+			if (degrees === 0) return draw();
+			document.save();
+			document.rotate(degrees, { origin: [x + width / 2, y + height / 2] });
+			turns += 1;
+			draw();
+			turns -= 1;
 			document.restore();
 		},
 		clipped(box, draw) {
 			const { x, y, width, height } = box;
 			document.save();
 			document.rect(x, y, width, height).clip();
-			clips.push(box);
+			if (turns === 0) clips.push(box);
 			draw();
-			clips.pop();
+			if (turns === 0) clips.pop();
 			document.restore();
 		},
-		cutsOffFrom: (y) => clips.some((clip) => y >= clip.y + clip.height),
+		cutsOffFrom: (y) => turns === 0 && clips.some((clip) => y >= clip.y + clip.height),
 		// A link reaches only as far down as what it is drawn with shows.
 		link({ x, y, width, height }, url) {
-			const bottom = clips.reduce(
-				(lowest, clip) => Math.min(lowest, clip.y + clip.height),
-				y + height,
-			);
+			const bottom =
+				turns === 0
+					? clips.reduce((lowest, clip) => Math.min(lowest, clip.y + clip.height), y + height)
+					: y + height;
 			if (bottom > y) document.link(x, y, width, bottom - y, url);
 		},
 	};

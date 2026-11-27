@@ -1,7 +1,7 @@
 import type { AttributeSpec, Schema } from "@tiptap/pm/model";
 import { describe, expect, it } from "vitest";
 import { LIVE_DOCUMENT_SCHEMA } from "./live-document.ts";
-import { liveDocumentSchema } from "./live-document-markdown.ts";
+import { liveDocumentSchema } from "./live-document-text.ts";
 
 /**
  * What the sync layer depends on in a schema: each node's and mark's name,
@@ -56,6 +56,6 @@ describe("LIVE_DOCUMENT_SCHEMA", () => {
 		expect(
 			{ [LIVE_DOCUMENT_SCHEMA]: await fingerprint() },
 			"A live document's nodes or marks changed. Raise LIVE_DOCUMENT_SCHEMA in live-document.ts, so tabs built for the old schema can't join and delete what they can't hold, then record the new number with this fingerprint here.",
-		).toEqual({ 8: "ae9b79445eae400f" });
+		).toEqual({ 9: "c873bc8fa8b1131b" });
 	});
 });

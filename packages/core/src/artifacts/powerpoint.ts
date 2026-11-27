@@ -4,19 +4,17 @@ import {
 	MAX_ARTIFACT_IMAGES_BYTES,
 } from "@sugabots/contracts";
 import type { ArtifactImageIds } from "@sugabots/contracts/http";
-import { placementOf, SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
 import {
-	type BoxRole,
-	type BoxRoleOf,
-	type Frame,
-	type Placement,
-	SLIDE_BOX_ROLES,
-	SLIDE_END_MARGIN,
-	SLIDE_LAYOUTS,
-	SLIDE_SIDE_MARGINS,
-	SLIDE_UNIT,
-	type SlideLayout,
-} from "@sugabots/contracts/slides-markdown";
+	backgroundOf,
+	bodyOf,
+	boxAttributesOf,
+	layoutOf,
+	notesOf,
+} from "@sugabots/contracts/live-slides";
+import type { BoxAttributes, BoxRole } from "@sugabots/contracts/slide-box";
+import { type Frame, SLIDE_UNIT } from "@sugabots/contracts/slide-geometry";
+import { defaultFrameOf, type SlideLayout } from "@sugabots/contracts/slide-layouts";
+import { pathCommandsOf, type SvgPath } from "@sugabots/contracts/svg-path";
 import { Fragment, type Mark, type Node } from "@tiptap/pm/model";
 import { Effect } from "effect";
 import { imageSize } from "image-size";
@@ -27,38 +25,43 @@ import { typesetterOn } from "./pdf-fonts.ts";
 import {
 	ACCENT,
 	accentBarOver,
+	alignedOffset,
 	BACKGROUND,
 	BLOCK_QUOTE_LOOK,
-	type BlocksOfLayout,
 	BOLD_WEIGHT,
-	BOX_PARTS,
+	type BoxLook,
+	boxLookOf,
 	CODE_LOOK,
-	COLUMN_GAP_UNITS,
 	COLUMN_LOOK,
-	CONTENT_BOTTOM,
-	CONTENT_HEIGHT,
-	childNamed,
-	contentWidthOf,
+	cellInsetOf,
+	contentAreaOf,
 	type DeckImage,
-	IMAGE_LAYOUT,
-	isEmptyParagraph,
+	fittedImage,
+	hasAccentBar,
+	type ImageFit,
+	imageFillingBox,
+	imageFitOf,
+	insetsOf,
 	LAYOUT_LOOKS,
 	LIST_LOOK,
+	lineHeightOf,
 	linkInFile,
+	type OwnTextStyle,
 	ownImagesIn,
-	type PartLook,
-	partLook,
+	ownTextStyleOf,
+	type Paint,
+	paintOf,
 	QUOTE_LOOK,
 	RULE,
 	RULE_THICKNESS,
-	SECTION_BAR,
-	type SlideBlocks,
-	type SlidePart,
-	slideBlocksOf,
+	type ShapeLook,
+	shapeLookOf,
 	TABLE_LOOK,
 	TEXT,
+	type TextAlign,
 	type TextLook,
 	TINT,
+	textAlignOf,
 } from "./slide-design.ts";
 import {
 	arrangedSlide,
@@ -78,33 +81,32 @@ export type PowerPointImage = DeckImage;
 
 /**
  * `deck`, a `slides` deck as people see it, as a PowerPoint file titled as
- * the artifact is, 16:9, a slide for each of the deck's in order, without the
- * boxes people removed from them. Each of the deck's layouts
- * is a layout of the file's, named as the app names it and laid out as the
- * app draws it, in light colours and Arial, and each slide's title and text
- * are in its layout's placeholders. Text keeps its bold, italics, underline,
- * strikethrough, superscript, subscript, highlight, inline code and links,
- * lists are PowerPoint's own at their depth, and a slide's speaker notes are
- * its notes. A table is PowerPoint's own. An image the deck keeps is held in
- * the file, as `imageOf` gives it, with its words, when it is a PNG, JPEG or
- * GIF; any other image comes out as its words. A quote is its paragraphs in
- * grey italics, and a code block its lines in a monospace font.
+ * the artifact is, 16:9, a slide for each of the deck's in order, on its
+ * background, or white. Each box is a shape at its frame, in the order the
+ * slide holds them, turned as it is turned: filled and outlined as it is, its
+ * path as PowerPoint's own freeform, and what it holds within its padding,
+ * where its vertical alignment sits it. A slide's first title box that holds
+ * only text, or else its quote, is its title placeholder, which PowerPoint's
+ * outline and screen readers take for the slide's title. Every slide is on
+ * one layout, which holds a title alone where the app puts a new slide's.
  *
- * Each slide's text is set at the step the app draws it at, the largest of
- * its steps at which it fits, as the PDF finds it (`slide-layout.ts`), and
- * each of its boxes is placed where the app sets its text at that step, as
- * tall as that text with room to spare for Arial, so a slide shows fitted
- * wherever the file is opened. Text is also set to shrink on overflow, which
- * a presentation program works out when the text is next edited, for a slide
- * that runs over even at the smallest step.
+ * Text keeps its bold, italics, underline, strikethrough, superscript,
+ * subscript, highlight, inline code and links, its own colour, size and font,
+ * and its paragraphs' alignment and line height. Text that says nothing of
+ * its own look is set as the app sets text of its box's role
+ * (`slide-design.ts`), in Arial, at the step the app draws its slide's text
+ * at, the largest of its steps at which the slide fits, as the PDF finds it
+ * (`slide-layout.ts`). Lists are PowerPoint's own at their depth, and a
+ * slide's speaker notes are its notes. A table is PowerPoint's own. An image
+ * the deck keeps is held in the file, as `imageOf` gives it, with its words,
+ * when it is a PNG, JPEG or GIF; any other image comes out as its words. A
+ * quote is its paragraphs in grey italics, and a code block its lines in a
+ * monospace font.
  *
- * A slide whose boxes somebody placed by hand has each region at the frame of
- * the box it stands for (`Region.box`), from the frame's top, as the app
- * draws a placed slide, and its text at the step the app fits it at.
- *
- * Whatever a layout has no place for, such as a table on a title slide, is
- * stacked with the rest of what its region holds, in boxes of its own, so
- * nothing the deck holds is left out.
+ * PowerPoint's text holds no table or picture, so a box holding either is its
+ * shape with what it holds stacked on it, each piece as tall as the app sets
+ * it, its text in boxes of its own; each piece turns with the box, but for a
+ * table, which PowerPoint doesn't turn.
  */
 export const powerPointFileOf = <E, R>(
 	artifact: Pick<Artifact, "podId" | "id" | "title">,
@@ -137,9 +139,6 @@ export const powerPointFileOf = <E, R>(
 
 const POINTS_PER_INCH = 72;
 
-/** The units a file's positions are in. */
-const EMUS_PER_POINT = 12_700;
-
 /** Fonts every copy of PowerPoint has, which the app's own isn't. */
 const FONT = "Arial";
 const CODE_FONT = "Courier New";
@@ -149,17 +148,20 @@ const HIGHLIGHT_YELLOW = "FFFF00";
 
 /**
  * The height of a line of Arial at 100% line spacing, as a multiple of its
- * size, which PowerPoint's line spacing is a share of, as CSS's isn't.
+ * size, which PowerPoint's line spacing is a share of, as CSS's isn't. Text
+ * in another font is spaced by it too, as near as a share of a line can say
+ * CSS's line height without knowing the font.
  */
 const ARIAL_LINE_HEIGHT = 1.15;
 
 /**
- * How much taller than the app's measure of its text a box is made, as a
- * share of that height, for the text set in Arial rather than the app's
- * Rubik. Arial runs 1 to 7% narrower than Rubik on a slide's words, and wraps
- * them in no more lines, but a line of wide capitals can run 5% wider, and a
- * program that takes Arial's single line spacing as 1.2 times its size,
- * rather than the 1.15 it is, sets lines 4% further apart.
+ * How much taller than the app's measure of its text a box of text stacked
+ * on a box is made, as a share of that height, for the text set in Arial
+ * rather than the app's Rubik. Arial runs 1 to 7% narrower than Rubik on a
+ * slide's words, and wraps them in no more lines, but a line of wide
+ * capitals can run 5% wider, and a program that takes Arial's single line
+ * spacing as 1.2 times its size, rather than the 1.15 it is, sets lines 4%
+ * further apart.
  */
 const ARIAL_ALLOWANCE = 0.05;
 
@@ -174,508 +176,91 @@ interface Box {
 	h: number;
 }
 
-/** A part of a layout of `L`, which is a placeholder of the file's, standing for one of the layout's boxes. */
-interface Region<L extends SlideLayout> {
-	/** Its placeholder's name, by which a slide's text for it is put in it. */
-	name: string;
-	/** What PowerPoint takes it for: the slide's title, or its text. */
-	type: "title" | "body";
-	/** What it shows when empty on a slide made in PowerPoint. */
-	prompt: string;
-	/** How text typed into it on a slide made in PowerPoint looks. */
-	writes: TextLook;
-	/** How tall the text its box has room for is on a slide made in PowerPoint, in points. */
-	room: number;
-	/** The edge of its box its text sits against. */
-	anchor: "top" | "bottom";
-	/**
-	 * The box of a slide it stands for: it holds what the box holds, set as
-	 * the app sets that box's part of the slide (`BOX_PARTS`), and once
-	 * somebody placed the slide's boxes by hand, it is at the box's frame. A
-	 * section break's text stands for its label, which has a frame of its
-	 * own, and its title for the whole of its title's box.
-	 */
-	box: BoxRoleOf<L>;
-	/**
-	 * What a slide its layout places holds in it, when that isn't what its box
-	 * holds: on a section break, whose label the file's layout has no place
-	 * over its title for.
-	 */
-	holds?(blocks: BlocksOfLayout<L>): readonly Node[];
+/** A box on a slide, and how far it is turned clockwise about its middle, in degrees. */
+interface Placed extends Box {
+	rotate?: number;
 }
 
-/** A region standing for the box of role `R`, for any layout with a box of that role. */
-type RegionFor<R extends BoxRole> = Omit<Region<SlideLayout>, "box" | "holds"> & { box: R };
+/** The least a shape is across or down, in points: PowerPoint scales a freeform's path by its size, which mustn't be none. */
+const THINNEST = 0.01;
 
-/** How tall the text a slide puts in its region numbered `region` is, set across `width`, in points: 0 for none. */
-type HeightOf = (region: number, width: number) => number;
-
-/** Where a slide's regions' boxes are, in the order of its layout's regions, and the section break's accent bar. */
-interface Placed {
-	boxes: readonly Box[];
-	bar?: Box;
-}
-
-/** A slide's text, which a layout places its regions for. */
-interface TextToPlace {
-	/** The step it is set at, one of `SLIDE_TEXT_STEPS`. */
-	step: number;
-	/** How tall it is in each region. */
-	heightOf: HeightOf;
-	/**
-	 * Whether it puts anything in the region numbered `region`, if only an
-	 * empty line. An empty line takes no room, but the app sets it as far from
-	 * what is around it as any block, so a region holding one is as far from
-	 * the others as one holding words.
-	 */
-	holds: (region: number) => boolean;
-	/** Whether the slide fits at `step`. */
-	fits: boolean;
-	/** The section break's label, which its accent bar goes with. */
-	label: SectionLabel;
-}
-
-/**
- * A slide's section break label, as the file sets it: `"held"` when it holds
- * more than empty paragraphs, which the section break's text region holds
- * (`sectionParts`); `"empty"` when it holds only empty paragraphs, which no
- * region holds, though the app sets them between the accent bar and the
- * title, as far from each as it sets its blocks apart; and `undefined` when
- * the slide shows no label, or is no section break.
- */
-type SectionLabel = "held" | "empty" | undefined;
-
-function sectionLabelOf(blocks: SlideBlocks): SectionLabel {
-	if (blocks.layout !== "section" || !blocks.shows("label")) return undefined;
-	return blocks.inBox("label").every(isEmptyParagraph) ? "empty" : "held";
-}
-
-/** Where a layout's regions are for `text`, as the app places it. */
-type Place = (text: TextToPlace) => Placed;
-
-/** One of the deck's layouts, `L`, as a layout of the file's. */
-interface LayoutDesign<L extends SlideLayout> {
-	/** Its name in PowerPoint's Layout menu, as the app's layout picker names it. */
-	name: string;
-	regions: readonly Region<L>[];
-	place: Place;
-}
-
-/** The height of `count` lines of `look` at full size. */
-const lines = (count: number, look: TextLook) => count * look.size * SLIDE_UNIT * look.lineHeight;
+const boxOf = ({ x, y, width, height }: Frame): Box => ({ x, y, w: width, h: height });
 
 /** Text `height` tall, with Arial's allowance. */
 const grown = (height: number) => height * (1 + ARIAL_ALLOWANCE);
 
-/** A box for text `height` tall, from `top` down. */
-const below = (x: number, w: number, top: number, height: number): Box => ({
-	x,
-	y: top,
-	w,
-	h: grown(height),
+const inchesOf = ({ x, y, w, h }: Box) => ({
+	x: x / POINTS_PER_INCH,
+	y: y / POINTS_PER_INCH,
+	w: w / POINTS_PER_INCH,
+	h: h / POINTS_PER_INCH,
 });
 
-/** A box for text `height` tall, up from `bottom`. */
-const above = (x: number, w: number, bottom: number, height: number): Box => ({
-	x,
-	y: bottom - grown(height),
-	w,
-	h: grown(height),
+/** `placed` as PptxGenJS takes it: in inches, turned between 0 and 360 degrees, as PowerPoint writes a turn. */
+const positionOf = ({ rotate = 0, ...box }: Placed) => ({
+	...inchesOf(box),
+	...(rotate % 360 !== 0 ? { rotate: ((rotate % 360) + 360) % 360 } : {}),
 });
 
 /**
- * A box from `top` to the margin at the slide's foot, as the app lets the
- * text under a slide's title run, or further for text `height` tall that fits
- * at its step. Text that runs over even at the smallest step keeps to the
- * margin, so shrinking it when it is edited fits it within.
+ * `box`, on a box at `frame` turned `degrees` clockwise about its middle, as
+ * PowerPoint places it, as it turns each shape about its own middle: its
+ * middle turned about the frame's, and itself turned as much.
  */
-const toFoot = (x: number, w: number, top: number, height: number, fits: boolean): Box => ({
-	x,
-	y: top,
-	w,
-	h: fits ? Math.max(CONTENT_BOTTOM - top, grown(height)) : CONTENT_BOTTOM - top,
-});
-
-/**
- * A section break's title and text, as its regions hold them. The file's
- * layout has no place over a title for a label, so a section break with a
- * label is all text, in the order it reads; without one, a heading its title
- * box starts with is its title, and what follows it is text.
- */
-function sectionParts(blocks: BlocksOfLayout<"section">): {
-	title: readonly Node[];
-	text: readonly Node[];
-} {
-	if (sectionLabelOf(blocks) === "held") return { title: [], text: blocks.all };
-	const [first, ...rest] = blocks.inBox("title");
-	if (first?.type.name !== "heading") return { title: [], text: blocks.inBox("title") };
-	return { title: [first], text: rest };
-}
-
-/** The region standing for a slide's title box, which PowerPoint takes for its title. */
-const titleRegion = (
-	writes: TextLook,
-	room: number,
-	anchor: Region<SlideLayout>["anchor"],
-): RegionFor<"title"> => ({
-	name: "title",
-	type: "title",
-	prompt: "Title",
-	writes,
-	room,
-	anchor,
-	box: "title",
-});
-
-const TOP_TITLE = titleRegion(
-	LAYOUT_LOOKS.bullets.heading,
-	lines(1, LAYOUT_LOOKS.bullets.heading),
-	"top",
-);
-
-/** A body region running from under the title to the margin at the slide's foot, standing for the box of `box`. */
-const footRegion = <R extends BoxRole>(
-	name: string,
-	prompt: string,
-	writes: TextLook,
-	box: R,
-): RegionFor<R> => ({
-	name,
-	type: "body",
-	prompt,
-	writes,
-	room: 0,
-	anchor: "top",
-	box,
-});
-
-/**
- * The title across the top, and `columns` regions side by side under it, as
- * far under it as `layout` sets its blocks apart while there is a title, if
- * only an empty line.
- */
-const underTitle =
-	(layout: SlideLayout, columns: 1 | 2): Place =>
-	({ step, heightOf, holds, fits }) => {
-		const unit = step * SLIDE_UNIT;
-		const sideMargin = SLIDE_SIDE_MARGINS[layout];
-		const contentWidth = contentWidthOf(layout);
-		const title = heightOf(0, contentWidth);
-		const top = SLIDE_END_MARGIN + (holds(0) ? title + LAYOUT_LOOKS[layout].gap * unit : 0);
-		const gap = COLUMN_GAP_UNITS * unit;
-		const width = columns === 1 ? contentWidth : (contentWidth - gap) / 2;
-		return {
-			boxes: [
-				below(sideMargin, contentWidth, SLIDE_END_MARGIN, title),
-				...Array.from({ length: columns }, (_, index) =>
-					toFoot(sideMargin + index * (width + gap), width, top, heightOf(index + 1, width), fits),
-				),
-			],
-		};
-	};
-
-/**
- * Two regions one over the other, together in the middle of `layout`'s
- * margins, as far apart as it sets its blocks while both hold something, if
- * only an empty line.
- */
-const centred =
-	(layout: SlideLayout): Place =>
-	({ step, heightOf, holds }) => {
-		const x = SLIDE_SIDE_MARGINS[layout];
-		const width = contentWidthOf(layout);
-		const first = heightOf(0, width);
-		const second = heightOf(1, width);
-		const gap = holds(0) && holds(1) ? LAYOUT_LOOKS[layout].gap * step * SLIDE_UNIT : 0;
-		const top = SLIDE_END_MARGIN + Math.max(0, (CONTENT_HEIGHT - first - gap - second) / 2);
-		return {
-			boxes: [above(x, width, top + first, first), below(x, width, top + first + gap, second)],
-		};
-	};
-
-/**
- * The section break's accent bar and an empty label, while it shows a label,
- * then its title and its text, while they hold anything, one under another at
- * the margin at the slide's foot, as far apart as the layout sets its blocks.
- * An empty label takes no room, as an empty title doesn't.
- */
-const atFoot: Place = ({ step, heightOf, holds, label }) => {
-	const unit = step * SLIDE_UNIT;
-	const sideMargin = SLIDE_SIDE_MARGINS.section;
-	const width = contentWidthOf("section");
-	const bar = { w: SECTION_BAR.width * unit, h: SECTION_BAR.height * unit };
-	const title = heightOf(0, width);
-	const text = heightOf(1, width);
-	const {
-		tops: [, , titleTop = 0, textTop = 0],
-		height,
-	} = stackedTops(
-		[
-			label ? bar.h : undefined,
-			label === "empty" ? 0 : undefined,
-			holds(0) ? title : undefined,
-			holds(1) ? text : undefined,
-		],
-		LAYOUT_LOOKS.section.gap * unit,
-	);
-	const top = SLIDE_END_MARGIN + Math.max(0, CONTENT_HEIGHT - height);
+function turnedWith(box: Box, frame: Frame, degrees: number): Placed {
+	if (degrees % 360 === 0) return box;
+	const radians = (degrees * Math.PI) / 180;
+	const centre = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 };
+	const across = box.x + box.w / 2 - centre.x;
+	const down = box.y + box.h / 2 - centre.y;
 	return {
-		boxes: [
-			above(sideMargin, width, top + titleTop + title, title),
-			below(sideMargin, width, top + textTop, text),
-		],
-		bar: label ? { x: sideMargin, y: top, ...bar } : undefined,
+		x: centre.x + across * Math.cos(radians) - down * Math.sin(radians) - box.w / 2,
+		y: centre.y + across * Math.sin(radians) + down * Math.cos(radians) - box.h / 2,
+		w: box.w,
+		h: box.h,
+		rotate: degrees,
 	};
-};
-
-/**
- * Where each of `heights` starts, from 0, one under another `gap` apart, and
- * how tall they are together. An `undefined` height is of something that
- * isn't there, which takes neither room nor a gap, and starts where the next
- * would.
- */
-function stackedTops(
-	heights: readonly (number | undefined)[],
-	gap: number,
-): { tops: number[]; height: number } {
-	const tops: number[] = [];
-	let height = 0;
-	let anyBefore = false;
-	for (const each of heights) {
-		const top = anyBefore ? height + gap : 0;
-		tops.push(top);
-		if (each === undefined) continue;
-		height = top + each;
-		anyBefore = true;
-	}
-	return { tops, height };
 }
 
-/**
- * The title and the text box under it together in the middle of the left,
- * the text as far under the title as the layout sets it while there is a
- * title, if only an empty line, and the image box in the middle of the right.
- */
-const besideImage: Place = ({ step, heightOf, holds }) => {
-	const unit = step * SLIDE_UNIT;
-	const sideMargin = SLIDE_SIDE_MARGINS.image;
-	const gap = COLUMN_GAP_UNITS * unit;
-	const width = (contentWidthOf("image") - gap) / 2;
-	const title = heightOf(0, width);
-	const text = heightOf(1, width);
-	const image = heightOf(2, width);
-	const titleGap = holds(0) ? IMAGE_LAYOUT.titleGap * unit : 0;
-	const left = title + titleGap + text;
-	const height = Math.max(CONTENT_HEIGHT, left, image);
-	const leftTop = SLIDE_END_MARGIN + (height - left) / 2;
-	return {
-		boxes: [
-			above(sideMargin, width, leftTop + title, title),
-			below(sideMargin, width, leftTop + title + titleGap, text),
-			below(sideMargin + width + gap, width, SLIDE_END_MARGIN + (height - image) / 2, image),
-		],
-	};
-};
-
-/**
- * Where `regions`, a layout's, are on a slide of that `layout` whose boxes
- * somebody placed by hand, at `step`: each at the frame of the box it stands
- * for (`Region.box`), across it, its text from the frame's top, as the app
- * draws a placed box, but in the middle of the frame for the image layout's
- * image box, which the app centres there. A region whose text sits at the
- * foot of its box is as tall as its text; another reaches the frame's foot at
- * least. The section break's accent bar is over its label, while it shows one.
- */
-function placedRegions(
-	regions: readonly Region<SlideLayout>[],
-	layout: SlideLayout,
-	placement: Placement,
-	step: number,
-	heightOf: HeightOf,
-	labelled: boolean,
-): Placed {
-	const boxes = regions.map((region, index): Box => {
-		const frame = frameOfBox(placement, layout, region.box);
-		const height = heightOf(index, frame.width);
-		const top = region.box === "image" ? frame.y + (frame.height - height) / 2 : frame.y;
-		if (region.anchor === "bottom") return above(frame.x, frame.width, top + height, height);
-		return {
-			x: frame.x,
-			y: top,
-			w: frame.width,
-			h: Math.max(frame.y + frame.height - top, grown(height)),
-		};
-	});
-	if (!labelled) return { boxes };
-	const bar = accentBarOver(frameOfBox(placement, layout, "label"), step * SLIDE_UNIT);
-	return { boxes, bar: { x: bar.x, y: bar.y, w: bar.width, h: bar.height } };
-}
-
-/** The frame of the box of `role` on a slide of `layout` placed at `placement`. */
-function frameOfBox(placement: Placement, layout: SlideLayout, role: BoxRole): Frame {
-	const roles: readonly BoxRole[] = SLIDE_BOX_ROLES[layout];
-	const frame = placement[roles.indexOf(role)];
-	if (!frame) throw new Error(`A slide laid out as ${layout} has no box for its ${role}`);
-	return frame;
-}
-
-/** Each of the deck's layouts as the file lays it out, after the mock-ups the app draws. */
-const LAYOUTS: { readonly [L in SlideLayout]: LayoutDesign<L> } = {
-	title: {
-		name: "Title",
-		regions: [
-			titleRegion(LAYOUT_LOOKS.title.heading, lines(2, LAYOUT_LOOKS.title.heading), "bottom"),
-			{
-				name: "subtitle",
-				type: "body",
-				prompt: "Subtitle",
-				writes: LAYOUT_LOOKS.title.text,
-				room: lines(2, LAYOUT_LOOKS.title.text),
-				anchor: "top",
-				box: "subtitle",
-			},
-		],
-		place: centred("title"),
-	},
-	bullets: {
-		name: "Title and bullets",
-		regions: [TOP_TITLE, footRegion("body", "Text", LAYOUT_LOOKS.bullets.text, "body")],
-		place: underTitle("bullets", 1),
-	},
-	columns: {
-		name: "Two columns",
-		regions: [
-			TOP_TITLE,
-			footRegion("left", "Left column", COLUMN_LOOK.text, "leftColumn"),
-			footRegion("right", "Right column", COLUMN_LOOK.text, "rightColumn"),
-		],
-		place: underTitle("columns", 2),
-	},
-	image: {
-		name: "Image and text",
-		regions: [
-			titleRegion(LAYOUT_LOOKS.image.heading, lines(2, LAYOUT_LOOKS.image.heading), "bottom"),
-			{
-				name: "text",
-				type: "body",
-				prompt: "Text",
-				writes: IMAGE_LAYOUT.text,
-				room: lines(3, IMAGE_LAYOUT.text),
-				anchor: "top",
-				box: "text",
-			},
-			{
-				name: "image",
-				type: "body",
-				prompt: "Image",
-				writes: IMAGE_LAYOUT.text,
-				room: CONTENT_HEIGHT,
-				anchor: "top",
-				box: "image",
-			},
-		],
-		place: besideImage,
-	},
-	section: {
-		name: "Section break",
-		regions: [
-			{
-				...titleRegion(
-					LAYOUT_LOOKS.section.heading,
-					lines(2, LAYOUT_LOOKS.section.heading),
-					"bottom",
-				),
-				holds: (blocks) => sectionParts(blocks).title,
-			},
-			{
-				name: "body",
-				type: "body",
-				prompt: "Text",
-				writes: LAYOUT_LOOKS.section.text,
-				room: lines(1, LAYOUT_LOOKS.section.text),
-				anchor: "top",
-				box: "label",
-				holds: (blocks) => sectionParts(blocks).text,
-			},
-		],
-		place: atFoot,
-	},
-	quote: {
-		name: "Quote",
-		regions: [
-			{
-				name: "quote",
-				// The slide's title, as PowerPoint's own quote layouts have it, for an outline and a screen reader.
-				type: "title",
-				prompt: "Quote",
-				writes: QUOTE_LOOK,
-				room: lines(3, QUOTE_LOOK),
-				anchor: "bottom",
-				box: "quote",
-			},
-			{
-				name: "attribution",
-				type: "body",
-				prompt: "Who said it",
-				writes: LAYOUT_LOOKS.quote.text,
-				room: lines(1, LAYOUT_LOOKS.quote.text),
-				anchor: "top",
-				box: "attribution",
-			},
-		],
-		place: centred("quote"),
-	},
-	table: {
-		name: "Table",
-		regions: [TOP_TITLE, footRegion("table", "Table", LAYOUT_LOOKS.table.text, "table")],
-		place: underTitle("table", 1),
-	},
-};
-
-/**
- * What `blocks`, a slide's, puts in each region of the slide's layout: what
- * the region's box holds, or, on a slide its layout places, rather than one
- * `placed` by hand, what the region holds of it (`Region.holds`). Nothing for
- * a region whose box is off the slide.
- */
-function heldInRegions<L extends SlideLayout>(
-	blocks: BlocksOfLayout<L>,
-	placed: boolean,
-): (readonly Node[])[] {
-	const regions: readonly Region<L>[] = LAYOUTS[blocks.layout].regions;
-	return regions.map((region) =>
-		placed || !region.holds ? blocks.inBox(region.box) : region.holds(blocks),
-	);
-}
-
-/** What the file writes of `held`, what a region holds: nothing when it is only empty paragraphs, which show nothing. */
-const writtenOf = (held: readonly Node[]) => (held.every(isEmptyParagraph) ? [] : held);
-
-/** Where a layout's regions are on a slide made from it in PowerPoint: with room for the text each is made for, a section break's label included. */
-const roomyBoxes = ({ regions, place }: LayoutDesign<SlideLayout>) =>
-	place({
-		step: 1,
-		heightOf: (region) => regions[region]?.room ?? 0,
-		holds: () => true,
-		fits: true,
-		label: "held",
-	}).boxes;
-
-/**
- * PptxGenJS numbers a layout's placeholders from 100, in the order they are
- * defined, which the regions are.
- */
-const FIRST_PLACEHOLDER_INDEX = 100;
+/** How transparent `paint` is, as PowerPoint says it: a percentage. */
+const transparencyOf = ({ opacity }: Paint) => Math.round((1 - opacity) * 100);
 
 /** An image the file can hold: as PptxGenJS takes it, with its size in pixels. */
 interface DrawableImage {
 	data: string;
+	/** Its size as it is stored. */
 	width: number;
 	height: number;
-	/** Its size as it is shown, upright, which its EXIF orientation may turn on its side. */
+	/** How it is turned and mirrored to show upright, as its EXIF orientation says (`ORIENTATIONS`). */
+	orientation: Orientation;
+	/** Its size as it is shown, upright, which its orientation may turn on its side. */
 	upright: Size;
 	byteLength: number;
 }
+
+/**
+ * How PowerPoint shows a picture upright, as a browser shows it by its EXIF
+ * orientation, by the orientation's number: the picture mirrored across, or
+ * down, and then turned clockwise. PowerPoint draws a picture's pixels as
+ * they are stored, and mirrors a shape before it turns it, as EXIF's
+ * orientations do: 5 is mirrored and turned three quarters, and 7 mirrored
+ * and turned a quarter.
+ */
+const ORIENTATIONS = {
+	1: { rotate: 0 },
+	2: { rotate: 0, flipH: true },
+	3: { rotate: 180 },
+	4: { rotate: 0, flipV: true },
+	5: { rotate: 270, flipH: true },
+	6: { rotate: 90 },
+	7: { rotate: 90, flipH: true },
+	8: { rotate: 270 },
+} as const satisfies Record<number, { rotate: number; flipH?: true; flipV?: true }>;
+
+type Orientation = keyof typeof ORIENTATIONS;
+
+const orientationIn = (value: unknown): Orientation =>
+	typeof value === "number" && value in ORIENTATIONS ? (value as Orientation) : 1;
 
 /**
  * The kinds of image every PowerPoint draws. Older copies show no WebP, and
@@ -692,25 +277,95 @@ function drawable({ contentType, bytes }: PowerPointImage): DrawableImage | unde
 	if (!DRAWN_TYPES.has(contentType)) return undefined;
 	const size = sizeOf(bytes);
 	if (!size) return undefined;
-	const { width, height, sideways } = size;
+	const { width, height, orientation } = size;
+	const stored = orientation === 1 ? bytes : withOrientationUpright(bytes);
 	return {
-		data: `${contentType};base64,${Buffer.from(bytes).toString("base64")}`,
+		data: `${contentType};base64,${Buffer.from(stored).toString("base64")}`,
 		width,
 		height,
-		upright: sideways ? { width: height, height: width } : { width, height },
+		orientation,
+		upright: isSideways(orientation) ? { width: height, height: width } : { width, height },
 		byteLength: bytes.byteLength,
 	};
 }
 
 function sizeOf(
 	bytes: Uint8Array,
-): { width: number; height: number; sideways: boolean } | undefined {
+): { width: number; height: number; orientation: Orientation } | undefined {
 	try {
 		const { width, height, orientation } = imageSize(bytes);
-		return width && height ? { width, height, sideways: (orientation ?? 1) > 4 } : undefined;
+		return width && height ? { width, height, orientation: orientationIn(orientation) } : undefined;
 	} catch {
 		return undefined;
 	}
+}
+
+/** A JPEG's markers: the start of its scan, after which no more of its headers come, and an APP1 segment, which may hold its EXIF. */
+const START_OF_SCAN = 0xda;
+const APP1 = 0xe1;
+
+/** The tag of EXIF's orientation, and the orientation that shows a picture as it is stored. */
+const ORIENTATION_TAG = 0x0112;
+const AS_STORED = 1;
+
+/**
+ * A copy of `bytes`, a JPEG's, whose EXIF says its orientation is as it is
+ * stored, its pixels as they were: the file turns and mirrors the picture
+ * itself (`pictureAt`), which a program that turns a picture by its EXIF, as
+ * some do, would otherwise do a second time. `bytes` itself when it says no
+ * orientation.
+ */
+function withOrientationUpright(bytes: Uint8Array): Uint8Array {
+	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	for (let at = 2; at + 4 <= bytes.length && bytes[at] === 0xff; ) {
+		const marker = bytes[at + 1];
+		const length = view.getUint16(at + 2);
+		if (marker === START_OF_SCAN) break;
+		const tiff = at + 10;
+		const isExif =
+			marker === APP1 && String.fromCharCode(...bytes.subarray(at + 4, at + 8)) === "Exif";
+		if (isExif && tiff + 8 <= bytes.length) {
+			const little = bytes[tiff] === 0x49;
+			const directory = tiff + view.getUint32(tiff + 4, little);
+			const entries = directory + 2 <= bytes.length ? view.getUint16(directory, little) : 0;
+			for (let entry = directory + 2; entry < directory + 2 + entries * 12; entry += 12) {
+				if (entry + 12 > bytes.length) break;
+				if (view.getUint16(entry, little) !== ORIENTATION_TAG) continue;
+				const copy = new Uint8Array(bytes);
+				new DataView(copy.buffer).setUint16(entry + 8, AS_STORED, little);
+				return copy;
+			}
+		}
+		at += 2 + length;
+	}
+	return bytes;
+}
+
+/** Whether a picture of `orientation` is turned on its side to show upright, its width and height swapped. */
+const isSideways = (orientation: Orientation) => ORIENTATIONS[orientation].rotate % 180 !== 0;
+
+/**
+ * Where `image` goes to show upright across `shown`, on a box at `frame`
+ * turned `degrees` clockwise about its middle, as PptxGenJS places a picture:
+ * its stored pixels across a box of their own shape, about the middle the
+ * box's turn takes `shown`'s to, mirrored and turned as its orientation says
+ * and turned with the box.
+ */
+function pictureAt(image: DrawableImage, shown: Box, frame: Frame, degrees: number) {
+	const turned = turnedWith(shown, frame, degrees);
+	const { rotate, ...flips } = ORIENTATIONS[image.orientation];
+	const [w, h] = isSideways(image.orientation) ? [turned.h, turned.w] : [turned.w, turned.h];
+	const middle = { x: turned.x + turned.w / 2, y: turned.y + turned.h / 2 };
+	return {
+		...positionOf({
+			x: middle.x - w / 2,
+			y: middle.y - h / 2,
+			w,
+			h,
+			rotate: (turned.rotate ?? 0) + rotate,
+		}),
+		...flips,
+	};
 }
 
 /**
@@ -745,15 +400,16 @@ function measureOf(images: ReadonlyMap<string, DrawableImage>): Measure {
 	};
 }
 
-/** What the file's own forms need to know of each slide once PptxGenJS has written it. */
+/** What the file's own forms need to know of each slide once PptxGenJS has written it: its speaker notes' paragraphs. */
 interface DrawnSlide {
-	/** Its speaker notes' paragraphs. */
 	notes: readonly Node[];
-	/** The placeholders it shows nothing in: those its regions leave empty, and those whose region's parts are stacked in boxes of their own. */
-	unused: readonly number[];
-	/** Where each placeholder it puts text in is on it, by number. */
-	boxes: ReadonlyMap<number, Box>;
 }
+
+/** The layout every slide is on, as PowerPoint names one holding a title alone. */
+const LAYOUT_NAME = "Title Only";
+
+/** What the box that is a slide's title placeholder is named while PptxGenJS writes it, which `withTitlePlaceholder` finds it by. */
+const TITLE_NAME = "Title";
 
 /*
  * PptxGenJS writes a slide only from what it is given, and fetches an image
@@ -774,54 +430,39 @@ function presentationOf(
 	presentation.company = "";
 	presentation.subject = "";
 	presentation.theme = { headFontFace: FONT, bodyFontFace: FONT };
-	for (const layout of SLIDE_LAYOUTS) presentation.defineSlideMaster(masterOf(layout));
+	presentation.defineSlideMaster(titleOnlyLayout());
 	const slides = deck.children.map((slide) => addSlide(presentation, slide, draw, measure));
 	return { presentation, slides };
 }
 
-function masterOf(layout: SlideLayout): PptxGenJS.SlideMasterProps {
-	const design: LayoutDesign<SlideLayout> = LAYOUTS[layout];
-	const boxes = roomyBoxes(design);
-	return {
-		title: design.name,
-		background: { color: BACKGROUND },
-		objects: design.regions.map((region, index) => ({
-			placeholder: {
-				options: placeholderOptions(layout, region, boxes[index]),
-				text: region.prompt,
-			},
-		})),
-	};
-}
-
 /**
- * A region as a placeholder: its box, and the look of text typed into it on a
- * slide made from the layout, which states no space after a paragraph, as a
- * slide's own paragraphs state theirs.
+ * The one layout of the file: a title where the app puts a new slide's, in
+ * the look of the app's, which a slide made in PowerPoint starts with.
  */
-function placeholderOptions(
-	layout: SlideLayout,
-	region: Region<SlideLayout>,
-	box: Box | undefined,
-): PptxGenJS.PlaceholderProps {
-	const style = styleOf(region.writes, SLIDE_UNIT);
-	const options: PptxGenJS.PlaceholderProps &
-		Pick<PptxGenJS.TextPropsOptions, "lineSpacingMultiple"> = {
-		name: region.name,
-		type: region.type,
-		...(box ? inchesOf(box) : {}),
-		fontSize: style.size,
-		color: style.color,
-		...(style.bold ? { bold: true } : {}),
-		lineSpacingMultiple: style.lineHeight / ARIAL_LINE_HEIGHT,
-		align: alignOf(partLook(layout, BOX_PARTS[region.box])),
-		valign: region.anchor,
-		margin: 0,
+function titleOnlyLayout(): PptxGenJS.SlideMasterProps {
+	const look = LAYOUT_LOOKS.bullets.heading;
+	return {
+		title: LAYOUT_NAME,
+		background: { color: BACKGROUND },
+		objects: [
+			{
+				placeholder: {
+					options: {
+						name: "title",
+						type: "title",
+						...inchesOf(boxOf(defaultFrameOf("title", "bullets"))),
+						fontSize: look.size * SLIDE_UNIT,
+						color: look.color,
+						bold: look.weight >= BOLD_WEIGHT,
+						align: "left",
+						valign: "top",
+					},
+					text: "Title",
+				},
+			},
+		],
 	};
-	return options;
 }
-
-const alignOf = (look: PartLook) => (look.align === "center" ? "center" : "left");
 
 function addSlide(
 	presentation: PptxGenJS,
@@ -829,70 +470,211 @@ function addSlide(
 	draw: ImageDrawer,
 	measure: Measure,
 ): DrawnSlide {
-	const blocks = slideBlocksOf(slide);
-	const { layout } = blocks;
-	const design: LayoutDesign<SlideLayout> = LAYOUTS[layout];
-	const placement = placementOf(slide);
-	const { step, fits } = arrangedSlide(slide, measure);
-	const held = heldInRegions(blocks, placement !== null);
-	const placingOf = (index: number, width: number): Placing => {
-		const region = design.regions[index];
+	const layout = layoutOf(slide);
+	const { step } = arrangedSlide(slide, measure);
+	const added = presentation.addSlide({ masterName: LAYOUT_NAME });
+	const background = paintOf(backgroundOf(slide));
+	if (background) {
+		added.background = { color: background.color, transparency: transparencyOf(background) };
+	}
+	const boxes = bodyOf(slide).children.map((box): BoxToAdd => {
+		const alone = imageFillingBox(box);
+		const image = alone && draw(alone.attrs.src);
 		return {
-			layout,
-			part: region ? BOX_PARTS[region.box] : "flow",
-			step,
-			width,
-			boxHeight: placement && region ? frameOfBox(placement, layout, region.box).height : undefined,
+			attributes: boxAttributesOf(box),
+			filling: image && { image, words: String(alone?.attrs.alt ?? "") },
+			parts: image ? [] : partsOf(writtenOf(box.children), draw),
 		};
-	};
-	const heightOf: HeightOf = (index, width) => {
-		const holds = held[index] ?? [];
-		return holds.length === 0 ? 0 : heightOfBlocks(holds, placingOf(index, width), measure);
-	};
-	const label = sectionLabelOf(blocks);
-	const { boxes, bar } = placement
-		? placedRegions(design.regions, layout, placement, step, heightOf, label !== undefined)
-		: design.place({
-				step,
-				heightOf,
-				holds: (index) => (held[index]?.length ?? 0) > 0,
-				fits,
-				label,
-			});
-	const added = presentation.addSlide({ masterName: design.name });
-	if (bar)
-		added.addShape(presentation.ShapeType.rect, {
-			...inchesOf(bar),
+	});
+	const title = titleBoxIn(boxes);
+	boxes.forEach((box, index) => {
+		addBox(added, box, { layout, step, title: index === title }, measure);
+	});
+	return { notes: notesOf(slide).children };
+}
+
+/**
+ * One of a slide's boxes: how it is drawn, and what it holds, as the file
+ * draws it: the image filling it (`imageFillingBox`), or its parts.
+ */
+interface BoxToAdd {
+	attributes: BoxAttributes;
+	filling: { image: DrawableImage; words: string } | undefined;
+	parts: readonly Part[];
+}
+
+/** What the file writes of `blocks`, what a box holds: nothing when they are only empty paragraphs, which show nothing. */
+const writtenOf = (blocks: readonly Node[]) => (blocks.every(isEmptyParagraph) ? [] : blocks);
+
+const isEmptyParagraph = (block: Node) => block.type.name === "paragraph" && block.childCount === 0;
+
+/**
+ * Which of a slide's `boxes` is its title placeholder: its first title box
+ * that holds text alone, or, on a slide with none, its first such quote box,
+ * as PowerPoint's own quote layouts make the quote the title. `-1` for none.
+ */
+function titleBoxIn(boxes: readonly BoxToAdd[]): number {
+	const firstHolding = (role: BoxRole) =>
+		boxes.findIndex(({ attributes, parts }) => attributes.role === role && textAlone(parts));
+	const title = firstHolding("title");
+	return title === -1 ? firstHolding("quote") : title;
+}
+
+/** The blocks `parts` hold when they are one piece of text alone: `undefined` when they are anything else. */
+function textAlone(parts: readonly Part[]): readonly Node[] | undefined {
+	const [only, ...more] = parts;
+	return only?.kind === "text" && more.length === 0 ? only.blocks : undefined;
+}
+
+/**
+ * `box` on `slide`: as its shape with the image filling it over it; as one
+ * shape holding its text when that is all it holds; or as its shape with
+ * each part of what it holds stacked on it (`stack`). A box that draws
+ * nothing and holds nothing is left out, but for the section break's accent
+ * bar, which is over its label, empty or not.
+ */
+function addBox(
+	slide: PptxGenJS.Slide,
+	{ attributes, filling, parts }: BoxToAdd,
+	{ layout, step, title }: { layout: SlideLayout; step: number; title: boolean },
+	measure: Measure,
+) {
+	const { frame, role, rotation, verticalAlign } = attributes;
+	const look = shapeLookOf(attributes);
+	const drawn = look.fill !== undefined || look.stroke !== undefined;
+	if (filling) {
+		if (drawn) slide.addShape(look.path ? FREEFORM : "rect", shapeOptions(attributes, look));
+		addFillingPicture(slide, filling, attributes, imageFitOf(layout));
+		return;
+	}
+	const setting = settingIn(layout, role, step);
+	const addAccentBar = () => {
+		if (!hasAccentBar(layout, role)) return;
+		slide.addShape("rect", {
+			...positionOf(turnedWith(boxOf(accentBarOver(frame, setting.unit)), frame, rotation)),
 			fill: { color: ACCENT },
 			objectName: ACCENT_BAR_NAME,
 		});
-	const unused: number[] = [];
-	const placed = new Map<number, Box>();
-	design.regions.forEach((region, index) => {
-		const placeholder = FIRST_PLACEHOLDER_INDEX + index;
-		const box = boxes[index];
-		const parts = partsOf(writtenOf(held[index] ?? []), draw);
-		const [first] = parts;
-		if (!first || !box) {
-			unused.push(placeholder);
-			return;
-		}
-		const setting = settingIn(layout, BOX_PARTS[region.box], step);
-		if (parts.length === 1 && first.kind === "text") {
-			added.addText(textOf(paragraphsIn(first.blocks, setting)), {
-				placeholder: region.name,
-				fit: "shrink",
+	};
+	const text = parts.length === 0 ? [] : textAlone(parts);
+	if (text) {
+		if (text.length > 0 || drawn) {
+			slide.addText(textOf(paragraphsIn(text, setting)), {
+				...shapeOptions(attributes, look),
+				margin: textInsetsOf(attributes, look),
+				valign: verticalAlign,
+				isTextBox: !drawn && !look.path,
+				...(title ? { objectName: TITLE_NAME } : {}),
 			});
-			placed.set(placeholder, box);
-			return;
 		}
-		stack(added, box, parts, setting, placingOf(index, box.w), measure);
-		unused.push(placeholder);
-	});
-	return { notes: childNamed(slide, SPEAKER_NOTES).children, unused, boxes: placed };
+		addAccentBar();
+		return;
+	}
+	if (drawn) slide.addShape(look.path ? FREEFORM : "rect", shapeOptions(attributes, look));
+	addAccentBar();
+	const area = contentAreaOf(attributes);
+	const placing: Placing = { layout, role, step, width: area.width };
+	stack(slide, { ...attributes, area }, parts, setting, placing, measure);
 }
 
-/** Some of what a region holds, as the file draws it: text, a table, or an image, with the paragraph that holds it alone. */
+/**
+ * The longer side of the shape PptxGenJS is told a picture has when it crops
+ * one, in inches: it reads only the shape's proportions, and reads a number as
+ * inches only below 100.
+ */
+const SHAPE_TO_CROP = 10;
+
+/**
+ * `image` filling the content area of a box drawn as `attributes` say, as
+ * `fit` says (`imageFitOf`), turned with the box: whole within it, as large
+ * as fits, or over all of it, its picture cropped about its middle to it.
+ */
+function addFillingPicture(
+	slide: PptxGenJS.Slide,
+	{ image, words }: { image: DrawableImage; words: string },
+	attributes: BoxAttributes,
+	fit: ImageFit,
+) {
+	const { frame, rotation } = attributes;
+	const area = contentAreaOf(attributes);
+	if (fit === "contain") {
+		const shown = boxOf(fittedImage(image.upright, area, "contain"));
+		slide.addImage({
+			data: image.data,
+			...pictureAt(image, shown, frame, rotation),
+			altText: words,
+		});
+		return;
+	}
+	const placed = pictureAt(image, boxOf(area), frame, rotation);
+	const longest = Math.max(image.width, image.height);
+	slide.addImage({
+		data: image.data,
+		...placed,
+		w: (SHAPE_TO_CROP * image.width) / longest,
+		h: (SHAPE_TO_CROP * image.height) / longest,
+		sizing: { type: "cover", w: placed.w, h: placed.h },
+		altText: words,
+	});
+}
+
+/** PptxGenJS's freeform, drawn from its `points`, which its typings leave out of the shapes it names. */
+const FREEFORM = "custGeom" as PptxGenJS.SHAPE_NAME;
+
+/** A box's own shape as PptxGenJS draws it: at its frame, turned, its path a freeform, filled and outlined. */
+type ShapeOptions = Pick<
+	PptxGenJS.ShapeProps,
+	"x" | "y" | "w" | "h" | "rotate" | "fill" | "line" | "points"
+> & { shape?: PptxGenJS.SHAPE_NAME };
+
+/**
+ * `attributes`' shape as PptxGenJS draws it, as `look` says: a freeform of
+ * its path at its frame, or its frame's rectangle, its outline drawn within
+ * the frame as the app draws it, as PowerPoint draws a rectangle's on its
+ * edge.
+ */
+function shapeOptions(attributes: BoxAttributes, look: ShapeLook): ShapeOptions {
+	const { frame, rotation } = attributes;
+	const inset = look.path ? 0 : (look.stroke?.width ?? 0) / 2;
+	const box = {
+		x: frame.x + inset,
+		y: frame.y + inset,
+		w: Math.max(THINNEST, frame.width - 2 * inset),
+		h: Math.max(THINNEST, frame.height - 2 * inset),
+	};
+	return {
+		...positionOf({ ...box, rotate: rotation }),
+		...(look.path ? { shape: FREEFORM, points: pointsOf(look.path) } : {}),
+		...(look.fill
+			? { fill: { color: look.fill.color, transparency: transparencyOf(look.fill) } }
+			: {}),
+		...(look.stroke
+			? {
+					line: {
+						color: look.stroke.paint.color,
+						transparency: transparencyOf(look.stroke.paint),
+						width: look.stroke.width,
+					},
+				}
+			: {}),
+	};
+}
+
+/**
+ * How far in from the edges of the shape `shapeOptions` draws a box's text
+ * starts, in points, as PptxGenJS 4 reads a text box's margin, whatever its
+ * typings say: left, right, bottom, top.
+ */
+function textInsetsOf(
+	attributes: BoxAttributes,
+	look: ShapeLook,
+): [number, number, number, number] {
+	const shapeInset = look.path ? 0 : (look.stroke?.width ?? 0) / 2;
+	const { top, right, bottom, left } = insetsOf(attributes);
+	return [left - shapeInset, right - shapeInset, bottom - shapeInset, top - shapeInset];
+}
+
+/** Some of what a box holds, as the file draws it: text, a table, or an image, with the paragraph that holds it alone. */
 type Piece =
 	| { kind: "text"; blocks: readonly Node[] }
 	| { kind: "table"; table: Node }
@@ -965,77 +747,304 @@ const saysSomething = (inline: Node) =>
 	inline.type.name === "image" ? Boolean(inline.attrs.alt) : inline.textContent.trim() !== "";
 
 /**
- * Stacks a region's parts down its box from its top, each as tall as the app
- * sets it and as far from the one before: text in boxes of its own, with room
- * to spare for Arial, tables with their rows as tall as the app's, and images
- * as large as the app draws them.
+ * Stacks a box's parts in its content area, as tall together as the app sets
+ * them and where its vertical alignment sits them, each as far from the one
+ * before as the app sets it, turned with the box: text in boxes of its own,
+ * with room to spare for Arial, tables with their rows as tall as the app's,
+ * and images as large as the app draws them.
  */
 function stack(
 	slide: PptxGenJS.Slide,
-	box: Box,
+	{
+		frame,
+		rotation,
+		verticalAlign,
+		area,
+	}: Pick<BoxAttributes, "frame" | "rotation" | "verticalAlign"> & { area: Frame },
 	parts: readonly Part[],
 	setting: Setting,
 	placing: Placing,
 	measure: Measure,
 ) {
-	let y = box.y;
+	const heights = parts.map((part) => heightOfPart(part, setting, placing, measure));
+	const gaps = parts.map((part, index) => (index > 0 && part.apart ? setting.blockGap : 0));
+	const total = [...heights, ...gaps].reduce((sum, each) => sum + each, 0);
+	let y = area.y + alignedOffset(verticalAlign, area.height, total);
 	parts.forEach((part, index) => {
-		if (index > 0 && part.apart) y += setting.blockGap;
+		y += gaps[index] ?? 0;
+		const height = heights[index] ?? 0;
+		const slot = { x: area.x, y, w: area.width, h: height };
+		const turned = (box: Box) => positionOf(turnedWith(box, frame, rotation));
 		if (part.kind === "text") {
-			const height = heightOfBlocks(part.blocks, placing, measure);
 			if (!part.blocks.every(isEmptyParagraph)) {
 				slide.addText(textOf(paragraphsIn(part.blocks, setting)), {
-					...inchesOf(below(box.x, box.w, y, height)),
+					...turned({ ...slot, h: grown(height) }),
 					valign: "top",
 					margin: 0,
-					fit: "shrink",
 					isTextBox: true,
 				});
 			}
-			y += height;
-			return;
-		}
-		if (part.kind === "table") {
+		} else if (part.kind === "table") {
 			const rows = tableRowHeights(part.table, rowHeightsOf(part.table, placing, measure), setting);
-			const height = rows.reduce((total, row) => total + row, 0);
+			// PowerPoint doesn't turn a table, so it is only moved to where the box's turn takes its middle.
+			const { x, y: top } = turnedWith(slot, frame, rotation);
 			slide.addTable(
 				tableRowsOf(part.table, setting),
-				tableOptions(part.table, { ...box, y, h: height }, rows, setting),
+				tableOptions(part.table, { ...slot, x, y: top }, rows, setting),
 			);
-			y += height;
-			return;
+		} else {
+			slide.addImage({
+				data: part.image.data,
+				...pictureAt(part.image, placedImage(part.image, slot), frame, rotation),
+				altText: part.words,
+				...linkTo(part.link),
+			});
 		}
-		const height = heightOfBlocks([part.alone], placing, measure);
-		slide.addImage({
-			data: part.image.data,
-			...inchesOf(placedImage(part.image, { ...box, y, h: height }, setting.align)),
-			altText: part.words,
-			...linkTo(part.link),
-		});
 		y += height;
 	});
 }
 
-/** `image` as large as fits in `slot` without being enlarged, a pixel to a point, at its top, across it as `align` says. */
-function placedImage(image: DrawableImage, slot: Box, align: Setting["align"]): Box {
-	const scale = Math.min(1, slot.w / image.width, slot.h / image.height);
-	const w = image.width * scale;
-	const h = image.height * scale;
-	return { x: align === "center" ? slot.x + (slot.w - w) / 2 : slot.x, y: slot.y, w, h };
+/** How tall the app sets `part` in a box set as `placing` says, in points. */
+function heightOfPart(part: Part, setting: Setting, placing: Placing, measure: Measure): number {
+	switch (part.kind) {
+		case "text":
+			return heightOfBlocks(part.blocks, placing, measure);
+		case "table":
+			return tableRowHeights(
+				part.table,
+				rowHeightsOf(part.table, placing, measure),
+				setting,
+			).reduce((total, row) => total + row, 0);
+		case "image":
+			return heightOfBlocks([part.alone], placing, measure);
+	}
 }
 
-const inchesOf = ({ x, y, w, h }: Box) => ({
-	x: x / POINTS_PER_INCH,
-	y: y / POINTS_PER_INCH,
-	w: w / POINTS_PER_INCH,
-	h: h / POINTS_PER_INCH,
-});
+/** Where `image` is shown upright in `slot`, at its top left: as large as it is, a pixel to a point, but no wider than the slot. */
+function placedImage(image: DrawableImage, slot: Box): Box {
+	const { width, height } = image.upright;
+	const scale = Math.min(1, slot.w / width);
+	return { x: slot.x, y: slot.y, w: width * scale, h: height * scale };
+}
+
+/** A freeform's points, as PptxGenJS takes them. */
+type FreeformPoint = NonNullable<PptxGenJS.ShapeProps["points"]>[number];
+
+/**
+ * PptxGenJS reads a number of 100 or more as a length in the file's own
+ * units, not inches, so a freeform's points are kept within this many inches
+ * of the box, much further than any shape on a slide reaches.
+ */
+const FURTHEST_POINT = 99;
+
+interface Point {
+	x: number;
+	y: number;
+}
+
+/**
+ * `path`, an SVG path in its box's own points, as PptxGenJS's points of a
+ * freeform, in inches: its moves, lines, cubic and quadratic curves and
+ * closes as PowerPoint's own, every point on the box. An arc is drawn as the
+ * cubic curves that make it, as PowerPoint's own arcs can't be tilted.
+ */
+function pointsOf(path: SvgPath): FreeformPoint[] {
+	const points: FreeformPoint[] = [];
+	const inches = (value: number) =>
+		Math.max(-FURTHEST_POINT, Math.min(FURTHEST_POINT, value / POINTS_PER_INCH));
+	const at = ({ x, y }: Point) => ({ x: inches(x), y: inches(y) });
+	let current: Point = { x: 0, y: 0 };
+	let start = current;
+	/** The last curve's second control point, which a smooth curve after it mirrors, and its kind. */
+	let control: { point: Point; cubic: boolean } | undefined;
+	for (const command of pathCommandsOf(path)) {
+		const from = current;
+		const relative = command.letter === command.letter.toLowerCase();
+		const point = (x: number, y: number): Point =>
+			relative ? { x: from.x + x, y: from.y + y } : { x, y };
+		const before = control;
+		const mirrored = (cubic: boolean): Point =>
+			before && before.cubic === cubic
+				? { x: 2 * from.x - before.point.x, y: 2 * from.y - before.point.y }
+				: from;
+		control = undefined;
+		switch (command.letter) {
+			case "M":
+			case "m": {
+				const [x, y] = command.values;
+				current = start = point(x, y);
+				points.push({ ...at(current), moveTo: true });
+				break;
+			}
+			case "L":
+			case "l": {
+				const [x, y] = command.values;
+				current = point(x, y);
+				points.push(at(current));
+				break;
+			}
+			case "H":
+			case "h": {
+				const [x] = command.values;
+				current = { x: point(x, 0).x, y: from.y };
+				points.push(at(current));
+				break;
+			}
+			case "V":
+			case "v": {
+				const [y] = command.values;
+				current = { x: from.x, y: point(0, y).y };
+				points.push(at(current));
+				break;
+			}
+			case "C":
+			case "c": {
+				const [x1, y1, x2, y2, x, y] = command.values;
+				const second = point(x2, y2);
+				current = point(x, y);
+				points.push(cubicTo(point(x1, y1), second, current, at));
+				control = { point: second, cubic: true };
+				break;
+			}
+			case "S":
+			case "s": {
+				const [x2, y2, x, y] = command.values;
+				const second = point(x2, y2);
+				current = point(x, y);
+				points.push(cubicTo(mirrored(true), second, current, at));
+				control = { point: second, cubic: true };
+				break;
+			}
+			case "Q":
+			case "q":
+			case "T":
+			case "t": {
+				const [near, end] =
+					command.letter === "Q" || command.letter === "q"
+						? [
+								point(command.values[0], command.values[1]),
+								point(command.values[2], command.values[3]),
+							]
+						: [mirrored(false), point(command.values[0], command.values[1])];
+				current = end;
+				const { x: x1, y: y1 } = at(near);
+				points.push({ ...at(current), curve: { type: "quadratic", x1, y1 } });
+				control = { point: near, cubic: false };
+				break;
+			}
+			case "A":
+			case "a": {
+				const [rx, ry, tilt, large, clockwise, x, y] = command.values;
+				current = point(x, y);
+				for (const [first, second, end] of arcAsCubics(from, current, {
+					rx,
+					ry,
+					tilt,
+					large,
+					clockwise,
+				})) {
+					points.push(cubicTo(first, second, end, at));
+				}
+				break;
+			}
+			case "Z":
+			case "z":
+				points.push({ close: true });
+				current = start;
+				break;
+		}
+	}
+	return points;
+}
+
+function cubicTo(
+	first: Point,
+	second: Point,
+	end: Point,
+	at: (point: Point) => Point,
+): FreeformPoint {
+	const [{ x: x1, y: y1 }, { x: x2, y: y2 }] = [at(first), at(second)];
+	return { ...at(end), curve: { type: "cubic", x1, y1, x2, y2 } };
+}
+
+/**
+ * An SVG arc from `from` to `to` with its radii, its ellipse's tilt in
+ * degrees and its two flags, for the larger arc and for drawing it clockwise,
+ * as cubic curves of a quarter turn at most, each its two control points and
+ * its end, as SVG's notes on implementing arcs work out its centre. An arc
+ * with a radius of nothing is a line.
+ */
+function arcAsCubics(
+	from: Point,
+	to: Point,
+	{
+		rx: radiusX,
+		ry: radiusY,
+		tilt,
+		large,
+		clockwise: sweep,
+	}: { rx: number; ry: number; tilt: number; large: 0 | 1; clockwise: 0 | 1 },
+): [Point, Point, Point][] {
+	if (from.x === to.x && from.y === to.y) return [];
+	let rx = Math.abs(radiusX);
+	let ry = Math.abs(radiusY);
+	if (rx === 0 || ry === 0) return [[from, to, to]];
+	const phi = (tilt * Math.PI) / 180;
+	const [cos, sin] = [Math.cos(phi), Math.sin(phi)];
+	const halfX = (from.x - to.x) / 2;
+	const halfY = (from.y - to.y) / 2;
+	const x1 = cos * halfX + sin * halfY;
+	const y1 = -sin * halfX + cos * halfY;
+	const reach = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry);
+	if (reach > 1) {
+		rx *= Math.sqrt(reach);
+		ry *= Math.sqrt(reach);
+	}
+	const across = rx * rx * y1 * y1 + ry * ry * x1 * x1;
+	const share = Math.sqrt(Math.max(0, (rx * rx * ry * ry - across) / across));
+	const sign = large === sweep ? -1 : 1;
+	const centreX1 = sign * share * ((rx * y1) / ry);
+	const centreY1 = sign * share * (-(ry * x1) / rx);
+	const centre = {
+		x: cos * centreX1 - sin * centreY1 + (from.x + to.x) / 2,
+		y: sin * centreX1 + cos * centreY1 + (from.y + to.y) / 2,
+	};
+	const angle = (ux: number, uy: number, vx: number, vy: number) =>
+		Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+	const startX = (x1 - centreX1) / rx;
+	const startY = (y1 - centreY1) / ry;
+	const first = angle(1, 0, startX, startY);
+	let turn = angle(startX, startY, (-x1 - centreX1) / rx, (-y1 - centreY1) / ry);
+	if (!sweep && turn > 0) turn -= 2 * Math.PI;
+	if (sweep && turn < 0) turn += 2 * Math.PI;
+	const pieces = Math.max(1, Math.ceil(Math.abs(turn) / (Math.PI / 2) - 1e-9));
+	const step = turn / pieces;
+	const handle = (4 / 3) * Math.tan(step / 4);
+	const on = (t: number): Point => ({
+		x: centre.x + rx * Math.cos(t) * cos - ry * Math.sin(t) * sin,
+		y: centre.y + rx * Math.cos(t) * sin + ry * Math.sin(t) * cos,
+	});
+	const along = (t: number): Point => ({
+		x: -rx * Math.sin(t) * cos - ry * Math.cos(t) * sin,
+		y: -rx * Math.sin(t) * sin + ry * Math.cos(t) * cos,
+	});
+	return Array.from({ length: pieces }, (_, index): [Point, Point, Point] => {
+		const [t1, t2] = [first + index * step, first + (index + 1) * step];
+		const [p1, p2] = [on(t1), index === pieces - 1 ? to : on(t2)];
+		const [d1, d2] = [along(t1), along(t2)];
+		return [
+			{ x: p1.x + handle * d1.x, y: p1.y + handle * d1.y },
+			{ x: p2.x - handle * d2.x, y: p2.y - handle * d2.y },
+			p2,
+		];
+	});
+}
 
 /**
  * The heights of a table's rows: as tall as the app sets them, `measured`,
  * but a line of their text tall at least, as a cell of PowerPoint's holds a
  * line even when it is empty, which the app's doesn't. A row past what is
- * measured, past as much as a slide may hold, is that line tall.
+ * measured, past a slide's height, is that line tall.
  */
 function tableRowHeights(table: Node, measured: readonly number[], setting: Setting): number[] {
 	const fontSize = TABLE_LOOK.text.size * setting.unit;
@@ -1043,8 +1052,8 @@ function tableRowHeights(table: Node, measured: readonly number[], setting: Sett
 	return table.children.map((row, index) => {
 		const height = measured[index] ?? 0;
 		const header = row.firstChild?.type.name === "tableHeader";
-		const padding = (header ? TABLE_LOOK.headerPadding : TABLE_LOOK.cellPadding).y * fontSize;
-		return Math.max(height, 2 * padding + line + RULE_THICKNESS);
+		const inset = cellInsetOf(setting.look.tightCells, header, fontSize);
+		return Math.max(height, 2 * inset.y + line + RULE_THICKNESS);
 	});
 }
 
@@ -1057,7 +1066,8 @@ function tableOptions(
 ): PptxGenJS.TableProps {
 	let columns = 1;
 	for (const row of table.children) columns = Math.max(columns, row.childCount);
-	const { x, y, w, h } = inchesOf(slot);
+	const { x, y, w } = inchesOf(slot);
+	const h = rowHeights.reduce((total, row) => total + row, 0) / POINTS_PER_INCH;
 	return {
 		x,
 		y,
@@ -1073,8 +1083,8 @@ function tableOptions(
 
 /**
  * A table's rows, as the app draws them: the header row's cells grey and
- * bold on a tint, each row ruled below, and each cell padded in ems of its
- * text.
+ * bold on a tint, each row ruled below, and each cell padded as its box's
+ * look says (`cellInsetOf`).
  */
 function tableRowsOf(table: Node, setting: Setting): PptxGenJS.TableRow[] {
 	const fontSize = TABLE_LOOK.text.size * setting.unit;
@@ -1098,14 +1108,14 @@ function tableRowsOf(table: Node, setting: Setting): PptxGenJS.TableRow[] {
 				},
 				fontSize,
 				blockGap: TABLE_LOOK.blockGap * fontSize,
-				align: "left",
 			};
-			const padding = header ? TABLE_LOOK.headerPadding : TABLE_LOOK.cellPadding;
+			const inset = cellInsetOf(setting.look.tightCells, header, fontSize);
 			return {
 				text: textOf(paragraphsIn(cell.children, cellSetting)),
 				options: {
-					margin: [padding.y, padding.x, padding.y, padding.x].map(
-						(ems) => (ems * fontSize) / POINTS_PER_INCH,
+					// In inches, as PptxGenJS reads a cell's margin of less than 1: top, right, bottom, left.
+					margin: [inset.y, inset.x, inset.y, inset.x].map(
+						(points) => points / POINTS_PER_INCH,
 					) as [number, number, number, number],
 					border: [
 						NO_BORDER,
@@ -1123,9 +1133,11 @@ function tableRowsOf(table: Node, setting: Setting): PptxGenJS.TableRow[] {
 const NO_BORDER: PptxGenJS.BorderProps = { type: "none" };
 
 /*
- * Text: each block as the app sets it in the part of the slide it is in, at
- * the slide's step, its sizes, line heights and the space between its blocks
- * and its lists' items as the app's are, so it is as tall as the app's.
+ * Text: each block as the app sets it in the part of the slide its box is,
+ * at the slide's step, its sizes, line heights and the space between its
+ * blocks and its lists' items as the app's are, so it is as tall as the
+ * app's; and as its own colour, size, font, alignment and line height say,
+ * where it says them.
  */
 
 /** How a run of text looks. */
@@ -1146,10 +1158,10 @@ const styleOf = (look: TextLook, unit: number): TextStyle => ({
 	lineHeight: look.lineHeight,
 });
 
-/** What is inherited down a region's blocks, as CSS inherits it. */
+/** What is inherited down a box's blocks, as CSS inherits it. */
 interface Setting {
-	/** The look of the part of the slide the blocks are in. */
-	look: PartLook;
+	/** The look of the box the blocks are in (`boxLookOf`). */
+	look: BoxLook;
 	/** The slide's unit at its step, in points. */
 	unit: number;
 	/** The size the blocks are sized against, in points: the unit, or a list's text within a list. */
@@ -1160,12 +1172,11 @@ interface Setting {
 	quoteLayout: boolean;
 	/** Whether it is a quote's, within other text: grey italics, for the rule the app draws at its side. */
 	quoted: boolean;
-	align: "left" | "center";
 }
 
-/** What `part` of a slide of `layout` sets its blocks with, at `step`. */
-function settingIn(layout: SlideLayout, part: SlidePart, step: number): Setting {
-	const look = partLook(layout, part);
+/** What a box of `role` on a slide of `layout` sets its blocks with, at `step`. */
+function settingIn(layout: SlideLayout, role: BoxRole | null, step: number): Setting {
+	const look = boxLookOf(layout, role);
 	const unit = step * SLIDE_UNIT;
 	return {
 		look,
@@ -1174,18 +1185,18 @@ function settingIn(layout: SlideLayout, part: SlidePart, step: number): Setting 
 		blockGap: look.gap * unit,
 		quoteLayout: layout === "quote",
 		quoted: false,
-		align: alignOf(look),
 	};
 }
 
 type Run = PptxGenJS.TextProps;
 type RunOptions = PptxGenJS.TextPropsOptions;
 
-/** A paragraph of PowerPoint's: its runs, its bullet or number and depth in a list, its line height and the space after it. */
+/** A paragraph of PowerPoint's: its runs, its bullet or number and depth in a list, its alignment, line height and the space after it. */
 interface Paragraph {
 	runs: readonly Run[];
 	bullet?: RunOptions["bullet"];
 	level?: number;
+	align: TextAlign;
 	/** As the app's CSS gives it: a multiple of its size. */
 	lineHeight: number;
 	/** In points. */
@@ -1198,24 +1209,25 @@ const paragraphsIn = (blocks: readonly Node[], setting: Setting): Paragraph[] =>
 		paragraphsOf(block, setting, index < blocks.length - 1 ? setting.blockGap : 0),
 	);
 
-/** The look of a paragraph's runs, which each takes unless its marks say otherwise, and every one its paragraph's alignment. */
+/** The look of a paragraph's runs, which each takes unless its marks say otherwise. */
 const runOptions = (style: TextStyle, setting: Setting): RunOptions => ({
 	fontSize: style.size,
 	color: style.color,
 	...(style.bold ? { bold: true } : {}),
 	...(setting.quoted ? { italic: true } : {}),
-	align: setting.align,
 });
 
-/** A paragraph of `style`, `after` points before the next. */
+/** A paragraph of `style` holding `runs`, `after` points before the next, at the alignment and line height `block` sets, if it sets them. */
 const paragraphWith = (
 	runs: readonly Run[],
 	style: TextStyle,
 	setting: Setting,
 	after: number,
+	block?: Node,
 ): Paragraph => ({
 	runs: runs.length > 0 ? runs : [{ text: "", options: runOptions(style, setting) }],
-	lineHeight: style.lineHeight,
+	align: (block && textAlignOf(block)) ?? "left",
+	lineHeight: (block && lineHeightOf(block)) ?? style.lineHeight,
 	spaceAfter: after,
 });
 
@@ -1263,7 +1275,7 @@ function paragraphsOf(block: Node, setting: Setting, after: number): Paragraph[]
 			const runs = block.isTextblock
 				? runsOf(block, base)
 				: [{ text: block.textContent, options: { ...base } }];
-			return [paragraphWith(runs, style, setting, after)];
+			return [paragraphWith(runs, style, setting, after, block)];
 		}
 	}
 }
@@ -1283,16 +1295,31 @@ function headingParagraph(heading: Node, setting: Setting, after: number): Parag
 			color: TEXT,
 			lineHeight: look.text.lineHeight,
 		};
-		return paragraphWith(runsOf(heading, runOptions(style, setting)), style, setting, after);
+		return paragraphWith(
+			runsOf(heading, runOptions(style, setting)),
+			style,
+			setting,
+			after,
+			heading,
+		);
 	}
 	const style = { ...styleOf(look.heading, unit), color: TEXT };
 	const rule = look.ruledHeadings ? COLUMN_LOOK.headingRuleGap * style.size + RULE_THICKNESS : 0;
-	return paragraphWith(runsOf(heading, runOptions(style, setting)), style, setting, rule + after);
+	return paragraphWith(
+		runsOf(heading, runOptions(style, setting)),
+		style,
+		setting,
+		rule + after,
+		heading,
+	);
 }
 
 const isList = (block: Node) => ["bulletList", "orderedList"].includes(block.type.name);
 
-/** A list's items, as far apart as the part sets them, a list in an item a little below it. */
+/**
+ * A list's items, as far apart as the part sets them, a list in an item a
+ * little below it, each item aligned and spaced as its first block says.
+ */
 function listParagraphs(list: Node, setting: Setting, after: number, level: number): Paragraph[] {
 	const fontSize = setting.look.text.size * setting.unit;
 	const itemSetting = { ...setting, fontSize };
@@ -1307,13 +1334,18 @@ function listParagraphs(list: Node, setting: Setting, after: number, level: numb
 			.filter((child) => !isList(child))
 			.flatMap((child) => paragraphsOf(child, itemSetting, 0).map(({ runs }) => runs));
 		const nested = item.children.filter(isList);
+		const first = item.firstChild ?? undefined;
 		return [
 			{
-				runs: joinedLines(lines, runOptions(style, itemSetting)),
+				...paragraphWith(
+					joinedLines(lines, runOptions(style, itemSetting)),
+					style,
+					itemSetting,
+					nested.length > 0 ? nestedGap : afterItem,
+					first,
+				),
 				bullet: bulletOf(list, fontSize, level),
 				level,
-				lineHeight: style.lineHeight,
-				spaceAfter: nested.length > 0 ? nestedGap : afterItem,
 			},
 			...nested.flatMap((child, nestedIndex) =>
 				listParagraphs(
@@ -1409,7 +1441,46 @@ const MARK_OPTIONS: Readonly<Record<string, (mark: Mark, base: RunOptions) => Ru
 	subscript: () => ({ subscript: true }),
 	highlight: () => ({ highlight: HIGHLIGHT_YELLOW }),
 	link: (mark) => linkTo(mark.attrs.href),
+	textStyle: (mark) => ownStyleOptions(ownTextStyleOf([mark])),
 };
+
+/** A run's own colour, size and font (see `slide-text-style.ts`), as PowerPoint sets a run's. */
+function ownStyleOptions({ color, fontFamily, fontSize }: OwnTextStyle): RunOptions {
+	const paint = paintOf(color ?? null);
+	const typeface = fontFamily === undefined ? undefined : typefaceOf(fontFamily);
+	return {
+		...(paint ? { color: paint.color, transparency: transparencyOf(paint) } : {}),
+		...(fontSize ? { fontSize } : {}),
+		...(typeface ? { fontFace: typeface } : {}),
+	};
+}
+
+/** CSS's generic families, as the fonts every copy of PowerPoint has that it draws for them. */
+const GENERIC_TYPEFACES: Readonly<Record<string, string>> = {
+	serif: "Times New Roman",
+	"ui-serif": "Times New Roman",
+	"sans-serif": FONT,
+	"ui-sans-serif": FONT,
+	"system-ui": FONT,
+	monospace: CODE_FONT,
+	"ui-monospace": CODE_FONT,
+};
+
+/**
+ * The typeface PowerPoint draws text of `fontFamily`, a CSS font list, in:
+ * the first family the list names, out of its quotes, or the font PowerPoint
+ * has for a generic family, written as an attribute's value in the file's
+ * XML, as PptxGenJS writes it as it is given.
+ */
+function typefaceOf(fontFamily: string): string | undefined {
+	const [first = ""] = fontFamily.split(",");
+	const name = first
+		.trim()
+		.replace(/^(["'])(.*)\1$/, "$2")
+		.trim();
+	if (name === "") return undefined;
+	return escapeXml(GENERIC_TYPEFACES[name.toLowerCase()] ?? name);
+}
 
 /**
  * A link to `href`, when it goes somewhere a link in a file may (`linkInFile`).
@@ -1421,12 +1492,12 @@ const linkTo = (href: unknown): { hyperlink?: PptxGenJS.HyperlinkProps } => {
 };
 
 /**
- * Paragraphs as PptxGenJS's runs: each paragraph's bullet, depth, line
- * spacing and space after on its first run, which PowerPoint takes the
+ * Paragraphs as PptxGenJS's runs: each paragraph's bullet, depth, alignment,
+ * line spacing and space after on its first run, which PowerPoint takes the
  * paragraph's from, and a break after its last.
  */
 function textOf(paragraphs: readonly Paragraph[]): Run[] {
-	return paragraphs.flatMap(({ runs, bullet, level, lineHeight, spaceAfter }) => {
+	return paragraphs.flatMap(({ runs, bullet, level, align, lineHeight, spaceAfter }) => {
 		const [first = { text: "" }, ...rest] = runs;
 		const all = [
 			{
@@ -1434,6 +1505,7 @@ function textOf(paragraphs: readonly Paragraph[]): Run[] {
 				options: {
 					...first.options,
 					bullet,
+					align,
 					...(level ? { indentLevel: level } : {}),
 					lineSpacingMultiple: lineHeight / ARIAL_LINE_HEIGHT,
 					...(spaceAfter > 0 ? { paraSpaceAfter: spaceAfter } : {}),
@@ -1451,14 +1523,12 @@ function textOf(paragraphs: readonly Paragraph[]): Run[] {
  * `file`, as PptxGenJS writes it, with what it writes otherwise than
  * PowerPoint does made as PowerPoint writes it: each slide's paragraphs with
  * their properties once and their end marks the size of their text, each
- * shape with an id of its own, an image without words given none, each
- * placeholder where the slide places its text and none the slide shows
- * nothing in, and a section break's accent bar marked as decorative, which
- * PptxGenJS has no option for; each slide's notes as their paragraphs, which
- * it writes as one run; each layout's placeholders with their text's edge, no
- * padding and text that shrinks to fit, so a slide made from one in
- * PowerPoint is laid out as the deck's are; the master's styles as the app
- * sets text; no layout but the deck's; and no entries for folders.
+ * shape with an id of its own, an image without words given none, the empty
+ * title PptxGenJS adds to each slide from its layout left out and the box
+ * that is the slide's title made its title placeholder in its place, and a
+ * section break's accent bar marked as decorative, which PptxGenJS has no
+ * option for; each slide's notes as their paragraphs, which it writes as one
+ * run; no layout but the deck's; and no entries for folders.
  */
 async function withPowerPointsOwnForms(
 	file: Awaited<ReturnType<PptxGenJS["write"]>>,
@@ -1466,21 +1536,9 @@ async function withPowerPointsOwnForms(
 ): Promise<Uint8Array> {
 	const zip = await JSZip.loadAsync(file);
 	await Promise.all([
-		...slides.map((slide, index) =>
+		...slides.map((_slide, index) =>
 			rewritten(zip, `ppt/slides/slide${index + 1}.xml`, (xml) =>
-				withShapeIdsOfTheirOwn(
-					withPlaceholdersAt(
-						withoutPlaceholders(
-							withEndMarksSizedAsTheirText(
-								withParagraphPropertiesOnce(
-									withAccentBarDecorative(xml.replaceAll(MADE_UP_IMAGE_WORDS, "")),
-								),
-							),
-							slide.unused,
-						),
-						slide.boxes,
-					),
-				),
+				SLIDE_FORMS.reduce((within, change) => change(within), xml),
 			),
 		),
 		...slides.map((slide, index) =>
@@ -1488,12 +1546,6 @@ async function withPowerPointsOwnForms(
 				withNotes(xml, slide.notes),
 			),
 		),
-		...SLIDE_LAYOUTS.map((layout, index) =>
-			rewritten(zip, `ppt/slideLayouts/slideLayout${index + FIRST_DECK_LAYOUT}.xml`, (xml) =>
-				withRegionsLaidOut(xml, LAYOUTS[layout].regions),
-			),
-		),
-		rewritten(zip, MASTER, withTextStylesAsTheApp),
 	]);
 	await withoutDefaultLayout(zip);
 	return (await filesOf(zip)).generateAsync({ type: "uint8array", compression: "DEFLATE" });
@@ -1512,7 +1564,6 @@ async function filesOf(zip: JSZip): Promise<JSZip> {
 
 /** PptxGenJS writes a blank layout of its own first, which no slide here uses, then the deck's. */
 const DEFAULT_LAYOUT = "slideLayout1.xml";
-const FIRST_DECK_LAYOUT = 2;
 
 const MASTER = "ppt/slideMasters/slideMaster1.xml";
 
@@ -1539,7 +1590,7 @@ const DECORATIVE_MARK =
 /** `xml` with the accent bar marked as decorative, inside the properties PptxGenJS writes empty for a shape without a link. */
 const withAccentBarDecorative = (xml: string) =>
 	xml.replace(
-		new RegExp(`(<p:cNvPr id="\\d+" name="${ACCENT_BAR_NAME}">)(</p:cNvPr>)`),
+		new RegExp(`(<p:cNvPr id="\\d+" name="${ACCENT_BAR_NAME}">)(</p:cNvPr>)`, "g"),
 		`$1${DECORATIVE_MARK}$2`,
 	);
 
@@ -1570,30 +1621,23 @@ const withEndMarksSizedAsTheirText = (xml: string) =>
 		return paragraph.replace(/(<a:endParaRPr\b[^>]*?\bsz=")\d+"/, `$1${size}"`);
 	});
 
-/** `xml` with each of its shapes changed by `change`. A slide or layout of PptxGenJS's holds no shape in another. */
+/** `xml` with each of its shapes changed by `change`. A slide of PptxGenJS's holds no shape in another. */
 const eachShape = (xml: string, change: (shape: string) => string) =>
 	xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, change);
 
-const placeholderIndexOf = (shape: string) =>
-	Number(/<p:ph\b[^>]*\bidx="(\d+)"/.exec(shape)?.[1] ?? Number.NaN);
+/** `xml` without the empty placeholders PptxGenJS adds to a slide for its layout's, as the slide is given nothing for them. */
+const withoutLayoutPlaceholders = (xml: string) =>
+	eachShape(xml, (shape) => (shape.includes("<p:ph") ? "" : shape));
 
-/** `xml` without the placeholders numbered `indexes`, which PptxGenJS adds to a slide empty where it was given nothing for them. */
-const withoutPlaceholders = (xml: string, indexes: readonly number[]) =>
-	eachShape(xml, (shape) => (indexes.includes(placeholderIndexOf(shape)) ? "" : shape));
-
-/** `xml` with each placeholder numbered in `boxes` in its box there, which PptxGenJS puts where its layout's is. */
-const withPlaceholdersAt = (xml: string, boxes: ReadonlyMap<number, Box>) =>
-	eachShape(xml, (shape) => {
-		const box = boxes.get(placeholderIndexOf(shape));
-		if (!box) return shape;
-		const [x, y, w, h] = [box.x, box.y, box.w, box.h].map((points) =>
-			Math.round(points * EMUS_PER_POINT),
-		);
-		return shape.replace(
-			/<a:xfrm><a:off x="\d+" y="\d+"\/><a:ext cx="\d+" cy="\d+"\/><\/a:xfrm>/,
-			`<a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm>`,
-		);
-	});
+/** `xml` with the box named `TITLE_NAME` the slide's title placeholder, whose look and place it says itself. */
+const withTitlePlaceholder = (xml: string) =>
+	eachShape(xml, (shape) =>
+		shape.includes(`name="${TITLE_NAME}"`)
+			? shape
+					.replace('<p:cNvSpPr txBox="1"/>', "<p:cNvSpPr/>")
+					.replace("<p:nvPr></p:nvPr>", '<p:nvPr><p:ph type="title"/></p:nvPr>')
+			: shape,
+	);
 
 /** `xml` with its shapes numbered in order: PptxGenJS numbers a table as it may number another shape. */
 function withShapeIdsOfTheirOwn(xml: string): string {
@@ -1603,6 +1647,17 @@ function withShapeIdsOfTheirOwn(xml: string): string {
 		return `${start}${id}"`;
 	});
 }
+
+/** What is made of each slide's XML as PptxGenJS writes it, in order. */
+const SLIDE_FORMS: readonly ((xml: string) => string)[] = [
+	(xml) => xml.replaceAll(MADE_UP_IMAGE_WORDS, ""),
+	withAccentBarDecorative,
+	withParagraphPropertiesOnce,
+	withEndMarksSizedAsTheirText,
+	withoutLayoutPlaceholders,
+	withTitlePlaceholder,
+	withShapeIdsOfTheirOwn,
+];
 
 /** The body of a notes slide, which PptxGenJS writes holding the notes as one run. */
 const NOTES_BODY = /(<p:ph type="body" idx="1"\/>[\s\S]*?)<p:txBody>[\s\S]*?<\/p:txBody>/;
@@ -1636,37 +1691,6 @@ const NOTE_MARK_ATTRIBUTES: Readonly<Record<string, string>> = {
 	superscript: ' baseline="30000"',
 	subscript: ' baseline="-25000"',
 };
-
-/** What PptxGenJS writes for a layout placeholder's text box, saying nothing of its edge or padding. */
-const LAYOUT_BODY_PROPERTIES = '<a:bodyPr wrap="square" rtlCol="0"></a:bodyPr>';
-
-const withRegionsLaidOut = (xml: string, regions: readonly Region<SlideLayout>[]) =>
-	eachShape(xml, (shape) => {
-		const region = regions[placeholderIndexOf(shape) - FIRST_PLACEHOLDER_INDEX];
-		if (!region) return shape;
-		const anchor = region.anchor === "top" ? "t" : "b";
-		return shape.replace(
-			LAYOUT_BODY_PROPERTIES,
-			`<a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" rtlCol="0" anchor="${anchor}"><a:normAutofit/></a:bodyPr>`,
-		);
-	});
-
-/**
- * The master's text styles, which PptxGenJS writes as PowerPoint's default,
- * as the app sets text: a title at the left, not centred, and no space before
- * a paragraph of a body's, whose space after each paragraph is all the app
- * sets between them. Every paragraph the file holds states these itself, but
- * text a presentation program adds takes them from here.
- */
-const withTextStylesAsTheApp = (xml: string) =>
-	xml
-		.replace(/(<p:titleStyle>\s*<a:lvl1pPr\b[^>]*?\balgn=")ctr"/, '$1l"')
-		.replace(/(<p:bodyStyle>[\s\S]*?<\/p:bodyStyle>)/, (bodyStyle) =>
-			bodyStyle.replaceAll(
-				'<a:spcBef><a:spcPct val="20000"/></a:spcBef>',
-				'<a:spcBef><a:spcPts val="0"/></a:spcBef>',
-			),
-		);
 
 /** `zip` without PptxGenJS's blank layout, so PowerPoint's Layout menu lists the deck's alone. */
 async function withoutDefaultLayout(zip: JSZip) {

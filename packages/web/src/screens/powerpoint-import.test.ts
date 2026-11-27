@@ -1,13 +1,8 @@
-import { artifactImageAddress, artifactImageIds } from "@sugabots/contracts/http";
-import {
-	liveDocumentFromMarkdown,
-	liveDocumentSchema,
-	markdownOfLiveDocument,
-} from "@sugabots/contracts/live-document-markdown";
-import { layoutOf } from "@sugabots/contracts/live-slides";
-import { powerPointFileOf } from "@sugabots/core/artifacts/powerpoint";
+import { liveDocumentSchema, markdownOfDocument } from "@sugabots/contracts/live-document-text";
+import { backgroundOf, bodyOf, boxAttributesOf, layoutOf } from "@sugabots/contracts/live-slides";
+import { TEXT_STYLE } from "@sugabots/contracts/slide-text-style";
+import type { JSONContent } from "@tiptap/core";
 import type { Node } from "@tiptap/pm/model";
-import { Effect } from "effect";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ImageNotKept, type KeepableImage } from "@/lib/file-import.ts";
 import { deckFromPowerPoint } from "@/lib/powerpoint-import.ts";
@@ -18,9 +13,10 @@ import {
 } from "./powerpoint-import-test-file.ts";
 
 /*
- * What a PowerPoint file's import keeps, read back as the markdown the deck
- * is kept in: each slide's layout, its title as its heading, its words, lists
- * and tables, its images and its notes, and what it counts as left out.
+ * What a PowerPoint file's import keeps: each slide as the file draws it, a
+ * box for each thing on it, where the file puts it, with its words, lists,
+ * tables, pictures and shapes, and its notes, and what it counts as left out.
+ * A box's words are read back as a document's markdown, their styles apart.
  */
 
 // The app is bundled with pptxtojson's ES module, which Vite takes by its
@@ -37,13 +33,32 @@ async function imported(file: ArrayBuffer) {
 		kept.push(image);
 		return `/images/${kept.length}`;
 	});
-	return { ...result, kept, slides: slidesInMarkdown(result.deck) };
+	return { ...result, kept };
 }
 
-/** Each slide of `deck` as its markdown. */
-const slidesInMarkdown = (deck: Node) => markdownOfLiveDocument(deck).split("\n\n---\n\n");
+/** The boxes on the slide at `index` of `deck`. */
+const boxesOn = (deck: Node, index: number) => bodyOf(deck.child(index)).children;
 
-const lines = (...each: string[]) => each.join("\n\n");
+/** `content` without the text styles a document has no place for. */
+function withoutTextStyles(content: JSONContent): JSONContent {
+	return {
+		...content,
+		marks: content.marks?.filter((mark) => mark.type !== TEXT_STYLE),
+		content: content.content?.map(withoutTextStyles),
+	};
+}
+
+/** What `holder`, a box or a slide's notes, holds, as a document's markdown. */
+const markdownOf = (holder: Node) =>
+	markdownOfDocument(
+		liveDocumentSchema("document").nodeFromJSON(
+			withoutTextStyles({ type: "doc", content: holder.toJSON().content }),
+		),
+	);
+
+/** How the text of the first line of `box` looks. */
+const textStyleOf = (box: Node) =>
+	box.firstChild?.firstChild?.marks.find((mark) => mark.type.name === TEXT_STYLE)?.attrs;
 
 describe("importing a PowerPoint file", () => {
 	let deck: Awaited<ReturnType<typeof imported>>;
@@ -51,40 +66,46 @@ describe("importing a PowerPoint file", () => {
 		deck = await imported(await powerPointImportTestFile());
 	});
 
-	it("makes a slide of each of the file's, in order, each laid out by what it held", () => {
-		expect(deck.deck.children.map(layoutOf)).toEqual([
-			"title",
-			"bullets",
-			"columns",
-			"image",
-			"table",
-			"image",
-			"bullets",
-			"quote",
-			"section",
-			"bullets",
-		]);
+	it("makes a slide of each of the file's, in order, each of no layout, on the file's colour", () => {
+		expect(deck.deck.childCount).toBe(10);
+		for (const slide of deck.deck.children) {
+			expect(layoutOf(slide)).toBe("blank");
+			expect(backgroundOf(slide)).toBe("#FFFFFF");
+		}
 	});
 
-	it("takes the short line in the largest type for the title, the line under it for its subtitle, and keeps the notes a paragraph a line", () => {
-		expect(deck.slides[0]).toBe(
-			lines(
-				"<!-- layout: title -->",
-				"# Quarterly review",
-				"<!-- box -->",
-				"Q3, for the whole team",
-				"<!-- notes: Welcome everyone.",
-				"Say the new pod's name. -->",
-			),
+	it("keeps each text box where the file puts it, its words in their colour, size, font and alignment, and the notes a paragraph a line", () => {
+		const [title, subtitle] = boxesOn(deck.deck, 0);
+		if (!title || !subtitle) throw new Error("The title slide lost a box");
+
+		expect(boxAttributesOf(title)).toEqual({
+			role: null,
+			frame: { x: 72, y: 172.8, width: 813.6, height: 86.4 },
+			fill: null,
+			stroke: null,
+			path: null,
+			verticalAlign: "middle",
+			padding: { top: 3.6, right: 7.2, bottom: 3.6, left: 7.2 },
+			rotation: 0,
+		});
+		expect(markdownOf(title)).toBe("**Quarterly review**");
+		expect(textStyleOf(title)).toEqual({
+			color: "#000000",
+			fontSize: 44,
+			fontFamily: '"Calibri", sans-serif',
+		});
+		expect(title.firstChild?.attrs).toMatchObject({ textAlign: "center", lineHeight: 1.2 });
+		expect(markdownOf(subtitle)).toBe("Q3, for the whole team");
+		expect(markdownOf(deck.deck.child(0).child(1))).toBe(
+			"Welcome everyone.\n\nSay the new pod's name.",
 		);
 	});
 
 	it("keeps bullets and numbers at their levels, with bold, italics, underline, strikethrough, superscript, subscript and links, and leaves out the slide's number", () => {
-		expect(deck.slides[1]).toBe(
-			lines(
-				"<!-- layout: bullets -->",
-				"## Goals",
-				"<!-- box -->",
+		const boxes = boxesOn(deck.deck, 1);
+		expect(boxes.map(markdownOf)).toEqual([
+			"**Goals**",
+			[
 				[
 					"- Ship *live* slides",
 					"  - with suggestions",
@@ -93,94 +114,69 @@ describe("importing a PowerPoint file", () => {
 					"- x<sup>2</sup> and H<sub>2</sub>O, <u>underlined</u> and ~~struck~~",
 				].join("\n"),
 				"1. Write it\n2. Ship it",
-				"<!-- notes: Keep this one short. -->",
-			),
-		);
+			].join("\n\n"),
+		]);
+		expect(markdownOf(deck.deck.child(1).child(1))).toBe("Keep this one short.");
 	});
 
-	it("lays two boxes of words side by side out in two columns", () => {
-		expect(deck.slides[2]).toBe(
-			lines(
-				"<!-- layout: columns -->",
-				"## People and bots",
-				"<!-- box -->",
-				"**People**",
-				"Type in the page at the same time.",
-				"<!-- box -->",
-				"**Bots**",
-				"Suggest changes to accept or undo.",
-			),
-		);
-	});
+	it("keeps a picture, with its words, as the image of a box where the file puts it, keeping the same picture once", () => {
+		const [, words, picture] = boxesOn(deck.deck, 3);
+		if (!words || !picture) throw new Error("The picture's slide lost a box");
 
-	it("keeps a picture, with its words, in the image layout beside the words it sat beside, keeping the same picture once", () => {
-		expect(deck.slides[3]).toBe(
-			lines(
-				"<!-- layout: image -->",
-				"## Sales went up",
-				"<!-- box -->",
-				"Every region grew, the north most of all.",
-				"<!-- box -->",
-				"![The sales chart](/images/1)",
-			),
-		);
-		// A slide with no title of its own has an empty one to type it in.
-		expect(deck.slides[5]).toBe(
-			lines("<!-- layout: image -->", "##", "<!-- box -->", "<!-- box -->", "![](/images/1)"),
-		);
+		expect(markdownOf(words)).toBe("Every region grew, the north most of all.");
+		expect(boxAttributesOf(picture)).toMatchObject({
+			role: "image",
+			frame: { x: 496.8, y: 108, width: 417.6, height: 374.4 },
+			padding: null,
+		});
+		expect(markdownOf(picture)).toBe("![The sales chart](/images/1)");
+		expect(boxesOn(deck.deck, 5).map(markdownOf)).toEqual(["![](/images/1)"]);
 		expect(deck.kept).toEqual([{ type: "image/png", bytes: TEST_PICTURE }]);
 	});
 
-	it("keeps a table's cells, its first row its header, and a merged cell's words in the first cell it spans", () => {
-		expect(deck.slides[4]).toBe(
-			lines(
-				"<!-- layout: table -->",
-				"## Owners",
-				"<!-- box -->",
-				[
-					"",
-					"| Milestone                | Owner |",
-					"| ------------------------ | ----- |",
-					"| Beta, shared by everyone |       |",
-					"| Launch                   | Marco |",
-					"",
-				].join("\n"),
-			),
+	it("keeps a table's cells, its first row its header in the deck's own colours, a merged cell's words in the first cell it spans, and its columns' widths", () => {
+		const [, table] = boxesOn(deck.deck, 4);
+		if (!table) throw new Error("The table's slide lost its table");
+
+		expect(markdownOf(table)).toBe(
+			[
+				"",
+				"| Milestone                | Owner |",
+				"| ------------------------ | ----- |",
+				"| Beta, shared by everyone |       |",
+				"| Launch                   | Marco |",
+				"",
+			].join("\n"),
 		);
+		const [header, , launch] = table.firstChild?.children ?? [];
+		expect(textStyleOf(header?.child(0) ?? table)).toEqual({
+			color: null,
+			fontSize: 16,
+			fontFamily: '"Calibri", sans-serif',
+		});
+		expect(textStyleOf(launch?.child(0) ?? table)).toMatchObject({ color: "#000000" });
+		expect(table.firstChild?.firstChild?.children.map((cell) => cell.attrs.colwidth?.[0])).toEqual([
+			436, 436,
+		]);
 	});
 
-	it("leaves out a chart, a drawn shape and a picture of a kind a deck can't show, counting them, and keeps a shape's words", () => {
-		expect(deck.slides[6]).toBe(
-			lines(
-				"<!-- layout: bullets -->",
-				"## Revenue",
-				"<!-- box -->",
-				"Up 60% on last year",
-				"<!-- notes: The chart is in the appendix too. -->",
-			),
-		);
+	it("keeps shapes with their outline and fill, and leaves out a chart and a picture of a kind a deck can't show, counting them", () => {
+		const boxes = boxesOn(deck.deck, 6);
+		expect(boxes.map(markdownOf)).toEqual(["**Revenue**", "", "Up 60% on last year"]);
+		const [, square, ellipse] = boxes.map(boxAttributesOf);
+		expect(square).toMatchObject({ fill: "#2563EB", path: null });
+		expect(ellipse).toMatchObject({ fill: "#FDE68A", verticalAlign: "middle" });
+		expect(ellipse?.path).toMatch(/^M 0 54 A 144 54 /);
+		expect(markdownOf(deck.deck.child(6).child(1))).toBe("The chart is in the appendix too.");
 		expect({ imagesLeftOut: deck.imagesLeftOut, othersLeftOut: deck.othersLeftOut }).toEqual({
 			imagesLeftOut: 1,
-			othersLeftOut: 2,
+			othersLeftOut: 1,
 		});
 	});
 
-	it("takes words in quotation marks, over whose they are, for a quote, and a title alone after the first slide for a section break", () => {
-		expect(deck.slides[7]).toBe(
-			lines(
-				"<!-- layout: quote -->",
-				"> “Nothing a person writes is lost.”",
-				"<!-- box -->",
-				"Priya, at the launch",
-			),
-		);
-		// A section break with no label over its title.
-		expect(deck.slides[8]).toBe(lines("<!-- layout: section -->", "<!-- box -->", "## Questions?"));
-	});
-
-	it("keeps an empty slide, as a new one of the deck's is", () => {
+	it("keeps an empty slide, holding no boxes", () => {
 		const empty = deck.deck.child(9);
-		expect(layoutOf(empty)).toBe("bullets");
+		expect(bodyOf(empty).childCount).toBe(0);
 		expect(empty.textContent).toBe("");
 	});
 
@@ -201,109 +197,5 @@ describe("importing a PowerPoint file", () => {
 		await expect(
 			deckFromPowerPoint(new Uint8Array(notPowerPoint).buffer, schema, async () => "/images/1"),
 		).rejects.toThrow();
-	});
-});
-
-describe("importing a deck exported as a PowerPoint file", () => {
-	const artifact = {
-		podId: "0199a3a0-0000-7000-8000-000000000001",
-		id: "0199a3a0-0000-7000-8000-000000000002",
-		title: "Launch review",
-	};
-	const imageIds = artifactImageIds({
-		podId: artifact.podId,
-		artifactId: artifact.id,
-		imageId: "a".repeat(64),
-	});
-	if (!imageIds) throw new Error("fixture");
-
-	/** A deck with a slide of each layout, as a bot writes one. */
-	const DECK = [
-		lines(
-			"<!-- layout: title -->",
-			"# Launch review",
-			"Q3, for the whole team",
-			"<!-- notes: Welcome everyone.\n\nSay the **new** pod's name. -->",
-		),
-		lines(
-			"<!-- layout: bullets -->",
-			"## Goals",
-			[
-				"- Ship *live* slides",
-				"  - with suggestions",
-				"- Keep **everything**, ~~nothing~~ lost: x<sup>2</sup>, <u>this</u>",
-				"- Read [the plan](https://example.com/plan)",
-			].join("\n"),
-			"3. Third\n4. Fourth",
-		),
-		lines(
-			"<!-- layout: columns -->",
-			"## People and bots",
-			"<!-- box -->",
-			"### People",
-			"- Type in the page",
-			"<!-- box -->",
-			"### Bots",
-			"1. Suggest changes",
-		),
-		lines(
-			"<!-- layout: image -->",
-			"## The chart",
-			"<!-- box -->",
-			"Sales went up.",
-			"<!-- box -->",
-			`![The launch chart](${artifactImageAddress(imageIds)})`,
-		),
-		lines("<!-- layout: section -->", "## Where we are", "Part 2"),
-		lines("<!-- layout: quote -->", "> Nothing a person writes is lost.", "The team"),
-		lines(
-			"<!-- layout: table -->",
-			"## Owners",
-			"| Milestone | Owner |\n| --- | --- |\n| Beta | Priya |\n| Launch | Marco |",
-		),
-	].join("\n\n---\n\n");
-
-	it("brings back six of its seven layouts, with each slide's title, lists, marks, links, table, image and notes; a quote comes back a section break, a column's heading a bold line and the notes without their marks", async () => {
-		const file = await Effect.runPromise(
-			powerPointFileOf(artifact, liveDocumentFromMarkdown("slides", DECK), () =>
-				Effect.succeed({ contentType: "image/png" as const, bytes: TEST_PICTURE }),
-			),
-		);
-
-		const roundTrip = await imported(new Uint8Array(file).buffer);
-
-		const original = slidesInMarkdown(liveDocumentFromMarkdown("slides", DECK));
-		expect(roundTrip.deck.children.map(layoutOf)).toEqual([
-			"title",
-			"bullets",
-			"columns",
-			"image",
-			"section",
-			"section",
-			"table",
-		]);
-		const [title, bullets, columns, image, section, quote, table] = roundTrip.slides;
-		// The file's notes are their words alone.
-		expect(title).toBe(original[0]?.replace("**new**", "new"));
-		expect(bullets).toBe(original[1]);
-		// A heading in a column is written as a bold line, as no placeholder holds it.
-		expect(columns).toBe(original[2]?.replaceAll(/### (\w+)/g, "**$1**"));
-		expect(image).toBe(original[3]?.replace(artifactImageAddress(imageIds), "/images/1"));
-		expect(section).toBe(original[4]);
-		// The quote is written in the slide's title placeholder, without quotation marks.
-		expect(quote).toBe(
-			lines(
-				"<!-- layout: section -->",
-				"<!-- box -->",
-				"## Nothing a person writes is lost.",
-				"The team",
-			),
-		);
-		expect(table).toBe(original[6]);
-		expect(roundTrip.kept).toEqual([{ type: "image/png", bytes: TEST_PICTURE }]);
-		expect({ images: roundTrip.imagesLeftOut, others: roundTrip.othersLeftOut }).toEqual({
-			images: 0,
-			others: 0,
-		});
 	});
 });

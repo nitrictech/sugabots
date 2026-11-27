@@ -1,8 +1,7 @@
 import { crc32, deflateSync } from "node:zlib";
 import type { ArtifactImageType } from "@sugabots/contracts";
 import { artifactImageAddress, artifactImageIds } from "@sugabots/contracts/http";
-import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
-import type { Frame } from "@sugabots/contracts/slides-markdown";
+import type { Frame } from "@sugabots/contracts/slide-geometry";
 import type { Node } from "@tiptap/pm/model";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
@@ -10,12 +9,12 @@ import { getDocumentProxy, getMeta, getResolvedPDFJS } from "unpdf";
 import { describe, expect, it } from "vitest";
 import { pdfFileOf } from "./pdf.ts";
 import type { DeckImage } from "./slide-design.ts";
-import { withBoxRemoved, withSlidePlaced } from "./slides.test-support.ts";
+import { boxHtml, deckOf, slideHtml } from "./slides.test-support.ts";
 
 /*
  * A deck's PDF, read back as a PDF reader reads it: its pages and their size,
- * the text on each in the order it is drawn, its links, its images and the
- * fonts its text is in.
+ * the text on each in the order it is drawn, its links, its images, its
+ * colours and the fonts its text is in.
  */
 
 const ARTIFACT = {
@@ -52,26 +51,86 @@ const keptImages = new Map(
 	]),
 );
 
+/** An image's HTML, as a deck keeps one. */
+const imageHtml = (words: string, address: string) =>
+	`<img alt="${words}" data-address="${address}">`;
+
+/** A slide of bullets: its title, and the blocks of the box under it, each where the layout puts it. */
+const bulletsSlide = (title: string, body: string) =>
+	slideHtml([boxHtml(`<h2>${title}</h2>`, { role: "title" }), boxHtml(body, { role: "body" })], {
+		layout: "bullets",
+	});
+
+/** A list's HTML, its items' words each a paragraph. */
+const listHtml = (tag: "ul" | "ol", items: readonly string[]) =>
+	`<${tag}>${items.map((item) => `<li><p>${item}</p></li>`).join("")}</${tag}>`;
+
 /** A deck with a slide of each layout, holding the blocks and marks a slide can, as a bot writes one. */
 const DECK = [
-	"<!-- layout: title -->\n\n# Launch review\n\nQ3, for the whole team\n\n<!-- notes: Welcome everyone. -->",
-	[
-		"<!-- layout: bullets -->",
-		"## Goals",
-		"- Ship *live* slides\n  - with suggestions\n- Keep **everything**, ~~nothing~~ lost: `markdown`, x<sup>2</sup>, H<sub>2</sub>O, <u>this</u> and <mark>that</mark>\n- Read [the plan](https://example.com/plan), not [this](javascript:alert(1))",
-		"3. Third\n4. Fourth",
-		"> Quoted",
-		"```\nbun run dev\n```",
-	].join("\n\n"),
-	"<!-- layout: columns -->\n\n## People and bots\n\n<!-- box -->\n\n### People\n\n- Type in the page\n\n<!-- box -->\n\n### Bots\n\n1. Suggest changes",
-	`<!-- layout: image -->\n\n## The chart\n\n<!-- box -->\n\nSales went up.\n\n<!-- box -->\n\n![The launch chart](${keptImage("image/png")})`,
-	"<!-- layout: section -->\n\nPart 2\n\n## Where we are",
-	"<!-- layout: quote -->\n\n> Nothing a person writes is lost.\n\nThe team",
-	"<!-- layout: table -->\n\n## Owners\n\n| Milestone | Owner |\n| --- | --- |\n| Beta | Priya |\n| Launch | Marco |",
-].join("\n\n---\n\n");
-
-/** The deck `markdown` reads as. */
-const deckOf = (markdown: string) => liveDocumentFromMarkdown("slides", markdown);
+	slideHtml(
+		[
+			boxHtml("<h1>Launch review</h1>", { role: "title", verticalAlign: "bottom" }),
+			boxHtml("<p>Q3, for the whole team</p>", { role: "subtitle" }),
+		],
+		{ layout: "title", notes: "<p>Welcome everyone.</p>" },
+	),
+	bulletsSlide(
+		"Goals",
+		[
+			"<ul><li><p>Ship <em>live</em> slides</p><ul><li><p>with suggestions</p></li></ul></li>",
+			"<li><p>Keep <strong>everything</strong>, <s>nothing</s> lost: <code>markdown</code>, x<sup>2</sup>, H<sub>2</sub>O, <u>this</u> and <mark>that</mark></p></li>",
+			'<li><p>Read <a href="https://example.com/plan">the plan</a>, not <a href="javascript:alert(1)">this</a></p></li></ul>',
+			'<ol start="3"><li><p>Third</p></li><li><p>Fourth</p></li></ol>',
+			"<blockquote><p>Quoted</p></blockquote>",
+			"<pre><code>bun run dev</code></pre>",
+		].join(""),
+	),
+	slideHtml(
+		[
+			boxHtml("<h2>People and bots</h2>", { role: "title" }),
+			boxHtml(`<h3>People</h3>${listHtml("ul", ["Type in the page"])}`, { role: "leftColumn" }),
+			boxHtml(`<h3>Bots</h3>${listHtml("ol", ["Suggest changes"])}`, { role: "rightColumn" }),
+		],
+		{ layout: "columns" },
+	),
+	slideHtml(
+		[
+			boxHtml("<h2>The chart</h2>", { role: "title" }),
+			boxHtml("<p>Sales went up.</p>", { role: "text" }),
+			boxHtml(`<p>${imageHtml("The launch chart", keptImage("image/png"))}</p>`, {
+				role: "image",
+				verticalAlign: "middle",
+			}),
+		],
+		{ layout: "image" },
+	),
+	slideHtml(
+		[
+			boxHtml("<p>Part 2</p>", { role: "label" }),
+			boxHtml("<h2>Where we are</h2>", { role: "title" }),
+		],
+		{ layout: "section" },
+	),
+	slideHtml(
+		[
+			boxHtml("<blockquote><p>Nothing a person writes is lost.</p></blockquote>", {
+				role: "quote",
+			}),
+			boxHtml("<p>The team</p>", { role: "attribution" }),
+		],
+		{ layout: "quote" },
+	),
+	slideHtml(
+		[
+			boxHtml("<h2>Owners</h2>", { role: "title" }),
+			boxHtml(
+				"<table><tr><th><p>Milestone</p></th><th><p>Owner</p></th></tr><tr><td><p>Beta</p></td><td><p>Priya</p></td></tr><tr><td><p>Launch</p></td><td><p>Marco</p></td></tr></table>",
+				{ role: "table" },
+			),
+		],
+		{ layout: "table" },
+	),
+].join("\n");
 
 /** The PDF of `deck`, made at the start of 1970 by the test clock. */
 const pdfOfDeck = (deck: Node) =>
@@ -81,8 +140,8 @@ const pdfOfDeck = (deck: Node) =>
 		),
 	);
 
-/** The PDF of the deck `markdown` reads as, made at the start of 1970 by the test clock. */
-const pdfFile = (markdown: string) => pdfOfDeck(deckOf(markdown));
+/** The PDF of the deck `html` reads as, made at the start of 1970 by the test clock. */
+const pdfFile = (html: string) => pdfOfDeck(deckOf(html));
 
 /** The address of an image the artifact keeps under an id made from `name`. */
 function keptImageNamed(name: string): string {
@@ -92,10 +151,10 @@ function keptImageNamed(name: string): string {
 	return artifactImageAddress(ids);
 }
 
-/** The PDF of the deck `markdown` reads as when the artifact keeps `images`, by the names their addresses are made from. */
-const pdfWithImages = (markdown: string, images: Readonly<Record<string, DeckImage>>) =>
+/** The PDF of the deck `html` reads as when the artifact keeps `images`, by the names their addresses are made from. */
+const pdfWithImages = (html: string, images: Readonly<Record<string, DeckImage>>) =>
 	Effect.runPromise(
-		pdfFileOf(ARTIFACT, deckOf(markdown), (image) =>
+		pdfFileOf(ARTIFACT, deckOf(html), (image) =>
 			Effect.succeed(
 				Object.entries(images).find(
 					([name]) => keptImageNamed(name).split("/").at(-1) === image.imageId,
@@ -174,6 +233,10 @@ async function pagesOf(file: Uint8Array) {
 				page.getOperatorList(),
 			]);
 			const items = content.items.flatMap((item) => ("str" in item ? [item] : []));
+			const colorsSetBy = (operator: number) =>
+				operators.fnArray.flatMap((each, at) =>
+					each === operator ? [String(operators.argsArray[at]?.[0])] : [],
+				);
 			return {
 				size: page.view,
 				text: items
@@ -186,14 +249,18 @@ async function pagesOf(file: Uint8Array) {
 				links: annotations.map((annotation) => annotation.url),
 				/** How far up the page each stretch of text's baseline is, in points. */
 				baselines: items.map((item) => Math.round(item.transform[5])),
-				/** Each stretch of text that says something, where it starts across the page and its baseline up it, in points. */
+				/** Each stretch of text that says something, its size, where it starts across the page and its baseline up it, in points. */
 				stretches: items
 					.filter((item) => item.str !== "")
-					.map((item) => ({ text: item.str, x: item.transform[4], baseline: item.transform[5] })),
-				/** The colours shapes are filled with, as `#rrggbb`. */
-				fills: operators.fnArray.flatMap((operator, index) =>
-					operator === OPS.setFillRGBColor ? [String(operators.argsArray[index]?.[0])] : [],
-				),
+					.map((item) => ({
+						text: item.str,
+						size: Math.hypot(item.transform[0], item.transform[1]),
+						x: item.transform[4],
+						baseline: item.transform[5],
+					})),
+				/** The colours text and shapes are filled with, and lines drawn in, as `#rrggbb`. */
+				fills: colorsSetBy(OPS.setFillRGBColor),
+				strokes: colorsSetBy(OPS.setStrokeRGBColor),
 				images: operators.fnArray.filter((operator) => operator === OPS.paintImageXObject).length,
 				/** How many stretches of text are drawn as the mark for a missing character, each marked with what it stands for. */
 				missing: operators.fnArray.filter((operator) => operator === OPS.beginMarkedContentProps)
@@ -287,18 +354,30 @@ describe("a deck's PDF", () => {
 		]);
 	});
 
+	it("draws a section break's accent bar over its label, and none on a slide without one", async () => {
+		const pages = await pagesOf(await pdfFile(DECK));
+
+		expect(pages[4]?.fills).toContain(ACCENT);
+		expect(pages[1]?.fills).not.toContain(ACCENT);
+	});
+
 	it("draws the deck's own PNG and JPEG images, and any other image as its words", async () => {
 		const [slide] = await pagesOf(
 			await pdfFile(
-				[
-					"<!-- layout: image -->",
-					"## Charts",
-					"<!-- box -->",
-					`![Theirs](${keptImage("image/png", "0199a3a0-0000-7000-8000-000000000009")}) and ![A WebP chart](${keptImage("image/webp")})`,
-					"<!-- box -->",
-					`![The launch chart](${keptImage("image/png")})`,
-					`[![The photo](${keptImage("image/jpeg")})](https://example.com/photo)`,
-				].join("\n\n"),
+				slideHtml(
+					[
+						boxHtml("<h2>Charts</h2>", { role: "title" }),
+						boxHtml(
+							`<p>${imageHtml("Theirs", keptImage("image/png", "0199a3a0-0000-7000-8000-000000000009"))} and ${imageHtml("A WebP chart", keptImage("image/webp"))}</p>`,
+							{ role: "text" },
+						),
+						boxHtml(
+							`<p>${imageHtml("The launch chart", keptImage("image/png"))}</p><p><a href="https://example.com/photo">${imageHtml("The photo", keptImage("image/jpeg"))}</a></p>`,
+							{ role: "image", verticalAlign: "middle" },
+						),
+					],
+					{ layout: "image" },
+				),
 			),
 		);
 
@@ -308,9 +387,14 @@ describe("a deck's PDF", () => {
 	});
 
 	it("draws a slide's text a step smaller while it doesn't fit, and cuts off what still runs over, on its one page", async () => {
-		const points = Array.from({ length: 30 }, (_, index) => `- Point ${index + 1}`).join("\n");
+		const points = Array.from({ length: 30 }, (_, index) => `Point ${index + 1}`);
 		const pages = await pagesOf(
-			await pdfFile(`## Short\n\n- Point\n\n---\n\n## Long\n\n${points}`),
+			await pdfFile(
+				[
+					bulletsSlide("Short", listHtml("ul", ["Point"])),
+					bulletsSlide("Long", listHtml("ul", points)),
+				].join(""),
+			),
 		);
 
 		expect(pages).toHaveLength(2);
@@ -323,7 +407,11 @@ describe("a deck's PDF", () => {
 	});
 
 	it("keeps a file whole around text its fonts have no characters for", async () => {
-		const [slide] = await pagesOf(await pdfFile("# Ünïcödé Łódź жизнь 日本語 😀👍🏽\n\nThe rest"));
+		const [slide] = await pagesOf(
+			await pdfFile(
+				slideHtml([boxHtml("<h1>Ünïcödé Łódź жизнь 日本語 😀👍🏽</h1><p>The rest</p>")]),
+			),
+		);
 
 		expect(slide?.text).toMatch(/^Ünïcödé Łódź жизнь .* The rest$/);
 	});
@@ -337,7 +425,10 @@ describe("a deck's PDF", () => {
 	it("draws an image with more pixels than may be unpacked to draw it as its words, and a screenshot as itself", async () => {
 		const [slide] = await pagesOf(
 			await pdfWithImages(
-				`## Charts\n\n![A huge chart](${keptImageNamed("huge")})\n\n![A screenshot](${keptImageNamed("screen")})`,
+				bulletsSlide(
+					"Charts",
+					`<p>${imageHtml("A huge chart", keptImageNamed("huge"))}</p><p>${imageHtml("A screenshot", keptImageNamed("screen"))}</p>`,
+				),
 				{ huge: translucentPng(6000, 4200), screen: rgbaPng(1920, 1080) },
 			),
 		);
@@ -356,7 +447,13 @@ describe("a deck's PDF", () => {
 		};
 		const pages = await pagesOf(
 			await pdfWithImages(
-				`## Damaged\n\n![Bad pixels](${keptImageNamed("bad")})\n\n![No width](${keptImageNamed("zero")})\n\n---\n\n## Next`,
+				[
+					bulletsSlide(
+						"Damaged",
+						`<p>${imageHtml("Bad pixels", keptImageNamed("bad"))}</p><p>${imageHtml("No width", keptImageNamed("zero"))}</p>`,
+					),
+					bulletsSlide("Next", ""),
+				].join(""),
 				{
 					bad: png(64, 64, { colorType: 6, data: Buffer.from("not deflate data at all") }),
 					zero: zeroWideJpeg,
@@ -373,7 +470,10 @@ describe("a deck's PDF", () => {
 	it("links only to absolute addresses, written as a reader can follow them, wherever the file is saved", async () => {
 		const [slide] = await pagesOf(
 			await pdfFile(
-				"## Links\n\n[in the app](/pods/abc/artifacts/def) [beside it](plan.pdf) [up](../secret.txt) [here](#top) [café](https://example.com/café?q=日本) [mail](mailto:team@example.com)",
+				bulletsSlide(
+					"Links",
+					'<p><a href="/pods/abc/artifacts/def">in the app</a> <a href="plan.pdf">beside it</a> <a href="../secret.txt">up</a> <a href="#top">here</a> <a href="https://example.com/café?q=日本">café</a> <a href="mailto:team@example.com">mail</a></p>',
+				),
 			),
 		);
 
@@ -386,13 +486,17 @@ describe("a deck's PDF", () => {
 
 	it("lays out a word far longer than its line, in a cell of a wide table", async () => {
 		const columns = 40;
-		const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
+		const row = (tag: "th" | "td", cells: readonly string[]) =>
+			`<tr>${cells.map((cell) => `<${tag}><p>${cell}</p></${tag}>`).join("")}</tr>`;
 		const cells = Array.from({ length: columns }, (_, index) =>
 			index === 0 ? "y".repeat(130_000) : "x",
 		);
 		const [slide] = await pagesOf(
 			await pdfFile(
-				`## Wide\n\n${row(Array(columns).fill("H"))}\n${row(Array(columns).fill("---"))}\n${row(cells)}`,
+				bulletsSlide(
+					"Wide",
+					`<table>${row("th", Array(columns).fill("H"))}${row("td", cells)}</table>`,
+				),
 			),
 		);
 
@@ -401,8 +505,14 @@ describe("a deck's PDF", () => {
 
 	it("leaves out what is past the foot of the slide, numbers and all", async () => {
 		const list = (length: number) =>
-			`## Long\n\n${Array.from({ length }, (_, index) => `${index + 1}. Item ${index + 1}`).join("\n")}`;
-		const [short, long] = await pagesOf(await pdfFile(`${list(20)}\n\n---\n\n${list(400)}`));
+			bulletsSlide(
+				"Long",
+				listHtml(
+					"ol",
+					Array.from({ length }, (_, index) => `Item ${index + 1}`),
+				),
+			);
+		const [short, long] = await pagesOf(await pdfFile(`${list(20)}${list(400)}`));
 
 		expect(long?.text).toBe(short?.text);
 		expect(long?.textsDrawn).toBe(short?.textsDrawn);
@@ -410,7 +520,10 @@ describe("a deck's PDF", () => {
 
 	it("draws symbols in fonts that hold them, and characters that show nothing as nothing", async () => {
 		const file = await pdfFile(
-			"## Plan A → B ✓\n\nπ ≥ 3 ≠ ∞ ★ ✗ **Δ ⇒ α** co\u200boperate soft\u00adhyphen 10\u2009000\n\n| Done | Next |\n| --- | --- |\n| ✓ | → `a ≤ b` |\n\nfirst\u2028second",
+			bulletsSlide(
+				"Plan A → B ✓",
+				"<p>π ≥ 3 ≠ ∞ ★ ✗ <strong>Δ ⇒ α</strong> co&#x200b;operate soft&#xad;hyphen 10&#x2009;000</p><table><tr><th><p>Done</p></th><th><p>Next</p></th></tr><tr><td><p>✓</p></td><td><p>→ <code>a ≤ b</code></p></td></tr></table><p>first&#x2028;second</p>",
+			),
 		);
 		const fonts = fontsIn(file);
 		const [slide] = await pagesOf(file);
@@ -424,56 +537,63 @@ describe("a deck's PDF", () => {
 		expect(new Set(baselines.slice(-2)).size).toBe(2);
 	});
 
-	it("draws a placed slide's boxes at their frames, wherever its layout would put them", async () => {
+	it("draws each box at its frame on the slide's background, filled and outlined, and text of its own colour and size as it says", async () => {
 		const title = { x: 480, y: 300, width: 400, height: 60 };
 		const list = { x: 80, y: 64, width: 360, height: 200 };
-
-		const [slide] = await pagesOf(
-			await pdfOfDeck(withSlidePlaced(deckOf("## Goals\n\n- Ship it"), 0, [title, list])),
+		const deck = deckOf(
+			slideHtml(
+				[
+					boxHtml("<h2>Goals</h2>", {
+						role: "title",
+						frame: title,
+						style: "background: #1e3a8a; border: 2px solid #93c5fd",
+					}),
+					boxHtml(
+						'<ul><li><p><span style="color: #fbbf24; font-size: 40px">Ship it</span></p></li></ul>',
+						{ role: "body", frame: list },
+					),
+				],
+				{ layout: "bullets", background: "#0f172a" },
+			),
 		);
+
+		const [slide] = await pagesOf(await pdfOfDeck(deck));
 
 		const [goals, shipIt] = ["Goals", "Ship it"].map((text) =>
 			slide?.stretches.find((stretch) => stretch.text === text),
 		);
-		// A heading starts at its box's left edge.
-		expect(goals?.x).toBeCloseTo(title.x * POINTS_PER_SLIDE_PX);
+		// A heading starts at the left of its box, within its outline.
+		expect(goals?.x).toBeCloseTo((title.x + 2) * POINTS_PER_SLIDE_PX);
 		expect(goals && startsInside(goals, title)).toBe(true);
 		expect(shipIt && startsInside(shipIt, list)).toBe(true);
+		expect(shipIt?.size).toBeCloseTo(40 * POINTS_PER_SLIDE_PX);
+		expect(slide?.fills).toEqual(expect.arrayContaining(["#0f172a", "#1e3a8a", "#fbbf24"]));
+		expect(slide?.strokes).toContain("#93c5fd");
 	});
 
-	it("leaves out a box somebody removed: a section break's label, with its accent bar, and a slide's title, the text under it rising to the top", async () => {
-		const kept = deckOf(
-			"<!-- layout: section -->\n\n<!-- box -->\n\n## Where we are\n\n---\n\n<!-- layout: bullets -->\n\n##\n\n<!-- box -->\n\n- Ship it",
+	it("keeps a box's text at full size where it runs past its frame into room below it, and steps it down where a box below leaves it none", async () => {
+		const points = listHtml(
+			"ul",
+			Array.from({ length: 6 }, (_, index) => `Point ${index + 1}`),
 		);
-
-		const [labelled, titled] = await pagesOf(await pdfOfDeck(kept));
-		const [unlabelled, untitled] = await pagesOf(
-			await pdfOfDeck(withBoxRemoved(withBoxRemoved(kept, 0, 0), 1, 0)),
-		);
-
-		expect(labelled?.fills).toContain(ACCENT);
-		expect(unlabelled?.fills).not.toContain(ACCENT);
-		expect(unlabelled?.text).toBe("Where we are");
-		// An empty title takes no room, but the gap under it, 2 units of 16 pixels, goes with it.
-		expect(
-			(baselineOf(untitled?.stretches ?? [], "Ship it") ?? 0) -
-				(baselineOf(titled?.stretches ?? [], "Ship it") ?? 0),
-		).toBeCloseTo(32 * POINTS_PER_SLIDE_PX);
-	});
-
-	it("keeps a placed box's text at full size where it runs past its frame into room below it, and steps it down where a box below leaves it none", async () => {
-		const points = Array.from({ length: 6 }, (_, index) => `- Point ${index + 1}`).join("\n");
-		const deck = deckOf(`## Points\n\n${points}`);
 		const list = { x: 80, y: 142, width: 800, height: 60 };
-		const roomy = withSlidePlaced(deck, 0, [{ x: 80, y: 64, width: 800, height: 46 }, list]);
+		const slideWith = (titleFrame: Frame, listFrame: Frame) =>
+			slideHtml(
+				[
+					boxHtml("<h2>Points</h2>", { role: "title", frame: titleFrame }),
+					boxHtml(points, { role: "body", frame: listFrame }),
+				],
+				{ layout: "bullets" },
+			);
+		const roomy = slideWith({ x: 80, y: 64, width: 800, height: 46 }, list);
 		// The title placed just under the list's frame, across the same width.
-		const crowded = withSlidePlaced(deck, 0, [
+		const crowded = slideWith(
 			{ x: 80, y: 130, width: 800, height: 46 },
 			{ x: 80, y: 64, width: 800, height: 60 },
-		]);
+		);
 
-		const [roomyPage] = await pagesOf(await pdfOfDeck(roomy));
-		const [crowdedPage] = await pagesOf(await pdfOfDeck(crowded));
+		const [roomyPage] = await pagesOf(await pdfFile(roomy));
+		const [crowdedPage] = await pagesOf(await pdfFile(crowded));
 
 		// A bullet's text is 1.5 units, a unit being a 60th of the slide's 720 points.
 		expect(roomyPage?.textSizes.at(-1)).toBeCloseTo(18);

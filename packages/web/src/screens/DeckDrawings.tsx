@@ -1,5 +1,5 @@
+import { deckFromHtml } from "@sugabots/contracts/deck-html";
 import { liveDocumentExtensions } from "@sugabots/contracts/live-document";
-import { liveDocumentFromMarkdown } from "@sugabots/contracts/live-document-markdown";
 import { getSchema } from "@tiptap/core";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { type MouseEvent, useMemo } from "react";
@@ -8,14 +8,20 @@ import { opensUneditableLink, useLinkOpening } from "./live-document-text.tsx";
 import { SlideDrawing } from "./slide-drawing.tsx";
 
 /*
- * A deck read, not edited: drawn from its markdown, slide by slide, as its
+ * A deck read, not edited: drawn from its HTML, slide by slide, as its
  * editor draws it. This module holds the editor's libraries, so the views
  * that show a deck load it only once one is shown (see `artifact-kinds.tsx`).
  */
 
-/** The slides `content`, a deck's markdown, holds, and how to draw them with the images version `at` keeps. */
+/**
+ * Reads a deck's HTML inert, into a page of its own that runs nothing and
+ * loads nothing, as a version's HTML may be a bot's.
+ */
+const readHtmlInert = new DOMParser();
+
+/** The slides `content`, a deck's HTML, holds, and how to draw them with the images version `at` keeps. */
 function useDeck(content: string, { podId, artifactId }: PageAt) {
-	const slides = useMemo(() => liveDocumentFromMarkdown("slides", content).children, [content]);
+	const slides = useMemo(() => deckFromHtml(content, readHtmlInert).children, [content]);
 	const serializer = useMemo(
 		() =>
 			DOMSerializer.fromSchema(

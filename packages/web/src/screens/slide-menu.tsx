@@ -1,16 +1,26 @@
 import { SPEAKER_NOTES } from "@sugabots/contracts/live-slides";
+import { SLIDE_WIDTH } from "@sugabots/contracts/slide-geometry";
 import { TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import type { Editor } from "@tiptap/react";
-import { ClipboardPaste, ClipboardType, Copy, RotateCcw, Scissors, Trash2 } from "lucide-react";
+import {
+	ClipboardPaste,
+	ClipboardType,
+	Copy,
+	RotateCcw,
+	Scissors,
+	SquarePlus,
+	Trash2,
+} from "lucide-react";
 import { type MouseEvent, type PointerEvent, useRef, useState } from "react";
 import {
+	addTextBox,
 	BOX_REMOVAL_BLOCKED_WORDS,
 	type BoxIndex,
 	boxesOf,
 	boxHolding,
 	boxRemovalBlocked,
-	laidOutByHand,
+	canResetLayout,
 	resetLayout,
 	type SlideAt,
 	whereFollowedSlideIs,
@@ -34,10 +44,11 @@ import { DRAWN_BOX } from "./slide-drawing.tsx";
  * opens in place of the browser's, every time: on its words, whatever is
  * selected, on a box's outline, on the slide around its boxes, or in its
  * notes. It cuts, copies and pastes as the keyboard's shortcuts do, deletes
- * the box it was opened on, as the Delete key does on the box's outline, and
- * resets the slide's layout. Right-clicking words outside the selection first
- * puts the caret there, so a paste goes where the person clicked; anywhere
- * else, a right-click leaves the selection as it is.
+ * the box it was opened on, as the Delete key does on the box's outline,
+ * adds a text box where it was opened, and resets the slide's layout.
+ * Right-clicking words outside the selection first puts the caret there, so
+ * a paste goes where the person clicked; anywhere else, a right-click leaves
+ * the selection as it is.
  *
  * Shift held while right-clicking opens the browser's menu instead, which
  * has its spelling suggestions, and a long press on a touch screen is left to
@@ -83,6 +94,8 @@ interface OpenedMenu {
 	region: Region;
 	/** The box it offers to delete, when the slide's boxes can be edited here. */
 	box: BoxIndex | undefined;
+	/** Where on the slide, in its pixels, it was opened by the pointer, where a text box it adds goes. */
+	at: { x: number; y: number } | undefined;
 	/** The slide it was opened on, followed through anybody's changes, so it acts on no other. */
 	slide: FollowedNode | undefined;
 	/** Whether nothing was selected, which leaves nothing to cut or copy. */
@@ -134,6 +147,7 @@ export function useSlideMenu(
 				: pointAt(event.clientX, event.clientY),
 			region: target.region,
 			box: boxesEditable ? target.box : undefined,
+			at: byKeyboard ? undefined : pointOnSlide(view, slide, event),
 			slide: followNode(view.state, slide.pos),
 			nothingSelected: view.state.selection.empty,
 			focused: document.activeElement,
@@ -186,11 +200,20 @@ export function useSlideMenu(
 		if (resetting) editor.view.dispatch(resetting);
 	}
 
+	function addTextBoxFromMenu() {
+		const on = slideOpenedOn();
+		const adding = on && addTextBox(editor.state, on.pos, opened?.at);
+		if (!adding) return;
+		editor.view.dispatch(adding);
+		editor.view.focus();
+	}
+
 	const onSlide = editable && opened?.region === "slide";
 	const box = onSlide && opened?.box !== undefined ? opened.box : undefined;
 	const boxNode = box === undefined || !slide ? undefined : boxesOf(slide.node)[box]?.node;
 	const removalBlocked = boxNode && boxRemovalBlocked(editor.state, boxNode);
-	const offersReset = onSlide && slide !== undefined && laidOutByHand(slide.node);
+	const offersBoxes = onSlide && boxesEditable;
+	const offersReset = onSlide && slide !== undefined && canResetLayout(slide.node);
 
 	const menu = (
 		<ContextMenu open={open} onOpenChange={setOpen}>
@@ -227,7 +250,13 @@ export function useSlideMenu(
 						</DropdownMenuItem>
 					</>
 				)}
-				{(boxNode || offersReset) && <DropdownMenuSeparator />}
+				{(offersBoxes || offersReset) && <DropdownMenuSeparator />}
+				{offersBoxes && (
+					<DropdownMenuItem onClick={addTextBoxFromMenu}>
+						<SquarePlus aria-hidden />
+						Add text box
+					</DropdownMenuItem>
+				)}
 				{box !== undefined && boxNode && (
 					<DropdownMenuItem
 						variant="destructive"
@@ -338,6 +367,17 @@ function keyboardAnchor(
 const pointAt = (x: number, y: number, height = 0): VirtualPoint => ({
 	getBoundingClientRect: () => DOMRect.fromRect({ x, y, width: 0, height }),
 });
+
+/** Where on `slide` the pointer at `event` is, in the slide's pixels: `undefined` when its body isn't drawn. */
+function pointOnSlide(view: EditorView, slide: SlideAt, { clientX, clientY }: MouseEvent) {
+	const area = drawnSlideBody(view, slide.pos)?.getBoundingClientRect();
+	if (!area?.width) return undefined;
+	const slidePxPerWindowPx = SLIDE_WIDTH / area.width;
+	return {
+		x: (clientX - area.left) * slidePxPerWindowPx,
+		y: (clientY - area.top) * slidePxPerWindowPx,
+	};
+}
 
 /**
  * Gives the words the focus, and puts the caret where the right-click was,

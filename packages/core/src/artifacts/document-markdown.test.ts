@@ -1,9 +1,8 @@
-import type { LiveArtifactKind } from "@sugabots/contracts/artifacts";
 import {
-	liveDocumentFromMarkdown,
+	documentFromMarkdown,
 	liveDocumentSchema,
-	markdownOfLiveDocument,
-} from "@sugabots/contracts/live-document-markdown";
+	markdownOfDocument,
+} from "@sugabots/contracts/live-document-text";
 import type { Node } from "@tiptap/pm/model";
 import { describe, expect, it } from "vitest";
 
@@ -16,12 +15,12 @@ const schema = liveDocumentSchema("document");
 
 /** `text` as a live document, which must be one its schema holds. */
 function parsed(text: string): Node {
-	const document = liveDocumentFromMarkdown("document", text);
+	const document = documentFromMarkdown(text);
 	document.check();
 	return document;
 }
 
-const written = (document: Node) => markdownOfLiveDocument(document).trim();
+const written = (document: Node) => markdownOfDocument(document).trim();
 
 const IMAGE = `/api/pods/0199a3a0-0000-7000-8000-000000000001/artifacts/0199a3a0-0000-7000-8000-000000000002/images/${"a".repeat(64)}`;
 
@@ -205,7 +204,7 @@ describe("a live document's markdown", () => {
 });
 
 describe("markdown a live document's schema has no place for", () => {
-	/** Markdown each kind's markdown reader reads as nodes their schema can't hold as they are. */
+	/** Markdown the markdown reader reads as nodes the schema can't hold as they are. */
 	const UNFITTING: [label: string, markdown: string][] = [
 		["a quote holding nothing", ">"],
 		["a numbered item holding nothing", "1."],
@@ -219,22 +218,15 @@ describe("markdown a live document's schema has no place for", () => {
 		["only a link's definition, which shows nothing", "[launch]: https://example.com/launch"],
 	];
 
-	const KINDS: LiveArtifactKind[] = ["document", "slides"];
+	it.each(UNFITTING)(
+		"reads %s as content its schema holds, which reads back the same",
+		(_, markdown) => {
+			const read = documentFromMarkdown(markdown);
 
-	it.each(
-		KINDS.flatMap((kind) =>
-			UNFITTING.map(([label, markdown]): [LiveArtifactKind, string, string] => [
-				kind,
-				label,
-				markdown,
-			]),
-		),
-	)("(%s) reads %s as content its schema holds, which reads back the same", (kind, _, markdown) => {
-		const read = liveDocumentFromMarkdown(kind, markdown);
-
-		read.check();
-		expect(liveDocumentFromMarkdown(kind, markdownOfLiveDocument(read)).eq(read)).toBe(true);
-	});
+			read.check();
+			expect(documentFromMarkdown(markdownOfDocument(read)).eq(read)).toBe(true);
+		},
+	);
 
 	it("keeps a task's box as the characters it is", () => {
 		const items: string[] = [];

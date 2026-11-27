@@ -1,7 +1,6 @@
-import type { Frame } from "@sugabots/contracts/slides-markdown";
+import type { Frame } from "@sugabots/contracts/slide-geometry";
 import { describe, expect, it } from "vitest";
 import {
-	frameOfDrawnBox,
 	type Guide,
 	type Handle,
 	movedFrame,
@@ -67,6 +66,27 @@ describe("a box moved by hand", () => {
 
 		expect(frame).toEqual({ x: 90, y: 150, width: 300, height: 60 });
 		expect(guides).toEqual([]);
+	});
+
+	it.each<[string, Frame, Shift, Pick<Frame, "x" | "y">]>([
+		[
+			"past the slide's left, as a picture bleeding off it, moves on, but no further off",
+			{ x: -40, y: 100, width: 200, height: 100 },
+			{ dx: -20, dy: 0 },
+			{ x: -40, y: 100 },
+		],
+		[
+			"wider than the slide moves only as far as keeps it across the slide",
+			{ x: -10, y: 0, width: 1000, height: 540 },
+			{ dx: -100, dy: 0 },
+			{ x: -40, y: 0 },
+		],
+	])("that sits %s", (_, start, shift, at) => {
+		expect(movedFrame(start, shift, NO_SNAP_LINES).frame).toEqual({
+			...at,
+			width: start.width,
+			height: start.height,
+		});
 	});
 });
 
@@ -139,41 +159,17 @@ describe("a box resized by hand", () => {
 		expect(frame).toEqual({ ...CLEAR, width: 290 });
 		expect(guides).toEqual([]);
 	});
-});
 
-describe("the frame of a box as the slide is drawn", () => {
-	it.each([
-		[
-			"at half size",
-			{ left: 140, top: 82, width: 400.3, height: 23 },
-			{ left: 100, top: 50, width: 480 },
-			{ x: 80, y: 64, width: 801, height: 46 },
-		],
-		[
-			"at one and a half times its size",
-			{ left: 120.4, top: 96.2, width: 1200.6, height: 69.3 },
-			{ left: 0, top: 0, width: 1440 },
-			{ x: 80, y: 64, width: 801, height: 47 },
-		],
-	])(
-		"is in the slide's whole pixels, its size rounded up, with the slide drawn %s",
-		(_, box, slide, frame) => {
-			expect(frameOfDrawnBox(box, slide)).toEqual(frame);
-		},
-	);
+	it("past the slide's left, as a picture bleeding off it, keeps its edge there, but no further off", () => {
+		const bleeding: Frame = { x: -40, y: 100, width: 200, height: 100 };
 
-	it.each([
-		[
-			"cut at the slide's right and foot where it runs past them",
-			{ left: 900, top: 500, width: 200, height: 100 },
-			{ x: 900, y: 500, width: 60, height: 40 },
-		],
-		[
-			"no smaller than a person may make a box, even at the slide's right and foot",
-			{ left: 950, top: 535, width: 5, height: 3 },
-			{ x: 912, y: 516, width: 48, height: 24 },
-		],
-	])("is on the slide, %s", (_, box, frame) => {
-		expect(frameOfDrawnBox(box, { left: 0, top: 0, width: 960 })).toEqual(frame);
+		expect(resizedFrame(bleeding, "left", { dx: -20, dy: 0 }, NO_SNAP_LINES).frame).toEqual(
+			bleeding,
+		);
+		expect(resizedFrame(bleeding, "left", { dx: 10, dy: 0 }, NO_SNAP_LINES).frame).toEqual({
+			...bleeding,
+			x: -30,
+			width: 190,
+		});
 	});
 });

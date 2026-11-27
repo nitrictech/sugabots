@@ -52,6 +52,9 @@ type Refusal = { status: "refused"; reason: string };
 /** A change that waits in the document for a person, which the model should report and not retry. */
 type Suggested = { status: "suggested"; note: string };
 
+/** A change that asked for nothing the artifact keeps, so no version was written. */
+type Unchanged = { status: "unchanged"; note: string };
+
 const artifactIdSchema = Schema.String.check(Schema.isUUID()).annotate({
 	description: "The artifact's id, from artifact_list or the write that made it",
 });
@@ -101,7 +104,7 @@ export function artifactTools({
 
 	const refusingChanges = <E extends AuthoringFailure>(
 		change: Effect.Effect<Artifact, E>,
-	): Promise<Written | Refusal | Suggested> =>
+	): Promise<Written | Refusal | Suggested | Unchanged> =>
 		run(
 			change.pipe(
 				Effect.map(written),
@@ -132,7 +135,10 @@ export function artifactTools({
 							...listing(artifact),
 							content: artifact.content,
 						})),
-						Effect.catchTag("ArtifactNotFound", (failure) => Effect.succeed(refusalFor(failure))),
+						Effect.catchTags({
+							ArtifactNotFound: (failure) => Effect.succeed(refusalFor(failure)),
+							ArtifactUnreadable: (failure) => Effect.succeed(refusalFor(failure)),
+						}),
 					),
 				),
 		}),
@@ -184,7 +190,7 @@ export function artifactTools({
 
 		[ARTIFACT_EDIT_TOOL]: tool({
 			description:
-				"Change part of an artifact, as a new version: `oldText` is replaced by `newText`. `oldText` must appear exactly once, so quote enough around the change to make it unique, exactly as it is in the content from artifact_read or your last write.",
+				"Change part of an artifact, as a new version: `oldText` is replaced by `newText`. `oldText` must appear exactly once, so quote enough around the change to make it unique, exactly as it is in the content artifact_read gives. The app keeps what you write in its own form, a deck's HTML most of all, so read the artifact again rather than quote what you wrote.",
 			inputSchema: Schema.Struct({
 				artifactId: artifactIdSchema,
 				baseVersion: baseVersionSchema,
@@ -216,9 +222,32 @@ const listing = (summary: ArtifactSummary): ArtifactListing => ({
 	updatedAt: summary.updatedAt,
 });
 
+/** One slide of a deck as its HTML is written, for the model to follow. */
+const EXAMPLE_SLIDE = `<section data-slide data-layout="bullets" style="background: #f8fafc">
+  <div data-slide-body>
+    <div data-slide-box data-role="title" style="left: 80px; top: 64px; width: 800px; height: 48px">
+      <h2>Launch goals</h2>
+    </div>
+    <div data-slide-box data-role="body" style="left: 80px; top: 144px; width: 560px; height: 332px">
+      <ul><li><p>Ship on <strong>Friday</strong></p></li><li><p>Tell support first</p></li></ul>
+    </div>
+    <div data-slide-box data-vertical-align="middle" style="left: 680px; top: 144px; width: 200px; height: 96px; background: #0f766e; padding: 12px 16px">
+      <p style="text-align: center"><span style="color: #ffffff; font-size: 28px">On track</span></p>
+    </div>
+  </div>
+  <aside data-speaker-notes>
+    <p>Start with the date.</p>
+  </aside>
+</section>`;
+
+/** The styles a deck keeps, which are all it keeps of CSS. */
+const DECK_STYLES = `a slide's \`background\` on its section; a box's \`left\`, \`top\`, \`width\`, \`height\`, \`background\`, \`border\` (as \`2px solid #334155\`), \`padding\` and \`transform: rotate(-5deg)\`, with \`data-vertical-align="middle"\` or \`"bottom"\` to sit its text lower; text's \`color\`, \`font-family\` and \`font-size\` on a \`<span>\`; and \`text-align\` and \`line-height\` on a paragraph or heading. Every length is in px and every colour solid: hex, \`rgb()\` or a name`;
+
+/** How a deck is written, for artifact_write to tell the model. */
+const SLIDES_RULES = `A \`slides\` deck is HTML: its slides alone, a \`<section data-slide>\` for each, in order, with no doctype, \`<html>\`, \`<head>\`, \`<body>\`, \`<style>\` or \`<script>\` (those are ignored). A slide is 960 x 540 px. Its boxes go in a \`<div data-slide-body>\`, each a \`<div data-slide-box>\` placed by \`left\`, \`top\`, \`width\` and \`height\` in its \`style\`; later boxes are drawn over earlier ones. A box holds what a document does, as HTML: headings, paragraphs, lists, a small table, a quote, and images as \`<img alt="what it shows" data-address="…">\`; keep an image's \`data-address\` as you read it, as an image from anywhere else shows only its \`alt\`. A shape is an \`<svg viewBox="0 0 W H">\` holding a \`<path>\` with its \`fill\`, \`stroke\` and \`stroke-width\`, first in its box, W and H the box's width and height. \`data-role\` on a box says what it is for, which styles its text: \`title\`, \`subtitle\`, \`body\`, \`leftColumn\`, \`rightColumn\`, \`text\`, \`image\`, \`label\`, \`quote\`, \`attribution\` or \`table\`; leave it out for anything else, such as a shape. A slide's \`data-layout\` is the template it was laid out by, which places these roles: \`title\` (title, subtitle), \`bullets\` (title, body), \`columns\` (title, leftColumn, rightColumn), \`image\` (title, text, image), \`section\` (label, title), \`quote\` (quote, attribution), \`table\` (title, table) or \`blank\` (none). A box with a role and no position goes where its slide's layout puts that role; changing \`data-layout\` alone moves nothing. Style with inline CSS, of which a deck keeps only this, never classes, \`border-radius\`, \`opacity\`, shadows or gradients: ${DECK_STYLES}. A title slide's title is an \`<h1>\`, other slides' an \`<h2>\`. What the speaker says over a slide goes after its body, as paragraphs in an \`<aside data-speaker-notes>\`. For example:\n\n${EXAMPLE_SLIDE}\n\nLay slides out as a designer would: keep text inside its box and every box inside the slide, at least 64 px from its edges; never overlap boxes that hold text; and keep a slide to a heading and three to five short points, splitting anything longer across slides.`;
+
 /** How each kind is written, for artifact_write to tell the model. */
-const KIND_RULES =
-	"A `document` is markdown with `#` headings. A `slides` deck is markdown too, one slide after another, with a line of `---` between each two and a blank line before and after it (without the blank line before, the line above becomes a heading). Start each slide with its layout, as `<!-- layout: bullets -->`. A layout places the slide's boxes in order, and each box after the first starts with `<!-- box -->` on its own line; keep a box's comment even when the box is empty. The layouts are: `title` (the first slide: a `#` heading, then a box with an optional short line under it), `section` (an optional short label such as `Part 2`, then a box with a `##` heading opening a part of the talk), `bullets` (a `##` heading, then a box with a short list), `columns` (a `##` heading, then two boxes side by side, each holding a few lines or a short list), `image` (like `columns`, with the words in the first box after the heading and the last left for an image), `quote` (a `>` quote, then a box with an optional line saying whose it is) or `table` (a `##` heading, then a box with one small table). End a slide with what the speaker says over it, if anything, as `<!-- notes: what to say -->`. Keep each slide to a heading and three to five short points; split anything longer across slides rather than filling one. An `html` page is a complete HTML document, shown in the chat under your reply as well as on its own, so it suits charts, tables and small interactive tools. Make it responsive: it is shown in the chat, opened large beside it and on phones, from about 360px to 1200px wide, so use fluid widths with no fixed or maximum width of its own, let rows wrap or stack when narrow, and size charts and canvases to their container, redrawing when it resizes. It is drawn on the chat's own ground with the app's theme, so it looks part of the conversation: leave the page background transparent, add no outer card or border of your own, and colour it with the app's CSS variables, which follow light and dark mode: --foreground, --body-foreground, --muted-foreground, --subtle-foreground for text; --card, --panel, --chip, --hover for surfaces; --border, --border-strong; --primary, --link, --success-text, --destructive-text, --warning for accents; and --font-sans, --font-mono. It runs in an isolated frame with no network access except scripts from https://cdn.jsdelivr.net (such as Chart.js), so inline its CSS and embed its data.";
+const KIND_RULES = `A \`document\` is markdown with \`#\` headings. ${SLIDES_RULES} An \`html\` page is a complete HTML document, shown in the chat under your reply as well as on its own, so it suits charts, tables and small interactive tools. Make it responsive: it is shown in the chat, opened large beside it and on phones, from about 360px to 1200px wide, so use fluid widths with no fixed or maximum width of its own, let rows wrap or stack when narrow, and size charts and canvases to their container, redrawing when it resizes. It is drawn on the chat's own ground with the app's theme, so it looks part of the conversation: leave the page background transparent, add no outer card or border of your own, and colour it with the app's CSS variables, which follow light and dark mode: --foreground, --body-foreground, --muted-foreground, --subtle-foreground for text; --card, --panel, --chip, --hover for surfaces; --border, --border-strong; --primary, --link, --success-text, --destructive-text, --warning for accents; and --font-sans, --font-mono. It runs in an isolated frame with no network access except scripts from https://cdn.jsdelivr.net (such as Chart.js), so inline its CSS and embed its data.`;
 
 /** artifact_write's inputs that don't go together, and what to do instead. */
 const WRITE_REFUSALS = {
@@ -240,10 +269,24 @@ const KIND_NAMES: Record<ArtifactKind, string> = {
 const SUGGESTION_BLOCKED_REASONS: Record<Artifacts.SuggestionBlocked["blocked"], string> = {
 	unmarkable:
 		"This change has to be shown as a suggestion, and a suggestion can't be shown inside a code block. Say so, and ask them to change the code block themselves.",
-	layoutPending:
-		"A new layout suggested for a slide this change touches is waiting for somebody to accept or reject it, and nothing on that slide can change until then, so none of this change was made. Say so, and ask them to settle that suggestion first. The rest of the change can be made again without touching that slide.",
-	suggestionPending:
-		"A slide whose layout this change sets holds a suggestion waiting for somebody to accept or reject it, and its layout can't change until then, so none of this change was made. Say so, and ask them to settle the suggestions on that slide first. The rest of the change can be made again without changing that slide's layout.",
+};
+
+/** What was wrong with HTML written for a deck that can't be the deck, and what to do instead. */
+const DECK_HTML_REFUSALS: Record<Artifacts.DeckHtmlRefused["reason"], string> = {
+	saysNothing:
+		"That HTML holds no slide, nor anything a slide could, so nothing was changed. Write every slide the deck is to have, each a `<section data-slide>`; a deck always has at least one.",
+	nestedTooDeeply:
+		"That HTML nests elements far deeper than any slide does, so it can't be read and nothing was changed. Write the slides again as sections, boxes and blocks.",
+	wordsLost:
+		"Some words in that HTML stand where a slide has no place for them, so they would be lost, and nothing was changed. Put every word in a box's headings, paragraphs, lists, tables or quotes, or in a slide's speaker notes.",
+};
+
+/** What a change that asked for nothing an artifact of each kind keeps is told. */
+const UNCHANGED_NOTES: Record<ArtifactKind, string> = {
+	document:
+		"That leaves the document reading as it does already, so nothing was changed and no version was written.",
+	slides: `Nothing that changes is something a deck keeps, so the deck is as it was and no version was written. Of CSS a deck keeps only ${DECK_STYLES}. Say so if it matters, rather than writing it again.`,
+	html: "That is the page's content already, so nothing was changed and no version was written.",
 };
 
 type AuthoringFailure =
@@ -252,15 +295,21 @@ type AuthoringFailure =
 	| Artifacts.KindFixed
 	| Artifacts.TooLarge
 	| Artifacts.EditTextUnmatched
+	| Artifacts.DeckHtmlRefused
+	| Artifacts.Unreadable
 	| Artifacts.NotWritten;
 
-function refusalFor(failure: AuthoringFailure): Refusal | Suggested {
+function refusalFor(failure: AuthoringFailure): Refusal | Suggested | Unchanged {
 	switch (failure._tag) {
 		case "ArtifactChangeSuggested":
 			return {
 				status: "suggested",
-				note: "This change was asked for from inside the document, so it is shown there as a suggestion and takes effect once somebody accepts it. The document reads as before for now. Say that you suggested it; don't make the change again.",
+				note: "This change was asked for from inside the document, so what it changes in words, and any blocks, boxes or slides it adds or removes, are shown there as a suggestion, which takes effect once somebody accepts it; until then the document reads as before. Anything it changed in how a deck looks was made at once. Say that you suggested it; don't make the change again.",
 			};
+		case "ArtifactUnchanged":
+			return { status: "unchanged", note: UNCHANGED_NOTES[failure.kind] };
+		case "ArtifactDeckHtmlRefused":
+			return { status: "refused", reason: DECK_HTML_REFUSALS[failure.reason] };
 		case "ArtifactUnreadable":
 			return {
 				status: "refused",
