@@ -214,7 +214,7 @@ describe("SessionAuthentication", () => {
 					yield* query((db) => db.delete(session).where(eq(session.id, ending.id)));
 				}),
 		);
-		const cursor = await store.latest(stream);
+		const cursor = (await store.latest([stream])).get(stream) ?? 0;
 		const replayed = async () => (await store.replay(stream, cursor, 3)).map(({ event }) => event);
 
 		try {

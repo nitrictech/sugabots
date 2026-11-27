@@ -484,7 +484,7 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				),
 			);
 		await commit(marker());
-		const since = await store.latest(stream);
+		const since = (await store.latest([stream])).get(stream) ?? 0;
 
 		const publishing = Promise.withResolvers<void>();
 		const unblock = Promise.withResolvers<void>();
