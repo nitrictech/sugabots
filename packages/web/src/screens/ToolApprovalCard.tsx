@@ -450,7 +450,7 @@ export function parseFields(value: unknown): Fields | undefined {
 	return fields.length > 0 ? fields : undefined;
 }
 
-/** A list with nothing structured in it, which reads well enough as its items in a row. */
+/** A list with nothing structured in it, shown as one value rather than laid out as entries. */
 function isPlainList(value: unknown): value is unknown[] {
 	return Array.isArray(value) && value.every((item) => item === null || typeof item !== "object");
 }
@@ -666,9 +666,11 @@ function SmallRecord({ fields }: { fields: Record<string, unknown> }) {
 /**
  * A single value as text: words as written, numbers in even figures, and
  * true, false and emptiness in a quieter voice, since they are flags rather
- * than content.
+ * than content. A list is shown as JSON, so each entry's boundaries are exact
+ * even when an entry contains a comma.
  */
 function PlainValue({ value }: { value: unknown }) {
+	if (Array.isArray(value) && value.length === 0) return <Quiet>None</Quiet>;
 	if (isPlainList(value)) {
 		return (
 			<code className="whitespace-pre-wrap wrap-anywhere text-sm leading-normal">

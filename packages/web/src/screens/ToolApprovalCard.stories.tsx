@@ -188,7 +188,7 @@ export const ReviewOnAPhone = meta.story({
 	},
 });
 
-/** Regions with commas still show exactly which names the connector receives. */
+/** Labels with commas still show exactly which names the connector receives. */
 export const ListEntryBoundaries = meta.story({
 	globals: { ...PHONE, theme: "light" },
 	args: {
@@ -248,7 +248,7 @@ export const ANetworkRequestNotYours = meta.story({
 	play: async ({ canvas }) => {
 		await expect(
 			canvas.getByText(
-				"The workspace's owner or an admin can decide, or in a bot's own chats, whoever made the bot.",
+				"The workspace's owner or an admin can decide. In a bot's own chats, whoever made the bot can too.",
 			),
 		).toBeInTheDocument();
 	},
