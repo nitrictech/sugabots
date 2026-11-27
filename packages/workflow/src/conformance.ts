@@ -131,25 +131,15 @@ export function conformance(options: {
 		{ timeout: RESTART_TEST_TIMEOUT_MS },
 		async () => {
 			const key = crypto.randomUUID();
-			const executionId = await (async () => {
-				const harness = start(options.engine());
-				const id = await harness.run(Racing.execute({ key }, { discard: true }));
-				await harness.untilSuspended(id, Racing);
-				await harness.run(
-					DurableDeferred.succeed(Second, { token: racingToken(Second, id), value: "b" }),
-				);
-				await harness.until(() => runs(key).includes("second"));
-				await harness.untilSuspended(id, Racing);
-				await harness.stop();
-				return id;
-			})();
-
-			const restarted = start(options.engine());
-			const result = await restarted.resultAfterRestart(
-				executionId,
-				Racing,
-				DurableDeferred.succeed(First, { token: racingToken(First, executionId), value: "a" }),
-			);
+			const result = await resultAcrossRestart(options.engine, Racing, key, {
+				beforeRestart: {
+					deliver: (id) =>
+						DurableDeferred.succeed(Second, { token: racingToken(Second, id), value: "b" }),
+					recorded: () => runs(key).includes("second"),
+				},
+				afterRestart: (id) =>
+					DurableDeferred.succeed(First, { token: racingToken(First, id), value: "a" }),
+			});
 			expect(result).toBe("second:b,first:a");
 			expect(runs(key)).toEqual(["second", "first", "cleanup"]);
 		},
@@ -191,20 +181,9 @@ export function conformance(options: {
 		{ timeout: RESTART_TEST_TIMEOUT_MS },
 		async () => {
 			const key = crypto.randomUUID();
-			const executionId = await (async () => {
-				const harness = start(options.engine());
-				const id = await harness.run(Suspending.execute({ key }, { discard: true }));
-				await harness.untilSuspended(id);
-				await harness.stop();
-				return id;
-			})();
-
-			const restarted = start(options.engine());
-			const result = await restarted.resultAfterRestart(
-				executionId,
-				Suspending,
-				DurableDeferred.succeed(Go, { token: goToken(executionId), value: "go" }),
-			);
+			const result = await resultAcrossRestart(options.engine, Suspending, key, {
+				afterRestart: (id) => DurableDeferred.succeed(Go, { token: goToken(id), value: "go" }),
+			});
 			expect(result).toBe("before:go:after");
 			expect(runs(key)).toEqual(["before", "after"]);
 		},
@@ -300,6 +279,113 @@ export const goToken = (executionId: string, workflow: Workflows = Suspending) =
 	DurableDeferred.tokenFromExecutionId(Go, { workflow, executionId });
 
 type Workflows = typeof Suspending | typeof Racing | typeof Waiting | typeof Inputs;
+
+function poll<A>(
+	workflow: Workflows,
+	executionId: string,
+	done: (result: Option.Option<Workflow.Result<string, never>>) => A | undefined,
+) {
+	return workflow
+		.poll(executionId)
+		.pipe(Effect.flatMap((result) => Effect.fromOption(Option.fromUndefinedOr(done(result)))));
+}
+
+function readResult(exit: Exit.Exit<string, never>) {
+	if (Exit.isFailure(exit)) throw new Error(`Execution failed: ${String(exit.cause)}`);
+	return exit.value;
+}
+
+async function resultAcrossRestart(
+	engine: () => Layer.Layer<WorkflowEngine.WorkflowEngine, unknown>,
+	workflow: typeof Suspending | typeof Racing,
+	key: string,
+	signals: {
+		readonly beforeRestart?: {
+			readonly deliver: (id: string) => Effect.Effect<void, never, WorkflowEngine.WorkflowEngine>;
+			readonly recorded: () => boolean;
+		};
+		readonly afterRestart: (
+			id: string,
+		) => Effect.Effect<void, never, WorkflowEngine.WorkflowEngine>;
+	},
+) {
+	const executionId = await Effect.runPromise(workflow.executionId({ key }));
+	const signal = AbortSignal.timeout(RESTART_BUDGET_MS);
+	let lastState = "no state observed";
+	const runPhase = async <A>(phase: string, run: () => Promise<A>) => {
+		try {
+			signal.throwIfAborted();
+			const result = await run();
+			signal.throwIfAborted();
+			return result;
+		} catch (cause) {
+			if (!signal.aborted) throw cause;
+			throw new Error(
+				`Execution ${executionId} exceeded its ${RESTART_BUDGET_MS} ms restart budget during ${phase} (last state: ${lastState})`,
+				{ cause },
+			);
+		}
+	};
+	const retryWhileWaiting = <A>(
+		attempt: Effect.Effect<A, unknown, WorkflowEngine.WorkflowEngine>,
+	) => attempt.pipe(Effect.retry(Schedule.spaced(POLL_INTERVAL)), Effect.orDie);
+	const waitFor = <A>(
+		harness: ReturnType<typeof start<never>>,
+		phase: string,
+		done: (result: Workflow.Result<string, never>) => A | undefined,
+	) =>
+		runPhase(phase, () =>
+			harness.run(
+				retryWhileWaiting(
+					poll(workflow, executionId, (result) => {
+						const state = Option.getOrUndefined(result);
+						lastState = state?._tag ?? "poll returned no state";
+						return state === undefined ? undefined : done(state);
+					}),
+				),
+				{ signal },
+			),
+		);
+	const suspended = (state: Workflow.Result<string, never>) =>
+		state._tag === "Suspended" ? true : undefined;
+
+	const before = start(engine());
+	await runPhase("starting the execution", () =>
+		before.run(workflow.execute({ key }, { discard: true }), { signal }),
+	);
+	await waitFor(before, "waiting for the initial suspension", suspended);
+	const first = signals.beforeRestart;
+	if (first) {
+		await runPhase("delivering the signal before restart", () =>
+			before.run(first.deliver(executionId), { signal }),
+		);
+		await runPhase("waiting for the race winner to be recorded", () =>
+			before.run(
+				retryWhileWaiting(
+					Effect.suspend(() => {
+						if (first.recorded()) return Effect.void;
+						return Effect.fail("not yet");
+					}),
+				),
+				{ signal },
+			),
+		);
+		await waitFor(before, "waiting for suspension after the race winner", suspended);
+	}
+	await runPhase("stopping the engine", () =>
+		Effect.runPromise(Effect.promise(before.stop), { signal }),
+	);
+
+	const after = start(engine());
+	await runPhase("restarting the engine and delivering the signal", () =>
+		after.run(signals.afterRestart(executionId), { signal }),
+	);
+	return readResult(
+		await waitFor(after, "waiting for completion after restart", (state) =>
+			state._tag === "Complete" ? state.exit : undefined,
+		),
+	);
+}
 
 const suspendingActivities = Activities.fromService<typeof Suspending.payloadSchema.Type>()(Probe, {
 	step: { input: Schema.String },
@@ -402,8 +488,7 @@ const workflows = Layer.mergeAll(
 export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngine | R, unknown>) {
 	const runtime = ManagedRuntime.make(workflows.pipe(Layer.provideMerge(engine)));
 	onTestFinished(() => runtime.dispose());
-	const run = <A, E>(effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine | R>) =>
-		runtime.runPromise(effect);
+	const run = runtime.runPromise;
 	const retried = <A>(attempt: Effect.Effect<A, unknown, WorkflowEngine.WorkflowEngine>) =>
 		run(
 			attempt.pipe(
@@ -411,14 +496,6 @@ export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngi
 				Effect.orDie,
 			),
 		);
-	const poll = <A>(
-		workflow: Workflows,
-		executionId: string,
-		done: (result: Option.Option<Workflow.Result<string, never>>) => A | undefined,
-	) =>
-		workflow
-			.poll(executionId)
-			.pipe(Effect.flatMap((result) => Effect.fromOption(Option.fromUndefinedOr(done(result)))));
 	const pollUntil = <A>(
 		workflow: Workflows,
 		executionId: string,
@@ -429,10 +506,6 @@ export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngi
 				Option.isSome(result) ? done(result.value) : undefined,
 			),
 		);
-	const readResult = (exit: Exit.Exit<string, never>) => {
-		if (Exit.isFailure(exit)) throw new Error(`Execution failed: ${String(exit.cause)}`);
-		return exit.value;
-	};
 	const completion = (executionId: string, workflow: Workflows = Suspending) =>
 		pollUntil(workflow, executionId, (result) =>
 			result._tag === "Complete" ? result.exit : undefined,
@@ -449,38 +522,6 @@ export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngi
 		completion,
 		result: async (executionId: string, workflow: Workflows = Suspending) =>
 			readResult(await completion(executionId, workflow)),
-		resultAfterRestart: async (
-			executionId: string,
-			workflow: Workflows,
-			deliver: Effect.Effect<unknown, never, WorkflowEngine.WorkflowEngine>,
-		) => {
-			const signal = AbortSignal.timeout(RESTART_BUDGET_MS);
-			let lastState = "starting engine";
-			const result = poll(workflow, executionId, (observed) => {
-				const state = Option.getOrUndefined(observed);
-				lastState = state?._tag ?? "poll returned no state";
-				return state?._tag === "Complete" ? state.exit : undefined;
-			}).pipe(Effect.retry(Schedule.spaced(POLL_INTERVAL)), Effect.orDie);
-			try {
-				return readResult(
-					await runtime.runPromise(
-						Effect.andThen(
-							Effect.sync(() => {
-								lastState = "delivering signal";
-							}),
-							deliver.pipe(Effect.andThen(result)),
-						),
-						{ signal },
-					),
-				);
-			} catch (cause) {
-				if (!signal.aborted) throw cause;
-				throw new Error(
-					`Execution ${executionId} did not finish within ${RESTART_BUDGET_MS} ms of restart (last state: ${lastState})`,
-					{ cause },
-				);
-			}
-		},
 		/** Stops the engine, as a process stopping does. */
 		stop: () => runtime.dispose(),
 	};
