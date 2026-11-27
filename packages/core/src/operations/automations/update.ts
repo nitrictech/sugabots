@@ -10,8 +10,6 @@ import {
 	proveReachesProjectAutomation,
 	proveRestrictableAutomation,
 } from "../../proofs/reaches-project-automation.ts";
-import { writingUnderWorkspaceShare } from "../../proofs/workspace-lock.ts";
-import { workspaceOfProject } from "../../workspaces/workspace-reference.ts";
 import { defineOperation } from "../operation.ts";
 
 export const update = defineOperation(
@@ -20,31 +18,26 @@ export const update = defineOperation(
 		Effect.gen(function* () {
 			const automations = yield* ProjectAutomations.Service;
 			const { changes } = input;
-			// Proved in the write's transaction, under the workspace's lock shared.
-			return yield* writingUnderWorkspaceShare(
-				workspaceOfProject(input.projectId),
-				"project",
-				named(principal, input.projectId, input.automationId, (principal, project, automation) =>
-					Effect.gen(function* () {
-						const { reach, target } = yield* proveReachesProjectAutomation(
-							principal,
-							project,
-							automation,
-						);
-						const canManage = yield* proveCanManageProject(reach);
-						const member = yield* proveIsMember(principal);
-						return yield* automations.update(canManage, automation, target, member, changes);
-					}).pipe(
-						// An admin restricting a bot they can't talk to may only switch its automations off.
-						Effect.catchTag("ResourceHidden", (hidden) => {
-							if (!onlySwitchesOff(changes)) return Effect.fail(hidden);
-							return Effect.gen(function* () {
-								const canRestrict = yield* proveCanRestrictBotsProject(principal, project);
-								const target = yield* proveRestrictableAutomation(canRestrict, automation);
-								return yield* automations.switchOff(canRestrict, automation, target);
-							}).pipe(Effect.mapError(() => hidden));
-						}),
-					),
+			return yield* named(principal, input.projectId, input.automationId, (principal, project, automation) =>
+				Effect.gen(function* () {
+					const { reach, target } = yield* proveReachesProjectAutomation(
+						principal,
+						project,
+						automation,
+					);
+					const canManage = yield* proveCanManageProject(reach);
+					const member = yield* proveIsMember(principal);
+					return yield* automations.update(canManage, automation, target, member, changes);
+				}).pipe(
+					// An admin restricting a bot they can't talk to may only switch its automations off.
+					Effect.catchTag("ResourceHidden", (hidden) => {
+						if (!onlySwitchesOff(changes)) return Effect.fail(hidden);
+						return Effect.gen(function* () {
+							const canRestrict = yield* proveCanRestrictBotsProject(principal, project);
+							const target = yield* proveRestrictableAutomation(canRestrict, automation);
+							return yield* automations.switchOff(canRestrict, automation, target);
+						}).pipe(Effect.mapError(() => hidden));
+					}),
 				),
 			);
 		}),
