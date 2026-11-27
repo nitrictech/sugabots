@@ -1083,8 +1083,8 @@ INSERT INTO "task" ("conversation_id", "workspace_id", "bot_id", "started_by_id"
 SELECT "id", "workspace_id", "host_bot_id", "initiator_user_id", "done_at"
 FROM "conversation" WHERE "kind" = 'conversation';
 --> statement-breakpoint
-INSERT INTO "channel_conversation" ("conversation_id", "workspace_id", "channel_id", "main", "archived_at", "started_by_id")
-SELECT "id", "workspace_id", "channel_id", "main", "archived_at", "initiator_user_id"
+INSERT INTO "channel_conversation" ("conversation_id", "workspace_id", "channel_id", "main", "archived_at", "started_by_id", "done_at")
+SELECT "id", "workspace_id", "channel_id", "main", "archived_at", "initiator_user_id", "done_at"
 FROM "conversation" WHERE "kind" = 'pod_chat';
 --> statement-breakpoint
 INSERT INTO "automation_feed" ("conversation_id", "workspace_id", "automation_id")

@@ -898,6 +898,16 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(reached).toBe(own.id);
 		});
 
+		it("keeps a resolved discussion resolved", async () => {
+			expect(
+				await upgraded.rows(
+					`select to_char(resolved_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as resolved_at
+					 from project_chat where chat_id = $1`,
+					[legacy.threads.trip],
+				),
+			).toEqual([{ resolved_at: "2026-10-07 12:00" }]);
+		});
+
 		it("records who started a chat nobody started as its project's creator", async () => {
 			expect(
 				await upgraded.rows(`select started_by_id from project_chat where chat_id = $1`, [
