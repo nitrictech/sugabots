@@ -7,7 +7,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { query } from "../database.ts";
+import { query, transaction } from "../database.ts";
 import { event } from "../schema.ts";
 import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../testing.ts";
 import { EventBus } from "./bus.ts";
@@ -191,6 +191,74 @@ for (const { name, skip, make, backdate } of stores) {
 					stopWatching.abort();
 					await reader.release();
 				}
+			},
+		);
+
+		it("merges capped replay feeds in sequence order without repeating overlapping events", async () => {
+			const control: EventStream = `workspace:${crypto.randomUUID()}`;
+			const cursor = await append(stream, rawEvent("message.created"));
+			await append(control, rawEvent("chat.changed"));
+			const first = await append(control, rawEvent("reach.changed"));
+			const second = await append(stream, rawEvent("message.created"));
+			await append(control, rawEvent("reach.changed"));
+			const feed = { stream: control, since: cursor, types: ["reach.changed"] as const };
+
+			const page = await store.replayPage({ stream, cursor, controls: [feed, feed] }, 2);
+			expect(page?.map(({ seq }) => seq)).toEqual([first, second]);
+		});
+
+		it.skipIf(name !== "postgres")(
+			"does not scan unrelated events to fill a sparse replay page",
+			async () => {
+				const control: EventStream = `workspace:${crypto.randomUUID()}`;
+				const noise: EventStream = `workspace:${crypto.randomUUID()}`;
+				const cursor = await append(stream, rawEvent("message.created"));
+				await onDatabase((db) =>
+					db.execute(
+						sql`
+					insert into event (stream, type, payload)
+					select case when n % 2 = 0 then ${control} else ${noise} end,
+						case when n % 2 = 0 then 'message.created' else 'reach.changed' end, '{}'::jsonb
+					from generate_series(1, 20000) n
+				`,
+						"objects",
+					),
+				);
+				const after = await append(stream, rawEvent("message.created"));
+				const changed = await append(control, rawEvent("reach.changed"));
+				await onDatabase((db) => db.execute(sql`analyze event`, "objects"));
+
+				const { page, fetched } = await runOnPostgres(
+					transaction(
+						Effect.gen(function* () {
+							const inTransaction = yield* EventStore.make;
+							const page = yield* Effect.promise((signal) =>
+								inTransaction.replayPage(
+									{
+										stream,
+										cursor,
+										controls: [
+											{ stream: control, since: cursor, types: ["reach.changed", "session.ended"] },
+										],
+									},
+									100,
+									signal,
+								),
+							);
+							const [stats] = yield* query((db) =>
+								db.execute<{ fetched: string }>(
+									sql`select seq_tup_read + idx_tup_fetch as fetched
+								from pg_stat_xact_user_tables where relname = 'event'`,
+									"objects",
+								),
+							);
+							return { page, fetched: Number(stats?.fetched) };
+						}),
+					),
+				);
+				expect(page?.map(({ seq }) => seq)).toEqual([after, changed]);
+				expect(fetched).toBeGreaterThan(0);
+				expect(fetched).toBeLessThan(100);
 			},
 		);
 

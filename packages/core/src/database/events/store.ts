@@ -1,7 +1,7 @@
 export * as EventStore from "./store.ts";
 
 import type { DurableEventType, EventStream, StreamEvent } from "@sugabots/contracts";
-import { and, asc, eq, gt, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { processLayer, Tier } from "../../tiers.ts";
 import {
@@ -135,7 +135,7 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 				"cursor" in page ? { stream: page.stream, since: afterCursor(page.cursor) } : page.feed;
 			const retained = sql`${feed.since} >= (${retentionBoundary}) and ${validReplayPosition(page)}`;
 			const rows = await run((db) => {
-				const batch = followingRows(db, [feed, ...page.controls], limit);
+				const batch = replayRows(db, [feed, ...page.controls], limit);
 				return db.execute<{
 					retained: boolean;
 					seq: string | null;
@@ -198,23 +198,46 @@ function validReplayPosition(page: ReplayPage) {
 	)`;
 }
 
+const eventSelection = {
+	seq: event.seq,
+	stream: sql<EventStream>`${event.stream}`.as("stream"),
+	payload: event.payload,
+};
+
 function followingRows(db: Executor, feeds: readonly Feed[], limit: number) {
 	return db
-		.select({
-			seq: event.seq,
-			stream: sql<EventStream>`${event.stream}`.as("stream"),
-			payload: event.payload,
-		})
+		.select(eventSelection)
 		.from(event)
-		.where(
-			or(
-				...feeds.map(({ stream, since, types }) =>
-					and(eq(event.stream, stream), gt(event.seq, since), typesInFeed(types)),
-				),
-			),
-		)
+		.where(or(...feeds.map((feed) => and(eq(event.stream, feed.stream), matchesFeed(feed)))))
 		.orderBy(asc(event.seq))
 		.limit(limit);
+}
+
+function replayRows(db: Executor, feeds: readonly Feed[], limit: number) {
+	// Overlapping feeds on the same stream must still return each event once.
+	const batches = [...Map.groupBy(feeds, (feed) => feed.stream)].map(([stream, sameStream]) => {
+		const batch = db
+			.select(eventSelection)
+			.from(event)
+			.where(
+				and(
+					// Keep stream in the index order. An equality would let Postgres
+					// drop it from ORDER BY and scan the global sequence index.
+					gte(event.stream, stream),
+					lte(event.stream, stream),
+					or(...sameStream.map(matchesFeed)),
+				),
+			)
+			.orderBy(asc(event.stream), asc(event.seq))
+			.limit(limit);
+		return sql`(${batch})`;
+	});
+	const combined = sql.join(batches, sql` union all `);
+	return batches.length === 1 ? combined : sql`${combined} order by seq limit ${limit}`;
+}
+
+function matchesFeed({ since, types }: Feed) {
+	return and(gt(event.seq, since), typesInFeed(types));
 }
 
 /** afterCursor returns the sequence position to read after, including a cursor without a retained event. */
