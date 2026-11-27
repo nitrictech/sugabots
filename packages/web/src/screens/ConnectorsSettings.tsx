@@ -10,7 +10,7 @@ import {
 	type UnsavedConnector,
 } from "@sugabots/contracts";
 import { cn } from "cn";
-import { ArrowUpRight, ChevronDown, ChevronRight, Code, Globe } from "lucide-react";
+import { ArrowUpRight, ChevronDown, ChevronRight, Code, Globe, Info } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import {
 	bearerAuthorization,
@@ -42,6 +42,7 @@ import {
 	DialogFormScroll,
 	DialogFormStep,
 } from "@/ui/dialog-form.tsx";
+import { IconButton } from "@/ui/icon-button.tsx";
 import { RadioGroup, RadioGroupItem } from "@/ui/radio-group.tsx";
 import { SearchField, useSearchFilter } from "@/ui/search-field.tsx";
 import {
@@ -424,7 +425,18 @@ function BuiltInConnectorList({
 							No connector matches “{query.trim()}”.
 						</p>
 					)}
-					<SettingsGroup label="Something else">
+					<SettingsGroup
+						label="Something else"
+						action={
+							<IconButton
+								label="For a service that offers its tools as an MCP server. The service gives you the address to paste."
+								size="sm"
+								side="top"
+							>
+								<Info strokeWidth={2} />
+							</IconButton>
+						}
+					>
 						<SettingsRow
 							icon={
 								<SettingsRowIcon className="size-9 rounded-lg">
@@ -432,7 +444,7 @@ function BuiltInConnectorList({
 								</SettingsRowIcon>
 							}
 							label="Connect by URL"
-							sub="Any MCP server, by its address"
+							sub="Another service's tools, from the link it gives you"
 							chevron
 							onClick={() => onChoose("custom")}
 						/>

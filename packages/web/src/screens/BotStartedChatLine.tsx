@@ -1,10 +1,10 @@
 import {
 	type BotParticipant,
 	type BotStartedChat,
-	botStartedChatSchema,
 	type Message,
 	START_CHAT_TOOL,
 } from "@sugabots/contracts";
+import { operationContracts } from "@sugabots/contracts/operations";
 import { Link } from "@tanstack/react-router";
 import { Option, Schema } from "effect";
 import { ChevronRight } from "lucide-react";
@@ -76,7 +76,7 @@ function LineFace({ face }: { face: BotParticipant }) {
 }
 
 const decodeStartChatOutput = Schema.decodeUnknownOption(
-	Schema.Struct({ chat: botStartedChatSchema }),
+	operationContracts["chats.startBriefedChat"].output,
 );
 
 /** The chats a bot's message started with `start_chat`, in the order it started them. */
