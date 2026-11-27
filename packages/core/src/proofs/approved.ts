@@ -326,7 +326,9 @@ const proveApproval = <
 		)
 			return yield* Effect.fail(new ApprovalRefused());
 		if (need === "nothing" && !decision?.status) return approved(null, decision?.sdkToolCallId);
+		// A connector call's input was compared with what was recorded above.
 		if (
+			!connectorUse &&
 			decision?.status === "allowed" &&
 			!sameRecordedInput(name, decision.executionInput ?? decision.input, argumentsToApprove, {
 				builtIn: true,
