@@ -3249,4 +3249,9 @@ ALTER TABLE "notification_delivery" ADD COLUMN "claimed_until" timestamp with ti
 UPDATE "notification_delivery" SET "sent_at" = "created_at";--> statement-breakpoint
 CREATE INDEX "notification_delivery_unsent_idx" ON "notification_delivery" ("created_at") WHERE "sent_at" is null;--> statement-breakpoint
 CREATE INDEX "pending_notification_due_idx" ON "pending_notification" ("due_at","id");--> statement-breakpoint
-ALTER TABLE "pending_notification" ADD CONSTRAINT "pending_notification_chat_id_chat_id_fkey" FOREIGN KEY ("chat_id") REFERENCES "chat"("id") ON DELETE CASCADE;
+ALTER TABLE "pending_notification" ADD CONSTRAINT "pending_notification_chat_id_chat_id_fkey" FOREIGN KEY ("chat_id") REFERENCES "chat"("id") ON DELETE CASCADE;--> statement-breakpoint
+-- ## Turn lookups indexed
+-- A turn's reply is found by its turn on every write the turn makes while it
+-- runs, and the sweep for lost cancels reads only turns asked to end.
+CREATE INDEX "message_turn_idx" ON "message" ("turn_id") WHERE "turn_id" is not null;--> statement-breakpoint
+CREATE INDEX "turn_end_requested_idx" ON "turn" ("status","finished_at") WHERE "end_requested" is not null;

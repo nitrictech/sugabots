@@ -515,6 +515,11 @@ export const turn = pgTable(
 		index("turn_active_idx")
 			.on(table.status, table.startedAt)
 			.where(sql`${table.status} = 'running'`),
+		// The sweep for lost cancels reads only turns asked to end, which are few
+		// beside every turn there has been.
+		index("turn_end_requested_idx")
+			.on(table.status, table.finishedAt)
+			.where(sql`${table.endRequested} is not null`),
 		check("turn_failure_has_error", sql`${table.status} <> 'failed' or ${table.error} is not null`),
 	],
 );
@@ -573,6 +578,8 @@ export const message = pgTable(
 			sql`num_nonnulls(${table.authorMemberId}, ${table.authorBotId}, ${table.automationTrigger}) = 1`,
 		),
 		index("message_chat_created_at_idx").on(table.chatId, table.createdAt),
+		// A turn's reply, found by its turn on every write the turn makes while it runs.
+		index("message_turn_idx").on(table.turnId).where(sql`${table.turnId} is not null`),
 		uniqueIndex("message_retry_idx")
 			.on(table.chatId, table.authorMemberId, table.retryKey)
 			.where(sql`${table.retryKey} is not null`),

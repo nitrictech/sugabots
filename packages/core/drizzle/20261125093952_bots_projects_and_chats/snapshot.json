@@ -14876,6 +14876,47 @@
         "n|col|public.bot.visibility",
         "n|col|public.bot.created_by_id"
       ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "message",
+        "message_turn_idx"
+      ],
+      "writes": [
+        "s|idx|public.message_turn_idx",
+        "n|idx|public.message_turn_idx",
+        "e|idx|public.message_turn_idx",
+        "n|rel|public.message_turn_idx"
+      ],
+      "reads": [
+        "n|tbl|public.message",
+        "n|sch|public",
+        "n|col|public.message.turn_id"
+      ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "turn",
+        "turn_end_requested_idx"
+      ],
+      "writes": [
+        "s|idx|public.turn_end_requested_idx",
+        "n|idx|public.turn_end_requested_idx",
+        "e|idx|public.turn_end_requested_idx",
+        "n|rel|public.turn_end_requested_idx"
+      ],
+      "reads": [
+        "n|tbl|public.turn",
+        "n|sch|public",
+        "n|col|public.turn.status",
+        "n|col|public.turn.finished_at"
+      ]
     }
   ],
   "deltas": [
@@ -24239,6 +24280,61 @@
         "name": "bot_personal_assistant_check",
         "value": "\"assistant_of\" is null or (\"visibility\" = 'personal' and (\"created_by_id\" is null or \"created_by_id\" = \"assistant_of\"))",
         "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message",
+        "name": "message_turn_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "turn_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"turn_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "turn",
+        "name": "turn_end_requested_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "status",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          },
+          {
+            "value": "finished_at",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"end_requested\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
       }
     }
   ]
