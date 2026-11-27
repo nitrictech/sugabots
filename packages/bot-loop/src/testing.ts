@@ -21,7 +21,7 @@ import {
 	type TestInfrastructure,
 } from "@sugabots/core/database/testing";
 import { Email } from "@sugabots/core/email/email";
-import { layerWithConnectorCalls } from "@sugabots/core/operations/layer";
+import { layerNoDeps as operationsLayerNoDeps } from "@sugabots/core/operations/layer";
 import { Operations } from "@sugabots/core/operations/registry";
 import { servedOperations } from "@sugabots/core/operations/testing";
 import type { BotPrincipal } from "@sugabots/core/principal";
@@ -568,8 +568,13 @@ export async function botLoopOnPostgres(
 			TurnAuthentication.layer,
 		).pipe(
 			Layer.provideMerge(
-				layerWithConnectorCalls(
-					ConnectorCalls.from(outside.connectorTools ?? ConnectorCatalog.none),
+				operationsLayerNoDeps.pipe(
+					Layer.provideMerge(
+						Layer.succeed(
+							ConnectorCalls.Service,
+							ConnectorCalls.from(outside.connectorTools ?? ConnectorCatalog.none),
+						),
+					),
 				),
 			),
 			Layer.provideMerge(surroundings),

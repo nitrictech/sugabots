@@ -74,6 +74,40 @@ import {
 	openAIThinkingSupport,
 } from "./sdk-model-catalogs.ts";
 
+export interface Interface {
+	/**
+	 * Opens a streamed response. The Effect ends once the stream is open, and
+	 * closing its scope aborts the request, along with any tool call still
+	 * running inside it.
+	 */
+	stream(request: StreamRequest): Effect.Effect<Streamed, RequestFailure, Database | Scope.Scope>;
+	/** Asks for one whole answer, in a single model request. */
+	answer(
+		request: AnswerRequest,
+	): Effect.Effect<Answer, RequestFailure | AnswerTimedOut | UnusableAnswer, Database>;
+}
+
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Models") {
+	declare readonly [Tier]: "process";
+}
+
+/** The models of the workspace's providers, reached through egress, priced from models.dev. */
+export const make = Effect.gen(function* () {
+	const modelProviders = yield* ModelProviderStore.Service;
+	const egress = yield* Egress.Service;
+	const requests = yield* ModelRequests.make;
+	return fromParts({
+		modelProviders,
+		httpClients: egress.providers,
+		requests,
+		registry: modelsDev,
+	});
+});
+
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
+
+export const layer = layerNoDeps.pipe(Layer.provide(ModelProviderStore.layer));
+
 export * from "./request-failures.ts";
 
 /**
@@ -177,19 +211,6 @@ export interface Answer {
 	contextTokens?: number;
 }
 
-export interface Interface {
-	/**
-	 * Opens a streamed response. The Effect ends once the stream is open, and
-	 * closing its scope aborts the request, along with any tool call still
-	 * running inside it.
-	 */
-	stream(request: StreamRequest): Effect.Effect<Streamed, RequestFailure, Database | Scope.Scope>;
-	/** Asks for one whole answer, in a single model request. */
-	answer(
-		request: AnswerRequest,
-	): Effect.Effect<Answer, RequestFailure | AnswerTimedOut | UnusableAnswer, Database>;
-}
-
 /**
  * logModelFailure logs what is known about a failed model request: `failure`
  * with its cause chain, every error the provider reported in the stream, and
@@ -279,7 +300,8 @@ interface Options {
 	registry: Pick<ModelRegistry, "cost" | "version">;
 }
 
-export function make({ modelProviders, httpClients, requests, registry }: Options): Interface {
+/** Models built from the parts given, which a test can stand in for. */
+export function fromParts({ modelProviders, httpClients, requests, registry }: Options): Interface {
 	return fromStream((input) =>
 		Effect.gen(function* () {
 			const signal = yield* Effect.abortSignal;
@@ -716,22 +738,6 @@ function withBreakpoint<Marked extends ModelMessage | ToolResultPart>(
 	}
 	return { ...marked, providerOptions };
 }
-
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Models") {
-	declare readonly [Tier]: "process";
-}
-
-export const layer = Layer.effect(
-	Service,
-	Effect.gen(function* () {
-		const modelProviders = yield* ModelProviderStore.Service;
-		const egress = yield* Egress.Service;
-		const requests = yield* ModelRequests.make;
-		return make({ modelProviders, httpClients: egress.providers, requests, registry: modelsDev });
-	}),
-)
-	.pipe(processLayer)
-	.pipe(Layer.provide(ModelProviderStore.layer));
 
 /**
  * Reads the model's text one delta at a time and runs `onDelta` for each.

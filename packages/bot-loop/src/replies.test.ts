@@ -102,7 +102,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's replies, against Postgres",
 	it("counts a provider's thinking tokens once in the turn's usage", async () => {
 		const providerId = randomUUID();
 		const requests = await runOnPostgres(ModelRequests.make);
-		const model = Models.make({
+		const model = Models.fromParts({
 			modelProviders: {
 				resolve: () =>
 					Effect.succeed(

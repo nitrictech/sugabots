@@ -82,7 +82,7 @@ describe("models", () => {
 		configurationRevision: 0,
 	};
 	const modelResolving = (resolved: ModelProviderStore.ResolvedModel) =>
-		Models.make({
+		Models.fromParts({
 			modelProviders: {
 				renewOAuthTokens: () => Effect.die(new Error("Not a ChatGPT provider")),
 				resolve: () => Effect.succeed(resolved),

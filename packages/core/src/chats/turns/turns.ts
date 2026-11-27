@@ -27,20 +27,136 @@ import type {
 	ToolApprovalNotFound,
 } from "@sugabots/contracts/errors/approvals";
 import type { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import type { DomainError } from "@sugabots/errors";
+import type { DomainError, UserText } from "@sugabots/errors";
 import { inArray, type SQLWrapper } from "drizzle-orm";
-import { Context, type Effect, Layer } from "effect";
+import { Cause, Context, Effect, Exit, Layer, Option } from "effect";
+import { afterCommit, serviceOperations, transaction } from "../../database/database.ts";
 import { ACTIVE_TURN_STATUSES, type TurnSteer, turn } from "../../database/schema.ts";
+import { Ids } from "../../ids/ids.ts";
 import type { CanDecide } from "../../proofs/can-decide.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
 import type { CanInterrupt, CanSteer } from "../../proofs/turn-control.ts";
 import { processLayer, Tier } from "../../tiers.ts";
-import { laneBusy, waitingSince } from "../../workflows/lanes.ts";
+import { Lanes, laneBusy, waitingSince } from "../../workflows/lanes.ts";
 import { makeControls } from "./controls.ts";
+import { logTurnDefect, SYSTEM_TURN_INTERRUPTED } from "./lifecycle.ts";
 import { TURN_WORKFLOW, type TurnRequest } from "./requests.ts";
-import { makeService } from "./service.ts";
+import { TurnSignals } from "./signals.ts";
 import { TurnStore } from "./store.ts";
 import { ToolCallStore } from "./tool-calls/store.ts";
+
+export interface Interface {
+	/**
+	 * Asks for a bot's turn, in the caller's transaction; it starts once
+	 * that commits. It joins a turn of the same bot in the same chat waiting
+	 * for the same member, which reads that member's messages posted before it
+	 * starts; otherwise it waits behind the turns there (see
+	 * `TurnRequests.admission`).
+	 */
+	readonly ask: (request: TurnRequest) => Effect.Effect<void>;
+	/**
+	 * Stops the turns in the chats `chatIds`, in the caller's transaction:
+	 * cancels those waiting for approvals, tells their workflows once it
+	 * commits, and drops the turns still waiting to start. A running turn is
+	 * left to finish.
+	 */
+	readonly stopUnder: (chatIds: readonly string[]) => Effect.Effect<void>;
+	/**
+	 * Records `work` as a system bot's turn: opens the turn, runs `work` with
+	 * its id, and completes it with the prompt size `work` measured, or fails
+	 * it with what went wrong. Only `work` may be interrupted; how it ended is
+	 * always written.
+	 */
+	readonly recordSystemTurn: <A, E extends DomainError, R>(
+		turn: SystemTurn,
+		work: (turnId: string) => Effect.Effect<{ value: A; contextTokens?: number }, E, R>,
+	) => Effect.Effect<SystemTurnOutcome<A>, never, R>;
+}
+
+export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Turns") {
+	declare readonly [Tier]: "process";
+}
+
+/**
+ * `Service`, over the turns' records, the lanes turns wait in and the
+ * service that signals turns, which the bot loop provides.
+ */
+export const make = Effect.gen(function* () {
+	const operation = yield* serviceOperations<Interface>("Turns");
+	const ids = yield* Ids.Service;
+	const lanes = yield* Lanes.Service;
+	const turns = yield* TurnStore.Service;
+	const signals = yield* TurnSignals.Service;
+
+	const recordSystemTurn: Interface["recordSystemTurn"] = (systemTurn, work) =>
+		Effect.gen(function* () {
+			const opened = yield* turns.openSystemBotTurn(systemTurn);
+			if (opened._tag === "NotRunnable") {
+				return { _tag: "Skipped", reason: opened.reason } as const;
+			}
+			return yield* Effect.uninterruptibleMask((restore) =>
+				Effect.gen(function* () {
+					const worked = yield* Effect.exit(restore(work(opened.turnId)));
+					if (Exit.isSuccess(worked)) {
+						yield* turns.completeSystemBotTurn(opened.turnId, worked.value.contextTokens);
+						return { _tag: "Completed", value: worked.value.value } as const;
+					}
+					const expected = Cause.findErrorOption(worked.cause);
+					const interrupted = Cause.hasInterruptsOnly(worked.cause);
+					let userMessage: UserText;
+					if (Option.isSome(expected) && !Cause.hasDies(worked.cause)) {
+						yield* Effect.logWarning(`A ${systemTurn.name} failed: ${expected.value.message}`);
+						userMessage = expected.value.userMessage;
+					} else if (interrupted) {
+						yield* Effect.logError(`A ${systemTurn.name} did not finish`, worked.cause);
+						userMessage = SYSTEM_TURN_INTERRUPTED;
+					} else {
+						userMessage = yield* logTurnDefect(
+							yield* ids.random,
+							`A ${systemTurn.name} did not finish`,
+							worked.cause,
+						);
+					}
+					yield* turns.failSystemBotTurn(opened.turnId, userMessage);
+					return { _tag: "Failed" } as const;
+				}),
+			);
+		});
+
+	return {
+		ask: (request) => operation("ask", turns.ask(request)),
+		stopUnder: (chatIds) =>
+			operation(
+				"stopUnder",
+				transaction(
+					Effect.gen(function* () {
+						if (chatIds.length === 0) return;
+						// Workflows waiting on approvals or a retry still hold their lanes
+						// until they hear that their turns were cancelled.
+						const stillWaiting = yield* turns.cancelUnder(chatIds);
+						yield* afterCommit(
+							Effect.forEach(stillWaiting, (executionId) => signals.cancel(executionId), {
+								discard: true,
+							}),
+						);
+						yield* lanes.dropWaiting(chatIds, [TURN_WORKFLOW]);
+					}),
+				),
+			),
+		recordSystemTurn: (systemTurn, work) =>
+			operation("recordSystemTurn", recordSystemTurn(systemTurn, work)),
+	} satisfies Interface;
+});
+
+export const layerNoDeps = processLayer(Layer.effect(Service, make));
+
+/**
+ * `Service`. Needs the chat services a turn reports to, and the services
+ * that start and signal turns, which the bot loop provides.
+ */
+export const layer = layerNoDeps.pipe(
+	Layer.provide(Layer.mergeAll(TurnStore.layer, ToolCallStore.layer)),
+);
 
 export {
 	ToolApprovalConflict,
@@ -104,38 +220,6 @@ type SystemTurnOutcome<A> =
 	| { readonly _tag: "Failed" }
 	| { readonly _tag: "Skipped"; readonly reason: string };
 
-export interface Interface {
-	/**
-	 * Asks for a bot's turn, in the caller's transaction; it starts once
-	 * that commits. It joins a turn of the same bot in the same chat waiting
-	 * for the same member, which reads that member's messages posted before it
-	 * starts; otherwise it waits behind the turns there (see
-	 * `TurnRequests.admission`).
-	 */
-	readonly ask: (request: TurnRequest) => Effect.Effect<void>;
-	/**
-	 * Stops the turns in the chats `chatIds`, in the caller's transaction:
-	 * cancels those waiting for approvals, tells their workflows once it
-	 * commits, and drops the turns still waiting to start. A running turn is
-	 * left to finish.
-	 */
-	readonly stopUnder: (chatIds: readonly string[]) => Effect.Effect<void>;
-	/**
-	 * Records `work` as a system bot's turn: opens the turn, runs `work` with
-	 * its id, and completes it with the prompt size `work` measured, or fails
-	 * it with what went wrong. Only `work` may be interrupted; how it ended is
-	 * always written.
-	 */
-	readonly recordSystemTurn: <A, E extends DomainError, R>(
-		turn: SystemTurn,
-		work: (turnId: string) => Effect.Effect<{ value: A; contextTokens?: number }, E, R>,
-	) => Effect.Effect<SystemTurnOutcome<A>, never, R>;
-}
-
-export class Service extends Context.Service<Service, Interface>()("@sugabots/core/Turns") {
-	declare readonly [Tier]: "process";
-}
-
 /** What members may do to a turn, once proved. */
 export interface ControlsInterface {
 	/**
@@ -181,14 +265,6 @@ export class Controls extends Context.Service<Controls, ControlsInterface>()(
 }
 
 const internals = Layer.mergeAll(TurnStore.layer, ToolCallStore.layer);
-
-/**
- * `Service`. Needs the chat services a turn reports to, and the services
- * that start and signal turns, which the bot loop provides.
- */
-export const layer = processLayer(Layer.effect(Service, makeService)).pipe(
-	Layer.provide(internals),
-);
 
 /**
  * `Controls`, which the approvals operations are built from. Needs the chat

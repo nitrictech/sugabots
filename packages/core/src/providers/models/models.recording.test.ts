@@ -86,7 +86,7 @@ function modelAnswering(
 	/** Each request's headers, by lower-case name. */
 	const headers: Array<Record<string, string>> = [];
 	const answers = [...responses];
-	const model = Models.make({
+	const model = Models.fromParts({
 		modelProviders: {
 			renewOAuthTokens,
 			resolve:
