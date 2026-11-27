@@ -8,7 +8,7 @@ import {
 	seedRun,
 } from "@sugabots/core/authentication/seed.test-support";
 import { seedChat } from "@sugabots/core/chats/seed.test-support";
-import { aChatAwaitingReply } from "@sugabots/core/chats/turns/testing";
+import { aChatAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import { ComputerNetwork } from "@sugabots/core/computers/computer-network";
 import { ComputerProviderStore } from "@sugabots/core/computers/computer-provider-store";
@@ -266,10 +266,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
-		const runBrowserWorkflow = async (
-			model: ReturnType<typeof scriptedSteps>["model"],
-			browser: ReturnType<typeof standInBrowser>,
-		) => {
+		const prepareBrowserRun = async (browser: ReturnType<typeof standInBrowser>) => {
 			const projectId = await runOnPostgres(defaultProjectOf(botId));
 			const provider = await enableComputers();
 			const providerComputerId = Computers.ComputerId("desktop");
@@ -282,21 +279,95 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					image: "sugabots-computer:dev",
 				}),
 			);
-			const runChat = await queueOutsideRun(projectId, "github");
 			const providerFetch = computerService(
 				providerComputerId,
 				"allowed-hosts-only",
 				browser.fetch,
 			);
-			return loop.runWorkflow(runChat, {
-				model,
+			return {
+				projectId,
 				egress: unimplemented(Egress.Service, {
 					providers: { for: () => providerFetch },
 					validateProviderUrl: () => Effect.void,
 				}),
 				computerSignIn: ComputerSignIn.none,
-			});
+			};
 		};
+
+		const runBrowserWorkflow = async (
+			model: ReturnType<typeof scriptedSteps>["model"],
+			browser: ReturnType<typeof standInBrowser>,
+		) => {
+			const { projectId, ...outside } = await prepareBrowserRun(browser);
+			const runChat = await queueOutsideRun(projectId, "github");
+			return loop.runWorkflow(runChat, { ...outside, model });
+		};
+
+		const stepBrowserRun = async (
+			model: ReturnType<typeof scriptedSteps>["model"],
+			browser: ReturnType<typeof standInBrowser>,
+		) => {
+			const outside = await prepareBrowserRun(browser);
+			const [run] = await runOnPostgres(runningTurns(chatId));
+			if (!run) throw new Error("No browser turn running");
+			const { steps, authentication } = await loop.loopOver({ ...outside, model });
+			const opened = await steps.open(run.request, 0);
+			if (opened._tag !== "Opened") throw new Error("The browser turn could not open");
+			const principal = await authentication.authenticate(opened.turnId);
+			return {
+				turnId: opened.turnId,
+				step: (step: number) =>
+					steps.step(run.request, principal, { turnId: opened.turnId, attempt: 0, step }),
+			};
+		};
+
+		const listTabs = (toolCallId: string) => ({
+			calls: [{ toolCallId, toolName: "browser_tabs", input: { action: "list" } }],
+		});
+
+		it("opens a fresh MCP session when the cached session has expired", async () => {
+			const browser = standInBrowser();
+			const { model } = scriptedSteps(listTabs("before"), listTabs("after"), { text: ["Done."] });
+			const run = await stepBrowserRun(model, browser);
+
+			await run.step(0);
+			const [session] = browser.sessions;
+			if (!session) throw new Error("No browser session opened");
+			browser.sessions.delete(session);
+			expect((await browser.ping(session)).status).toBe(404);
+
+			await run.step(1);
+			await run.step(2);
+			expect(browser.sessions.size).toBe(1);
+			expect(browser.sessions.has(session)).toBe(false);
+			expect(await callsOf(run.turnId)).toMatchObject([
+				{ tool: "browser_tabs", status: "completed" },
+				{ tool: "browser_tabs", status: "completed" },
+			]);
+		});
+
+		it("terminates the remote MCP session when closing the browser", async () => {
+			const browser = standInBrowser();
+			const { model } = scriptedSteps(
+				listTabs("before"),
+				{ calls: [{ toolCallId: "close", toolName: "browser_close", input: {} }] },
+				{ text: ["Done."] },
+			);
+			const run = await stepBrowserRun(model, browser);
+
+			await run.step(0);
+			const [session] = browser.sessions;
+			if (!session) throw new Error("No browser session opened");
+			expect((await browser.ping(session)).status).toBe(200);
+
+			await run.step(1);
+			await run.step(2);
+			expect(await callsOf(run.turnId)).toMatchObject([
+				{ tool: "browser_tabs", status: "completed" },
+				{ tool: "browser_close", status: "completed" },
+			]);
+			expect((await browser.ping(session)).status).toBe(404);
+		});
 
 		it("asks again before clicking in a different tab with the same address", async () => {
 			const browser = standInBrowser();
@@ -805,13 +876,15 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 	const url = "https://shop.example.com/checkout";
 	const clicked: string[] = [];
 	const handled: { tool: string; input: unknown }[] = [];
+	const sessions = new Set<string>();
 	let sessionCount = 0;
 	let modalSession: string | null = null;
 	let dialogMessage = "Submit the receipt?";
-	return {
+	const browser = {
 		url,
 		clicked,
 		handled,
+		sessions,
 		selectTab: (selected: string) => {
 			tab = selected;
 		},
@@ -819,6 +892,13 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 			dialogMessage = message;
 		},
 		fetch: async (request: Request) => {
+			const session = request.headers.get("mcp-session-id");
+			if (session !== null && !sessions.has(session)) return new Response(null, { status: 404 });
+			if (request.method === "DELETE" && session !== null) {
+				sessions.delete(session);
+				if (modalSession === session) modalSession = null;
+				return new Response(null, { status: 204 });
+			}
 			if (request.method !== "POST") return new Response(null, { status: 405 });
 			const { id, method, params } = (await request.json()) as {
 				id?: number;
@@ -828,18 +908,20 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 			const result = (value: unknown, headers?: Record<string, string>) =>
 				Response.json({ jsonrpc: "2.0", id, result: value }, { headers });
 			if (method === "initialize") {
+				const opened = `session-${++sessionCount}`;
+				sessions.add(opened);
 				return result(
 					{
 						protocolVersion: params?.protocolVersion,
 						capabilities: { tools: {} },
 						serverInfo: { name: "browser-test", version: "1" },
 					},
-					{ "mcp-session-id": `session-${++sessionCount}` },
+					{ "mcp-session-id": opened },
 				);
 			}
+			if (session === null) return new Response(null, { status: 400 });
 			if (method === "notifications/initialized") return new Response(null, { status: 202 });
 			if (method === "ping") return result({});
-			const session = request.headers.get("mcp-session-id");
 			const modalOpen = modalSession !== null && modalSession === session;
 			const modalDescription =
 				modalTool === "browser_handle_dialog"
@@ -862,6 +944,8 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 				}
 				case "browser_tabs":
 					return reply(`### Result\n- 0: (current) [](${url})`);
+				case "browser_close":
+					return reply("Closed browser");
 				case "browser_click":
 					clicked.push(tab);
 					modalSession = modalTool ? session : null;
@@ -880,5 +964,16 @@ function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_uplo
 					throw new Error(`Unexpected browser request ${method}`);
 			}
 		},
+	};
+	return {
+		...browser,
+		ping: (session: string) =>
+			browser.fetch(
+				new Request("https://computer.example.com/mcp", {
+					method: "POST",
+					headers: { "mcp-session-id": session },
+					body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+				}),
+			),
 	};
 }

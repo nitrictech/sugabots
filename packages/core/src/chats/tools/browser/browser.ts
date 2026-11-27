@@ -183,7 +183,7 @@ export function browserSession(
 ): BrowserSession {
 	interface ConnectedBrowser {
 		client: Client;
-		sessionId: string | undefined;
+		transport: StreamableHTTPClientTransport;
 		key: string;
 		note?: UserText;
 	}
@@ -219,15 +219,15 @@ export function browserSession(
 					throw cause;
 				}
 			}
-			return { client, sessionId: transport.sessionId, key };
+			return { client, transport, key };
 		};
 		const connected = await openClient(sessionId).catch((cause: unknown) => {
 			if (sessionId && cause instanceof StreamableHTTPError && cause.code === 404)
 				return openClient();
 			throw cause;
 		});
-		await run(Cache.set(sessions, key, connected.sessionId));
-		if (turn.naturalBrowsing && (!sessionId || sessionId !== connected.sessionId))
+		await run(Cache.set(sessions, key, connected.transport.sessionId));
+		if (turn.naturalBrowsing && (!sessionId || sessionId !== connected.transport.sessionId))
 			await browseNaturally(connected.client, botPalettes[turn.color].face);
 		return {
 			...connected,
@@ -255,7 +255,7 @@ export function browserSession(
 			const connected = await connectOnce(computer);
 			if ("status" in connected) return undefined;
 			if (tool === "browser_handle_dialog" || tool === "browser_file_upload")
-				return readBrowserModalTarget(connected.client, connected.sessionId, signal);
+				return readBrowserModalTarget(connected.client, connected.transport.sessionId, signal);
 			const index =
 				tool === "browser_tabs" &&
 				(input.action === "close" || input.action === "select") &&
@@ -273,9 +273,16 @@ export function browserSession(
 				{ signal: abortSignal },
 			);
 			if (toolName === "browser_close" && !result.isError) {
-				await run(Cache.invalidate(sessions, connected.key));
-				await connected.client.close();
 				connecting = undefined;
+				await run(Cache.invalidate(sessions, connected.key));
+				try {
+					await connected.transport.terminateSession();
+				} catch (cause) {
+					if (!(cause instanceof StreamableHTTPError && cause.code === 404))
+						await run(Effect.logWarning("Terminating a browser's MCP session failed", cause));
+				} finally {
+					await connected.client.close();
+				}
 			}
 			const note = told ? undefined : connected.note;
 			told = true;
