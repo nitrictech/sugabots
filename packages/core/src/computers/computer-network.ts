@@ -8,7 +8,7 @@ import {
 	HOST_REQUEST_TOOL,
 	type ProjectComputerNetwork,
 } from "@sugabots/contracts";
-import { ComputerHostBlocked } from "@sugabots/contracts/errors/computers";
+import { ComputerHostBlocked, NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import type { OutputOf } from "@sugabots/contracts/operations";
 import { computersContracts } from "@sugabots/contracts/operations/computers";
 import { userText } from "@sugabots/errors";
@@ -92,13 +92,12 @@ export interface Interface {
 		host: string,
 	) => Effect.Effect<ProjectComputerNetwork>;
 	/**
-	 * Refuses a host request for a host the workspace blocked, before anyone
-	 * is asked: nobody could allow it.
+	 * Checks that the workspace has a computer provider and the host can be allowed.
 	 */
-	readonly refuseBlocked: <P, C>(
+	readonly checkHostRequest: <P, C>(
 		canUse: CanUseChatComputer<P, C>,
 		host: string,
-	) => Effect.Effect<void, ComputerHostBlocked>;
+	) => Effect.Effect<void, ComputerHostBlocked | NoComputerProvider>;
 	/**
 	 * Lets the computer of the project the host request `canDecide` is about
 	 * was made in reach the host it asks for, as the member `isMember` names,
@@ -329,10 +328,11 @@ export const make = Effect.gen(function* () {
 				}),
 			),
 
-		refuseBlocked: (canUse, host) =>
+		checkHostRequest: (canUse, host) =>
 			operation(
-				"refuseBlocked",
+				"checkHostRequest",
 				Effect.gen(function* () {
+					if (!(yield* providers.enabled(canUse.workspace))) return yield* new NoComputerProvider();
 					const by = yield* blockFor(canUse.workspace, host);
 					if (by !== undefined) return yield* new ComputerHostBlocked({ host, by });
 				}),
