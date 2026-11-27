@@ -10,7 +10,7 @@ import type {
 } from "@sugabots/contracts";
 import { connectorMarkFor } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
-import { FileText, Monitor, Pencil, RefreshCcw } from "lucide-react";
+import { FileText, Monitor, Pencil, RefreshCcw, Settings2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAutomationActions, useAutomations } from "@/lib/automations.ts";
 import { useChatContext } from "@/lib/chat-query.ts";
@@ -26,7 +26,6 @@ import { BotAvatar } from "@/shell/Bot.tsx";
 import { ProjectInitial } from "@/shell/SidebarProject.tsx";
 import { Button } from "@/ui/button.tsx";
 import { ConnectorMark } from "@/ui/connector-mark.tsx";
-import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { SpacedText } from "@/ui/spaced-text.tsx";
 import { Toggle } from "@/ui/toggle.tsx";
 import { WarningText } from "@/ui/warning-text.tsx";
@@ -96,7 +95,7 @@ export function DetailsPanel({
 					<div className="flex justify-center gap-7 pt-2">
 						<RoundAction
 							render={<Link {...botSettingsLink(bot)} />}
-							icon={<SettingsIcon size={20} />}
+							icon={<Settings2 size={20} strokeWidth={1.75} />}
 							label="Settings"
 						/>
 						<RoundAction

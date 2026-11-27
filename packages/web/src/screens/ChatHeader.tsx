@@ -1,7 +1,7 @@
 import type { Bot, MemberParticipant, Project } from "@sugabots/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { cn } from "cn";
-import { CircleCheck, Monitor, PanelRight, RefreshCcw, RotateCcw } from "lucide-react";
+import { CircleCheck, List, Monitor, PanelRight, RefreshCcw, RotateCcw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { botLink, projectLink } from "@/lib/links.ts";
 import { SIDE_BY_SIDE, useMediaQuery } from "@/lib/media.ts";
@@ -405,32 +405,12 @@ function DetailsButton({ open, onChange, cards = false }: DetailsToggle & { card
 			onClick={() => onChange(!open)}
 			className={cn(HEADER_ICON_CLASS_NAME, "max-md:hidden")}
 		>
-			{cards ? <CardsIcon /> : <PanelRight size={16} strokeWidth={1.75} />}
+			{cards ? <List size={18} strokeWidth={1.75} /> : <PanelRight size={16} strokeWidth={1.75} />}
 		</IconButton>
 	);
 }
 
 /** Two rows, each a dot and a line: the stack of Details cards. */
-function CardsIcon() {
-	return (
-		<svg
-			aria-hidden
-			width="18"
-			height="18"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			strokeWidth="1.75"
-			strokeLinecap="round"
-		>
-			<circle cx="7" cy="8" r="2.5" />
-			<path d="M13 8h7" />
-			<circle cx="7" cy="16" r="2.5" />
-			<path d="M13 16h7" />
-		</svg>
-	);
-}
-
 /**
  * The bar across the top of any chat but a bot's chat: a project's chat or
  * an automation's feed. Its title, after where it sits as

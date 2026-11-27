@@ -1,7 +1,7 @@
 import type { AttentionMark, NotificationSettings, Project } from "@sugabots/contracts";
 import { Link } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Lock, Plus } from "lucide-react";
+import { Lock, Plus, Settings2 } from "lucide-react";
 import { projectLink, projectNewChatLink, projectSettingsLink } from "@/lib/links.ts";
 import { ownerMarkTransition } from "@/lib/owner-mark.ts";
 import { useOwnerProblems } from "@/lib/owner-pages.ts";
@@ -11,7 +11,6 @@ import { hasNews, RowAttention } from "@/shell/SidebarBot.tsx";
 import { ProblemMark } from "@/ui/attention-dot.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { initialOf } from "@/ui/letter-tile.tsx";
-import { SettingsIcon } from "@/ui/settings-icon.tsx";
 
 /** A project the viewer is in, with its unread messages, approvals and automation errors. */
 export type ProjectWithAttention = AttentionMark & { project: Project };
@@ -93,7 +92,7 @@ export function SidebarProject({
 					render={<Link {...projectSettingsLink(project)} />}
 					className="hidden group-hover/project:grid group-has-focus-visible/project:grid"
 				>
-					<SettingsIcon />
+					<Settings2 size={16} strokeWidth={1.75} />
 				</IconButton>
 			</div>
 		</NotificationsContextMenu>

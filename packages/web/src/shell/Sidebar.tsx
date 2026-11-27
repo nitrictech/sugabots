@@ -1,7 +1,7 @@
 import type { Bot, NotificationSettings, Workspace } from "@sugabots/contracts";
 import { Link, useMatchRoute, useParams } from "@tanstack/react-router";
 import { cn } from "cn";
-import { Bot as BotIcon, ChevronRight, Hash, Plus } from "lucide-react";
+import { Bot as BotIcon, ChevronRight, Hash, Plus, Settings2 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useRef } from "react";
 import { findBot, ownAssistants, useBots } from "@/lib/bots.ts";
 import { useAttentionMarks } from "@/lib/chats.ts";
@@ -25,7 +25,6 @@ import { type BotStanding, SidebarBot } from "@/shell/SidebarBot.tsx";
 import { type ProjectWithAttention, SidebarProject } from "@/shell/SidebarProject.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { ResizeHandle } from "@/ui/resize-handle.tsx";
-import { SettingsIcon } from "@/ui/settings-icon.tsx";
 import { sidebarRow } from "@/ui/sidebar-row.ts";
 
 /**
@@ -380,7 +379,7 @@ export function SidebarView({
 							render={<Link {...settingsLink()} />}
 							className="size-7 text-muted-foreground [&_svg]:size-4"
 						>
-							<SettingsIcon />
+							<Settings2 size={16} strokeWidth={1.75} />
 						</IconButton>
 					)}
 					<HelpMenu />
