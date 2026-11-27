@@ -2,13 +2,23 @@ import { ToolApprovalConflict, ToolApprovalNotFound } from "@sugabots/contracts/
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { userText } from "@sugabots/errors";
 import { jsonSchema, tool } from "ai";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Context, Duration, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { seedBot, seedProject } from "../../../authentication/seed.test-support.ts";
 import { BlobStore } from "../../../blob-store/blob-store.ts";
 import { query } from "../../../database/database.ts";
 import type { CommittedEvent } from "../../../database/events/outbox.ts";
-import { bot, connector, toolCall, turn, workspace } from "../../../database/schema.ts";
+import {
+	bot,
+	connector,
+	membership,
+	project,
+	projectBot,
+	toolCall,
+	turn,
+	workspace,
+} from "../../../database/schema.ts";
 import {
 	closeDatabase,
 	holdTransaction,
@@ -77,6 +87,7 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	const chatsAs = (memberId: string) => asMember(call, memberId);
 	let workspaceId: string;
 	let botId: string;
+	let defaultProjectId: string;
 	let adminId: string;
 	let chatId: string;
 	let connectorId: string;
@@ -87,8 +98,14 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 	});
 
 	beforeEach(async () => {
-		({ workspaceId, botId, adminId, chatId, connectorId } =
-			await aChatWithConnectorAwaitingReply(chatsAs));
+		({
+			workspaceId,
+			botId,
+			adminId,
+			chatId,
+			connectorId,
+			projectId: defaultProjectId,
+		} = await aChatWithConnectorAwaitingReply(chatsAs));
 		const [running] = await runOnPostgres(runningTurns(chatId));
 		if (!running) throw new Error("no turn running");
 		opened = await run(openTurn(running));
@@ -462,6 +479,65 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 			status: "running",
 			sentInExecution: opened.principal.executionNumber,
 		});
+	});
+
+	it("starts an approved project connector call after its admitted bot leaves the project", async () => {
+		const lead = await seedBot(workspaceId);
+		const projectId = await seedProject(workspaceId, { leadBotId: lead.id, bots: [botId] });
+		const [botInChat] = await onDatabase((db) =>
+			db.select({ handle: bot.handle }).from(bot).where(eq(bot.id, botId)),
+		);
+		if (!botInChat) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.update(connector).set({ projectId }).where(eq(connector.id, connectorId)),
+		);
+		const started = await chatsAs(adminId).startProjectChat({
+			projectId,
+			message: `@${botInChat.handle} Create an issue`,
+			retryKey: crypto.randomUUID(),
+		});
+		chatId = started.chat.id;
+		const [runForChat] = await runOnPostgres(runningTurns(chatId));
+		if (!runForChat) throw new Error("no turn running");
+		opened = await run(openTurn(runForChat));
+		expect(opened.principal.bot).toBe(botId);
+		expect(opened.principal.admission?.projects[projectId]).toBeDefined();
+		const asked = askedCall();
+		await allowAndResume(asked);
+
+		await onDatabase((db) =>
+			db
+				.delete(projectBot)
+				.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, botId))),
+		);
+
+		expect(await start(asked)).toMatchObject({ _tag: "Send" });
+	});
+
+	it("does not withdraw an unrelated approval when a member's role changes", async () => {
+		const pending = await park(askedCall());
+		const editor = await createTestMember(
+			{ name: "Kim", email: `editor-${crypto.randomUUID()}@example.com` },
+			{ workspaceId, role: "editor" },
+		);
+		const [place] = await onDatabase((db) =>
+			db
+				.select({ id: membership.id })
+				.from(membership)
+				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, editor.id))),
+		);
+		if (!place) throw new Error("fixture");
+		await onDatabase((db) =>
+			db.update(project).set({ deleting: true }).where(eq(project.id, defaultProjectId)),
+		);
+
+		await call(await chatsAs(adminId).principal(), "workspaces.changeRole", {
+			workspace: workspaceId,
+			membershipId: place.id,
+			role: "viewer",
+		});
+
+		expect(await storedCall(pending.id)).toMatchObject({ approvalStatus: "pending" });
 	});
 
 	it("refuses an allowed call after the reviewed connector configuration changes", async () => {

@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { FileWritten, JsonValue, ToolApprovalStatus, ToolCallPart } from "@sugabots/contracts";
 import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { UserText } from "@sugabots/errors";
-import { and, desc, eq, exists, inArray, isNotNull, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -19,7 +19,7 @@ import {
 	connector,
 	member,
 	message,
-	projectBot,
+	projectBotConnector,
 	type ToolCallRow,
 	toolCall,
 	turn,
@@ -553,17 +553,22 @@ export const make = Effect.gen(function* () {
 										and(
 											eq(connector.id, binding.connectorId),
 											eq(connector.workspaceId, scope.workspaceId),
-											// The project's or the bot's own: one of the projects it is in.
-											exists(
-												db
-													.select({ projectId: projectBot.projectId })
-													.from(projectBot)
-													.where(
-														and(
-															eq(projectBot.projectId, connector.projectId),
-															eq(projectBot.botId, scope.botId),
+											eq(connector.enabled, true),
+											or(
+												eq(connector.projectId, runsTurn.project),
+												exists(
+													db
+														.select({ connectorId: projectBotConnector.connectorId })
+														.from(projectBotConnector)
+														.where(
+															and(
+																eq(projectBotConnector.connectorId, connector.id),
+																eq(projectBotConnector.projectId, runsTurn.project),
+																eq(projectBotConnector.botId, scope.botId),
+																eq(projectBotConnector.addressRevision, connector.addressRevision),
+															),
 														),
-													),
+												),
 											),
 											eq(connector.configurationRevision, binding.connectorRevision),
 										),

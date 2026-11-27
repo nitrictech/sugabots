@@ -1288,10 +1288,10 @@ declare const approvalExpiryWork: DoesStoredWork<"principal", "approval", "appro
 export const approvalWithdrawalMistakes = underWorkspaceLock(principal, "workspace", (lock) =>
 	Effect.gen(function* () {
 		// @ts-expect-error TS2740 [from type 'HoldsWorkspaceLock<unknown, unknown>'] Withdrawing approvals after reach changes requires the workspace lock.
-		yield* approvalWithdrawals.afterReachChange(lock.workspace);
+		yield* approvalWithdrawals.afterDeletionStarts(lock.workspace);
 		// @ts-expect-error TS2345 [parameter of type 'DoesStoredWork<"principal", "routine", "approvalExpiry">] Approval expiry requires approval-expiry work.
 		yield* approvalWithdrawals.expire(routineWork);
-		yield* approvalWithdrawals.afterReachChange(lock);
+		yield* approvalWithdrawals.afterDeletionStarts(lock);
 		yield* approvalWithdrawals.expire(approvalExpiryWork);
 	}),
 );

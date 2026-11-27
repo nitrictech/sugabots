@@ -21,7 +21,7 @@ export const deleteWorkspace = defineOperation(
 				workspaceId,
 				(lock) =>
 					Effect.flatMap(proveCanDeleteWorkspace(lock), membership.beginDeletion).pipe(
-						Effect.tap(() => withdrawals.afterReachChange(lock)),
+						Effect.tap(() => withdrawals.afterDeletionStarts(lock)),
 					),
 				{ allowDeleting: true },
 			);

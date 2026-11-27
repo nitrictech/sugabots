@@ -1,6 +1,5 @@
 import { botsContracts } from "@sugabots/contracts/operations/bots";
 import { Effect } from "effect";
-import { Turns } from "../../chats/turns/turns.ts";
 import { proveCanChangeBotReach } from "../../proofs/bot-permissions.ts";
 import { proveCanManageBot } from "../../proofs/can-manage-bot.ts";
 import { named } from "../../proofs/proof.ts";
@@ -14,7 +13,6 @@ import { underBotsLock } from "./locking.ts";
  */
 export const update = defineOperation(botsContracts["bots.update"], (principal, input) =>
 	Effect.gen(function* () {
-		const withdrawals = yield* Turns.ApprovalWithdrawals.Service;
 		const bots = yield* Bots.Service;
 		if (input.changes.visibility === undefined && input.changes.usesComputer === undefined) {
 			return yield* named(principal, input.botId, (principal, bot) =>
@@ -28,15 +26,7 @@ export const update = defineOperation(botsContracts["bots.update"], (principal, 
 				Effect.gen(function* () {
 					const canManage = yield* proveCanManageBot(lock.principal, bot);
 					const canChangeReach = yield* proveCanChangeBotReach(lock, canManage);
-					return yield* bots
-						.update(canChangeReach, input.changes)
-						.pipe(
-							Effect.tap(() =>
-								input.changes.visibility === undefined
-									? Effect.void
-									: withdrawals.afterReachChange(lock),
-							),
-						);
+					return yield* bots.update(canChangeReach, input.changes);
 				}),
 			),
 		);

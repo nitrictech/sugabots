@@ -26,7 +26,7 @@ export const remove = defineOperation(botsContracts["bots.remove"], (principal, 
 					const projectId = yield* bots.beginRemoval(yield* proveCanDeleteBot(lock, authority));
 					return { workspaceId: lock.workspace.value, projectId };
 				}),
-			).pipe(Effect.tap(() => withdrawals.afterReachChange(lock))),
+			).pipe(Effect.tap(() => withdrawals.afterDeletionStarts(lock))),
 		);
 		yield* finishDeletion(principal, workspaceId, { kind: "project", id: projectId });
 	}),

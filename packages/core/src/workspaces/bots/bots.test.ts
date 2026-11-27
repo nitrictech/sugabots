@@ -104,7 +104,9 @@ describe.skipIf(!process.env.DATABASE_URL)("administering bots", () => {
 						Layer.provide(Layer.succeed(EventOutbox.Service, { publish: () => Effect.void })),
 					),
 					unimplemented(Membership.Service),
-					unimplemented(Turns.ApprovalWithdrawals.Service, { afterReachChange: () => Effect.void }),
+					unimplemented(Turns.ApprovalWithdrawals.Service, {
+						afterDeletionStarts: () => Effect.void,
+					}),
 					unimplemented(Projects.Service),
 					unimplemented(ProjectComputers.Service, {
 						destroy: ({ project }) =>

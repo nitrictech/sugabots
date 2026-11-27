@@ -1,6 +1,5 @@
 import { projectsContracts } from "@sugabots/contracts/operations/projects";
 import { Effect } from "effect";
-import { Turns } from "../../chats/turns/turns.ts";
 import { proveCanChangeProjectMembers } from "../../proofs/project-permissions.ts";
 import { named } from "../../proofs/proof.ts";
 import { proveReachesProject } from "../../proofs/reaches-project.ts";
@@ -13,7 +12,6 @@ export const removeMember = defineOperation(
 	projectsContracts["projects.removeMember"],
 	(principal, input) =>
 		Effect.gen(function* () {
-			const withdrawals = yield* Turns.ApprovalWithdrawals.Service;
 			const projects = yield* Projects.Service;
 			return yield* underProjectsLock(principal, input.projectId, (lock) =>
 				named(input.projectId, input.memberId, (project, member) =>
@@ -24,7 +22,7 @@ export const removeMember = defineOperation(
 						);
 						return yield* projects.removeMember(canChange, member);
 					}),
-				).pipe(Effect.tap(() => withdrawals.afterReachChange(lock))),
+				),
 			);
 		}),
 );

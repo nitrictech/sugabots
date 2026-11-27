@@ -20,7 +20,7 @@ export const remove = defineOperation(projectsContracts["projects.remove"], (pri
 					const reach = yield* proveReachesProject(lock.principal, project, true);
 					return yield* projects.beginRemoval(yield* proveCanDeleteProject(lock, reach));
 				}),
-			).pipe(Effect.tap(() => withdrawals.afterReachChange(lock))),
+			).pipe(Effect.tap(() => withdrawals.afterDeletionStarts(lock))),
 		);
 		yield* finishDeletion(principal, removing.workspaceId, {
 			kind: "project",

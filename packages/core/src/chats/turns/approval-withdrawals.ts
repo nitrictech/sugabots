@@ -14,7 +14,7 @@ import { TurnSignals } from "./signals.ts";
 import { TurnStore } from "./store.ts";
 
 export interface Interface {
-	readonly afterReachChange: <P, W>(
+	readonly afterDeletionStarts: <P, W>(
 		lock: HoldsWorkspaceLock<P, W>,
 	) => Effect.Effect<void, never, Database>;
 	readonly expire: <P, X>(
@@ -57,7 +57,7 @@ export const make = Effect.gen(function* () {
 		);
 
 	return Service.of({
-		afterReachChange: (lock) =>
+		afterDeletionStarts: (lock) =>
 			Effect.gen(function* () {
 				const waiting = yield* query((db) =>
 					db
