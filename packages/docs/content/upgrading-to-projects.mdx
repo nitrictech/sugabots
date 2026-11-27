@@ -11,11 +11,17 @@ update so far, so plan for it.
 
 - **Back up first.** See [Backups](/docs/deploy-with-docker#backups). The
   upgrade can't be undone except by restoring a backup.
-- **Plan for downtime.** The whole upgrade runs in one database transaction
-  when the new version first starts. Stop every copy of the old version before
-  you start the new one, and expect the first start to take longer than usual
-  on a large installation. If it fails partway, nothing changes, and the old
-  version still runs on the same database.
+- **Plan for downtime.** The whole upgrade runs in one database transaction,
+  as the database is migrated. Stop every copy of the old version first, and
+  expect the migration to take longer than usual on a large installation. If
+  it fails partway, nothing changes, and the old version still runs on the
+  same database.
+- **Know what migrates the database.** The Docker image migrates it by
+  default, as the new version first starts. Set `SUGABOTS_SKIP_MIGRATIONS` to
+  `true` (see [Configuration](/docs/configuration)) to have the image skip
+  that, and migrate it yourself. A server run from source never migrates its
+  database on its own: run `bun run db:migrate` before you start the new
+  version.
 
 ## What changes
 
@@ -33,8 +39,8 @@ update so far, so plan for it.
   chooses another lead.
 - **Pod members can run its bots' automations by hand.** A shared pod's
   members become members of its bots, and anyone who reaches a bot, but a
-  viewer, may start its enabled automations by hand. Before, only owners and
-  admins could.
+  viewer, may start its automations by hand, paused ones included. Before,
+  only owners and admins could.
 - **Admins see which personal bots there are.** Each member's personal bots,
   such as their Personal Assistant and the bots of their personal pod, show in
   owners' and admins' lists of bots. Admins still can't talk to them or read
