@@ -203,39 +203,41 @@ describe("SessionAuthentication", () => {
 		}
 	});
 
-	it("takes a transaction's event stream locks in one order, failing at once out of order", async () => {
-		const [first, second] = (
-			await Promise.all([seedMember(workspaceId, "editor"), seedMember(workspaceId, "editor")])
-		).toSorted((a, b) => (memberStream(a) < memberStream(b) ? -1 : 1));
-		if (!first || !second) throw new Error("no members");
-		const endingSecond = await seedSession(second);
-		const endingFirst = await seedSession(first);
-		const outbox = EventOutbox.make.pipe(
-			Effect.provideService(EventBus.Service, {
-				...EventBus.inProcess({ store: await runOnPostgres(EventStore.make) }),
-				publishCommitted: async () => undefined,
-			}),
+	it("replays session and member events only after the transaction commits", async () => {
+		const member = await seedMember(workspaceId, "editor");
+		const ending = await seedSession(member);
+		const stillSignedIn = await seedSession(member);
+		const stream = memberStream(member);
+		const store = await runOnPostgres(EventStore.make);
+		const bus = EventBus.inProcess({ store });
+		const ended = streamEvent("session.ended", { sessionId: ending.id });
+		const told = streamEvent("approvals.changed", { toolCallId: crypto.randomUUID() });
+		const change = Effect.flatMap(
+			EventOutbox.make.pipe(Effect.provideService(EventBus.Service, bus)),
+			(outbox) =>
+				Effect.gen(function* () {
+					yield* outbox.publish([{ stream, event: told }]);
+					yield* query((db) => db.delete(session).where(eq(session.id, ending.id)));
+				}),
 		);
-		const endThenTell = (ending: string, toldMember: string) =>
-			Effect.flatMap(outbox, (outbox) =>
-				transaction(
-					Effect.gen(function* () {
-						yield* query((db) => db.delete(session).where(eq(session.id, ending)));
-						yield* outbox.publish([
-							{
-								stream: memberStream(toldMember),
-								event: streamEvent("approvals.changed", { toolCallId: crypto.randomUUID() }),
-							},
-						]);
-					}),
-				),
-			);
+		const cursor = await store.latest(stream);
+		const replayed = async () => (await store.replay(stream, cursor, 3)).map(({ event }) => event);
 
-		// The database refuses it; the driver keeps its message in the cause.
-		const refused = await runOnPostgres(endThenTell(endingSecond.id, first)).catch(
-			(error: Error) => error,
-		);
-		expect(String(refused instanceof Error && refused.cause)).toMatch(/out of order/);
-		await runOnPostgres(endThenTell(endingFirst.id, second));
+		try {
+			await expect(
+				runOnPostgres(transaction(change.pipe(Effect.andThen(Effect.fail("rolled back"))))),
+			).rejects.toBe("rolled back");
+			expect(await replayed()).toEqual([]);
+
+			await runOnPostgres(transaction(change));
+			const committed = await replayed();
+			expect(committed).toHaveLength(2);
+			expect(committed).toEqual(expect.arrayContaining([ended, told]));
+			expect(committed).not.toContainEqual(
+				streamEvent("session.ended", { sessionId: stillSignedIn.id }),
+			);
+		} finally {
+			await bus.close();
+		}
 	});
 });

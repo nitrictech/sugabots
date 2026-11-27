@@ -10,11 +10,12 @@ import {
 	type NotificationSettings,
 	type Presence,
 	type StreamEvent,
+	streamEvent,
 } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { Cause, Effect, Exit, Layer, Metric, Scope } from "effect";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { askerColumns } from "../authentication/turn-facts.ts";
 import { ChatEvent } from "../chats/events.ts";
 import { seedChat } from "../chats/seed.test-support.ts";
@@ -22,6 +23,7 @@ import { query, transaction } from "../database/database.ts";
 import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
+import { EventStore } from "../database/events/store.ts";
 import {
 	automation,
 	automationRun,
@@ -465,44 +467,82 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 		expect(sentTo(members.bob.id)).toEqual([]);
 	});
 
-	it("commits one notification across concurrent handlers and frees the database pool before publishing", async () => {
+	it("replays one committed notification while its live delivery is paused and another handler runs", async () => {
 		const chat = await projectChat();
 		const mention = `@${handleFromName(members.bob.name)}`;
+		const nextMention = `@${handleFromName(members.cy.name)}`;
 		const event = memberPosted(chat, members.ada, `${mention} look`);
-		const next = memberPosted(chat, members.ada, `${mention} next`);
+		const next = memberPosted(chat, members.ada, `${nextMention} next`);
+		const stream = memberStream(members.bob.id);
+		const store = await runOnPostgres(EventStore.make);
+		const freshBus = EventBus.inProcess({ store });
+		const marker = () => streamEvent("approvals.changed", { toolCallId: crypto.randomUUID() });
+		const commit = (event: ReturnType<typeof marker>) =>
+			runOnPostgres(
+				Effect.flatMap(EventOutbox.make, (outbox) => outbox.publish([{ stream, event }])).pipe(
+					Effect.provideService(EventBus.Service, freshBus),
+				),
+			);
+		await commit(marker());
+		const since = await store.latest(stream);
+
 		const publishing = Promise.withResolvers<void>();
 		const unblock = Promise.withResolvers<void>();
 		const sent: unknown[] = [];
-		const bus = busPublishing(async (_stream, event) => {
-			sent.push(event.body);
-			if (sent.length === 1) {
-				publishing.resolve();
-				await unblock.promise;
-			}
+		const bus = EventBus.inProcess({
+			store,
+			relay: {
+				listen: async () => async () => {},
+				broadcast: async (_stream, { event }) => {
+					sent.push(event.body);
+					if (sent.length === 1) {
+						publishing.resolve();
+						await unblock.promise;
+					}
+				},
+			},
 		});
-		const service = await served(bus);
-		try {
-			const notifications = await service.run(Notifications.Service);
-			await service.run(transaction(notifications.handler([event])));
-			await publishing.promise;
-			const [pool] = await onDatabase((db) =>
-				db.execute<{ held: number }>(
-					sql`
-				select count(*)::int as held from pg_stat_activity
-				where datname = current_database() and state = 'idle in transaction'
-			`,
-					"objects",
-				),
-			);
-			expect(pool?.held).toBe(0);
-
-			const concurrent = joiningWhatItStarts(transaction(notifications.handler([event, next])));
-			await service.run(concurrent.handled);
-			await concurrent.allEnded;
-			expect(sent).toEqual([`${mention} look`, `${mention} next`]);
-		} finally {
+		const service = await served(Layer.succeed(EventBus.Service, bus));
+		const notifications = await service.run(Notifications.Service);
+		const handle = (events: ChatEvent[]) => {
+			const work = joiningWhatItStarts(transaction(notifications.handler(events)));
+			return service.run(work.handled).then(() => work.allEnded);
+		};
+		const first = handle([event]);
+		let second: Promise<void> | undefined;
+		const close = async () => {
 			unblock.resolve();
-			await service.close();
+			await Promise.allSettled([first, second]);
+			await Promise.all([service.close(), bus.close(), freshBus.close()]);
+		};
+		onTestFinished(close);
+		try {
+			await Promise.race([
+				publishing.promise,
+				first.then(() => {
+					throw new Error("The first handler sent no notification");
+				}),
+			]);
+
+			const sentinel = marker();
+			await commit(sentinel);
+			const replayed = [];
+			for await (const delivery of freshBus.subscribe(stream, { since })) {
+				if (delivery.event.toolCallId === sentinel.toolCallId) break;
+				replayed.push(delivery);
+			}
+			expect(replayed).toEqual([
+				{
+					seq: expect.any(Number),
+					event: expect.objectContaining({ type: "notification", body: `${mention} look` }),
+				},
+			]);
+
+			second = handle([event, next]);
+			await second;
+			expect(sent).toEqual([`${mention} look`, `${nextMention} next`]);
+		} finally {
+			await close();
 		}
 	});
 
@@ -695,42 +735,74 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 			expect(sentTo(members.ada.id)).toEqual([]);
 		});
 
-		it("sends each notification once when another sweep runs while the first is still publishing", async () => {
+		it("lets only the current sweep send a delivery once its earlier claim expires", async () => {
 			const chat = await projectChat();
-			const bob = `@${handleFromName(members.bob.name)}`;
-			const cy = `@${handleFromName(members.cy.name)}`;
-			await recordedUnsent(memberPosted(chat, members.ada, `${bob} ${cy} look`));
-			await aWhileLater();
-			const publishing = Promise.withResolvers<EventStream>();
-			const resume = Promise.withResolvers<void>();
-			let held = false;
-			const first = await served(
-				busPublishing(async (stream, event) => {
-					if (!held) {
-						held = true;
-						publishing.resolve(stream);
-						await resume.promise;
-					}
-					published.push({ stream, event });
+			await onDatabase((db) =>
+				db.insert(projectMember).values({
+					workspaceId,
+					projectId,
+					memberId: members.outsider.id,
 				}),
 			);
-			const sweeping = first.run(Effect.flatMap(Notifications.Service, (n) => n.sendLeftBehind));
-			try {
-				const alreadyPublishing = await publishing.promise;
-				await aWhileLater();
-				await run((await notifications()).sendLeftBehind);
-				resume.resolve();
-				await sweeping;
+			const recipients = [members.bob, members.cy, members.outsider];
+			const mentions = recipients.map(({ name }) => `@${handleFromName(name)}`).join(" ");
+			await recordedUnsent(memberPosted(chat, members.ada, `${mentions} look`));
+			await aWhileLater();
 
-				const [heldMember, otherMember] =
-					alreadyPublishing === memberStream(members.bob.id)
-						? [members.bob.id, members.cy.id]
-						: [members.cy.id, members.bob.id];
-				expect(sentTo(heldMember)).toHaveLength(1);
-				expect(sentTo(otherMember)).toHaveLength(1);
+			const startSweep = async () => {
+				const sent: EventStream[] = [];
+				const publishing = Promise.withResolvers<void>();
+				const resume = Promise.withResolvers<void>();
+				onTestFinished(() => resume.resolve());
+				const service = await served(
+					busPublishing(async (stream) => {
+						sent.push(stream);
+						if (sent.length === 1) {
+							publishing.resolve();
+							await resume.promise;
+						}
+					}),
+				);
+				const finished = service.run(
+					Effect.flatMap(Notifications.Service, (n) => n.sendLeftBehind),
+				);
+				return {
+					sent,
+					finished,
+					publishing: Promise.race([
+						publishing.promise,
+						finished.then(() => {
+							throw new Error("The sweep sent no notification");
+						}),
+					]),
+					resume: resume.resolve,
+					close: service.close,
+				};
+			};
+
+			const first = await startSweep();
+			let second: Awaited<ReturnType<typeof startSweep>> | undefined;
+			try {
+				await first.publishing;
+				await aWhileLater();
+				second = await startSweep();
+				await second.publishing;
+
+				first.resume();
+				await first.finished;
+				expect(first.sent).toHaveLength(1);
+
+				second.resume();
+				await second.finished;
+				expect(second.sent).toHaveLength(2);
+				expect([...first.sent, ...second.sent].sort()).toEqual(
+					recipients.map(({ id }) => memberStream(id)).sort(),
+				);
 			} finally {
-				resume.resolve();
-				await first.close();
+				first.resume();
+				second?.resume();
+				await Promise.allSettled([first.finished, second?.finished]);
+				await Promise.all([first.close(), second?.close()]);
 			}
 		});
 

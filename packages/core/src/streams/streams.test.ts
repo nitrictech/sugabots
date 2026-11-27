@@ -24,13 +24,14 @@ import {
 	seedWorkspace,
 } from "../authentication/seed.test-support.ts";
 import { chatServicesForTests } from "../chats/testing.ts";
+import { runningTurns } from "../chats/turns/testing.ts";
 import { query, transaction } from "../database/database.ts";
 import { Audience } from "../database/events/audience.ts";
 import { EventBus } from "../database/events/bus.ts";
 import { EventOutbox } from "../database/events/outbox.ts";
 import { EventStore } from "../database/events/store.ts";
 import { inMemoryEventStore } from "../database/events/testing.ts";
-import { projectMember, session } from "../database/schema.ts";
+import { bot, projectMember, session } from "../database/schema.ts";
 import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Operations } from "../operations/registry.ts";
 import {
@@ -459,19 +460,26 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			expect(erinHeard !== "ended" && erinHeard.event).toEqual(sentinel);
 		});
 
-		it("tells everyone that a private bot lost a member, naming the bot to nobody", async () => {
+		it("closes the private bot’s own chat to a removed member who can still talk to it in a private project", async () => {
 			const world = await staffed();
 			const secret = await seedBot(world.workspace, {
 				createdById: world.ed,
 				visibility: "private",
 				members: [world.ed, world.vi],
 			});
+
+			const shared = await seedProject(world.workspace, {
+				leadBotId: secret.id,
+				members: [world.vi],
+			});
+			await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, secret.id)));
 			const erin = await following(await signedIn.member(world.erin), "events.followWorkspace", {
 				workspace: world.workspace,
 			});
-			const vi = await following(await signedIn.member(world.vi), "events.followWorkspace", {
-				workspace: world.workspace,
-			});
+			const viewer = await signedIn.member(world.vi);
+			const vi = await following(viewer, "events.followWorkspace", { workspace: world.workspace });
+			const chatId = await seedProjectChat(world.workspace, secret.defaultProject, world.ed);
+			const ownChat = await following(viewer, "events.followChat", { chatId });
 
 			await call(await signedIn.member(world.ed), "bots.removeMember", {
 				botId: secret.id,
@@ -483,6 +491,19 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				const heard = await follower.next();
 				expect(heard !== "ended" && heard.event).toEqual(unnamed);
 			}
+			await expect.soft(ownChat.next()).resolves.toBe("ended");
+			await expect(call(viewer, "chats.get", { chatId, limit: 1 })).rejects.toBeInstanceOf(
+				ResourceHidden,
+			);
+			const started = await call(viewer, "chats.startProjectChat", {
+				projectId: shared,
+				retryKey: randomUUID(),
+				message: "How is the launch going?",
+			});
+			expect(started.chat).toMatchObject({ projectId: shared });
+			expect(await runOnPostgres(runningTurns(started.chat.id))).toMatchObject([
+				{ request: { botId: secret.id } },
+			]);
 		});
 
 		it("tells everyone that a project was made private, naming it to nobody", async () => {

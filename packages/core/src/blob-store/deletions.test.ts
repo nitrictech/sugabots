@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
-import { Effect, type Layer } from "effect";
-import { afterAll, describe, expect, it } from "vitest";
+import { Duration, Effect, type Layer } from "effect";
+import { TestClock } from "effect/testing";
+import { afterAll, describe, expect, it, onTestFinished } from "vitest";
 import { query } from "../database/database.ts";
 import { blobDeletion } from "../database/schema.ts";
 import { closeDatabase, holdTransaction, onDatabase, runOnPostgres } from "../database/testing.ts";
@@ -14,7 +15,7 @@ describe.skipIf(!process.env.DATABASE_URL)("deleting queued blobs, against Postg
 	/** A folder queued for deletion, as deleting what owns it queues it. */
 	const queueFolder = async () => {
 		const prefix = BlobStore.key("chats", crypto.randomUUID());
-		await onDatabase((db) => db.insert(blobDeletion).values({ prefix }));
+		await onDatabase((db) => db.insert(blobDeletion).values({ prefix, dueAt: new Date(0) }));
 		return prefix;
 	};
 	const queued = (prefix: BlobStore.Key) =>
@@ -24,6 +25,7 @@ describe.skipIf(!process.env.DATABASE_URL)("deleting queued blobs, against Postg
 	const storeHolding = (held: BlobStore.Key) => {
 		const started = Promise.withResolvers<void>();
 		const released = Promise.withResolvers<void>();
+		onTestFinished(() => released.resolve());
 		const layer = unimplemented(BlobStore.Service, {
 			delete: () => Effect.void,
 			deletePrefix: (prefix) =>
@@ -36,49 +38,85 @@ describe.skipIf(!process.env.DATABASE_URL)("deleting queued blobs, against Postg
 		});
 		return { layer, started: started.promise, release: () => released.resolve() };
 	};
-	const deleteQueuedWith = (store: Layer.Layer<BlobStore.Service>) =>
-		runOnPostgres(BlobDeletions.deleteQueued.pipe(Effect.provide(store)));
+	const deleteQueuedWith = (store: Layer.Layer<BlobStore.Service>, now = Date.UTC(2026, 0, 1)) =>
+		runOnPostgres(
+			TestClock.setTime(now).pipe(
+				Effect.andThen(BlobDeletions.deleteQueued),
+				Effect.provide([store, TestClock.layer()]),
+			),
+		);
 
 	it("deletes a folder's blobs with its queue row unlocked, and forgets the row once they're gone", async () => {
 		const prefix = await queueFolder();
 		const store = storeHolding(prefix);
-
 		const working = deleteQueuedWith(store.layer);
-		await store.started;
-		const lockingTheRow = holdTransaction(
-			query((db) =>
-				db
-					.select({ id: blobDeletion.id })
-					.from(blobDeletion)
-					.where(eq(blobDeletion.prefix, prefix))
-					.for("update", { noWait: true }),
-			),
-		);
-		const rowFree = await lockingTheRow.held.then(
-			() => true,
-			() => false,
-		);
-		await lockingTheRow.release().catch(() => undefined);
-		store.release();
-		await working;
-
-		expect(rowFree).toBe(true);
+		try {
+			await Promise.race([
+				store.started,
+				working.then(() => {
+					throw new Error("The sweep did not start deleting the folder");
+				}),
+			]);
+			const lockingTheRow = holdTransaction(
+				query((db) =>
+					db
+						.select({ id: blobDeletion.id })
+						.from(blobDeletion)
+						.where(eq(blobDeletion.prefix, prefix))
+						.for("update", { noWait: true }),
+				),
+			);
+			try {
+				expect(await lockingTheRow.held).toHaveLength(1);
+			} finally {
+				await lockingTheRow.release().catch(() => undefined);
+			}
+		} finally {
+			store.release();
+			await working;
+		}
 		expect(await queued(prefix)).toEqual([]);
 	});
 
-	it("leaves a folder another worker has claimed until its claim runs out", async () => {
+	it("takes over a folder only after its claim expires and leaves the new claim intact", async () => {
 		const prefix = await queueFolder();
-		const store = storeHolding(prefix);
-		const working = deleteQueuedWith(store.layer);
-		await store.started;
+		const first = storeHolding(prefix);
+		const working = deleteQueuedWith(first.layer);
+		const second = storeHolding(prefix);
+		let takingOver: Promise<void> | undefined;
+		try {
+			await Promise.race([
+				first.started,
+				working.then(() => {
+					throw new Error("The sweep did not claim the folder");
+				}),
+			]);
+			takingOver = deleteQueuedWith(second.layer);
+			expect(
+				await Promise.race([
+					second.started.then(() => "deleted"),
+					takingOver.then(() => "skipped"),
+				]),
+			).toBe("skipped");
 
-		// Another worker comes by while the first is still deleting.
-		await deleteQueuedWith(storeHolding(BlobStore.key("unused")).layer);
-		const whileClaimed = await queued(prefix);
-		store.release();
-		await working;
-
-		expect(whileClaimed).toHaveLength(1);
+			takingOver = deleteQueuedWith(
+				second.layer,
+				Date.UTC(2026, 0, 1) + Duration.toMillis(Duration.hours(1)),
+			);
+			await Promise.race([
+				second.started,
+				takingOver.then(() => {
+					throw new Error("The expired claim was not taken over");
+				}),
+			]);
+			first.release();
+			await working;
+			expect(await queued(prefix)).toHaveLength(1);
+		} finally {
+			first.release();
+			second.release();
+			await Promise.all([working, takingOver]);
+		}
 		expect(await queued(prefix)).toEqual([]);
 	});
 });

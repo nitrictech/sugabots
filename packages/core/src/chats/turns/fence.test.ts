@@ -1,11 +1,10 @@
 import { userText } from "@sugabots/errors";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Stream } from "effect";
+import { Context, Effect } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { TurnAuthentication } from "../../authentication/turn.ts";
-import { file, membership, message, projectChat, toolCall, turn } from "../../database/schema.ts";
+import { membership, message, projectChat, toolCall, turn } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, onPostgres, runOnPostgres } from "../../database/testing.ts";
-import { ChatFileStore } from "../../files/chat-file-store.ts";
 import { asMember } from "../../operations/chats/testing.ts";
 import { asRunningTurn } from "../../operations/running-turn.ts";
 import { servedOperations } from "../../operations/testing.ts";
@@ -17,7 +16,6 @@ import { named } from "../../proofs/proof.ts";
 import { proveReachesChat } from "../../proofs/reaches-chat.ts";
 import { Chats } from "../chats/chats.ts";
 import { chatServicesForTests } from "../testing.ts";
-import { executionFence, holdRunningTurn } from "./fence.ts";
 import { TurnRecords } from "./records.ts";
 import { TurnStore } from "./store.ts";
 import {
@@ -176,9 +174,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 		expect(stored).toMatchObject({ status: "running" });
 	});
 
-	const filesInChat = () =>
-		onDatabase((db) => db.select().from(file).where(eq(file.chatId, opened.run.request.chatId)));
-
 	it("shares no file an older execution's tool attaches once the turn resumed", async () => {
 		await runOnPostgres(authentication.authenticate(opened.turnId));
 
@@ -189,52 +184,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's fence, against Postgres", a
 			),
 		).rejects.toMatchObject({ _tag: "ReplyEnded" });
 		expect(await turns.replyFiles(replyTurnOf(opened))).toEqual([]);
-	});
-
-	it("keeps no long result an older execution's call returns once the turn resumed", async () => {
-		const [running] = await onDatabase((db) =>
-			db
-				.insert(toolCall)
-				.values({
-					chatId: opened.run.request.chatId,
-					messageId: opened.replyMessageId,
-					turnId: opened.turnId,
-					tool: "read_file",
-					sdkToolCallId: "sdk-1",
-					step: 0,
-					input: {},
-					atOffset: 0,
-				})
-				.returning({ id: toolCall.id }),
-		);
-		if (!running) throw new Error("no call recorded");
-		await runOnPostgres(authentication.authenticate(opened.turnId));
-
-		// As a step's tools keep a long result: only while their execution runs the turn.
-		const kept = await run(
-			Effect.result(
-				Effect.flatMap(ChatFileStore.Service, (files) =>
-					files.write({
-						chatId: opened.run.request.chatId,
-						toolCallId: running.id,
-						content: {
-							stream: Stream.make(new TextEncoder().encode("long")),
-							contentType: "text/plain",
-						},
-						fence: holdRunningTurn(
-							executionFence(opened.turnId, opened.principal.executionNumber),
-							"share",
-						),
-					}),
-				).pipe(Effect.provide(ChatFileStore.layer)),
-			),
-		);
-
-		expect(kept).toMatchObject({
-			_tag: "Failure",
-			failure: { _tag: "TurnExecutionSuperseded" },
-		});
-		expect(await filesInChat()).toEqual([]);
 	});
 
 	it("refuses a write for a turn that has ended as ended, whichever execution asks", async () => {

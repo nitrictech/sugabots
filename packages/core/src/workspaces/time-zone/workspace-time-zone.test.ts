@@ -8,12 +8,7 @@ import { query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { inMemoryEventStore } from "../../database/events/testing.ts";
 import { automation, automationTrigger, workspace } from "../../database/schema.ts";
-import {
-	closeDatabase,
-	holdTransaction,
-	onDatabase,
-	waitUntilWaitingOnLocks,
-} from "../../database/testing.ts";
+import { closeDatabase, holdTransaction, onDatabase } from "../../database/testing.ts";
 import { type CallOperation, servedOperations } from "../../operations/testing.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 
@@ -133,13 +128,27 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				query((db) =>
 					db.update(automation).set({ state: "paused" }).where(eq(automation.id, automationId)),
 				),
+				{ separatePostgresSession: true },
 			);
 			await pausing.held;
 
 			const moving = timeZones.change({ workspace: workspaceId, timeZone: "Asia/Tokyo" });
-			await waitUntilWaitingOnLocks(1);
-			await pausing.release();
-			await moving;
+			const observed = new AbortController();
+			try {
+				await Promise.race([
+					pausing.waitForWaiters(1, observed.signal),
+					moving.then(() => {
+						throw new Error("The move finished before the routine was paused");
+					}),
+				]);
+			} finally {
+				observed.abort();
+				try {
+					await pausing.release();
+				} finally {
+					await moving;
+				}
+			}
 
 			const [routine] = await onDatabase((db) =>
 				db.select().from(automationTrigger).where(eq(automationTrigger.automationId, automationId)),

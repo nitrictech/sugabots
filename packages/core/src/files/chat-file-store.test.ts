@@ -20,7 +20,6 @@ import {
 } from "../database/schema.ts";
 import {
 	closeDatabase,
-	holdTransaction,
 	onDatabase,
 	type Promised,
 	runOnPostgres,
@@ -396,10 +395,17 @@ describe.skipIf(!process.env.DATABASE_URL)("chat files, against Postgres", () =>
 		});
 
 		await flaky.removeUnsentAttachment({ chatId, uploaderId: memberId, fileId: upload.id });
+		const key = BlobStore.key("chats", chatId, "files", upload.id);
 		const leftAtOnce = await blobKeysUnder(BlobStore.key("chats", chatId));
+		await onDatabase((db) =>
+			db
+				.update(blobDeletion)
+				.set({ dueAt: new Date(0) })
+				.where(eq(blobDeletion.prefix, key)),
+		);
 		await runOnPostgres(BlobDeletions.deleteQueued);
 
-		expect(leftAtOnce).toEqual([BlobStore.key("chats", chatId, "files", upload.id)]);
+		expect(leftAtOnce).toEqual([key]);
 		expect(await blobKeysUnder(BlobStore.key("chats", chatId))).toEqual([]);
 	});
 
@@ -451,34 +457,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chat files, against Postgres", () =>
 		expect(await blobKeysUnder(folder)).toEqual([]);
 	});
 
-	it("forgets a removed file's queued deletion once its blob is gone, in a Postgres session of its own", async () => {
+	it("cleans up a removed upload after commit and keeps it after rollback", async () => {
 		const { chatId, memberId } = await aChat();
-		let other: ReturnType<typeof holdTransaction> | undefined;
-		const deletesWhileAnotherTransactionStarts = Layer.effect(
-			BlobStore.Service,
-			Effect.map(BlobStore.Service, (store) =>
-				BlobStore.Service.of({
-					...store,
-					delete: (key) =>
-						store.delete(key).pipe(
-							// Another transaction takes the Postgres session the removing one let
-							// go of, and is rolled back.
-							Effect.andThen(
-								Effect.promise(() => {
-									other = holdTransaction(Effect.void, Effect.die("rolled back"));
-									return other.held;
-								}),
-							),
-						),
-				}),
-			),
-		);
-		const layer = ChatFileStore.layer.pipe(
-			Layer.provide(deletesWhileAnotherTransactionStarts),
-			Layer.orDie,
-		);
-		const removing = await servedOnPostgres(ChatFileStore.Service, layer);
-		const upload = await removing.upload({
+		const upload = await files.upload({
 			chatId,
 			uploaderId: memberId,
 			name: "draft.txt",
@@ -486,25 +467,41 @@ describe.skipIf(!process.env.DATABASE_URL)("chat files, against Postgres", () =>
 			maxUnsent: 20,
 			content: text("draft"),
 		});
-
-		await runOnPostgres(
-			Effect.flatMap(ChatFileStore.Service, (service) =>
-				transaction(
-					service.removeUnsentAttachment({ chatId, uploaderId: memberId, fileId: upload.id }),
-				),
-			).pipe(Effect.provide(layer)),
+		const deleted: BlobStore.Key[] = [];
+		const observesDeletion = Layer.effect(
+			BlobStore.Service,
+			Effect.map(BlobStore.Service, (store) => ({
+				...store,
+				delete: (key) =>
+					Effect.sync(() => {
+						deleted.push(key);
+					}).pipe(Effect.andThen(store.delete(key))),
+			})),
 		);
-		await other?.release().catch(() => undefined);
-
-		expect(await blobKeysUnder(BlobStore.key("chats", chatId))).toEqual([]);
-		expect(
-			await onDatabase((db) =>
+		const remove = Effect.flatMap(ChatFileStore.Service, (service) =>
+			service.removeUnsentAttachment({ chatId, uploaderId: memberId, fileId: upload.id }),
+		).pipe(Effect.provide(ChatFileStore.layer.pipe(Layer.provide(observesDeletion))));
+		const folder = BlobStore.key("chats", chatId);
+		const queued = () =>
+			onDatabase((db) =>
 				db
 					.select()
 					.from(blobDeletion)
-					.where(like(blobDeletion.prefix, `${BlobStore.key("chats", chatId)}%`)),
-			),
-		).toEqual([]);
+					.where(like(blobDeletion.prefix, `${folder}%`)),
+			);
+
+		await expect(
+			runOnPostgres(transaction(remove.pipe(Effect.andThen(Effect.fail("rolled back"))))),
+		).rejects.toBe("rolled back");
+		const key = BlobStore.key("chats", chatId, "files", upload.id);
+		expect(deleted).toEqual([]);
+		expect(await blobKeysUnder(folder)).toEqual([key]);
+		expect(await queued()).toEqual([]);
+
+		await runOnPostgres(transaction(remove));
+		expect(deleted).toEqual([key]);
+		expect(await blobKeysUnder(folder)).toEqual([]);
+		expect(await queued()).toEqual([]);
 	});
 
 	it("removes uploads left unsent, with their blobs, and nothing else", async () => {

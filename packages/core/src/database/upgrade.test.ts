@@ -6,7 +6,6 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { PgClient } from "@effect/sql-pg";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
-import { sql } from "drizzle-orm";
 import { makeWithDefaults } from "drizzle-orm/effect-postgres";
 import { migrate } from "drizzle-orm/effect-postgres/migrator";
 import {
@@ -28,23 +27,30 @@ import { SessionAuthentication } from "../authentication/session.ts";
 import { TurnAuthentication } from "../authentication/turn.ts";
 import { askerColumns } from "../authentication/turn-facts.ts";
 import { WebhookAuthentication, WebhookRefused } from "../authentication/webhook.ts";
-import { reachesBotFor, reachesChatFor, reachesProjectFor } from "../authorization/access.ts";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { BlobDeletions } from "../blob-store/deletions.ts";
 import { fromFileSystem } from "../blob-store/implementations/filesystem.ts";
 import { Compaction, CompactionRequest } from "../chats/compaction/compaction.workflow.ts";
+import { DesktopViewer } from "../chats/tools/browser/viewer.ts";
 import { TurnRequests } from "../chats/turns/turns.ts";
+import { ComputerSignIn } from "../computers/computer-sign-in.ts";
 import { ChatFileStore } from "../files/chat-file-store.ts";
 import { Files } from "../files/files.ts";
 import { Ids } from "../ids/ids.ts";
-import { requestOutcome, servedOperations } from "../operations/testing.ts";
+import { viewDesktop } from "../operations/computers/view-desktop.ts";
+import { servedOperations } from "../operations/testing.ts";
 import type { Principal } from "../principal.ts";
 import { proveCanReachConnector } from "../proofs/can-use-connector.ts";
 import { proveCanRunAutomations } from "../proofs/project-permissions.ts";
 import { named } from "../proofs/proof.ts";
 import { proveReachesProject } from "../proofs/reaches-project.ts";
+import { Egress } from "../providers/network/egress.ts";
 import { Secrets } from "../secrets/secrets.ts";
+import { Streams } from "../streams/streams.ts";
+import { unimplemented } from "../testing.ts";
 import { effectRunner, query, type RunEffect, transaction } from "./database.ts";
+import { EventBus } from "./events/bus.ts";
+import { EventStore } from "./events/store.ts";
 import { applyMigrations } from "./migrations.ts";
 import { message, turn } from "./schema.ts";
 import { type TestInfrastructure, testInfrastructure } from "./testing.ts";
@@ -96,6 +102,8 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 		let queuedByTheUpgrade: string[];
 		/** What each member reached on main, before the upgrade. */
 		let reachedOnMain: Reached[];
+		let legacyConnectors: { id: string; pod_id: string; handle: string }[];
+		let legacyBots: { id: string; pod_id: string }[];
 
 		beforeAll(async () => {
 			root = await mkdtemp(join(tmpdir(), "upgrade-blobs-"));
@@ -107,6 +115,21 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				await client.query(legacySummaryRequest);
 				await client.query(legacySessions);
 				reachedOnMain = (await client.query<Reached>(REACHED_ON_MAIN)).rows;
+				legacyConnectors = (await client.query("select id, pod_id, handle from connection")).rows;
+				legacyBots = (await client.query("select id, pod_id from agent")).rows;
+				const cipher = Secrets.fromKey(Buffer.alloc(32).toString("base64"));
+				await client.query(
+					"update sandbox_provider set api_key_encrypted = $1, settings = settings || $3::jsonb where id = $2",
+					[
+						cipher.encrypt("desktop-test-key"),
+						legacy.provider,
+						{ serverUrl: "https://computers.example.com" },
+					],
+				);
+				await client.query("update agent set uses_sandbox = true where id in ($1, $2)", [
+					legacy.bots.helper,
+					legacy.bots.planner,
+				]);
 			});
 			await storeLegacyBytes(url, store, root);
 			submitted = await submitToMainsEngine(url);
@@ -243,58 +266,6 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			).toMatchObject({ id: legacy.bots.sketch, name: "Sketchbook", visibility: "personal" });
 		});
 
-		it("keeps a shared pod's bots, chats, files, connectors, automations and computer to its members", async () => {
-			const { family } = legacy.pods;
-			const { planner, budget } = legacy.bots;
-			/** Everything that was the Family pod's, with whether `memberId` reaches each. */
-			const reachedBy = (memberId: string) =>
-				upgraded.run(
-					query((db) =>
-						db.execute<{ kind: string; id: string; reached: boolean }>(
-							sql`
-							with pod_project as (
-								select id from project
-								where id = ${family}::uuid or default_of_bot_id in (${planner}::uuid, ${budget}::uuid)
-							)
-							select 'bot' as kind, b.id::text as id, ${reachesBotFor(sql`b.id`, memberId)} as reached
-								from bot b where b.id in (${planner}::uuid, ${budget}::uuid)
-							union all
-							select 'project', p.id::text, ${reachesProjectFor(sql`p.id`, memberId)}
-								from project p where p.id in (select id from pod_project)
-							union all
-							select 'chat', c.id::text, ${reachesChatFor({ projectId: sql`c.project_id` }, memberId)}
-								from placed_chat c where c.project_id in (select id from pod_project)
-							union all
-							select 'file', f.id::text, ${reachesChatFor({ projectId: sql`fc.project_id` }, memberId)}
-								from file f join placed_chat fc on fc.id = f.chat_id
-								where fc.project_id in (select id from pod_project)
-							union all
-							select 'connector', k.id::text, ${reachesProjectFor(sql`k.project_id`, memberId)}
-								from connector k where k.project_id in (select id from pod_project)
-							union all
-							select 'computer', m.id::text, ${reachesProjectFor(sql`m.project_id`, memberId)}
-								from computer m where m.project_id in (select id from pod_project)
-							union all
-							select 'automation', a.id::text, ${reachesProjectFor(sql`a.project_id`, memberId)}
-								from automation a where a.project_id in (select id from pod_project)
-							order by 1, 2
-						`,
-							"objects",
-						),
-					),
-				);
-			const reachedByAna = await reachedBy(legacy.members.ana);
-			const kinds = new Set(reachedByAna.map(({ kind }) => kind));
-
-			expect([...kinds].sort()).toEqual(
-				["automation", "bot", "chat", "computer", "connector", "file", "project"].sort(),
-			);
-			expect(reachedByAna.filter(({ reached }) => reached)).toEqual([]);
-			for (const podMember of [legacy.members.sam, legacy.members.pat]) {
-				expect((await reachedBy(podMember)).filter(({ reached }) => !reached)).toEqual([]);
-			}
-		});
-
 		it("keeps a shared pod's connectors in the project it became, bots or none", async () => {
 			expect(
 				await upgraded.rows(`select project_id from connector where id = $1`, [
@@ -303,40 +274,131 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			).toEqual([{ project_id: legacy.pods.notes }]);
 		});
 
-		it("keeps the files of a personal pod with no bots for its owner alone", async () => {
-			const [diary] = await upgraded.rows<{
-				chat_id: string;
-				visibility: string;
-				assistant_of: string;
-			}>(
-				`select file.chat_id, bot.visibility, bot.assistant_of
-				 from file join placed_chat on placed_chat.id = file.chat_id
-				 join project on project.id = placed_chat.project_id
-				 join bot on bot.id = project.default_of_bot_id
-				 where file.id = $1`,
-				[legacy.diary],
-			);
-			expect(diary).toEqual({
-				chat_id: expect.any(String),
-				visibility: "personal",
-				assistant_of: legacy.members.ana,
+		it("lets only the member who owns the personal file read it", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const input = { fileId: legacy.diary };
+			const { ana, sam, pat } = legacy.members;
+			await expect(call(await upgraded.signIn(ana), "files.get", input)).resolves.toMatchObject({
+				content: "Dear.",
 			});
-			const reachedBy = async (memberId: string) => {
-				const [row] = await upgraded.run(
-					query((db) =>
-						db.execute<{ reached: boolean }>(
-							sql`select ${reachesChatFor({ projectId: sql`c.project_id` }, memberId)} as reached
-								from placed_chat c where c.id = ${diary?.chat_id}::uuid`,
-							"objects",
+			for (const outsider of [sam, pat]) {
+				await expect(
+					call(await upgraded.signIn(outsider), "files.get", input),
+				).rejects.toBeInstanceOf(ResourceHidden);
+			}
+		});
+
+		it.each([
+			{
+				place: "personal bot",
+				computer: legacy.computers.pat,
+				chatId: legacy.threads.report,
+				botId: legacy.bots.helper,
+				members: [legacy.members.pat],
+				outsiders: [legacy.members.sam, legacy.members.ana],
+			},
+			{
+				place: "private project",
+				computer: legacy.computers.family,
+				chatId: legacy.threads.trip,
+				botId: legacy.bots.planner,
+				members: [legacy.members.sam, legacy.members.pat],
+				outsiders: [legacy.members.ana, legacy.members.lee],
+			},
+		])(
+			"opens the preserved computer's desktop only for members of the $place",
+			async ({ computer, chatId, botId, members, outsiders }) => {
+				const openedMachines: string[] = [];
+				const fetchComputer: typeof fetch = async (request) => {
+					const url = new URL(request instanceof Request ? request.url : request.toString());
+					if (url.pathname.endsWith(`/sandboxes/${computer.providerId}`)) {
+						openedMachines.push(computer.providerId);
+						return Response.json({
+							id: computer.providerId,
+							status: { state: "Running" },
+							createdAt: "2026-10-01T00:00:00Z",
+						});
+					}
+					if (url.pathname.includes(`/sandboxes/${computer.providerId}/endpoints/`))
+						return Response.json({ endpoint: "desktop.example.com", headers: {} });
+					if (url.pathname === "/ping") return new Response("ok");
+					if (url.pathname === "/policy")
+						return Response.json({ policy: { defaultAction: "deny", egress: [] } });
+					if (url.pathname === "/credential-vault")
+						return Response.json({ code: "NOT_FOUND", message: "Missing" }, { status: 404 });
+					if (url.pathname.endsWith(`/sandboxes/${computer.providerId}/networkpolicy`))
+						return new Response(null, { status: 204 });
+					throw new Error(`Unexpected computer request to ${url.pathname}`);
+				};
+				const store = await upgraded.run(EventStore.make);
+				const bus = EventBus.inProcess({ store });
+				const viewer = await upgraded.run(
+					DesktopViewer.Service.pipe(
+						Effect.provide(
+							DesktopViewer.layer.pipe(
+								Layer.provide([
+									ComputerSignIn.none,
+									unimplemented(Egress.Service, { providers: { for: () => fetchComputer } }),
+								]),
+							),
 						),
 					),
 				);
-				return row?.reached;
-			};
-			expect(await reachedBy(legacy.members.ana)).toBe(true);
-			expect(await reachedBy(legacy.members.sam)).toBe(false);
-			expect(await reachedBy(legacy.members.pat)).toBe(false);
-		});
+				const streams = await upgraded.run(
+					Streams.Service.pipe(
+						Effect.provide(
+							Streams.layer.pipe(
+								Layer.provide([EventStore.layer, Layer.succeed(EventBus.Service, bus)]),
+							),
+						),
+					),
+				);
+				const view = async (member: string) => {
+					const principal = await upgraded.signIn(member);
+					return upgraded.run(
+						Effect.scoped(
+							viewDesktop.run(principal, { chatId, botId }, { kind: "request" }).pipe(
+								Effect.flatMap(({ stream }) => Stream.runCollect(stream)),
+								Effect.provideService(DesktopViewer.Service, {
+									...viewer,
+									show: (opened, canUse) =>
+										Effect.succeed({
+											endpoint: {
+												url: `https://desktop.example.com/${opened.computer.id}`,
+												headers: {},
+											},
+											password: "desktop-test",
+											control: canUse.control,
+										}),
+								}),
+								Effect.provideService(Streams.Service, streams),
+							),
+						),
+					);
+				};
+				try {
+					for (const outsider of outsiders) {
+						await expect(view(outsider)).rejects.toBeInstanceOf(ResourceHidden);
+					}
+					expect(openedMachines).toEqual([]);
+					for (const member of members) {
+						expect(await view(member)).toEqual([
+							{
+								endpoint: {
+									url: `https://desktop.example.com/${computer.providerId}`,
+									headers: {},
+								},
+								password: "desktop-test",
+								control: true,
+							},
+						]);
+					}
+					expect(openedMachines).toContain(computer.providerId);
+				} finally {
+					await bus.close();
+				}
+			},
+		);
 
 		it("lets a bot-less shared pod's members read a file written there whose chat is gone, and nobody else", async () => {
 			const call = await servedOperations({ runOn: upgraded.run });
@@ -355,58 +417,136 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 
 		it("leaves each member reaching, through the operations, what they reached on main, but for admins seeing personal bots", async () => {
 			const call = await servedOperations({ runOn: upgraded.run });
-			const legacyIds = new Set(reachedOnMain.map(({ id }) => id));
 			const chats = [
 				...new Set(reachedOnMain.filter(({ kind }) => kind === "chat").map(({ id }) => id)),
 			];
-			const projectIds = (await upgraded.rows<{ id: string }>(`select id from project`)).map(
-				({ id }) => id,
+			const projects = await upgraded.rows<{
+				id: string;
+				default_of_bot_id: string | null;
+				assistant_of: string | null;
+			}>(
+				`select project.id, project.default_of_bot_id, bot.assistant_of
+				from project left join bot on bot.id = project.default_of_bot_id`,
 			);
+			const connectors = await upgraded.rows<{ id: string; project_id: string; handle: string }>(
+				"select id, project_id, handle from connector",
+			);
+			const originalConnector = new Map(
+				connectors.map(({ id, project_id, handle }) => {
+					const defaultBot = projects.find(
+						(project) => project.id === project_id,
+					)?.default_of_bot_id;
+					const legacyPod = legacyBots.find((bot) => bot.id === defaultBot)?.pod_id;
+					const original =
+						legacyConnectors.find((connector) => connector.id === id) ??
+						legacyConnectors.find(
+							(connector) => connector.pod_id === legacyPod && connector.handle === handle,
+						);
+					if (!original) throw new Error(`Connector ${id} has no connection on main`);
+					return [id, original.id] as const;
+				}),
+			);
+			const [anasAssistant] = projects.filter(
+				({ assistant_of }) => assistant_of === legacy.members.ana,
+			);
+			if (!anasAssistant?.default_of_bot_id)
+				throw new Error("Ana has no Personal Assistant for her file");
+			const [notesLead] = await upgraded.rows<{ id: string }>(
+				"select lead_bot_id as id from project where id = $1",
+				[legacy.pods.notes],
+			);
+			if (!notesLead) throw new Error("Notes has no lead bot");
+			const expected: Reached[] = [
+				...Object.values(legacy.members).map((member) => ({
+					member,
+					kind: "bot" as const,
+					id: notesLead.id,
+				})),
+				...reachedOnMain.filter(
+					({ id }) =>
+						id !== migrationScale.orphanedCollaboration &&
+						id !== migrationScale.hostlessPersonalChat,
+				),
+				{ member: legacy.members.ana, kind: "bot", id: anasAssistant.default_of_bot_id },
+				{ member: legacy.members.sam, kind: "bot", id: anasAssistant.default_of_bot_id },
+				{ member: legacy.members.sam, kind: "bot", id: legacy.bots.patsAssistant },
+				{ member: legacy.members.sam, kind: "bot", id: legacy.bots.helper },
+				{ member: legacy.members.sam, kind: "bot", id: legacy.bots.sketch },
+			];
 			const reachedNow: Reached[] = [];
 			for (const member of Object.values(legacy.members)) {
 				const principal = await upgraded.signIn(member);
 				const workspace = legacy.workspace;
+				const reached = (kind: Reached["kind"], id: string) =>
+					expected.some((row) => row.member === member && row.kind === kind && row.id === id);
+				const list = async <A>(request: Promise<readonly A[]>, expectHidden: boolean) => {
+					try {
+						return await request;
+					} catch (error) {
+						if (expectHidden && error instanceof ResourceHidden) return [];
+						throw error;
+					}
+				};
 				for (const bot of await call(principal, "bots.list", { workspace })) {
 					reachedNow.push({ member, kind: "bot", id: bot.id });
 				}
 				for (const project of await call(principal, "projects.list", { workspace })) {
 					reachedNow.push({ member, kind: "project", id: project.id });
 				}
-				for (const projectId of projectIds) {
-					const automations = await call(principal, "automations.list", { projectId }).catch(
-						() => [],
+				for (const { id: projectId, default_of_bot_id: botId } of projects) {
+					const reachesProject = botId
+						? botId === notesLead.id ||
+							reachedOnMain.some(
+								(row) => row.member === member && row.kind === "bot" && row.id === botId,
+							) ||
+							(botId === anasAssistant.default_of_bot_id && member === legacy.members.ana)
+						: reached("project", projectId);
+					const automations = await list(
+						call(principal, "automations.list", { projectId }),
+						!reachesProject,
 					);
 					for (const automation of automations) {
 						reachedNow.push({ member, kind: "automation", id: automation.id });
 					}
-					const files = await call(principal, "files.listInProject", { projectId }).catch(() => []);
-					for (const file of files) reachedNow.push({ member, kind: "file", id: file.id });
-					const connectors = await call(principal, "connectors.list", { projectId }).catch(
-						() => [],
+					const files = await list(
+						call(principal, "files.listInProject", { projectId }),
+						!reachesProject,
 					);
-					for (const connector of connectors) {
-						reachedNow.push({ member, kind: "connector", id: connector.id });
+					for (const file of files) reachedNow.push({ member, kind: "file", id: file.id });
+					const listed = await list(
+						call(principal, "connectors.list", { projectId }),
+						!reachesProject,
+					);
+					expect(listed.map(({ id }) => id).sort()).toEqual(
+						connectors
+							.filter(({ id, project_id }) => {
+								const original = originalConnector.get(id);
+								return (
+									reachesProject &&
+									project_id === projectId &&
+									original &&
+									reached("connector", original)
+								);
+							})
+							.map(({ id }) => id)
+							.sort(),
+					);
+					for (const connector of listed) {
+						const original = originalConnector.get(connector.id);
+						if (!original) throw new Error(`Connector ${connector.id} has no connection on main`);
+						reachedNow.push({ member, kind: "connector", id: original });
 					}
 				}
 				for (const chatId of chats) {
-					const read = await requestOutcome(call(principal, "chats.get", { chatId, limit: 1 }));
-					if (read === "ok") reachedNow.push({ member, kind: "chat", id: chatId });
+					try {
+						await call(principal, "chats.get", { chatId, limit: 1 });
+						reachedNow.push({ member, kind: "chat", id: chatId });
+					} catch (error) {
+						if (reached("chat", chatId) || !(error instanceof ResourceHidden)) throw error;
+					}
 				}
 			}
-
-			expect(sortedReach(reachedNow.filter(({ id }) => legacyIds.has(id)))).toEqual(
-				sortedReach([
-					...reachedOnMain.filter(
-						({ id }) =>
-							id !== migrationScale.orphanedCollaboration &&
-							id !== migrationScale.hostlessPersonalChat,
-					),
-					// Admins know which personal bots there are, without reaching their chats.
-					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.patsAssistant },
-					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.helper },
-					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.sketch },
-				]),
-			);
+			expect([...new Set(sortedReach(reachedNow))]).toEqual(sortedReach(expected));
 		});
 
 		it("lets a shared pod's members start its bots' automations by hand, which on main only owners and admins could", async () => {

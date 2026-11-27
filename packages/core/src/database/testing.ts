@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { sql } from "drizzle-orm";
 import { type Context, Effect, Layer, ManagedRuntime } from "effect";
+import pg from "pg";
 import { onTestFinished } from "vitest";
 import { BlobStore } from "../blob-store/blob-store.ts";
 import { Ids } from "../ids/ids.ts";
@@ -95,35 +96,33 @@ function observeLockWait(
 }
 
 async function pollLockWait(count: number, signal: AbortSignal, holder?: Promise<{ pid: number }>) {
-	const blocker = holder
-		? await runOnPostgres(Effect.tryPromise({ try: () => holder, catch: (error) => error }), {
-				signal,
-			})
-		: undefined;
-	const blockerPid = blocker?.pid;
-	while (true) {
-		signal.throwIfAborted();
-		const [waiting] = await runOnPostgres(
-			query((db) =>
-				db.execute<{ count: number }>(
-					blockerPid === undefined
-						? sql`select count(*)::int as count from pg_stat_activity
+	const blockerPid = (await holder)?.pid;
+	const observation = new pg.Client({ connectionString: process.env.DATABASE_URL });
+	try {
+		await observation.connect();
+		while (true) {
+			signal.throwIfAborted();
+			const {
+				rows: [waiting],
+			} = await observation.query<{ count: number }>(
+				blockerPid === undefined
+					? `select count(*)::int as count from pg_stat_activity
 						where datname = current_database() and wait_event_type = 'Lock'`
-						: sql`with recursive blocked(pid) as (
-						select ${blockerPid}::int
+					: `with recursive blocked(pid) as (
+						select $1::int
 						union
 						select activity.pid from pg_stat_activity as activity
 						join blocked on blocked.pid = any(pg_blocking_pids(activity.pid))
 						where activity.datname = current_database() and activity.wait_event_type = 'Lock'
 					)
-					select count(*)::int as count from blocked where pid <> ${blockerPid}`,
-					"objects",
-				),
-			),
-			{ signal },
-		);
-		if ((waiting?.count ?? 0) >= count) return;
-		await delay(LOCK_WAIT_POLL_INTERVAL_MS, undefined, { signal });
+					select count(*)::int as count from blocked where pid <> $1`,
+				blockerPid === undefined ? [] : [blockerPid],
+			);
+			if ((waiting?.count ?? 0) >= count) return;
+			await delay(LOCK_WAIT_POLL_INTERVAL_MS, undefined, { signal });
+		}
+	} finally {
+		await observation.end();
 	}
 }
 
@@ -143,6 +142,7 @@ async function pollLockWait(count: number, signal: AbortSignal, holder?: Promise
 export function holdTransaction<A>(
 	work: Effect.Effect<A, unknown, TestInfrastructure | Transaction>,
 	afterRelease: Effect.Effect<unknown, unknown, TestInfrastructure | Transaction> = Effect.void,
+	{ separatePostgresSession = false } = {},
 ): {
 	held: Promise<A>;
 	release: () => Promise<void>;
@@ -151,20 +151,23 @@ export function holdTransaction<A>(
 	const released = Promise.withResolvers<void>();
 	const acquired = Promise.withResolvers<{ value: A; pid: number }>();
 	const held = acquired.promise.then(({ value }) => value);
-	const finished = runOnPostgres(
-		transaction(
-			Effect.gen(function* () {
-				const [backend] = yield* query((db) =>
-					db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`, "objects"),
-				);
-				if (!backend) return yield* Effect.die("Postgres returned no backend pid");
-				const value = yield* work;
-				acquired.resolve({ value, pid: backend.pid });
-				yield* Effect.promise(() => released.promise);
-				yield* afterRelease;
-			}),
-		),
-	).then(() => {});
+	const holding = transaction(
+		Effect.gen(function* () {
+			const [backend] = yield* query((db) =>
+				db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`, "objects"),
+			);
+			if (!backend) return yield* Effect.die("Postgres returned no backend pid");
+			const value = yield* work;
+			acquired.resolve({ value, pid: backend.pid });
+			yield* Effect.promise(() => released.promise);
+			yield* afterRelease;
+		}),
+	);
+	const runtime = separatePostgresSession ? ManagedRuntime.make(testInfrastructure) : undefined;
+	const run = runtime ? effectRunner(runtime) : runOnPostgres;
+	const finished = run(holding)
+		.then(() => {})
+		.finally(() => runtime?.dispose());
 	void finished.catch(acquired.reject);
 	const release = () => {
 		released.resolve();

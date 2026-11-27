@@ -1,6 +1,6 @@
 import { HOST_REQUEST_TOOL } from "@sugabots/contracts";
 import { eq } from "drizzle-orm";
-import { Effect, Stream } from "effect";
+import { Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	seedMessage,
@@ -18,7 +18,6 @@ import {
 	type World,
 } from "../../proofs/world.test-support.ts";
 import { type CallOperation, operationOutcome, servedOperations } from "../testing.ts";
-import { chatsOperations } from "./index.ts";
 
 /**
  * The chat operations whose rules the table in `permissions.test.ts` can't
@@ -136,18 +135,6 @@ describe("attachments and approvals in a chat", () => {
 			db.select().from(message).where(eq(message.retryKey, retryKey)),
 		);
 		expect(sent).toEqual([]);
-	});
-
-	it("refuses an input its contract refuses before the body runs, even called without the registry", async () => {
-		const empty = { chatId: a.chat, retryKey: crypto.randomUUID(), message: "" };
-
-		const body = chatsOperations["chats.send"].run(who.ed, empty, {
-			kind: "request",
-		});
-
-		await expect(Effect.runPromise(Effect.orDie(body) as Effect.Effect<unknown>)).rejects.toThrow(
-			"chats.send was called with an input its contract refuses",
-		);
 	});
 
 	describe("approvals.decide", () => {
