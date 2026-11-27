@@ -553,7 +553,11 @@ SELECT "chat_id", "owner_id" FROM "orphan_file_chat" WHERE "needs_chat" AND "own
 UPDATE "artifact" a SET "created_in_thread_id" = destination."chat_id"
 FROM "orphan_file_bot" source JOIN "orphan_file_chat" destination ON destination."bot_id" = source."bot_id"
 WHERE a."created_in_thread_id" IS NULL AND a."pod_id" = source."pod_id"
-	AND a."created_by_agent_id" IS NOT DISTINCT FROM source."created_by_agent_id";--> statement-breakpoint
+	AND a."created_by_agent_id" = source."created_by_agent_id";--> statement-breakpoint
+UPDATE "artifact" a SET "created_in_thread_id" = destination."chat_id"
+FROM "orphan_file_bot" source JOIN "orphan_file_chat" destination ON destination."bot_id" = source."bot_id"
+WHERE a."created_in_thread_id" IS NULL AND a."pod_id" = source."pod_id"
+	AND a."created_by_agent_id" IS NULL AND source."created_by_agent_id" IS NULL;--> statement-breakpoint
 DELETE FROM "artifact" WHERE "created_in_thread_id" IS NULL;--> statement-breakpoint
 -- Save the inherited preferences while each bot still names its pod.
 CREATE TEMP TABLE "default_project_notification_override" ON COMMIT DROP AS

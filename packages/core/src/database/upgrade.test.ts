@@ -2378,6 +2378,62 @@ it.skipIf(!process.env.DATABASE_URL)(
 );
 
 it.skipIf(!process.env.DATABASE_URL)(
+	"moves orphan files to their chats without comparing each file to every author",
+	async () => {
+		const migration = await readFile(
+			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+			"utf8",
+		);
+		const updates = migration
+			.split("--> statement-breakpoint")
+			.map((sql) => sql.trim())
+			.filter((sql) =>
+				sql.startsWith('UPDATE "artifact" a SET "created_in_thread_id" = destination.'),
+			);
+		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
+			await client.query("begin");
+			try {
+				await client.query(`
+					create temp table artifact (
+						id int primary key, pod_id uuid, created_by_agent_id uuid, created_in_thread_id uuid
+					);
+					create temp table orphan_file_bot (pod_id uuid, created_by_agent_id uuid, bot_id uuid);
+					create temp table orphan_file_chat (bot_id uuid, chat_id uuid);
+					insert into orphan_file_bot
+					select md5('pod')::uuid, md5(nullif(author, 0)::text)::uuid, md5('bot' || author)::uuid
+					from generate_series(0, 299) author;
+					insert into orphan_file_chat
+					select md5('bot' || author)::uuid, md5('chat' || author)::uuid
+					from generate_series(0, 299) author;
+					insert into artifact
+					select ordinal, md5('pod')::uuid, md5(nullif(ordinal % 300, 0)::text)::uuid, null
+					from generate_series(1, 30000) ordinal;
+					analyze artifact, orphan_file_bot, orphan_file_chat;
+				`);
+				let discardedPairs = 0;
+				for (const update of updates) {
+					const { rows: plan } = await client.query<{ "QUERY PLAN": string }>(
+						`explain (analyze, timing off) ${update}`,
+					);
+					for (const { "QUERY PLAN": line } of plan) {
+						discardedPairs += Number(/Rows Removed by Join Filter: (\d+)/.exec(line)?.[1] ?? 0);
+					}
+				}
+				const { rows } = await client.query(`
+					select count(*)::int as misplaced
+					from artifact where created_in_thread_id is distinct from md5('chat' || (id % 300))::uuid
+				`);
+				expect(rows).toEqual([{ misplaced: 0 }]);
+				expect(discardedPairs).toBeLessThan(30_000);
+			} finally {
+				await client.query("rollback");
+			}
+		});
+	},
+	UPGRADE_TIMEOUT_MS,
+);
+
+it.skipIf(!process.env.DATABASE_URL)(
 	"keeps replies referenced by queued work without comparing every reply to every payload",
 	async () => {
 		const migration = await readFile(
