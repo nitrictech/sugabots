@@ -22475,7 +22475,7 @@
       "op": "alter",
       "key": "checks\u0000[\"public\",\"model_request\",\"model_request_purpose_valid\"]",
       "set": {
-        "value": "\"purpose\" in ('bot-turn', 'compaction', 'model-test')"
+        "value": "\"purpose\" in ('bot-turn', 'compaction', 'model-test', 'legacy-facilitation')"
       }
     },
     {

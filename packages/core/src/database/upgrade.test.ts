@@ -23,6 +23,7 @@ import {
 import { DurableDeferred, Workflow } from "effect/unstable/workflow";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Usage } from "../accounting/usage.ts";
 import { SessionAuthentication } from "../authentication/session.ts";
 import { TurnAuthentication } from "../authentication/turn.ts";
 import { askerColumns } from "../authentication/turn-facts.ts";
@@ -39,6 +40,7 @@ import { Files } from "../files/files.ts";
 import { Ids } from "../ids/ids.ts";
 import { viewDesktop } from "../operations/computers/view-desktop.ts";
 import { servedOperations } from "../operations/testing.ts";
+import { usageMonth } from "../operations/workspace/usage-month.ts";
 import type { Principal } from "../principal.ts";
 import { proveCanReachConnector } from "../proofs/can-use-connector.ts";
 import { proveCanRunAutomations } from "../proofs/project-permissions.ts";
@@ -71,6 +73,7 @@ import {
 	legacy,
 	legacyBytes,
 	legacyCyclicCollaboration,
+	legacyFacilitationRequest,
 	legacyFiles,
 	legacyKeyOf,
 	legacyMigrationScaleRows,
@@ -163,6 +166,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				);
 				await client.query(legacyMigrationScaleRows);
 				await client.query(legacySummaryRequest);
+				await client.query(legacyFacilitationRequest);
 				await client.query(legacySessions);
 				reachedOnMain = (await client.query<Reached>(REACHED_ON_MAIN)).rows;
 				legacyConnectors = (await client.query("select id, pod_id, handle from connection")).rows;
@@ -995,6 +999,25 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					[legacy.summaryRequest],
 				),
 			).toEqual([{ purpose: "compaction", bot_id: null, chat_id: legacy.threads.trip, usd: 0.25 }]);
+		});
+
+		it("keeps historical system usage in the ledger and monthly totals", async () => {
+			expect(
+				await upgraded.rows(
+					`select purpose, bot_id, chat_id, cost_usd::float8 as usd from model_request where id = $1`,
+					[legacy.facilitationRequest],
+				),
+			).toEqual([
+				{ purpose: "legacy-facilitation", bot_id: null, chat_id: legacy.threads.trip, usd: 0.125 },
+			]);
+			const member = await upgraded.signIn(legacy.members.sam);
+			const usage = await upgraded.run(
+				usageMonth
+					.run(member, { workspace: legacy.workspace, month: "2026-10" }, { kind: "request" })
+					.pipe(Effect.provide(Usage.layer)),
+			);
+			expect(usage.systemBots).toEqual({ usd: 0.375, unknownCostRequests: 0 });
+			expect(usage.usd).toBe(0.875);
 		});
 
 		it("serves every file's bytes from where the file is read now", async () => {

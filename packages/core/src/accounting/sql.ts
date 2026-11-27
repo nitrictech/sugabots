@@ -63,7 +63,7 @@ export const modelRequest = pgTable(
 		index("model_request_chat_idx").on(table.chatId).where(sql`${table.chatId} is not null`),
 		check(
 			"model_request_purpose_valid",
-			sql`${table.purpose} in ('bot-turn', 'compaction', 'model-test')`,
+			sql`${table.purpose} in ('bot-turn', 'compaction', 'model-test', 'legacy-facilitation')`,
 		),
 		// Only bot turns can be charged to a bot. Older requests may have no attribution.
 		check("model_request_bot_valid", sql`${table.purpose} = 'bot-turn' or ${table.botId} is null`),

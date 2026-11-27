@@ -97,7 +97,7 @@ export type RequestPurpose =
 	/** Test questions put to a model before system bots run on it. */
 	| { readonly name: "model-test" };
 
-export type PurposeName = RequestPurpose["name"];
+export type PurposeName = RequestPurpose["name"] | "legacy-facilitation";
 
 /**
  * Where a request got to. `started` until it ends; a request still `started`

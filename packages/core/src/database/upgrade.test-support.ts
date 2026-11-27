@@ -98,6 +98,7 @@ export const legacy = {
 	deletedArtifact: "00000006-0000-4000-8000-0000000000dd",
 	/** What a summary of Trip cost, in {@link legacySummaryRequest}. */
 	summaryRequest: "00000015-0000-4000-8000-0000000000aa",
+	facilitationRequest: "00000015-0000-4000-8000-000000000003",
 	/** Direct messages between people, which the upgrade deletes. */
 	directMessages: {
 		/** Sam and Pat's, with a file Sam sent. */
@@ -403,6 +404,11 @@ INSERT INTO "model_request" ("id", "workspace_id", "purpose", "pod_id", "thread_
  ('00000015-0000-4000-8000-0000000000aa', '0000000a-0000-4000-8000-000000000001', 'summary', '0000000d-0000-4000-8000-000000000001', '0000000f-0000-4000-8000-000000000002', 0, '0000000e-0000-4000-8000-000000000000', 'm', 'completed', 0.25, 'provider-reported', '2026-10-05 09:03', '2026-10-05 09:03');
 `;
 
+export const legacyFacilitationRequest = `
+INSERT INTO "model_request" ("id", "workspace_id", "purpose", "pod_id", "thread_id", "step", "provider_id", "model", "outcome", "cost_usd", "cost_source", "started_at", "ended_at") VALUES
+ ('${legacy.facilitationRequest}', '${legacy.workspace}', 'facilitation', '${legacy.pods.family}', '${legacy.threads.trip}', 0, '${legacy.provider}', 'm', 'completed', 0.125, 'provider-reported', '2026-10-05 09:00', '2026-10-05 09:00');
+`;
+
 /**
  * More of what `main` holds, written after {@link legacyRows} for
  * `compare-migrations.ts`, so that every statement of the upgrade that moves
@@ -530,8 +536,9 @@ INSERT INTO "provider_model" ("id", "workspace_id", "provider_id", "model_id", "
 INSERT INTO "model_request" ("id", "workspace_id", "purpose", "pod_id", "agent_id", "thread_id", "turn_id", "step", "provider_id", "model", "outcome", "started_at", "ended_at") VALUES
  ('00000015-0000-4000-8000-000000000001', '0000000a-0000-4000-8000-000000000001', 'agent-turn', '0000000d-0000-4000-8000-000000000003', '0000000c-0000-4000-8000-000000000003', '0000000f-0000-4000-8000-000000000005', NULL, 0, '00000013-0000-4000-8000-000000000001', 'm', 'completed', '2026-10-07 09:01', '2026-10-07 09:02'),
  ('00000015-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', 'agent-turn', '0000000d-0000-4000-8000-000000000001', '0000000c-0000-4000-8000-000000000002', '0000000f-0000-4000-8000-00000000000c', '00000002-0000-4000-8000-000000000103', 0, '00000013-0000-4000-8000-000000000001', 'm', 'completed', '2026-10-05 09:03', '2026-10-05 09:04'),
- ('00000015-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', 'facilitation', '0000000d-0000-4000-8000-000000000001', NULL, '0000000f-0000-4000-8000-000000000002', NULL, 0, '00000013-0000-4000-8000-000000000001', 'm', 'completed', '2026-10-05 09:00', '2026-10-05 09:00'),
  ('00000015-0000-4000-8000-000000000004', '0000000a-0000-4000-8000-000000000001', 'trial', NULL, NULL, NULL, NULL, 0, '00000013-0000-4000-8000-000000000001', 'm', 'failed', '2026-10-01 09:00', '2026-10-01 09:00');
+
+${legacyFacilitationRequest}
 
 -- People: an invitation and notification settings in the old words.
 INSERT INTO "workspace_invite" ("workspace_id", "email", "role", "inviter_id", "expires_at") VALUES
