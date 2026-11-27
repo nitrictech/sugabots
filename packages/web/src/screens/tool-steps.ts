@@ -1,4 +1,4 @@
-import { SugabotsMark } from "@sugabots/avatars";
+import { SugabotsIcon } from "@sugabots/avatars";
 import { type MessagePart, messagePreview, type ToolCallPart } from "@sugabots/contracts";
 import {
 	AppWindow,
@@ -152,7 +152,7 @@ export type StepIcon = ComponentType<{ strokeWidth?: number }>;
 /**
  * The icon a call to one of the product's own tools shows by its line: its
  * family's, for what its tools work on, such as files, the computer or chats,
- * and the Sugabots mark for the workspace and the bot's own settings. A tool
+ * and the Sugabots icon for the workspace and the bot's own settings. A tool
  * in no family has the wrench.
  */
 export function stepIcon(call: ToolCallPart): StepIcon {
@@ -171,7 +171,7 @@ const TOOL_FAMILIES: readonly { icon: StepIcon; tools: readonly string[] }[] = [
 	{ icon: MessageSquare, tools: ["start_chat", "mark_resolved", "search_history"] },
 	{ icon: Zap, tools: ["list_automations", "create_automation", "update_automation"] },
 	{ icon: BookOpen, tools: ["read_docs", "workspace_guide"] },
-	{ icon: SugabotsMark, tools: ["create_project", "workspace_role", "save_instructions"] },
+	{ icon: SugabotsIcon, tools: ["create_project", "workspace_role", "save_instructions"] },
 ];
 
 /**
