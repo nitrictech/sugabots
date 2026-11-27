@@ -7,7 +7,7 @@ import { ApprovalNeeded, ApprovalRefused } from "@sugabots/contracts/errors/proo
 import type { InputOf, OutputOf } from "@sugabots/contracts/operations";
 import { MAX_SHARED_FILE_MEGABYTES } from "@sugabots/contracts/operations/computers";
 import { UserText, userText } from "@sugabots/errors";
-import { Context, Effect, Layer, type Scope, Semaphore, Stream } from "effect";
+import { Cache, Context, Effect, Layer, type Scope, Semaphore, Stream } from "effect";
 import { contentType as mediaTypeForName } from "mime-types";
 import { BlobStore } from "../../../blob-store/blob-store.ts";
 import { reachOf } from "../../../computers/allowed-hosts.ts";
@@ -165,6 +165,10 @@ export const make = Effect.gen(function* () {
 	// Each step's computer, by its turn and execution, for as long as the step runs.
 	const steps = new Map<string, StepComputer>();
 	const keyOf = (turnId: string, executionNumber: number) => `${turnId}/${executionNumber}`;
+	const browserSessions = yield* Cache.make({
+		capacity: 1_024,
+		lookup: (_desktop: string): Effect.Effect<string | undefined> => Effect.undefined,
+	});
 
 	/** The step's computer `canUse` was proved for, in the chat and project it names. */
 	const findCheckedStep = <P, C>(canUse: CanUseChatComputer<P, C>) =>
@@ -257,7 +261,7 @@ export const make = Effect.gen(function* () {
 					return opened;
 				},
 			};
-			const browser = browserSession(run, place, turn);
+			const browser = browserSession(run, place, turn, provider.id, browserSessions);
 			yield* Effect.addFinalizer(() =>
 				Effect.tryPromise(() => browser.close()).pipe(
 					Effect.catch((cause) => Effect.logWarning("Closing a bot's browser failed", cause)),

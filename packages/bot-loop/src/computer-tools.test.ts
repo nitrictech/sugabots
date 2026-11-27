@@ -266,7 +266,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
-		it("asks again before clicking in a different tab with the same address", async () => {
+		const runBrowserWorkflow = async (
+			model: ReturnType<typeof scriptedSteps>["model"],
+			browser: ReturnType<typeof standInBrowser>,
+		) => {
 			const projectId = await runOnPostgres(defaultProjectOf(botId));
 			const provider = await enableComputers();
 			const providerComputerId = Computers.ComputerId("desktop");
@@ -280,21 +283,25 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				}),
 			);
 			const runChat = await queueOutsideRun(projectId, "github");
-			const browser = standInBrowser();
 			const providerFetch = computerService(
 				providerComputerId,
 				"allowed-hosts-only",
 				browser.fetch,
 			);
-			const input = { target: "Submit order" };
-			const workflow = await loop.runWorkflow(runChat, {
-				model: calling("browser_click", input).model,
+			return loop.runWorkflow(runChat, {
+				model,
 				egress: unimplemented(Egress.Service, {
 					providers: { for: () => providerFetch },
 					validateProviderUrl: () => Effect.void,
 				}),
 				computerSignIn: ComputerSignIn.none,
 			});
+		};
+
+		it("asks again before clicking in a different tab with the same address", async () => {
+			const browser = standInBrowser();
+			const input = { target: "Submit order" };
+			const workflow = await runBrowserWorkflow(calling("browser_click", input).model, browser);
 
 			await workflow.suspended();
 			const { parked } = await parkedCallOf(workflow.executionId);
@@ -322,6 +329,53 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await chatsAs(adminId).decide({ toolCallId: fresh.call.id, decision: "allow_once" });
 			await workflow.completed();
 			expect(browser.clicked).toEqual(["tab-2"]);
+		});
+
+		it.each([
+			["browser_handle_dialog", { accept: true }],
+			["browser_file_upload", { paths: ["/workspace/chats/order/receipt.txt"] }],
+		] as const)("asks before %s and runs it with the modal open", async (toolName, input) => {
+			const browser = standInBrowser(toolName);
+			const { model, requests } = scriptedSteps(
+				{
+					calls: [
+						{ toolCallId: "open", toolName: "browser_click", input: { target: "Attach receipt" } },
+					],
+				},
+				{ calls: [{ toolCallId: "modal", toolName, input }] },
+				{ text: ["Done."] },
+			);
+			const workflow = await runBrowserWorkflow(model, browser);
+			await workflow.suspended();
+			const { parked } = await parkedCallOf(workflow.executionId);
+			await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+
+			await workflow.suspended();
+			let [waiting] = (await chatsAs(adminId).approvals(workspaceId)).waiting;
+			expect(waiting?.call).toMatchObject({
+				tool: toolName,
+				input,
+				approval: { browserUrl: browser.url },
+			});
+			expect(browser.handled).toEqual([]);
+			if (!waiting) throw new Error("No modal approval");
+
+			if (toolName === "browser_handle_dialog") {
+				browser.replaceDialog("Discard the receipt?");
+				await chatsAs(adminId).decide({ toolCallId: waiting.call.id, decision: "allow_once" });
+				await workflow.suspended();
+				const [fresh] = (await chatsAs(adminId).approvals(workspaceId)).waiting;
+				expect(fresh?.call.approval?.id).toBeDefined();
+				expect(fresh?.call.approval?.id).not.toBe(waiting.call.approval?.id);
+				expect(browser.handled).toEqual([]);
+				if (!fresh) throw new Error("No fresh modal approval");
+				waiting = fresh;
+			}
+
+			await chatsAs(adminId).decide({ toolCallId: waiting.call.id, decision: "allow_once" });
+			await workflow.completed();
+			expect(browser.handled).toEqual([{ tool: toolName, input }]);
+			expect(JSON.stringify(requests.at(-1)?.continuationMessages)).toContain("Handled modal");
 		});
 
 		describe("asking for a host", () => {
@@ -746,42 +800,82 @@ function computerService(
 	});
 }
 
-function standInBrowser() {
+function standInBrowser(modalTool?: "browser_handle_dialog" | "browser_file_upload") {
 	let tab = "tab-1";
 	const url = "https://shop.example.com/checkout";
 	const clicked: string[] = [];
+	const handled: { tool: string; input: unknown }[] = [];
+	let sessionCount = 0;
+	let modalSession: string | null = null;
+	let dialogMessage = "Submit the receipt?";
 	return {
 		url,
 		clicked,
+		handled,
 		selectTab: (selected: string) => {
 			tab = selected;
+		},
+		replaceDialog: (message: string) => {
+			dialogMessage = message;
 		},
 		fetch: async (request: Request) => {
 			if (request.method !== "POST") return new Response(null, { status: 405 });
 			const { id, method, params } = (await request.json()) as {
 				id?: number;
 				method: string;
-				params?: { protocolVersion?: string; name?: string };
+				params?: { protocolVersion?: string; name?: string; arguments?: unknown };
 			};
-			const result = (value: unknown) => Response.json({ jsonrpc: "2.0", id, result: value });
+			const result = (value: unknown, headers?: Record<string, string>) =>
+				Response.json({ jsonrpc: "2.0", id, result: value }, { headers });
 			if (method === "initialize") {
-				return result({
-					protocolVersion: params?.protocolVersion,
-					capabilities: { tools: {} },
-					serverInfo: { name: "browser-test", version: "1" },
-				});
+				return result(
+					{
+						protocolVersion: params?.protocolVersion,
+						capabilities: { tools: {} },
+						serverInfo: { name: "browser-test", version: "1" },
+					},
+					{ "mcp-session-id": `session-${++sessionCount}` },
+				);
 			}
 			if (method === "notifications/initialized") return new Response(null, { status: 202 });
+			if (method === "ping") return result({});
+			const session = request.headers.get("mcp-session-id");
+			const modalOpen = modalSession !== null && modalSession === session;
+			const modalDescription =
+				modalTool === "browser_handle_dialog"
+					? `"confirm" dialog with message "${dialogMessage}"`
+					: "File chooser";
+			const modalState = modalOpen
+				? `\n### Modal state\n- [${modalDescription}]: can be handled by ${modalTool}`
+				: "";
+			const reply = (message: string, isError = false) =>
+				result({ content: [{ type: "text", text: message + modalState }], isError });
 			switch (params?.name) {
 				case "browser_run_code_unsafe": {
+					if (modalOpen)
+						return reply(
+							'### Error\nError: Tool "browser_run_code_unsafe" does not handle the modal state.',
+							true,
+						);
 					const target = { browserTab: tab, browserDocument: tab, browserUrl: url };
-					return result({
-						content: [{ type: "text", text: `### Result\n${JSON.stringify(target)}` }],
-					});
+					return reply(`### Result\n${JSON.stringify(target)}`);
 				}
+				case "browser_tabs":
+					return reply(`### Result\n- 0: (current) [](${url})`);
 				case "browser_click":
 					clicked.push(tab);
-					return result({ content: [{ type: "text", text: "Clicked" }] });
+					modalSession = modalTool ? session : null;
+					return reply("Clicked");
+				case "browser_handle_dialog":
+				case "browser_file_upload":
+					if (!modalOpen || modalTool !== params.name)
+						return reply(
+							`### Error\nError: The tool "${params.name}" can only be used when there is related modal state present.`,
+							true,
+						);
+					modalSession = null;
+					handled.push({ tool: params.name, input: params.arguments });
+					return reply("Handled modal");
 				default:
 					throw new Error(`Unexpected browser request ${method}`);
 			}

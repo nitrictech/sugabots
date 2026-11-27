@@ -1,10 +1,14 @@
+import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+	StreamableHTTPClientTransport,
+	StreamableHTTPError,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { botPalettes } from "@sugabots/avatars/bot-colors";
 import type { BotColor } from "@sugabots/contracts";
 import { DesktopUnavailable } from "@sugabots/contracts/errors/computers";
 import { type UserText, userText } from "@sugabots/errors";
-import { Effect, Schema, Semaphore } from "effect";
+import { Cache, Effect, Schema, Semaphore } from "effect";
 import { Computers } from "../../../computers/computers.ts";
 import { prepareFoldersCommand } from "../computer/folders.ts";
 import type { Place, TurnComputer } from "../computer/tools.ts";
@@ -174,13 +178,19 @@ export function browserSession(
 	run: TurnComputer["run"],
 	place: Place,
 	turn: BotBrowsing,
+	providerId: string,
+	sessions: Cache.Cache<string, string | undefined>,
 ): BrowserSession {
-	let connecting: Promise<{ client: Client; note?: UserText } | Failed> | undefined;
+	interface ConnectedBrowser {
+		client: Client;
+		sessionId: string | undefined;
+		key: string;
+		note?: UserText;
+	}
+	let connecting: Promise<ConnectedBrowser | Failed> | undefined;
 	let told = false;
 
-	const connect = async (
-		computer: Computers.Computer,
-	): Promise<{ client: Client; note?: UserText } | Failed> => {
+	const connect = async (computer: Computers.Computer): Promise<ConnectedBrowser | Failed> => {
 		const browser = await run(
 			startBrowser(computer, place, turn).pipe(
 				Effect.catchTag("DesktopUnavailable", (unavailable) =>
@@ -190,20 +200,41 @@ export function browserSession(
 		);
 		if ("status" in browser) return browser;
 		const endpoint = await run(computer.endpoint(browser.browserPort));
-		const client = new Client({ name: "sugabots", version: "1" });
-		await client.connect(
-			new StreamableHTTPClientTransport(new URL(`${endpoint.url}/mcp`), {
+		const key = JSON.stringify([providerId, computer.id, sessionName(turn)]);
+		// Pending modals belong to the MCP session that opened them, even when a step ends.
+		const sessionId = browser.started ? undefined : await run(Cache.get(sessions, key));
+		const openClient = async (sessionId?: string) => {
+			const client = new Client({ name: "sugabots", version: "1" });
+			const transport = new StreamableHTTPClientTransport(new URL(`${endpoint.url}/mcp`), {
 				requestInit: { headers: endpoint.headers },
 				fetch: endpoint.fetch,
-			}),
-		);
-		if (turn.naturalBrowsing) await browseNaturally(client, botPalettes[turn.color].face);
-		return browser.started
-			? {
-					client,
-					note: userText`Your browser has just started, on your own desktop in the computer. Tabs from before, if any, are gone.`,
+				sessionId,
+			});
+			await client.connect(transport);
+			if (sessionId) {
+				try {
+					await client.ping();
+				} catch (cause) {
+					await client.close();
+					throw cause;
 				}
-			: { client };
+			}
+			return { client, sessionId: transport.sessionId, key };
+		};
+		const connected = await openClient(sessionId).catch((cause: unknown) => {
+			if (sessionId && cause instanceof StreamableHTTPError && cause.code === 404)
+				return openClient();
+			throw cause;
+		});
+		await run(Cache.set(sessions, key, connected.sessionId));
+		if (turn.naturalBrowsing && (!sessionId || sessionId !== connected.sessionId))
+			await browseNaturally(connected.client, botPalettes[turn.color].face);
+		return {
+			...connected,
+			...(browser.started && {
+				note: userText`Your browser has just started, on your own desktop in the computer. Tabs from before, if any, are gone.`,
+			}),
+		};
 	};
 
 	const connectOnce = async (computer: Computers.Computer) => {
@@ -223,6 +254,8 @@ export function browserSession(
 		target: async (computer, tool, input, signal) => {
 			const connected = await connectOnce(computer);
 			if ("status" in connected) return undefined;
+			if (tool === "browser_handle_dialog" || tool === "browser_file_upload")
+				return readBrowserModalTarget(connected.client, connected.sessionId, signal);
 			const index =
 				tool === "browser_tabs" &&
 				(input.action === "close" || input.action === "select") &&
@@ -239,6 +272,11 @@ export function browserSession(
 				undefined,
 				{ signal: abortSignal },
 			);
+			if (toolName === "browser_close" && !result.isError) {
+				await run(Cache.invalidate(sessions, connected.key));
+				await connected.client.close();
+				connecting = undefined;
+			}
 			const note = told ? undefined : connected.note;
 			told = true;
 			return toBrowserResult(result.content, note);
@@ -252,14 +290,48 @@ export function browserSession(
 
 const RUN_CODE_TOOL = "browser_run_code_unsafe";
 
+const browserUrlSchema = Schema.NonEmptyString.check(Schema.isMaxLength(8_192));
 const browserTargetSchema = Schema.Struct({
 	browserTab: Schema.NonEmptyString,
 	browserDocument: Schema.NonEmptyString,
-	browserUrl: Schema.NonEmptyString.check(Schema.isMaxLength(8_192)),
+	browserUrl: browserUrlSchema,
 });
-export type BrowserTarget = typeof browserTargetSchema.Type;
+type BrowserModalTarget = {
+	readonly browserTab: string;
+	readonly browserUrl: string;
+	readonly browserModal: string | null;
+};
+export type BrowserTarget = typeof browserTargetSchema.Type | BrowserModalTarget;
 
 const decodeBrowserTarget = Schema.decodeUnknownOption(Schema.fromJsonString(browserTargetSchema));
+const decodeBrowserUrl = Schema.decodeUnknownOption(browserUrlSchema);
+
+async function readBrowserModalTarget(
+	client: Client,
+	sessionId: string | undefined,
+	signal: AbortSignal,
+): Promise<BrowserModalTarget | undefined> {
+	const result = await client.callTool(
+		{ name: "browser_tabs", arguments: { action: "list" } },
+		undefined,
+		{ signal },
+	);
+	if (result.isError) return undefined;
+	const { text } = toBrowserResult(result.content, undefined);
+	const [tabs = ""] = text.split(/\r?\n### /, 1);
+	if (!/^### Result\r?\n/.test(tabs)) return undefined;
+	const tab = /^- (\d+): \(current\) \[.*?\]\((.*)\)\r?$/m.exec(tabs);
+	const url = decodeBrowserUrl(tab?.[2]);
+	if (!tab || url._tag === "None") return undefined;
+	const modal = /^### Modal state\r?\n([\s\S]+)/m.exec(text)?.[1];
+	return {
+		browserTab: createHash("sha256")
+			.update(JSON.stringify([sessionId, tab[1]]))
+			.digest("hex"),
+		browserUrl: url.value,
+		browserModal: modal ? createHash("sha256").update(modal).digest("hex") : null,
+	};
+}
 
 async function readBrowserTarget(client: Client, index: number | null, signal: AbortSignal) {
 	const result = await client.callTool(
