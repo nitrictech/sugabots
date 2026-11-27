@@ -182,6 +182,7 @@ function WaitingCard({ request }: { request: ApprovalRequest }) {
 					browserUrl={call.approval?.browserUrl}
 					gitHub={call.approval?.gitHub}
 					briefDestination={call.approval?.briefDestination}
+					routineChange={call.approval?.routineChange}
 					connectorUrl={connector?.url}
 					connectorChanged={connector?.changed}
 					waiting={call.approval?.status === "pending"}

@@ -310,6 +310,7 @@ export const toolCallPartSchema = Schema.Struct({
 					projectName: Schema.NullOr(Schema.String),
 				}),
 			),
+			routineChange: Schema.optional(Schema.Literals(["add", "replace"])),
 			connector: Schema.optional(Schema.Struct({ id: uuidSchema, revision: Schema.Int })),
 		}),
 	),

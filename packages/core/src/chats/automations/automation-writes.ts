@@ -22,10 +22,10 @@ import {
 	AutomationTriggerNotFound,
 	AutomationTriggerRejected,
 	TooManyAutomationTriggers,
-	TriggerSetInSettings,
 	WebhookDeliveryIdHeaderRejected,
 	WebhookSecretTooShort,
 } from "@sugabots/contracts/errors/automations";
+import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import { and, eq } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
 import { type Database, query, transaction } from "../../database/database.ts";
@@ -35,6 +35,7 @@ import { Secrets } from "../../secrets/secrets.ts";
 import { makeAcceptTrigger } from "./acceptance.ts";
 import {
 	automationWithTriggers,
+	findSoleRoutineId,
 	inScope,
 	lockTriggers,
 	type RoutineInput,
@@ -292,6 +293,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 			scope: Scope,
 			input: AutomationUpdate,
 			routine: RoutineInput,
+			approvedRoutineId: string | null,
 			fence: Effect.Effect<void, E, Database>,
 		) =>
 			transaction(
@@ -301,17 +303,14 @@ export const makeAutomationWrites = Effect.gen(function* () {
 					// waits, and a refused routine leaves the settings as they were.
 					yield* lockTriggers(scope.automationId);
 					const current = yield* automationIn(scope);
-					const [only, ...others] =
-						(yield* triggersOf([scope.automationId])).get(scope.automationId) ?? [];
-					if (others.length > 0 || (only && only.settings.kind !== "routine")) {
-						return yield* new TriggerSetInSettings();
-					}
+					const routineId = yield* findSoleRoutineId(scope.automationId);
+					if (routineId !== approvedRoutineId) return yield* new ApprovalNeeded();
 					// Written as the settings leave it, running or paused.
 					const written = yield* routineValues(
 						routine,
 						input.state ?? stateWithPendingPause(current),
 					);
-					if (only) yield* store.updateTrigger(scope, only.id, written.values);
+					if (routineId !== null) yield* store.updateTrigger(scope, routineId, written.values);
 					else yield* store.addTriggers(scope, [written.values]);
 					// The sole routine was just written for the state the settings leave.
 					const row = yield* writeSettings(scope, current, input);

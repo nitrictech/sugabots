@@ -1,5 +1,6 @@
 export * as Operations from "./registry.ts";
 
+import { TriggerSetInSettings } from "@sugabots/contracts/errors/automations";
 import { NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import {
@@ -172,6 +173,8 @@ const checkApprovalPermission = (
 		);
 		if (result._tag === "Failure") {
 			if (result.failure instanceof NoComputerProvider) return "noComputerProvider" as const;
+			if (name === "automations.updateInChat" && result.failure instanceof TriggerSetInSettings)
+				return "automationRoutineChanged" as const;
 			const approvedBot = call.approvalResolvedTargets?.bot;
 			if (
 				name === "chats.startBriefedChat" &&
@@ -194,6 +197,7 @@ const checkApprovalPermission = (
 			!sameResolvedTargets(call.approvalResolvedTargets, checked.resolvedTargets)
 		) {
 			if (name === "chats.startBriefedChat") return "briefDestinationChanged" as const;
+			if (name === "automations.updateInChat") return "automationRoutineChanged" as const;
 			return yield* forbidden;
 		}
 		return undefined;

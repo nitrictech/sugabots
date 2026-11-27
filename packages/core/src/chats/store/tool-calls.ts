@@ -47,6 +47,7 @@ export function toToolCallPart(
 	decidedByName: string | null = null,
 ): ToolCallPart {
 	const {
+		automationRoutineId,
 		browserUrl,
 		briefBotName,
 		briefProjectName,
@@ -79,6 +80,9 @@ export function toToolCallPart(
 						...(browserUrl && { browserUrl }),
 						...(briefBotName && {
 							briefDestination: { botName: briefBotName, projectName: briefProjectName ?? null },
+						}),
+						...(automationRoutineId !== undefined && {
+							routineChange: automationRoutineId === null ? "add" : "replace",
 						}),
 						...(gitHubRepositoryId && {
 							gitHub: {

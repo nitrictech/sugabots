@@ -12,7 +12,7 @@ import {
 	useState,
 } from "react";
 import { hostRequestPresentation } from "@/lib/approval-tool-source.ts";
-import { awaitedApprovers, closedApprovalMessage } from "@/lib/approvals.ts";
+import { awaitedApprovers, closedApprovalMessage, routineChangeMessage } from "@/lib/approvals.ts";
 import { useReviewToolCall } from "@/lib/chat-query.ts";
 import { type MarkedConnector, useApprovalConnector } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
@@ -117,6 +117,7 @@ export function ToolApprovalCard({
 						browserUrl={call.approval?.browserUrl}
 						gitHub={call.approval?.gitHub}
 						briefDestination={call.approval?.briefDestination}
+						routineChange={call.approval?.routineChange}
 						connectorUrl={boundConnector?.url}
 						connectorChanged={boundConnector?.changed}
 						waiting={call.approval?.status === "pending"}
@@ -158,6 +159,7 @@ export function ToolApprovalCard({
 				browserUrl={call.approval?.browserUrl}
 				gitHub={call.approval?.gitHub}
 				briefDestination={call.approval?.briefDestination}
+				routineChange={call.approval?.routineChange}
 				connectorUrl={boundConnector?.url}
 				connectorChanged={boundConnector?.changed}
 				waiting={call.approval?.status === "pending"}
@@ -314,12 +316,14 @@ export function FoldedRequest({ input }: { input: ToolCallPart["input"] }) {
 
 type ApprovalGitHub = NonNullable<ToolCallPart["approval"]>["gitHub"];
 type BriefDestination = NonNullable<ToolCallPart["approval"]>["briefDestination"];
+type RoutineChange = NonNullable<ToolCallPart["approval"]>["routineChange"];
 
 export function ApprovalDestination({
 	botName,
 	browserUrl,
 	gitHub,
 	briefDestination,
+	routineChange,
 	connectorUrl,
 	connectorChanged,
 	waiting,
@@ -328,6 +332,7 @@ export function ApprovalDestination({
 	browserUrl?: string | undefined;
 	gitHub?: ApprovalGitHub | undefined;
 	briefDestination?: BriefDestination;
+	routineChange?: RoutineChange;
 	connectorUrl?: string | null | undefined;
 	connectorChanged?: boolean | undefined;
 	/** Whether the request still waits for an answer, which the browser note is about. */
@@ -343,7 +348,8 @@ export function ApprovalDestination({
 	}
 	const address = browserUrl ?? connectorUrl;
 	const gitHubLines = gitHub && (gitHub.baseBranch || gitHub.reviewCommit);
-	if (!address && !gitHubLines && !briefDestination) return null;
+	const routineMessage = routineChangeMessage(routineChange);
+	if (!address && !gitHubLines && !briefDestination && !routineMessage) return null;
 	return (
 		<div className="space-y-1 pb-1.5 text-muted-foreground text-xs wrap-anywhere">
 			{briefDestination && (
@@ -352,6 +358,7 @@ export function ApprovalDestination({
 					{briefDestination.projectName ?? `${briefDestination.botName}'s own chats`}
 				</p>
 			)}
+			{routineMessage && <p className="m-0">{routineMessage}</p>}
 			{address && (
 				<p className="m-0">
 					{browserUrl ? "On the page" : "Sends to"} {address}
@@ -393,6 +400,7 @@ function ReviewSheet({
 	browserUrl,
 	gitHub,
 	briefDestination,
+	routineChange,
 	connectorUrl,
 	connectorChanged,
 	waiting,
@@ -406,6 +414,7 @@ function ReviewSheet({
 	browserUrl: string | undefined;
 	gitHub: ApprovalGitHub | undefined;
 	briefDestination: BriefDestination;
+	routineChange: RoutineChange;
 	connectorUrl: string | null | undefined;
 	connectorChanged: boolean | undefined;
 	waiting: boolean;
@@ -445,6 +454,7 @@ function ReviewSheet({
 							browserUrl={browserUrl}
 							gitHub={gitHub}
 							briefDestination={briefDestination}
+							routineChange={routineChange}
 							connectorUrl={connectorUrl}
 							connectorChanged={connectorChanged}
 							waiting={waiting}

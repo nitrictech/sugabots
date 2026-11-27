@@ -2,7 +2,7 @@ import type { Automation, AutomationTrigger } from "@sugabots/contracts";
 import { automationsContracts } from "@sugabots/contracts/operations/automations";
 import { Effect } from "effect";
 import { ProjectAutomations } from "../../chats/automations/project-automations.ts";
-import { approvalRule, proveApproved } from "../../proofs/approved.ts";
+import { approvalRule, proveApproved, proveApprovedAsResolved } from "../../proofs/approved.ts";
 import { automationProject } from "../../proofs/automation-in-turn.ts";
 import { proveCanManageProject } from "../../proofs/project-permissions.ts";
 import { named } from "../../proofs/proof.ts";
@@ -97,14 +97,19 @@ export const updateInChat = defineOperation(
 							automation,
 						);
 						const canManage = yield* proveCanManageProject(reach);
-						const approved = yield* proveApproved(
-							principal,
-							call,
-							approvalRule("automations.updateInChat"),
-							approvedInput,
-							project,
-							automation,
-						);
+						const rule = approvalRule("automations.updateInChat");
+						const approved =
+							approvedInput.value.routineExpression === undefined
+								? yield* proveApproved(principal, call, rule, approvedInput, project, automation)
+								: yield* proveApprovedAsResolved(
+										principal,
+										call,
+										rule,
+										approvedInput,
+										{ automationRoutineId: yield* automations.findSoleRoutineId(target) },
+										project,
+										automation,
+									);
 						const updated = yield* automations.updateInChat(
 							canManage,
 							automation,

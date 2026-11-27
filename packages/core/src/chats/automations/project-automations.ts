@@ -29,6 +29,7 @@ import type {
 	WebhookSecretTooShort,
 } from "@sugabots/contracts/errors/automations";
 import type { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
+import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations } from "../../database/database.ts";
 import type { Approved } from "../../proofs/approved.ts";
@@ -50,7 +51,7 @@ import type {
 import { processLayer, Tier } from "../../tiers.ts";
 import { ChatStore } from "../store/store.ts";
 import { type FenceRefusal, holdTurnOf } from "../turns/turns.ts";
-import type { RoutineInput, Scope } from "./automation.ts";
+import { findSoleRoutineId, type RoutineInput, type Scope } from "./automation.ts";
 import { automationsOf, projectRunsPage, restrictableAutomations } from "./automation-view.ts";
 import { makeAcceptWebhook, type WebhookAnswer } from "./automation-webhooks.ts";
 import { type Defined, makeAutomationWrites } from "./automation-writes.ts";
@@ -118,6 +119,9 @@ export interface Interface {
 		member: IsMember<P>,
 		input: AutomationUpdate,
 	) => Effect.Effect<Defined, AutomationNotFound | AutomationNameTaken | InvalidRoutineSchedule>;
+	readonly findSoleRoutineId: <P, J, A>(
+		target: ReachesProjectAutomation<P, J, A>,
+	) => Effect.Effect<string | null, TriggerSetInSettings>;
 	/**
 	 * Changes the automation as `approved.input` says, a new routine on the
 	 * project's time zone, `timeZone`, which the server reads, not the caller.
@@ -130,6 +134,7 @@ export interface Interface {
 		timeZone: string,
 	) => Effect.Effect<
 		Automation,
+		| ApprovalNeeded
 		| AutomationNotFound
 		| AutomationNameTaken
 		| InvalidRoutineSchedule
@@ -310,6 +315,9 @@ export const make = Effect.gen(function* () {
 		update: (_canManage, automation, target, _member, input) =>
 			operation("update", writes.update(scopeOf(target, automation.value), input, Effect.void)),
 
+		findSoleRoutineId: (target) =>
+			operation("findSoleRoutineId", findSoleRoutineId(target.automation.value)),
+
 		updateInChat: (_canManage, automation, target, approved, timeZone) => {
 			const { name, instructions, paused, routineExpression } = approved.input;
 			const input: AutomationUpdate = {
@@ -317,16 +325,25 @@ export const make = Effect.gen(function* () {
 				instructions,
 				state: paused === undefined ? undefined : paused ? "paused" : "enabled",
 			};
-			const routine =
-				routineExpression === undefined ? undefined : cronRoutine(routineExpression, timeZone);
 			const scope = scopeOf(target, automation.value);
 			const fence = holdTurnOf(approved.principal.value);
-			const update = routine
-				? writes.updateWithSoleRoutine(scope, input, routine, fence)
-				: writes.update(scope, input, fence);
 			return operation(
 				"updateInChat",
-				Effect.map(update, ({ automation }) => automation),
+				Effect.gen(function* () {
+					if (routineExpression === undefined) {
+						return (yield* writes.update(scope, input, fence)).automation;
+					}
+					const approvedRoutineId = approved.resolvedTargets?.automationRoutineId;
+					if (approvedRoutineId === undefined) return yield* new ApprovalNeeded();
+					const routine = cronRoutine(routineExpression, timeZone);
+					return (yield* writes.updateWithSoleRoutine(
+						scope,
+						input,
+						routine,
+						approvedRoutineId,
+						fence,
+					)).automation;
+				}),
 			);
 		},
 

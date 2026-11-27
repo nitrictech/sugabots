@@ -13,7 +13,14 @@ import { AutomationRunner } from "@sugabots/core/chats/automations/automation-ru
 import { startRunning } from "@sugabots/core/chats/automations/testing";
 import { startBotChat } from "@sugabots/core/chats/chats/testing";
 import { aChatAwaitingReply } from "@sugabots/core/chats/turns/testing";
-import { automation, bot, project, toolCall, workspace } from "@sugabots/core/database/schema";
+import {
+	automation,
+	automationTrigger,
+	bot,
+	project,
+	toolCall,
+	workspace,
+} from "@sugabots/core/database/schema";
 import {
 	closeDatabase,
 	onDatabase,
@@ -26,7 +33,14 @@ import { asSchema } from "ai";
 import { eq } from "drizzle-orm";
 import { Context } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { botLoopOnPostgres, callsOf, failedCall, scriptedSteps, toolResultFor } from "./testing.ts";
+import {
+	botLoopOnPostgres,
+	callsOf,
+	failedCall,
+	parkedCallOf,
+	scriptedSteps,
+	toolResultFor,
+} from "./testing.ts";
 
 const standup = {
 	name: "Morning standup",
@@ -82,6 +96,13 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			{ calls: [{ toolCallId: "automation-tool", toolName, input }] },
 			{ text: ["Done."] },
 		);
+
+	const addRoutine = async (automationId: string) =>
+		loop.call(await chatsAs(adminId).principal(), "automations.addTrigger", {
+			projectId: defaultProject,
+			automationId,
+			trigger: routine,
+		});
 
 	const approve = async (ran: Awaited<ReturnType<typeof loop.runTurn>>, asker = adminId) => {
 		const [parked] = await callsOf(ran.turnId);
@@ -214,12 +235,14 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			triggers: [{ kind: "webhook" }] as const,
 			expression: "0 10 * * 1-5",
 			error: new TriggerSetInSettings(),
+			asks: false,
 		},
 		{
 			name: "refuses to replace multiple triggers",
 			triggers: [routine, { kind: "webhook" }] as const,
 			expression: "0 10 * * 1-5",
 			error: new TriggerSetInSettings(),
+			asks: false,
 		},
 		{
 			name: "refuses an invalid schedule",
@@ -227,7 +250,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			expression: "not cron",
 			error: new InvalidRoutineSchedule({ reason: "notFiveFields" }),
 		},
-	])("$name in an approved edit", async ({ triggers, expression, error }) => {
+	])("$name in an edit", async ({ triggers, expression, error, asks = true }) => {
 		const { automation: created } = await defineAutomation(triggers);
 		const input = {
 			automationId: created.id,
@@ -238,17 +261,19 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 		const { model, requests } = requestTool("update_automation", input);
 		const ran = await loop.runTurn(chatId, { model });
 		expect(requests[0]?.tools).toHaveProperty("update_automation");
-		const parked = await approve(ran);
-		expect(parked).toMatchObject({ tool: "update_automation", input, writeOrDelete: true });
-		expect(await automationsOf(defaultProject)).toMatchObject([
-			{ name: created.name, state: "enabled" },
-		]);
-		await resume(ran);
+		if (asks) {
+			const parked = await approve(ran);
+			expect(parked).toMatchObject({ tool: "update_automation", input, writeOrDelete: true });
+			expect(await automationsOf(defaultProject)).toMatchObject([
+				{ name: created.name, state: "enabled" },
+			]);
+			await resume(ran);
+		}
 
 		const [completed] = await callsOf(ran.turnId);
 		if (error) {
 			expect(completed).toMatchObject({
-				id: parked.id,
+				approvalStatus: asks ? "allowed" : null,
 				status: "failed",
 				error: error.userMessage,
 			});
@@ -259,7 +284,7 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 			return;
 		}
 		expect(completed).toMatchObject({
-			id: parked.id,
+			approvalStatus: "allowed",
 			status: "completed",
 			output: {
 				automation: {
@@ -274,6 +299,92 @@ describe.skipIf(!process.env.DATABASE_URL)("automation tools through the bot loo
 		});
 		expect(await automationsOf(defaultProject)).toMatchObject([
 			{ name: "Renamed", state: "paused" },
+		]);
+	});
+
+	it.each([
+		{ change: "adds", triggers: [] },
+		{ change: "replaces", triggers: [routine] },
+	] as const)(
+		"closes a routine edit approval when a manager $change the routine before Allow",
+		async ({ triggers }) => {
+			const { automation: created } = await defineAutomation(triggers);
+			const { model, requests } = requestTool("update_automation", {
+				automationId: created.id,
+				routineExpression: "0 10 * * 1-5",
+			});
+			const workflow = await loop.runWorkflow(chatId, { model });
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+
+			const admin = chatsAs(adminId);
+			const { waiting } = await admin.approvals(workspaceId);
+			const [original] = created.triggers;
+			if (original) {
+				await loop.call(await admin.principal(), "automations.removeTrigger", {
+					projectId: defaultProject,
+					automationId: created.id,
+					triggerId: original.id,
+				});
+			}
+			await addRoutine(created.id);
+
+			const error = "This approval was closed because the automation's routine changed.";
+			await expect(
+				admin.decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({
+				_tag: "ToolApprovalConflict",
+				reason: "automationRoutineChanged",
+			});
+			expect(waiting).toMatchObject([
+				{
+					call: { id: parked.id, approval: { routineChange: triggers.length ? "replace" : "add" } },
+				},
+			]);
+			await workflow.completed();
+			expect(await callsOf(turnId)).toMatchObject([
+				{ id: parked.id, approvalStatus: "denied", status: "failed", error },
+			]);
+			expect(await admin.approvals(workspaceId)).toMatchObject({
+				waiting: [],
+				answered: [
+					{ call: { id: parked.id, approval: { closedBecause: "settingsChanged" }, error } },
+				],
+			});
+			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+		},
+	);
+
+	it("asks again when a routine is added after Allow and before the edit runs", async () => {
+		const { automation: created } = await defineAutomation([]);
+		const { model } = requestTool("update_automation", {
+			automationId: created.id,
+			name: "Renamed",
+			routineExpression: "0 10 * * 1-5",
+		});
+		const ran = await loop.runTurn(chatId, { model });
+		const parked = await approve(ran);
+		await addRoutine(created.id);
+
+		const principal = await ran.authentication.authenticate(ran.turnId);
+		expect(
+			await ran.steps.step(ran.run.request, principal, {
+				turnId: ran.turnId,
+				attempt: 0,
+				step: 1,
+			}),
+		).toMatchObject({ _tag: "Waiting" });
+		const [reparked] = await callsOf(ran.turnId);
+		expect(reparked).toMatchObject({ id: parked.id, approvalStatus: "pending" });
+		expect(reparked?.approvalId).not.toBe(parked.approvalId);
+		expect(await automationsOf(defaultProject)).toMatchObject([{ name: created.name }]);
+		expect(
+			await onDatabase((db) =>
+				db.select().from(automationTrigger).where(eq(automationTrigger.automationId, created.id)),
+			),
+		).toMatchObject([{ settings: routine }]);
+		expect((await chatsAs(adminId).approvals(workspaceId)).waiting).toMatchObject([
+			{ call: { id: parked.id, approval: { routineChange: "replace" } } },
 		]);
 	});
 

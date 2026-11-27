@@ -488,3 +488,51 @@ export const BriefInProject = meta.story({
 		await expect(await screen.findByRole("dialog")).toHaveTextContent(destination);
 	},
 });
+
+const askingToChangeRoutine = (routineChange: "add" | "replace") =>
+	asking({
+		tool: "update_automation",
+		input: {
+			automationId: "0199a3a0-0000-7000-8000-000000000007",
+			routineExpression: "0 9 * * 1-5",
+		},
+		approval: {
+			id: "approval-routine",
+			status: "pending",
+			approvers: "chat",
+			decidedAt: null,
+			decidedByName: null,
+			routineChange,
+		},
+	});
+
+export const AddFirstRoutine = meta.story({
+	parameters: { docs: { description: { story: "The automation has no routine yet." } } },
+	args: {
+		call: askingToChangeRoutine("add"),
+		connector: undefined,
+	},
+	globals: { theme: "light" },
+	play: async ({ canvas }) => {
+		await waitFor(() =>
+			expect(canvas.getByText("Adds the automation's first routine.")).toBeVisible(),
+		);
+	},
+});
+
+export const ReplaceRoutineOnPhone = meta.story({
+	parameters: {
+		docs: { description: { story: "The edit replaces the automation's only routine." } },
+	},
+	args: {
+		call: askingToChangeRoutine("replace"),
+		connector: undefined,
+	},
+	globals: { ...PHONE, theme: "dark" },
+	play: async ({ canvas, userEvent }) => {
+		const message = "Replaces the automation's existing routine.";
+		await waitFor(() => expect(canvas.getByText(message)).toBeVisible());
+		await userEvent.click(canvas.getByRole("button", { name: "Review" }));
+		await expect(await screen.findByRole("dialog")).toHaveTextContent(message);
+	},
+});

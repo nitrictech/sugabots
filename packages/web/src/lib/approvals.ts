@@ -26,6 +26,19 @@ export function awaitedApprovers(call: ToolCallPart) {
 		: "Waiting for someone with permission to answer this.";
 }
 
+export function routineChangeMessage(
+	change: NonNullable<ToolCallPart["approval"]>["routineChange"],
+) {
+	switch (change) {
+		case "add":
+			return "Adds the automation's first routine.";
+		case "replace":
+			return "Replaces the automation's existing routine.";
+		default:
+			return undefined;
+	}
+}
+
 export function closedApprovalMessage(call: ToolCallPart, botName: string): string {
 	switch (call.approval?.closedBecause) {
 		case "settingsChanged":

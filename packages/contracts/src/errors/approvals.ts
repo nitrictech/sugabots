@@ -23,6 +23,7 @@ export class ToolApprovalNotFound
 
 export const approvalSettingsChangeSchema = Schema.Literals([
 	"briefDestinationChanged",
+	"automationRoutineChanged",
 	"connectorChanged",
 	"noComputerProvider",
 	"computerUseChanged",
@@ -48,6 +49,8 @@ export class ToolApprovalConflict
 		switch (this.reason) {
 			case "briefDestinationChanged":
 				return userText`This approval was closed because the chat the bot wanted to start changed.`;
+			case "automationRoutineChanged":
+				return userText`This approval was closed because the automation's routine changed.`;
 			case "connectorChanged":
 				return userText`This approval was closed because the connector or its tool settings changed.`;
 			case "noComputerProvider":

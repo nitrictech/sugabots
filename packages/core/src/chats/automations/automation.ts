@@ -12,6 +12,7 @@ export {
 } from "@sugabots/contracts/errors/automations";
 
 import type { Automation, AutomationTrigger, AutomationTriggerInput } from "@sugabots/contracts";
+import { TriggerSetInSettings } from "@sugabots/contracts/errors/automations";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { query } from "../../database/database.ts";
@@ -99,6 +100,15 @@ export const triggersOf = (automationIds: readonly string[]) =>
 				),
 		(rows) => Map.groupBy(rows, (row) => row.automationId),
 	);
+
+export const findSoleRoutineId = (automationId: string) =>
+	Effect.gen(function* () {
+		const [only, another] = (yield* triggersOf([automationId])).get(automationId) ?? [];
+		if (another || (only && only.settings.kind !== "routine")) {
+			return yield* new TriggerSetInSettings();
+		}
+		return only?.id ?? null;
+	});
 
 /** An automation's row as the API shows it, with its triggers read alongside. */
 export const automationWithTriggers = (row: schema.AutomationRow) =>
