@@ -31,6 +31,7 @@ import { createTestMember } from "../../../database/workspace.test-support.ts";
 import { asMember } from "../../../operations/chats/testing.ts";
 import { type CallOperation, servedOperations } from "../../../operations/testing.ts";
 import { Lanes } from "../../../workflows/lanes.ts";
+import { startBotChat } from "../../chats/testing.ts";
 import { chatServicesForTests, lanesForTests } from "../../testing.ts";
 import { recordedCallOf } from "../../tools/recorded-call.ts";
 import { releaseParkedLanes } from "../cancel-sweep.ts";
@@ -538,6 +539,51 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 		});
 
 		expect(await storedCall(pending.id)).toMatchObject({ approvalStatus: "pending" });
+	});
+
+	it("refuses to let a demoted editor allow their Personal Assistant to create a project", async () => {
+		const editor = await createTestMember(
+			{ name: "Kim", email: `editor-${crypto.randomUUID()}@example.com` },
+			{ workspaceId, role: "editor" },
+		);
+		const assistant = await seedBot(workspaceId, {
+			visibility: "personal",
+			assistantOf: editor.id,
+		});
+		await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, assistant.id)));
+		const started = await startBotChat(chatsAs(editor.id), {
+			botId: assistant.id,
+			messageId: crypto.randomUUID(),
+			content: "Create a project",
+		});
+		const [running] = await runOnPostgres(runningTurns(started.chat.id));
+		if (!running) throw new Error("no turn running");
+		opened = await run(openTurn(running));
+		expect(opened.principal.admission?.role).toBe("editor");
+		const pending = await park(
+			askedCall({
+				tool: "create_project",
+				input: { workspace: workspaceId, name: "Planning", leadBotId: botId },
+				binding: { kind: "built-in" },
+			}),
+		);
+		await onDatabase((db) =>
+			db
+				.update(membership)
+				.set({ role: "viewer" })
+				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, editor.id))),
+		);
+
+		const decide = (decision: "allow_once" | "deny") =>
+			approvalsAs(editor.id).decide({
+				toolCallId: pending.id,
+				approvalId: pending.approvalId,
+				decision,
+			});
+		await expect(decide("allow_once")).rejects.toBeInstanceOf(ActionForbidden);
+		expect(await storedCall(pending.id)).toMatchObject({ approvalStatus: "pending" });
+		await decide("deny");
+		expect(await storedCall(pending.id)).toMatchObject({ approvalStatus: "denied" });
 	});
 
 	it("shows the recorded connector when listing a waiting approval", async () => {

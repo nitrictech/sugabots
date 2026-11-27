@@ -368,7 +368,7 @@ const proveApproval = <
 		}
 		if (call.kind === "approvalCheck") {
 			if (connectorUse?.access === "off") return yield* new ApprovalRefused();
-			const resolvedTargets = yield* resolveApprovalTargets;
+			const resolvedTargets = call.forDecision ? otherTargets : yield* resolveApprovalTargets;
 			return yield* ApprovalCheckReached.for({
 				...(computerProjectId && { computerProjectId }),
 				...(resolvedTargets && { resolvedTargets }),

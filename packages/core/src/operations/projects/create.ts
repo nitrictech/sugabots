@@ -1,14 +1,15 @@
 import { projectsContracts } from "@sugabots/contracts/operations/projects";
 import { Effect } from "effect";
+import type { Principal } from "../../principal.ts";
 import { approvalRule, proveApproved } from "../../proofs/approved.ts";
 import { proveInWorkspace } from "../../proofs/in-workspace.ts";
-import { named } from "../../proofs/proof.ts";
+import { type Named, named } from "../../proofs/proof.ts";
 import { proveReachesBot } from "../../proofs/reaches-bot.ts";
 import { underWorkspaceLock } from "../../proofs/workspace-lock.ts";
 import { proveCanCreateProjects } from "../../proofs/workspace-permissions.ts";
 import { Projects } from "../../workspaces/projects/projects.ts";
 import { workspaceIdOf } from "../../workspaces/workspace-reference.ts";
-import { defineOperation } from "../operation.ts";
+import { defineOperation, unexpectedApprovalProof } from "../operation.ts";
 
 /**
  * Making a project puts its creator, the workspace's owner and admins and its
@@ -20,27 +21,39 @@ export const create = defineOperation(
 	(principal, input, call) =>
 		Effect.gen(function* () {
 			const projects = yield* Projects.Service;
-			const { workspace: reference, leadBotId } = input;
-			const workspaceId = yield* workspaceIdOf(reference);
-			return yield* underWorkspaceLock(principal, workspaceId, (lock) =>
-				named(leadBotId, call, input, (leadBot, call, approvedInput) =>
+			const workspaceId = yield* workspaceIdOf(input.workspace);
+			return yield* named(input.leadBotId, call, input, (leadBot, call, approvedInput) => {
+				const proveCreation = <P, W>(principal: Named<P, Principal>, workspace: Named<W, string>) =>
 					Effect.gen(function* () {
 						const canCreate = yield* proveCanCreateProjects(
-							yield* proveInWorkspace(lock.principal, lock.workspace),
+							yield* proveInWorkspace(principal, workspace),
 						);
-						// A bot the member can't reach is answered as if it weren't there.
-						const lead = yield* proveReachesBot(lock.principal, leadBot);
+						const lead = yield* proveReachesBot(principal, leadBot);
 						const approved = yield* proveApproved(
-							lock.principal,
+							principal,
 							call,
 							approvalRule("projects.create"),
 							approvedInput,
-							lock.workspace,
+							workspace,
 							leadBot,
+						);
+						return { canCreate, lead, approved };
+					});
+
+				if (call.value.kind === "approvalCheck") {
+					return named(principal, workspaceId, (principal, workspace) =>
+						proveCreation(principal, workspace).pipe(Effect.andThen(unexpectedApprovalProof)),
+					);
+				}
+				return underWorkspaceLock(principal, workspaceId, (lock) =>
+					Effect.gen(function* () {
+						const { canCreate, lead, approved } = yield* proveCreation(
+							lock.principal,
+							lock.workspace,
 						);
 						return yield* projects.create(lock, canCreate, lead, approved);
 					}),
-				),
-			);
+				);
+			});
 		}),
 );

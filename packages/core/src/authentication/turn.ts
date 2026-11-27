@@ -10,12 +10,11 @@ import {
 	authenticated,
 	type BotForAsker,
 	type TurnAdmission,
-	type TurnBounds,
 } from "../principal.ts";
 import { captureTurnAdmission } from "../proofs/facts.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { freezeAdmission } from "./turn-admission.ts";
-import { askerOf, hasMemberBounds, type TurnFacts, turnFacts } from "./turn-facts.ts";
+import { askerOf, turnBounds, turnFacts } from "./turn-facts.ts";
 
 /**
  * The authenticator for a turn, which the bot loop calls each time a turn
@@ -79,7 +78,7 @@ export const make = Effect.gen(function* () {
 							chat: facts.chat,
 							turn: facts.turn,
 							...execution,
-							bounds: boundsOf(facts, asker, project),
+							bounds: turnBounds(facts, asker, project),
 						});
 					}
 					if (facts.askedBy.kind === "automation" && facts.run) {
@@ -130,15 +129,6 @@ const newExecution = (turnId: string, admission: TurnAdmission) =>
 	);
 
 export const layer = layerNoDeps;
-
-/**
- * A turn's bounds: member bounds for a personal bot's own turns, and those of
- * its routine and manual runs. A brief can grant member bounds only
- * if the turn writing it had them.
- */
-function boundsOf(facts: TurnFacts, asker: string, project: string): TurnBounds {
-	return hasMemberBounds(facts, asker) ? { kind: "member" } : { kind: "chat", project };
-}
 
 /**
  * The turn is gone, is in a chat in no project, or answers neither a member

@@ -15,6 +15,7 @@ export const readCurrentApproval = Effect.fn("readCurrentApproval")(function* (
 		.select({
 			call: toolCall,
 			executionId: turn.executionId,
+			executionNumber: turn.executionNumber,
 			turn: { status: turn.status, endRequested: turn.endRequested },
 		})
 		.from(toolCall)

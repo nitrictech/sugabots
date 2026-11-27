@@ -10,6 +10,7 @@ import { type FlexibleSchema, jsonSchema, type Tool, tool } from "ai";
 import { Effect, Schema } from "effect";
 import { canWriteBrief, turnFacts } from "../../authentication/turn-facts.ts";
 import { query } from "../../database/database.ts";
+import { checkApproval } from "../../operations/operation.ts";
 import type { Operations } from "../../operations/registry.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import { type ApprovalRule, approvalNeed, approvalRule } from "../../proofs/approved.ts";
@@ -18,7 +19,6 @@ import { offeredBrowserTools } from "../tools/browser/browser.ts";
 import { ToolCallError } from "../tools/failed.ts";
 import { hasImages, withImages } from "../tools/images.ts";
 import { recordedCallOf } from "../tools/recorded-call.ts";
-import { checkApproval } from "./approval-check.ts";
 import { type RecordingOptions, recorded, ToolApprovalRequired } from "./tool-calls/recorded.ts";
 import type { ApprovalAsked, StepTurn } from "./tools.ts";
 

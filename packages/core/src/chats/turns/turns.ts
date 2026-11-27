@@ -32,7 +32,12 @@ import type { DomainError, UserText } from "@sugabots/errors";
 import { inArray, type SQLWrapper } from "drizzle-orm";
 import { Cause, Context, Effect, Exit, Layer, Option } from "effect";
 import { afterCommit, serviceOperations, transaction } from "../../database/database.ts";
-import { ACTIVE_TURN_STATUSES, type TurnSteer, turn } from "../../database/schema.ts";
+import {
+	ACTIVE_TURN_STATUSES,
+	type TurnSteer,
+	type toolCall,
+	turn,
+} from "../../database/schema.ts";
 import { Ids } from "../../ids/ids.ts";
 import type { CanDecide } from "../../proofs/can-decide.ts";
 import type { IsMember } from "../../proofs/is-member.ts";
@@ -228,33 +233,46 @@ type SystemTurnOutcome<A> =
 	| { readonly _tag: "Failed" }
 	| { readonly _tag: "Skipped"; readonly reason: string };
 
+export type ApprovalCall = Pick<
+	typeof toolCall.$inferSelect,
+	| "tool"
+	| "turnId"
+	| "input"
+	| "executionInput"
+	| "connectorId"
+	| "approvalResolvedTargets"
+	| "writeOrDelete"
+>;
+
 /** What members may do to a turn, once proved. */
 export interface ControlsInterface {
 	/**
 	 * Decides the approval `approvalId` of the tool call `canDecide` is about,
 	 * for the member `isMember` names, its approver. In one transaction, once
-	 * the call's turn is locked,
-	 * it proves again that they may still decide it, records the decision, so
-	 * the chat's watchers see it at once, makes the change an allowed call
-	 * asks of its approver (`allowed`, given the fresh proof), and sends the
-	 * decision to the turn's workflow, which runs what was allowed. A call
-	 * that waits for no decision, whose turn no longer waits, or that was asked
-	 * again under another approval since, is not found; one somebody decided
-	 * first is a conflict.
+	 * the call's turn is locked, it checks the pending approval. On Allow,
+	 * `allow` checks the approver's permission for the recorded call and makes
+	 * any change the approval itself grants before the decision is recorded
+	 * and signalled. An approval that is no longer current is not found.
+	 * An approval that already has a decision is a conflict.
 	 */
-	readonly decide: <P, X>(
+	readonly decide: <P, X, R>(
 		isMember: IsMember<P>,
 		canDecide: CanDecide<P, X>,
 		approvalId: string,
 		decision: ToolApprovalDecision["decision"],
-		allowed: (canDecide: CanDecide<P, X>) => Effect.Effect<void, NoComputerProvider>,
+		allow: (
+			canDecide: CanDecide<P, X>,
+			call: ApprovalCall,
+			executionNumber: number,
+		) => Effect.Effect<void, ActionForbidden | NoComputerProvider, R>,
 	) => Effect.Effect<
 		void,
 		| ToolApprovalNotFound
 		| ToolApprovalConflict
 		| ResourceHidden
 		| ActionForbidden
-		| NoComputerProvider
+		| NoComputerProvider,
+		R
 	>;
 	/**
 	 * Makes `steer.messageId`, the message the turn's asker just posted, which

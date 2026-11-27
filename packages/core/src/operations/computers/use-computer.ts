@@ -14,7 +14,12 @@ import {
 } from "../../proofs/approved.ts";
 import { proveCanUseChatComputer } from "../../proofs/can-use-computer.ts";
 import { named } from "../../proofs/proof.ts";
-import { type Call, defineOperation, type ResolvedTargets } from "../operation.ts";
+import {
+	type Call,
+	defineOperation,
+	type ResolvedTargets,
+	unexpectedApprovalProof,
+} from "../operation.ts";
 
 /**
  * A bot's work on its computer: the computer of the project its turn's chat
@@ -48,6 +53,15 @@ const usingComputer = <N extends ComputerOperation, A, E, R>(
 			(principal, chat, call, approvedInput) =>
 				Effect.gen(function* () {
 					const canUse = yield* proveCanUseChatComputer(principal, chat);
+					if (call.value.kind === "approvalCheck" && call.value.forDecision) {
+						return yield* proveComputerUseApproved(
+							principal,
+							call,
+							rule,
+							approvedInput,
+							canUse,
+						).pipe(Effect.andThen(unexpectedApprovalProof));
+					}
 					const computers = yield* TurnComputers.Service;
 					const step = yield* computers.checkStep(canUse);
 					const run = Effect.gen(function* () {

@@ -1,20 +1,30 @@
 export * as Operations from "./registry.ts";
 
-import type {
-	FailureOf,
-	InputOf,
-	LongRunningOperationName,
-	OperationContracts,
-	OperationName,
-	OutputOf,
-	RequestOperationName,
+import { isDeepStrictEqual } from "node:util";
+import { ActionForbidden } from "@sugabots/contracts/errors/proofs";
+import {
+	botLoopTools,
+	type FailureOf,
+	type InputOf,
+	type LongRunningOperationName,
+	type OperationContracts,
+	type OperationName,
+	type OutputOf,
+	operationContracts,
+	type RequestOperationName,
 } from "@sugabots/contracts/operations";
 import type { DomainError } from "@sugabots/errors";
-import { Context, Effect, Layer, Scope } from "effect";
+import { Context, Effect, Layer, Schema, Scope } from "effect";
+import { principalForApprovalCheck } from "../authentication/approval.ts";
 import { refreshTurnAdmission } from "../authentication/turn-admission.ts";
+import { isBrowserTool } from "../chats/tools/browser/browser.ts";
+import type { Turns } from "../chats/turns/turns.ts";
 import type { Principal } from "../principal.ts";
+import { proveCanUseChatComputer } from "../proofs/can-use-computer.ts";
+import { checkConnectorApprovalPermission } from "../proofs/can-use-connector.ts";
+import { named } from "../proofs/proof.ts";
 import { processLayer, Tier } from "../tiers.ts";
-import { approvalsOperations } from "./approvals/index.ts";
+import { makeDecide } from "./approvals/decide.ts";
 import { automationsOperations } from "./automations/index.ts";
 import { botsOperations } from "./bots/index.ts";
 import { chatReadsOperations } from "./chat-reads/index.ts";
@@ -24,7 +34,14 @@ import { connectorsOperations } from "./connectors/index.ts";
 import { eventsOperations } from "./events/index.ts";
 import { filesOperations } from "./files/index.ts";
 import { notificationsOperations } from "./notifications/index.ts";
-import type { Call, LongRunningOperation, Operation, Running, ServicesOf } from "./operation.ts";
+import {
+	type Call,
+	checkApproval,
+	type LongRunningOperation,
+	type Operation,
+	type Running,
+	type ServicesOf,
+} from "./operation.ts";
 import { projectsOperations } from "./projects/index.ts";
 import { providersOperations } from "./providers/index.ts";
 import { scheduledWorkOperations } from "./scheduled-work.ts";
@@ -73,8 +90,7 @@ export class LongRunning extends Context.Service<LongRunning, LongRunningInterfa
 	declare readonly [Tier]: "process";
 }
 
-/** Every operation's body, by name: exactly one for each registered contract. */
-const operations = {
+const operationsExceptDecide = {
 	...workspaceOperations,
 	...projectsOperations,
 	...botsOperations,
@@ -86,10 +102,70 @@ const operations = {
 	...connectorsOperations,
 	...providersOperations,
 	...webOperations,
-	...approvalsOperations,
 	...eventsOperations,
 	...notificationsOperations,
 	...scheduledWorkOperations,
+};
+
+const offeredTools = botLoopTools(operationContracts);
+type ApprovalOperationName = (typeof offeredTools)[number]["operation"];
+type ApprovalServices = ServicesOf<(typeof operationsExceptDecide)[ApprovalOperationName]>;
+
+const checkApprovalPermission = (
+	member: string,
+	call: Turns.ApprovalCall,
+	executionNumber: number,
+) =>
+	Effect.gen(function* () {
+		const forbidden = new ActionForbidden({ proof: "CanDecide" });
+		if (call.connectorId) {
+			yield* checkConnectorApprovalPermission(member, {
+				connectorId: call.connectorId,
+				turnId: call.turnId,
+				writeOrDelete: call.writeOrDelete,
+			});
+			if (call.approvalResolvedTargets && "computer" in call.approvalResolvedTargets) {
+				const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
+				yield* named(principal, principal.chat, (principal, chat) =>
+					proveCanUseChatComputer(principal, chat).pipe(
+						Effect.asVoid,
+						Effect.mapError(() => forbidden),
+					),
+				);
+			}
+			return;
+		}
+
+		const { tool } = call;
+		const recordedInput = call.executionInput ?? call.input;
+		const browserTool = isBrowserTool(tool, true);
+		const name = browserTool
+			? "computers.useBrowser"
+			: offeredTools.find((offered) => offered.tool === tool)?.operation;
+		if (!name || name === "connectors.callTool") return yield* forbidden;
+		const decoded = Schema.decodeUnknownResult(operationContracts[name].input)(
+			browserTool ? { tool, arguments: recordedInput } : recordedInput,
+		);
+		if (decoded._tag === "Failure") return yield* forbidden;
+
+		const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
+		const operation: RegisteredOperation<ApprovalServices> = operationsExceptDecide[name];
+		const checked = yield* checkApproval(
+			(check) => operation.run(principal, decoded.success as never, check),
+			{ kind: "approvalCheck", forDecision: true },
+		);
+		if (
+			!checked ||
+			(checked.resolvedTargets &&
+				!isDeepStrictEqual(checked.resolvedTargets, call.approvalResolvedTargets))
+		)
+			return yield* forbidden;
+	});
+
+/** Every operation's body, by name: exactly one for each registered contract. */
+const operations = {
+	...operationsExceptDecide,
+	"approvals.decide": makeDecide(checkApprovalPermission),
 } satisfies {
 	readonly [Name in OperationName]: Name extends LongRunningOperationName
 		? LongRunningOperation<OperationContracts[Name], unknown>
@@ -102,13 +178,13 @@ type Operations = typeof operations;
 type Services = ServicesOf<Operations[keyof Operations]>;
 
 /** Any one of the operations, with what its input is forgotten: the registry only passes it on. */
-interface RegisteredOperation {
+interface RegisteredOperation<R = Services | Scope.Scope> {
 	readonly kind: "request" | "longRunning";
 	readonly run: (
 		principal: Principal,
 		input: never,
 		call: Call,
-	) => Effect.Effect<unknown, DomainError, Services | Scope.Scope>;
+	) => Effect.Effect<unknown, DomainError, R>;
 }
 
 /**

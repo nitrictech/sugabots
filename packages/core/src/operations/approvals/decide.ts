@@ -1,3 +1,4 @@
+import type { ActionForbidden } from "@sugabots/contracts/errors/proofs";
 import { approvalsContracts } from "@sugabots/contracts/operations/approvals";
 import { Effect } from "effect";
 import { Turns } from "../../chats/turns/turns.ts";
@@ -13,20 +14,30 @@ import { defineOperation } from "../operation.ts";
  * authority, in the decision's transaction; the turn then reads what became
  * of it.
  */
-export const decide = defineOperation(approvalsContracts["approvals.decide"], (principal, input) =>
-	named(principal, input.toolCallId, (principal, call) =>
-		Effect.gen(function* () {
-			const isMember = yield* proveIsMember(principal);
-			const canDecide = yield* proveCanDecide(isMember, call);
-			const controls = yield* Turns.Controls;
-			const network = yield* ComputerNetwork.Service;
-			return yield* controls.decide(
-				isMember,
-				canDecide,
-				input.approvalId,
-				input.decision,
-				(approver) => network.grantHostRequest(isMember, approver),
-			);
-		}),
-	),
-);
+export const makeDecide = <R>(
+	checkApprovalPermission: (
+		member: string,
+		call: Turns.ApprovalCall,
+		executionNumber: number,
+	) => Effect.Effect<void, ActionForbidden, R>,
+) =>
+	defineOperation(approvalsContracts["approvals.decide"], (principal, input) =>
+		named(principal, input.toolCallId, (principal, call) =>
+			Effect.gen(function* () {
+				const isMember = yield* proveIsMember(principal);
+				const canDecide = yield* proveCanDecide(isMember, call);
+				const controls = yield* Turns.Controls;
+				const network = yield* ComputerNetwork.Service;
+				return yield* controls.decide(
+					isMember,
+					canDecide,
+					input.approvalId,
+					input.decision,
+					(approver, call, executionNumber) =>
+						approver.rule === "computerRequest"
+							? network.grantHostRequest(isMember, approver)
+							: checkApprovalPermission(isMember.member, call, executionNumber),
+				);
+			}),
+		),
+	);

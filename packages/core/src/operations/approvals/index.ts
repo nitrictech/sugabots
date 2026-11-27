@@ -7,11 +7,6 @@
 import { Layer } from "effect";
 import { Turns } from "../../chats/turns/turns.ts";
 import { ComputerNetwork } from "../../computers/computer-network.ts";
-import { decide } from "./decide.ts";
-
-export const approvalsOperations = {
-	"approvals.decide": decide,
-};
 
 /**
  * Over the chat services, whose turns' calls it decides (see

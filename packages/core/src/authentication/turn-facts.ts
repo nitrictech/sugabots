@@ -1,3 +1,4 @@
+import type { TurnBounds } from "../principal.ts";
 /**
  * What a turn acts for, read from its rows: the turn authenticator builds its
  * principal from these, and the provers that ask who a turn's asker is, or
@@ -159,6 +160,10 @@ export function hasMemberBounds(facts: TurnFacts, asker = askerOf(facts)) {
 		(facts.reason !== "brief" || facts.briefTurnRule === "memberBounds") &&
 		!startedFromOutside(facts)
 	);
+}
+
+export function turnBounds(facts: TurnFacts, asker: string, project: string): TurnBounds {
+	return hasMemberBounds(facts, asker) ? { kind: "member" } : { kind: "chat", project };
 }
 
 export function canWriteBrief(reason: TurnFacts["reason"]): boolean {

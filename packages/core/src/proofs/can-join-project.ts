@@ -59,31 +59,38 @@ export function mayJoin(member: MemberPlace, facts: ProjectFacts): boolean {
 	return member.inProject || facts.visibility === "public";
 }
 
-export const proveCanJoinProject = <P, W, J>(
-	lock: HoldsWorkspaceLock<P, W>,
-	projectId: Named<J, string>,
-) =>
+export const checkProjectJoin = (principal: Principal, projectId: string, workspaceId?: string) =>
 	Effect.gen(function* () {
-		const { principal } = lock;
-		const acting = principal.value;
-		const facts = yield* query((db) => reachFacts(db, projectId.value, whoActs(acting)));
-		if (!facts || facts.project.workspace !== lock.workspace.value) {
+		const facts = yield* query((db) => reachFacts(db, projectId, whoActs(principal)));
+		if (!facts || (workspaceId !== undefined && facts.project.workspace !== workspaceId)) {
 			return yield* Effect.fail(hidden);
 		}
-		const member = joiner(acting, facts);
+		const member = joiner(principal, facts);
 		if (!member) {
-			// Anyone else joins nothing: refused where they reach the project, hidden elsewhere.
-			const reaches = decideReach(acting, facts, undefined).kind === "reaches";
+			const reaches = decideReach(principal, facts, undefined).kind === "reaches";
 			return yield* Effect.fail(
 				reaches ? new ActionForbidden({ proof: "CanJoinProject" }) : hidden,
 			);
 		}
 		if (!mayJoin(member, facts.project)) return yield* Effect.fail(hidden);
+		return { facts: facts.project, member };
+	});
+
+export const proveCanJoinProject = <P, W, J>(
+	{ principal, workspace }: HoldsWorkspaceLock<P, W>,
+	projectId: Named<J, string>,
+) =>
+	Effect.gen(function* () {
+		const { facts, member } = yield* checkProjectJoin(
+			principal.value,
+			projectId.value,
+			workspace.value,
+		);
 		const proof: CanJoinProject<P, J> = CanJoinProjectProof.prove([principal, projectId], {
 			principal,
 			project: projectId,
-			workspace: facts.project.workspace,
-			facts: facts.project,
+			workspace: facts.workspace,
+			facts,
 			member,
 		});
 		return proof;

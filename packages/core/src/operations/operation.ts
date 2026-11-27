@@ -19,6 +19,7 @@
 
 import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import type { OperationContract } from "@sugabots/contracts/operations";
+import type { DomainError } from "@sugabots/errors";
 import { Effect, Schema, type Scope, type Stream } from "effect";
 import type { Principal } from "../principal.ts";
 
@@ -27,6 +28,8 @@ export interface ApprovalCheck {
 	readonly kind: "approvalCheck";
 	/** A call plan checks reach and tool access before an approval request resolves connector targets. */
 	readonly deferConnectorTargets?: true;
+	/** Rechecks permissions for a pending decision after the turn has released its step. */
+	readonly forDecision?: true;
 }
 
 /**
@@ -51,6 +54,25 @@ export class ApprovalCheckReached extends ApprovalNeeded {
 		return Object.assign(new ApprovalCheckReached(), { details });
 	}
 }
+
+export const unexpectedApprovalProof = Effect.die(
+	new Error("Operation finished an approval check without proving Approved"),
+);
+
+/** checkApproval runs an operation through the proofs it requires before Approved. */
+export const checkApproval = <R>(
+	run: (call: ApprovalCheck) => Effect.Effect<unknown, DomainError, R>,
+	call: ApprovalCheck = { kind: "approvalCheck" },
+) =>
+	Effect.suspend(() =>
+		run(call).pipe(
+			Effect.matchEffect({
+				onFailure: (error) =>
+					Effect.succeed(error instanceof ApprovalCheckReached ? error.details : undefined),
+				onSuccess: () => unexpectedApprovalProof,
+			}),
+		),
+	);
 
 /**
  * One call of an operation, the `X` of `Approved<P, X, Targets, Operation>`, which the registry

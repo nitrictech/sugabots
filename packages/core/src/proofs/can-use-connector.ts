@@ -107,9 +107,9 @@ function enabledConnectorRows(db: Executor, acting: Principal, selected: SQL | u
 		.where(and(eq(connector.enabled, true), selected));
 }
 
-export const checkConnectorWritePermission = (
+export const checkConnectorApprovalPermission = (
 	memberId: string,
-	call: { readonly connectorId: string; readonly turnId: string },
+	call: { readonly connectorId: string; readonly turnId: string; readonly writeOrDelete: boolean },
 ) =>
 	Effect.gen(function* () {
 		const place = yield* query((db) =>
@@ -126,7 +126,11 @@ export const checkConnectorWritePermission = (
 				{ member: memberId },
 			),
 		);
-		if (!place?.member || !mayInProjectAs(place.member, place.project, "project.change"))
+		if (
+			!place?.member ||
+			!memberReaches(place.member, place.project) ||
+			(call.writeOrDelete && !mayInProjectAs(place.member, place.project, "project.change"))
+		)
 			return yield* new ActionForbidden({ proof: "CanDecide" });
 	});
 

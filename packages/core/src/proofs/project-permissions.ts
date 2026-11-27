@@ -320,23 +320,28 @@ export const proveCanChangeProjectSettings = <P, W, J>(
 	return Effect.succeed(proof);
 };
 
+export const checkProjectMembershipChange = <P, J>(reach: ReachesProject<P, J>) => {
+	const member = memberChangingMembers(reach.as, reach.facts);
+	return member
+		? Effect.succeed(member)
+		: Effect.fail(new ActionForbidden({ proof: "CanChangeProjectMembers" }));
+};
+
 export const proveCanChangeProjectMembers = <P, W, J>(
 	lock: HoldsWorkspaceLock<P, W>,
 	reach: ReachesProject<P, J>,
-): Effect.Effect<CanChangeProjectMembers<P, J>, ActionForbidden | ResourceHidden> => {
-	if (reach.workspace !== lock.workspace.value) {
-		return Effect.fail(new ResourceHidden({ resource: "project" }));
-	}
-	const member = memberChangingMembers(reach.as, reach.facts);
-	if (!member) {
-		return Effect.fail(new ActionForbidden({ proof: "CanChangeProjectMembers" }));
-	}
-	const proof: CanChangeProjectMembers<P, J> = CanChangeProjectMembersProof.prove(
-		[reach.principal, reach.project],
-		{ reach, member },
-	);
-	return Effect.succeed(proof);
-};
+): Effect.Effect<CanChangeProjectMembers<P, J>, ActionForbidden | ResourceHidden> =>
+	Effect.gen(function* () {
+		if (reach.workspace !== lock.workspace.value) {
+			return yield* new ResourceHidden({ resource: "project" });
+		}
+		const member = yield* checkProjectMembershipChange(reach);
+		const proof: CanChangeProjectMembers<P, J> = CanChangeProjectMembersProof.prove(
+			[reach.principal, reach.project],
+			{ reach, member },
+		);
+		return proof;
+	});
 
 export const proveCanDeleteProject = <P, W, J>(
 	lock: HoldsWorkspaceLock<P, W>,
