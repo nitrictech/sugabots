@@ -596,6 +596,81 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: live });
 	});
 
+	it("checkpoints filtered replay pages at startup before sending live events", async () => {
+		const world = await staffed();
+		const erin = await signedIn.member(world.erin);
+		const stream = workspaceStream(world.workspace);
+		const live = Audience.forWorkspace(streamEvent("chat.changed", { chatId: world.spareChat }));
+		await commit(stream, live);
+		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The stream has no cursor");
+		const hidden = Audience.forProject(
+			world.project,
+			streamEvent("chat.changed", { chatId: world.chat }),
+		);
+		await runOnPostgres(
+			transaction(outbox.publish(Array.from({ length: 225 }, () => ({ stream, event: hidden })))),
+		);
+		const start = (await stored.latest([stream])).get(stream);
+		const { follow: followWithLiveEvent } = await servedRegistry({
+			bus: Layer.succeed(EventBus.Service, bus),
+			eventStore: {
+				...stored,
+				async replayPage(page, limit, signal) {
+					const rows = await stored.replayPage(page, limit, signal);
+					if ("cursor" in page) await commit(stream, live);
+					return rows;
+				},
+			},
+		});
+		const resumed = await pastReady(followWithLiveEvent)(erin, "events.followWorkspace", {
+			workspace: world.workspace,
+			since,
+		});
+		const checkpoint = await resumed.next();
+		if (checkpoint === "ended" || checkpoint.seq === undefined) {
+			throw new Error("The replay checkpoint has no cursor");
+		}
+		expect(checkpoint).toEqual({ seq: start, event: streamEvent("ready") });
+		const received = await resumed.next();
+		expect(received).toEqual({
+			seq: expect.any(Number),
+			event: streamEvent("chat.changed", { chatId: world.spareChat }),
+		});
+		await resumed.close();
+
+		const reconnected = await following(erin, "events.followWorkspace", {
+			workspace: world.workspace,
+			since: checkpoint.seq,
+		});
+		expect(await reconnected.next()).toEqual(received);
+	});
+
+	it("resets at the startup cursor after replaying at most 5,000 missed events", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const stream = chatStream(world.chat);
+		const changed = streamEvent("chat.changed", { chatId: world.chat });
+		await commit(stream, changed);
+		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The stream has no cursor");
+		await runOnPostgres(
+			transaction(
+				outbox.publish(Array.from({ length: 5_001 }, () => ({ stream, event: changed }))),
+			),
+		);
+		const start = (await stored.latest([stream])).get(stream);
+		const resumed = await following(ed, "events.followChat", { chatId: world.chat, since });
+		for (let replayed = 0; replayed < 5_000; replayed += 1) {
+			expect(await nextType(resumed)).toBe("chat.changed");
+		}
+		expect(await resumed.next()).toEqual({ seq: start, event: streamEvent("reset") });
+
+		const live = streamEvent("chat.changed", { chatId: "after replay" });
+		await commit(stream, live);
+		expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: live });
+	});
+
 	it("resets when pruning removes an event beyond the first replay page", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);
@@ -604,6 +679,9 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		await commit(stream, changed);
 		const since = (await stored.latest([stream])).get(stream);
 		if (since === undefined) throw new Error("The stream has no cursor");
+		await runOnPostgres(
+			transaction(outbox.publish(Array.from({ length: 102 }, () => ({ stream, event: changed })))),
+		);
 
 		const replayed: Delivery[] = [];
 		let retained: number | undefined;
@@ -613,13 +691,6 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				...stored,
 				async replayPage(page, limit, signal) {
 					if ("cursor" in page) {
-						await runOnPostgres(
-							transaction(
-								outbox.publish(
-									Array.from({ length: limit + 2 }, () => ({ stream, event: changed })),
-								),
-							),
-						);
 						const first = await stored.replayPage(page, limit, signal);
 						for (const { seq, event } of first ?? []) replayed.push({ seq, event });
 						return first;

@@ -41,7 +41,7 @@ export interface Interface {
 		signal?: AbortSignal,
 	): Promise<Map<EventStream, StreamCursor>>;
 
-	/** replayPage reads a batch, or returns undefined if its starting position is no longer usable. */
+	/** replayPage reads a batch through page.through if given, or returns undefined for an unusable starting position. */
 	replayPage(
 		page: ReplayPage,
 		limit: number,
@@ -138,7 +138,7 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 
 			const retained = sql`${feed.since} >= (${retentionBoundary(feed.stream)}) and ${validReplayPosition(page)}`;
 			const rows = await run((db) => {
-				const batch = selectFeedRows(db, [feed, ...page.controls], limit);
+				const batch = selectFeedRows(db, [feed, ...page.controls], limit, page.through);
 				return db.execute<Omit<EventRow, "seq"> & { retained: boolean; seq: string | null }>(
 					sql`select retained, batch.* from (select ${retained} as retained) as replay
 						left join lateral (${batch}) as batch on retained order by batch.seq`,
@@ -210,7 +210,7 @@ interface EventRow {
 	payload: StreamEvent;
 }
 
-function selectFeedRows(db: Executor, feeds: readonly Feed[], limit: number) {
+function selectFeedRows(db: Executor, feeds: readonly Feed[], limit: number, through?: number) {
 	// Overlapping feeds on the same stream must still return each event once.
 	const batches = [...Map.groupBy(feeds, (feed) => feed.stream)].map(([stream, sameStream]) => {
 		const batch = db
@@ -222,6 +222,7 @@ function selectFeedRows(db: Executor, feeds: readonly Feed[], limit: number) {
 					// drop it from ORDER BY and scan the global sequence index.
 					gte(event.stream, stream),
 					lte(event.stream, stream),
+					through === undefined ? undefined : lte(event.seq, through),
 					or(...sameStream.map(matchesFeed)),
 				),
 			)
@@ -265,13 +266,16 @@ export interface Feed {
 }
 
 /** The client's cursor for the first page, or the stream's read position for later pages. */
-export type ReplayPage =
+export type ReplayPage = (
 	| {
 			readonly stream: EventStream;
 			readonly cursor: StreamCursor;
-			readonly controls: readonly Feed[];
 	  }
-	| { readonly feed: Feed; readonly controls: readonly Feed[] };
+	| { readonly feed: Feed }
+) & {
+	readonly controls: readonly Feed[];
+	readonly through?: number;
+};
 
 function typesInFeed(types: readonly DurableEventType[] | undefined) {
 	if (types === undefined) return undefined;

@@ -99,7 +99,8 @@ export interface Interface {
 	 * scope is open and the follower may (see {@link Following}). Listens before
 	 * it first proves, so no change of reach slips between; a first refusal
 	 * fails it. The stream it returns ends once it must, dropping whatever it
-	 * hadn't sent; a resume point that is gone gets a `reset` first.
+	 * hadn't sent. A `reset` asks the client to refetch when its resume point
+	 * is gone or replay reaches its limit.
 	 */
 	readonly follow: <E>(following: Following<E>) => Effect.Effect<Running<Delivery>, E, Scope.Scope>;
 	/**
@@ -201,6 +202,8 @@ const READ_AHEAD = 16;
 
 /** How many stored events a stream, or a watcher, reads at a time. */
 const BATCH = 100;
+
+const MAX_REPLAY_EVENTS = 5_000;
 
 const SNAPSHOT_TIMEOUT = Duration.seconds(2);
 
@@ -530,7 +533,9 @@ export const make = Effect.gen(function* () {
 				const reached = yield* operation("follow", prove);
 				if (!listensWhereProved(reached, workspace)) return yield* endStream();
 				const starts = yield* snapshot([stream, ...controlStreams]);
-				if (starts === undefined) return yield* endStream();
+				const start = starts?.get(stream);
+				if (starts === undefined || start === undefined) return yield* endStream();
+				const startPosition = EventStore.afterCursor(start);
 				const feeds = new Map(
 					[...starts].map(([stream, cursor]) => [stream, EventStore.afterCursor(cursor)]),
 				);
@@ -556,6 +561,7 @@ export const make = Effect.gen(function* () {
 										stream,
 										cursor: since,
 										controls: replayControls(),
+										through: startPosition,
 									},
 									BATCH,
 									signal,
@@ -565,7 +571,6 @@ export const make = Effect.gen(function* () {
 
 				// Both carry where the stream starts, so a client cut off before
 				// anything else arrives resumes from there.
-				const start = starts.get(stream);
 				if (since === undefined) {
 					// Where the stream starts is known: whatever the client fetched before
 					// this, it fetches again, and what changes after arrives here.
@@ -575,6 +580,7 @@ export const make = Effect.gen(function* () {
 					yield* Queue.offer(outbox, { seq: start, event: streamEvent("reset") });
 				}
 				let current = first;
+				let lastSentPosition = since === undefined ? startPosition : EventStore.afterCursor(since);
 				const proveForSending = (seq?: number) =>
 					Effect.map(life.proveAgain(seq), (exit) => {
 						if (Exit.isFailure(exit)) return false;
@@ -614,7 +620,10 @@ export const make = Effect.gen(function* () {
 					});
 				const send = (outcome: Outcome) =>
 					Effect.gen(function* () {
-						if (outcome.kind === "send") yield* Queue.offer(outbox, outcome.delivery);
+						if (outcome.kind === "send") {
+							yield* Queue.offer(outbox, outcome.delivery);
+							if (typeof outcome.delivery.seq === "number") lastSentPosition = outcome.delivery.seq;
+						}
 						return outcome.kind !== "end";
 					});
 				const sendStored = Effect.fnUntraced(function* (rows: readonly EventStore.StoredOn[]) {
@@ -637,17 +646,32 @@ export const make = Effect.gen(function* () {
 				});
 				const sendReplay = Effect.fnUntraced(function* (firstPage: readonly EventStore.StoredOn[]) {
 					let page = firstPage;
+					let remaining = MAX_REPLAY_EVENTS;
 					while (true) {
 						for (const row of page) feeds.set(row.stream, row.seq);
 						if (!(yield* sendStored(page))) return false;
-						if (page.length < BATCH) return true;
+						const position = feeds.get(stream) ?? startPosition;
+						if (page.length < Math.min(BATCH, remaining) || position >= startPosition) {
+							// Filtered events still need a cursor so the next reconnect starts past them.
+							if (position > lastSentPosition) {
+								yield* Queue.offer(outbox, { seq: position, event: streamEvent("ready") });
+							}
+							return true;
+						}
+						remaining -= page.length;
+						if (remaining === 0) {
+							feeds.set(stream, startPosition);
+							yield* Queue.offer(outbox, { seq: start, event: streamEvent("reset") });
+							return true;
+						}
 						const next = yield* Effect.promise((signal) =>
 							store.replayPage(
 								{
-									feed: { stream, since: feeds.get(stream) ?? 0 },
+									feed: { stream, since: position },
 									controls: replayControls(),
+									through: startPosition,
 								},
-								BATCH,
+								Math.min(BATCH, remaining),
 								signal,
 							),
 						);

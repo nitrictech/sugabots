@@ -31,15 +31,17 @@ export function inMemoryEventStore({
 	let next = 0;
 	const prunedThrough = new Map<EventStream, number>();
 
-	const following = (feeds: ReadonlyArray<EventStore.Feed>, limit: number) =>
+	const following = (feeds: ReadonlyArray<EventStore.Feed>, limit: number, through?: number) =>
 		rows
-			.filter((row) =>
-				feeds.some(
-					(feed) =>
-						feed.stream === row.stream &&
-						row.seq > feed.since &&
-						(feed.types === undefined || feed.types.includes(row.event.type)),
-				),
+			.filter(
+				(row) =>
+					(through === undefined || row.seq <= through) &&
+					feeds.some(
+						(feed) =>
+							feed.stream === row.stream &&
+							row.seq > feed.since &&
+							(feed.types === undefined || feed.types.includes(row.event.type)),
+					),
 			)
 			.slice(0, limit)
 			.map(({ seq, stream, event }) => ({ seq, stream, event }));
@@ -77,7 +79,7 @@ export function inMemoryEventStore({
 			if ("feed" in page) {
 				return page.feed.since < (prunedThrough.get(page.feed.stream) ?? 0)
 					? undefined
-					: following([page.feed, ...page.controls], limit);
+					: following([page.feed, ...page.controls], limit, page.through);
 			}
 			const { stream, cursor, controls } = page;
 			const position = EventStore.afterCursor(cursor);
@@ -89,7 +91,9 @@ export function inMemoryEventStore({
 						position <= next &&
 						!rows.some((row) => row.stream === stream && row.seq >= boundary && row.seq <= position)
 					: rows.some((row) => row.seq === cursor && row.stream === stream);
-			return retained ? following([{ stream, since: position }, ...controls], limit) : undefined;
+			return retained
+				? following([{ stream, since: position }, ...controls], limit, page.through)
+				: undefined;
 		},
 
 		async prune(before) {
