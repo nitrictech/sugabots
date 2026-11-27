@@ -14,7 +14,10 @@ import { Clock, Context, Duration, Effect, Layer } from "effect";
 import { type Database, effectRunner } from "../../database/database.ts";
 import type { ChatFileStore } from "../../files/chat-file-store.ts";
 import type { Principal } from "../../principal.ts";
-import { proveCanReachConnector } from "../../proofs/can-use-connector.ts";
+import {
+	discoverConnectorRevisions,
+	proveCanReachConnector,
+} from "../../proofs/can-use-connector.ts";
 import { named } from "../../proofs/proof.ts";
 import {
 	type ConnectorSessions,
@@ -310,18 +313,15 @@ export function from({
 						: undefined;
 				const isFree = (connector: { handle: string }) => !taken.has(connector.handle);
 				const owned = <Connector>(connector: Connector) => ({ ...connector, projectId });
-				const allowed = yield* Effect.filter(found.targets.filter(isFree), (candidate) =>
-					named(principal, candidate.connectorId, (acting, id) =>
-						proveCanReachConnector(acting, id).pipe(
-							Effect.map(
-								(reach) =>
-									reach.workspace === workspaceId &&
-									reach.project === projectId &&
-									reach.revision === candidate.configurationRevision,
-							),
-							Effect.orElseSucceed(() => false),
-						),
-					),
+				const candidates = found.targets.filter(isFree);
+				const revisions = yield* discoverConnectorRevisions(
+					principal,
+					workspaceId,
+					projectId,
+					candidates.map(({ connectorId }) => connectorId),
+				);
+				const allowed = candidates.filter(
+					(candidate) => revisions.get(candidate.connectorId) === candidate.configurationRevision,
 				);
 				reached.push(...allowed.map(owned));
 				expired.push(...found.signInExpired.filter(isFree).map(owned));

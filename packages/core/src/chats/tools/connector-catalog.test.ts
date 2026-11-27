@@ -130,25 +130,34 @@ it("offers a bot's own connector in another project only once it is turned on th
 		kind: "http",
 	});
 
-	const turnOn = (addressRevision: number) =>
+	const reports = await store.create(workspaceId, bot.defaultProject, admin, {
+		name: "Reports",
+		url: "https://reports.example.com/api",
+		kind: "http",
+	});
+	const turnOn = (addressRevision: number, connectorId = own.id) =>
 		store.setOnInProject({
 			workspaceId,
 			projectId,
 			botId: bot.id,
-			connectorId: own.id,
+			connectorId,
 			memberId: admin,
 			on: true,
 			addressRevision,
 		});
 	const moveTo = (url: string) => store.update(workspaceId, bot.defaultProject, own.id, { url });
 
+	await turnOn(reports.addressRevision, reports.id);
+	expect(await offered()).toEqual(expect.arrayContaining([reports.id]));
 	expect(await offered()).not.toContain(own.id);
 
 	await turnOn(own.addressRevision);
 	expect(await offered()).toContain(own.id);
 
 	await moveTo("https://other-tracker.example.com/api");
-	expect(await offered()).not.toContain(own.id);
+	const stillOffered = await offered();
+	expect(stillOffered).not.toContain(own.id);
+	expect(stillOffered).toContain(reports.id);
 	// Moved back, it is still off: it was turned on for the address as it was then.
 	const movedBack = await moveTo("https://tracker.example.com/api");
 	expect(await offered()).not.toContain(own.id);

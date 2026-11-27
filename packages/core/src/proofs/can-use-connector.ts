@@ -4,22 +4,15 @@ import {
 	connectorToolWritesOrDeletes,
 } from "@sugabots/contracts";
 import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { query } from "../database/database.ts";
+import { type Executor, query } from "../database/database.ts";
 import { connector, placedChat, projectBotConnector } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import type { AutomationRun, BotForAsker, Principal } from "../principal.ts";
+import type { Principal } from "../principal.ts";
 import { toolsOf } from "../providers/connectors/connector-store.ts";
 import { toolAccessOf } from "../providers/connectors/tool-access.ts";
-import {
-	decideReach,
-	mayInProjectAs,
-	memberReaches,
-	type ReachFacts,
-	reachFacts,
-	whoActs,
-} from "./facts.ts";
+import { decideReach, mayInProjectAs, memberReaches, reachFacts, whoActs } from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
 export interface ReachesEnabledConnector<P, K> extends Proof<"ReachesEnabledConnector", [P, K]> {
@@ -45,27 +38,19 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 	Effect.gen(function* () {
 		const hidden = new ResourceHidden({ resource: "connector" });
 		const [row] = isUuid(id.value)
-			? yield* query((db) =>
-					db
-						.select({
-							workspaceId: connector.workspaceId,
-							projectId: connector.projectId,
-							configurationRevision: connector.configurationRevision,
-							handle: connector.handle,
-							enabled: connector.enabled,
-							kind: connector.kind,
-							url: connector.url,
-							addressRevision: connector.addressRevision,
-							tools: connector.tools,
-							toolAccess: connector.toolAccess,
-						})
-						.from(connector)
-						.where(eq(connector.id, id.value))
-						.limit(1),
-				)
+			? yield* query((db) => enabledConnectorRows(db, principal.value, eq(connector.id, id.value)))
 			: [];
-		if (!row?.enabled) return yield* hidden;
-		const mayWrite = yield* connectorAccess(principal.value, id.value, row);
+		if (!row) return yield* hidden;
+		const acting = principal.value;
+		if (
+			acting._tag === "WebhookCall" &&
+			(acting.source.kind !== "github" || acting.source.connector !== id.value)
+		)
+			return yield* hidden;
+		const mayWrite =
+			acting._tag === "WebhookCall"
+				? true
+				: yield* connectorAccess(acting, yield* connectorPlaces(acting, row), row.workingProjectId);
 		const reach: ReachesEnabledConnector<P, K> = ReachesEnabledConnectorProof.prove(
 			[principal, id],
 			{
@@ -80,32 +65,76 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 		return { row, reach, mayWrite };
 	});
 
+function enabledConnectorRows(db: Executor, acting: Principal, selected: SQL | undefined) {
+	const turn =
+		acting._tag === "BotForAsker" || acting._tag === "AutomationRun" ? acting : undefined;
+	return db
+		.select({
+			id: connector.id,
+			workspaceId: connector.workspaceId,
+			projectId: connector.projectId,
+			configurationRevision: connector.configurationRevision,
+			handle: connector.handle,
+			kind: connector.kind,
+			url: connector.url,
+			tools: connector.tools,
+			toolAccess: connector.toolAccess,
+			workingProjectId: sql<string | null>`case
+				when ${placedChat.projectId} = ${connector.projectId} or ${projectBotConnector.connectorId} is not null
+				then ${placedChat.projectId}
+			end`,
+		})
+		.from(connector)
+		.leftJoin(placedChat, turn ? eq(placedChat.id, turn.chat) : sql`false`)
+		.leftJoin(
+			projectBotConnector,
+			turn
+				? and(
+						eq(projectBotConnector.projectId, placedChat.projectId),
+						eq(projectBotConnector.connectorId, connector.id),
+						eq(projectBotConnector.botId, turn.bot),
+						eq(projectBotConnector.addressRevision, connector.addressRevision),
+					)
+				: sql`false`,
+		)
+		.where(and(eq(connector.enabled, true), selected));
+}
+
+const connectorPlaces = (
+	acting: Principal,
+	{ projectId, workingProjectId }: { projectId: string; workingProjectId: string | null },
+) =>
+	Effect.gen(function* () {
+		const who = whoActs(acting);
+		const source = yield* query((db) => reachFacts(db, projectId, who));
+		const own =
+			source !== undefined &&
+			(acting._tag === "BotForAsker" || acting._tag === "AutomationRun") &&
+			acting.workspace === source.project.workspace &&
+			source.project.defaultOf?.id === acting.bot;
+		const working =
+			own && workingProjectId && workingProjectId !== projectId
+				? yield* query((db) => reachFacts(db, workingProjectId, who))
+				: source;
+		return { source, own, working };
+	});
+
 const connectorAccess = (
 	acting: Principal,
-	id: string,
-	{ projectId, addressRevision }: { readonly projectId: string; readonly addressRevision: number },
+	{ source, own, working }: Effect.Success<ReturnType<typeof connectorPlaces>>,
+	workingProjectId: string | null,
 ) =>
 	Effect.gen(function* () {
 		const hidden = new ResourceHidden({ resource: "connector" });
-		if (acting._tag === "WebhookCall") {
-			if (acting.source.kind !== "github" || acting.source.connector !== id) return yield* hidden;
-			return true;
-		}
-		const facts = yield* query((db) => reachFacts(db, projectId, whoActs(acting)));
-		if (!facts) return yield* hidden;
-		const botsOwn =
-			(acting._tag === "BotForAsker" || acting._tag === "AutomationRun") &&
-			acting.workspace === facts.project.workspace &&
-			facts.project.defaultOf?.id === acting.bot;
-		const place = botsOwn
-			? yield* placeWhereTurnedOn(acting, facts, { id, addressRevision })
-			: facts;
+		if (!source) return yield* hidden;
+		const place = own ? working : source;
 		if (!place) return yield* hidden;
-		if (botsOwn) {
+		if (own) {
+			if (!workingProjectId || place.project.id !== workingProjectId) return yield* hidden;
 			if (acting._tag === "BotForAsker" && !memberReaches(place.member, place.project))
 				return yield* hidden;
 		} else {
-			const decision = decideReach(acting, facts, undefined);
+			const decision = decideReach(acting, place, undefined);
 			if (decision.kind === "hidden") return yield* hidden;
 			if (decision.kind === "botCannotReach")
 				return yield* new BotCannotReach({ resource: "connector" });
@@ -120,50 +149,46 @@ const connectorAccess = (
 		);
 	});
 
-/**
- * Where the bot's own connector `connector` is on for the turn, as the facts
- * of the project its turn's chat is in: always the bot's default project,
- * where the connector lives, `defaultProject`; any other only once one of
- * that project's managers turned it on there, for the address revision it
- * still has. None where it is off.
- *
- * Turning it on in a project lets the bot use it for whoever may talk to the
- * bot there, so the asker is judged in that project, not in the bot's
- * default project, which they may not reach.
- */
-const placeWhereTurnedOn = (
-	acting: BotForAsker | AutomationRun,
-	defaultProject: ReachFacts,
-	connector: { readonly id: string; readonly addressRevision: number },
-) =>
-	Effect.gen(function* () {
-		const [working] = yield* query((db) =>
-			db
-				.select({ projectId: placedChat.projectId })
-				.from(placedChat)
-				.where(eq(placedChat.id, acting.chat))
-				.limit(1),
+/** The enabled revisions a turn may discover, with project standing read once for the candidates. */
+export const discoverConnectorRevisions = Effect.fn("Connector.discoverRevisions")(function* (
+	acting: Principal,
+	workspaceId: string,
+	projectId: string,
+	ids: readonly string[],
+) {
+	const candidates = ids.filter(isUuid);
+	if (candidates.length === 0) return new Map<string, number>();
+	const rows = yield* query((db) =>
+		enabledConnectorRows(
+			db,
+			acting,
+			and(
+				eq(connector.workspaceId, workspaceId),
+				eq(connector.projectId, projectId),
+				inArray(connector.id, candidates),
+			),
+		),
+	);
+	const representative = rows.find((row) => row.workingProjectId !== null) ?? rows[0];
+	if (!representative) return new Map<string, number>();
+	if (acting._tag === "WebhookCall") {
+		return new Map(
+			rows.flatMap((row) =>
+				acting.source.kind === "github" && acting.source.connector === row.id
+					? [[row.id, row.configurationRevision] as const]
+					: [],
+			),
 		);
-		const workingProject = working?.projectId;
-		if (!workingProject) return undefined;
-		if (workingProject === defaultProject.project.id) return defaultProject;
-		const [turnedOn] = yield* query((db) =>
-			db
-				.select({ connectorId: projectBotConnector.connectorId })
-				.from(projectBotConnector)
-				.where(
-					and(
-						eq(projectBotConnector.projectId, workingProject),
-						eq(projectBotConnector.connectorId, connector.id),
-						eq(projectBotConnector.botId, acting.bot),
-						eq(projectBotConnector.addressRevision, connector.addressRevision),
-					),
-				)
-				.limit(1),
-		);
-		if (!turnedOn) return undefined;
-		return yield* query((db) => reachFacts(db, workingProject, whoActs(acting)));
-	});
+	}
+	const places = yield* connectorPlaces(acting, representative);
+	const allowed = yield* Effect.filter(rows, (row) =>
+		connectorAccess(acting, places, row.workingProjectId).pipe(
+			Effect.as(true),
+			Effect.orElseSucceed(() => false),
+		),
+	);
+	return new Map(allowed.map((row) => [row.id, row.configurationRevision]));
+});
 
 export const proveCanReachConnector = <P, K>(
 	principal: Named<P, Principal>,
