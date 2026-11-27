@@ -12,7 +12,14 @@ import { isUuid } from "../ids/ids.ts";
 import type { AutomationRun, BotForAsker, Principal } from "../principal.ts";
 import { toolsOf } from "../providers/connectors/connector-store.ts";
 import { toolAccessOf } from "../providers/connectors/tool-access.ts";
-import { decideReach, mayInProjectAs, memberReaches, reachFacts, whoActs } from "./facts.ts";
+import {
+	decideReach,
+	mayInProjectAs,
+	memberReaches,
+	type ReachFacts,
+	reachFacts,
+	whoActs,
+} from "./facts.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
 export interface ReachesEnabledConnector<P, K> extends Proof<"ReachesEnabledConnector", [P, K]> {
@@ -90,10 +97,12 @@ const connectorAccess = (
 			(acting._tag === "BotForAsker" || acting._tag === "AutomationRun") &&
 			acting.workspace === facts.project.workspace &&
 			facts.project.defaultOf?.id === acting.bot;
+		const place = botsOwn
+			? yield* placeWhereTurnedOn(acting, facts, { id, addressRevision })
+			: facts;
+		if (!place) return yield* hidden;
 		if (botsOwn) {
-			if (acting._tag === "BotForAsker" && !memberReaches(facts.member, facts.project))
-				return yield* hidden;
-			if (!(yield* onWhereTurnWorks(acting, { id, projectId, addressRevision })))
+			if (acting._tag === "BotForAsker" && !memberReaches(place.member, place.project))
 				return yield* hidden;
 		} else {
 			const decision = decideReach(acting, facts, undefined);
@@ -104,26 +113,28 @@ const connectorAccess = (
 				return yield* new ActionForbidden({ proof: "CanUseConnector" });
 		}
 		const member =
-			acting._tag === "MemberSession" || acting._tag === "BotForAsker" ? facts.member : undefined;
+			acting._tag === "MemberSession" || acting._tag === "BotForAsker" ? place.member : undefined;
 		return (
 			acting._tag === "AutomationRun" ||
-			(member !== undefined && mayInProjectAs(member, facts.project, "project.change"))
+			(member !== undefined && mayInProjectAs(member, place.project, "project.change"))
 		);
 	});
 
 /**
- * Whether the bot's own connector `connector` is on in the project its turn's
- * chat is in: always in the bot's default project, where the connector lives;
- * in any other, only once one of that project's managers turned it on there,
- * for the address revision it still has.
+ * Where the bot's own connector `connector` is on for the turn, as the facts
+ * of the project its turn's chat is in: always the bot's default project,
+ * where the connector lives, `defaultProject`; any other only once one of
+ * that project's managers turned it on there, for the address revision it
+ * still has. None where it is off.
+ *
+ * Turning it on in a project lets the bot use it for whoever may talk to the
+ * bot there, so the asker is judged in that project, not in the bot's
+ * default project, which they may not reach.
  */
-const onWhereTurnWorks = (
+const placeWhereTurnedOn = (
 	acting: BotForAsker | AutomationRun,
-	connector: {
-		readonly id: string;
-		readonly projectId: string;
-		readonly addressRevision: number;
-	},
+	defaultProject: ReachFacts,
+	connector: { readonly id: string; readonly addressRevision: number },
 ) =>
 	Effect.gen(function* () {
 		const [working] = yield* query((db) =>
@@ -134,8 +145,8 @@ const onWhereTurnWorks = (
 				.limit(1),
 		);
 		const workingProject = working?.projectId;
-		if (!workingProject) return false;
-		if (workingProject === connector.projectId) return true;
+		if (!workingProject) return undefined;
+		if (workingProject === defaultProject.project.id) return defaultProject;
 		const [turnedOn] = yield* query((db) =>
 			db
 				.select({ connectorId: projectBotConnector.connectorId })
@@ -150,7 +161,8 @@ const onWhereTurnWorks = (
 				)
 				.limit(1),
 		);
-		return turnedOn !== undefined;
+		if (!turnedOn) return undefined;
+		return yield* query((db) => reachFacts(db, workingProject, whoActs(acting)));
 	});
 
 export const proveCanReachConnector = <P, K>(

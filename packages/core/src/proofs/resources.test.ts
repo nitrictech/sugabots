@@ -6,10 +6,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	addMembership,
 	seedAutomation,
+	seedBot,
 	seedComputer,
 	seedConnector,
 	seedMessage,
 	seedPage,
+	seedProject,
 	seedProjectBotConnector,
 	seedProjectChat,
 	seedWorkspace,
@@ -369,6 +371,26 @@ describe("resource proofs", () => {
 			);
 			expect(await uses(inProject, pubsOwn, "list_issues")).toBe("ResourceHidden");
 			expect(await uses(inOwnChat, pubsOwn, "list_issues")).toBe("ok");
+		});
+
+		it("lets a private bot use its own connector, turned on in a private project, for that project's members", async () => {
+			const { a } = world;
+			const privateBot = await seedBot(a.workspace, { createdById: a.ed, visibility: "private" });
+			const project = await seedProject(a.workspace, {
+				leadBotId: privateBot.id,
+				members: [a.ed, a.quinn, a.vi],
+			});
+			const own = await seedConnector(a.workspace, privateBot.defaultProject, { tools });
+			await seedProjectBotConnector(a.workspace, project, privateBot.id, own);
+			const chat = await seedProjectChat(a.workspace, project, a.quinn);
+			// Quinn and Vi are in the project but not the bot's members.
+			const quinnsTurn = await as.botFor(a.quinn, privateBot.id, chat);
+			const visTurn = await as.botFor(a.vi, privateBot.id, chat);
+
+			expect(await uses(quinnsTurn, own, "list_issues")).toBe("ok");
+			expect(await uses(quinnsTurn, own, "create_issue")).toBe("ok");
+			expect(await uses(visTurn, own, "list_issues")).toBe("ok");
+			expect(await uses(visTurn, own, "create_issue")).toBe("ActionForbidden");
 		});
 
 		it("lets a run use its project's connectors and its bot's own, and members those they reach", async () => {
