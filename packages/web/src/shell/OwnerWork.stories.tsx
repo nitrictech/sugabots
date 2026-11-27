@@ -90,7 +90,8 @@ export const NoChatsYet = meta.story({
 		);
 	},
 	play: async ({ canvas }) => {
-		await expect(await canvas.findByText("No chats yet")).toBeInTheDocument();
+		// The whole app renders, so the list can briefly show in more than one place.
+		await expect((await canvas.findAllByText("No chats yet")).length).toBeGreaterThan(0);
 	},
 });
 
