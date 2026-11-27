@@ -247,6 +247,7 @@ export const approverFacts = (memberId: string, facts: TurnFacts, computerProjec
 export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function* (
 	db: Executor,
 	callIds: readonly string[],
+	recipientId?: string,
 ) {
 	if (callIds.length === 0) return [];
 	const member = sql`audience.member_id`;
@@ -286,10 +287,15 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 		from candidates
 		inner join ${turn} as approver_turn on approver_turn.id = candidates.turn_id
 		inner join ${bot} as approver_bot on approver_bot.id = approver_turn.bot_id
-		inner join ${placedChat} as approver_chat on approver_chat.id = approver_turn.chat_id
+		inner join lateral (
+			select id, kind, root_chat_id, project_id, workspace_id from ${placedChat}
+			where id = approver_turn.chat_id
+			limit 1
+		) as approver_chat on true
 		inner join ${workspace} as audience_workspace on audience_workspace.id = approver_chat.workspace_id
 			and not audience_workspace.deleting
 		inner join ${membership} as audience on audience.workspace_id = audience_workspace.id and not audience.leaving
+			${recipientId === undefined ? sql`` : sql`and audience.member_id = ${recipientId}::uuid`}
 		left join ${automationRun} as approver_run on approver_run.chat_id = approver_turn.chat_id
 		left join ${bot} as run_bot on run_bot.id = approver_run.bot_id
 		left join ${project} as computer_project on computer_project.id = candidates.approval_computer_project_id

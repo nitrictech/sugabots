@@ -13,7 +13,7 @@ import type { UserText } from "@sugabots/errors";
 import { type AnyColumn, and, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
-import { reachesChatFor } from "../authorization/access.ts";
+import { membersReachingProject, reachesChatFor } from "../authorization/access.ts";
 import { fixedApprovalInput } from "../chats/tools/approvers.ts";
 import type { Executor } from "../database/database.ts";
 import type { Audience } from "../database/events/audience.ts";
@@ -443,10 +443,8 @@ export const mayStillBeTold = Effect.fn("Notifications.mayStillBeTold")(function
 			)
 			.limit(1);
 		if (!waiting) return false;
-		const approvers = yield* approvalAudience(db, [audience.toolCall]);
-		return approvers.some(
-			(approver) => approver.memberId === memberId && (approver.reachesChat || !audience.showsChat),
-		);
+		const [approver] = yield* approvalAudience(db, [audience.toolCall], memberId);
+		return approver !== undefined && (approver.reachesChat || !audience.showsChat);
 	}
 	if (audience?.kind !== "chat") return true;
 	const [reaching] = yield* db
@@ -542,7 +540,7 @@ const membersReaching = Effect.fn("Notifications.membersReaching")(function* (
 				eq(membership.workspaceId, place.workspaceId),
 				approvalRecipients
 					? inArray(member.id, approvalRecipients)
-					: reachesChatFor({ projectId: sql`${place.projectId}::uuid` }, member.id),
+					: sql`${member.id} in (${membersReachingProject(sql`${place.projectId}::uuid`)})`,
 			),
 		);
 });

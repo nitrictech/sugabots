@@ -315,6 +315,18 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				(await onDatabase((db) => approvalAudience(db, [callId]))).map(({ memberId }) => memberId);
 			expect(await askedOf(assistantsRequest)).toEqual([viewerId]);
 			expect(await askedOf(personalBotsRequest)).toEqual([viewerId]);
+			expect(
+				await onDatabase((db) => approvalAudience(db, [personalBotsRequest], viewerId)),
+			).toEqual([
+				expect.objectContaining({
+					memberId: viewerId,
+					reachesChat: true,
+					calls: [expect.objectContaining({ id: personalBotsRequest })],
+				}),
+			]);
+			expect(
+				await onDatabase((db) => approvalAudience(db, [personalBotsRequest], a.admin)),
+			).toEqual([]);
 		});
 
 		it("lets admins and the run's bot's managers who reach its chat decide a run's call", async () => {

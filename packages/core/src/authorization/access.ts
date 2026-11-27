@@ -51,12 +51,27 @@ export function reachesProjectFor(
  * none, the workspace's members who reach the bot.
  */
 export function membersReachingProject(projectId: SQLWrapper): SQL<string> {
-	return sql`select reaching_member.member_id
-		from ${membership} as reaching_member
-		inner join ${project} as reached_project
-			on reached_project.workspace_id = reaching_member.workspace_id
+	return sql`select candidate.member_id
+		from ${project} as reached_project
+		left join ${bot} as reached_bot on reached_bot.id = reached_project.default_of_bot_id
+		cross join lateral (
+			select project_members.member_id
+			from ${projectMember} as project_members
+			where reached_project.default_of_bot_id is null and project_members.project_id = reached_project.id
+			union all
+			select bot_members.member_id
+			from ${botMember} as bot_members
+			where reached_bot.visibility = 'private' and bot_members.bot_id = reached_bot.id
+			union all
+			select reached_bot.created_by_id
+			where reached_bot.visibility = 'personal' and reached_bot.created_by_id is not null
+			union all
+			select workspace_members.member_id
+			from ${membership} as workspace_members
+			where reached_bot.visibility = 'public' and workspace_members.workspace_id = reached_bot.workspace_id
+		) as candidate
 		where reached_project.id = ${outerColumn(projectId)}
-			and ${reachesProjectFor(sql`reached_project.id`, sql`reaching_member.member_id`)}`;
+			and ${reachesProjectFor(sql`reached_project.id`, sql`candidate.member_id`)}`;
 }
 
 /**
