@@ -553,47 +553,55 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const ed = await signedIn.member(world.ed);
 		const stream = chatStream(world.chat);
 		const changed = streamEvent("chat.changed", { chatId: world.chat });
-		await runOnPostgres(
-			transaction(outbox.publish(Array.from({ length: 103 }, () => ({ stream, event: changed })))),
-		);
-		const rows = await stored.replay(stream, 0, 103);
-		const [anchor] = rows;
-		const pruned = rows[101];
-		if (!anchor || !pruned) throw new Error("Replay events were not stored");
-		const scope = Scope.makeUnsafe();
-		onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
-		const resumed = await runOnPostgres(
-			Scope.provide(scope)(
-				longRunning["events.followChat"](
-					ed,
-					{ chatId: world.chat, since: anchor.seq },
-					{ kind: "request" },
-				),
-			),
-		);
+		await commit(stream, changed);
+		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The stream has no cursor");
 
-		// The first page is already read, and the sender waits for its client to take it.
-		await onDatabase((db) =>
-			db
-				.update(event)
-				.set({ createdAt: new Date(0) })
-				.where(eq(event.seq, pruned.seq)),
-		);
-		await stored.prune(new Date(1));
-		const heard = await runOnPostgres(
-			Stream.runCollect(Stream.take(resumed.stream, 101)).pipe(Effect.timeout("4 seconds")),
-		);
-		expect(heard.slice(0, 100).map(({ seq }) => seq)).toEqual(
-			rows.slice(1, 101).map(({ seq }) => seq),
-		);
-		expect(heard[100]).toEqual({ seq: rows[102]?.seq, event: streamEvent("reset") });
+		const replayed: Delivery[] = [];
+		let retained: number | undefined;
+		const { follow: followWithPruning } = await servedRegistry({
+			bus: Layer.succeed(EventBus.Service, bus),
+			eventStore: {
+				...stored,
+				async replayPage(page, limit, signal) {
+					if ("cursor" in page) {
+						await runOnPostgres(
+							transaction(
+								outbox.publish(
+									Array.from({ length: limit + 2 }, () => ({ stream, event: changed })),
+								),
+							),
+						);
+						const first = await stored.replayPage(page, limit, signal);
+						for (const { seq, event } of first ?? []) replayed.push({ seq, event });
+						return first;
+					}
+
+					const [pruned, kept] = await stored.replay(stream, page.feed.since, 2, signal);
+					if (!pruned || !kept) throw new Error("Expected two events beyond the first page");
+					retained = kept.seq;
+					await onDatabase((db) =>
+						db
+							.update(event)
+							.set({ createdAt: new Date(0) })
+							.where(eq(event.seq, pruned.seq)),
+					);
+					await stored.prune(new Date(1));
+					return stored.replayPage(page, limit, signal);
+				},
+			},
+		});
+		const resumed = await followWithPruning(ed, "events.followChat", { chatId: world.chat, since });
+		onTestFinished(() => resumed.close());
+
+		expect(replayed.length).toBeGreaterThan(0);
+		for (const expected of replayed) expect(await resumed.next()).toEqual(expected);
+		const reset = await resumed.next();
+		expect(retained).toBeDefined();
+		expect(reset).toEqual({ seq: retained, event: streamEvent("reset") });
 
 		await commit(stream, changed);
-		expect(
-			await runOnPostgres(
-				Stream.runCollect(Stream.take(resumed.stream, 1)).pipe(Effect.timeout("4 seconds")),
-			),
-		).toEqual([{ seq: expect.any(Number), event: changed }]);
+		expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: changed });
 	});
 
 	it("resets a cursor from another stream even when this stream was empty", async () => {
