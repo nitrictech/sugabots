@@ -1,7 +1,14 @@
 import { HttpResponse, http } from "msw";
-import { expect, within } from "storybook/test";
+import { expect, screen, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
-import { revenue } from "@/shell/story-fixtures.test-support.ts";
+import {
+	accountManager,
+	growthDesk,
+	leadResearcher,
+	oncall,
+	revenue,
+	storyBots,
+} from "@/shell/story-fixtures.test-support.ts";
 import {
 	appHandlers,
 	StoryApp,
@@ -157,6 +164,116 @@ export const GeneralAsAnEditor = meta.story({
 		await expect(await canvas.findByRole("heading", { name: "Revenue" })).toBeInTheDocument();
 		await expect(canvas.queryByRole("button", { name: "Delete project" })).toBeNull();
 		await expect(canvas.queryByRole("textbox", { name: "Name" })).toBeNull();
+	},
+});
+
+/** Revenue made private, so private bots may be in it and lead it. */
+const privateProjects = projectsWithMembers.map((project) =>
+	project.id === revenue.id ? { ...project, visibility: "private" as const } : project,
+);
+
+/** Account Manager, in Revenue, and On-call, in another project, made private. */
+const withPrivateBots = storyBots.map((bot) =>
+	bot.id === accountManager.id || bot.id === oncall.id
+		? { ...bot, visibility: "private" as const }
+		: bot,
+);
+
+/**
+ * A private project with a private bot in it can't be made public: its Public
+ * switch is off, and the row says which bot to take out first.
+ */
+export const PublicHeldByPrivateBots = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...revenueHandlers,
+			...appHandlers({ projects: privateProjects, bots: withPrivateBots }),
+		);
+	},
+	render: () => <StoryApp path={revenueSettings} />,
+	play: async ({ canvas }) => {
+		const visibility = await canvas.findByRole("switch", { name: "Make public" });
+		await expect(
+			await canvas.findByText(/Account Manager is a private bot in it/),
+		).toBeInTheDocument();
+		await expect(visibility).toBeDisabled();
+		await expect(visibility).toHaveAccessibleDescription(/Account Manager is a private bot in it/);
+	},
+});
+
+/** Making a project public asks first, saying everyone in the workspace will see its chats and files. */
+export const MakingPublic = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...revenueHandlers, ...appHandlers({ projects: privateProjects }));
+	},
+	render: () => <StoryApp path={revenueSettings} />,
+	play: async ({ canvas, userEvent }) => {
+		const visibility = await canvas.findByRole("switch", { name: "Make public" });
+		await expect(visibility).toBeEnabled();
+		await userEvent.click(visibility);
+		const dialog = await screen.findByRole("dialog", { name: `Make ${revenue.name} public?` });
+		await expect(within(dialog).getByText(/read its chats and files/)).toBeInTheDocument();
+	},
+});
+
+/** A private project's lead bot may be a private bot: the picker offers those you reach. */
+export const PrivateBotsInLeadPicker = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...revenueHandlers,
+			...appHandlers({ projects: privateProjects, bots: withPrivateBots }),
+		);
+	},
+	render: () => <StoryApp path={revenueSettings} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(
+			await canvas.findByRole("button", { name: `Lead bot: ${growthDesk.name}` }),
+		);
+		const menu = await screen.findByRole("menu");
+		await expect(within(menu).getByRole("menuitem", { name: oncall.name })).toBeInTheDocument();
+	},
+});
+
+/** A private project's Add bot menu offers the private bots you reach that aren't in it yet. */
+export const PrivateBotsInAddBot = meta.story({
+	beforeEach: PrivateBotsInLeadPicker.input.beforeEach,
+	render: () => <StoryApp path={revenuePage("bots")} />,
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "Add bot" }));
+		const menu = await screen.findByRole("menu");
+		await expect(within(menu).getByRole("menuitem", { name: oncall.name })).toBeInTheDocument();
+		// Closed again before the accessibility check, which counts the open menu's focus guards
+		// beside the button as focusable hidden elements.
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+	},
+});
+
+/**
+ * A lead bot that is a private bot you don't reach still shows as the lead,
+ * as the project lists it, though you can't pick it.
+ */
+export const LeadYouDontReach = meta.story({
+	beforeEach({ msw }) {
+		const hiddenLead = { ...leadResearcher, visibility: "private" as const };
+		msw.use(
+			...revenueHandlers,
+			http.get(`${API}/projects/:projectId/bots`, () =>
+				HttpResponse.json([growthDesk, accountManager, hiddenLead]),
+			),
+			...appHandlers({
+				projects: privateProjects.map((project) =>
+					project.id === revenue.id ? { ...project, leadBotId: hiddenLead.id } : project,
+				),
+				bots: storyBots.filter((bot) => bot.id !== leadResearcher.id),
+			}),
+		);
+	},
+	render: () => <StoryApp path={revenueSettings} />,
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByRole("button", { name: `Lead bot: ${leadResearcher.name}` }),
+		).toBeInTheDocument();
 	},
 });
 

@@ -9,6 +9,7 @@ import {
 	appHandlers,
 	connectorHandlers,
 	StoryApp,
+	storyMember,
 	storyModel,
 } from "../story-app.test-support.tsx";
 import { personalBot } from "./BotRestrictions.test-support.ts";
@@ -282,6 +283,111 @@ export const MakingPrivate = meta.story({
 			within(dialog).getByText(/It will leave every public project it's in/),
 		).toBeInTheDocument();
 		await expect(within(dialog).getByRole("button", { name: "Make private" })).toBeInTheDocument();
+	},
+});
+
+/**
+ * Making a bot private is refused while it leads a public project: the
+ * confirmation stays open and says which project needs another lead bot.
+ */
+export const MakingPrivateWhileLeading = meta.story({
+	beforeEach({ msw }) {
+		const refusal = `${growthDesk.name} leads ${revenue.name}. Choose another lead bot for it first.`;
+		msw.use(
+			http.patch(`${API}/bots/:botId`, () =>
+				HttpResponse.json(
+					{
+						_tag: "Conflict",
+						message: refusal,
+						error: { _tag: "LeadsProjects", userMessage: refusal, isRetryable: false },
+					},
+					{ status: 409 },
+				),
+			),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		const visibility = await canvas.findByRole("radiogroup", { name: "Visibility" });
+		await userEvent.click(within(visibility).getByRole("radio", { name: "Private" }));
+		const dialog = await within(document.body).findByRole("dialog", {
+			name: `Make ${growthDesk.name} private?`,
+		});
+		await userEvent.click(within(dialog).getByRole("button", { name: "Make private" }));
+		await expect(
+			await within(dialog).findByText(/Choose another lead bot for it first/),
+		).toBeInTheDocument();
+	},
+});
+
+/**
+ * Making a private bot public asks first, saying everyone will see it and that
+ * its invited members are removed, so making it private again starts over.
+ */
+export const MakingPublic = meta.story({
+	beforeEach({ msw }) {
+		msw.use(...appHandlers({ models, bots: privateBots }));
+	},
+	play: async ({ canvas, userEvent }) => {
+		const visibility = await canvas.findByRole("radiogroup", { name: "Visibility" });
+		await userEvent.click(within(visibility).getByRole("radio", { name: "Public" }));
+		const dialog = await within(document.body).findByRole("dialog", {
+			name: `Make ${growthDesk.name} public?`,
+		});
+		await expect(within(dialog).getByText(/Its invited members are removed/)).toBeInTheDocument();
+		await expect(within(dialog).getByRole("button", { name: "Make public" })).toBeInTheDocument();
+	},
+});
+
+/** A viewer, who may not change the bot, reads its visibility rather than choosing it. */
+export const VisibilityForViewer = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			...appHandlers({
+				models,
+				role: "viewer",
+				bots: bots.map((bot) => ({
+					...bot,
+					permissions: { ...bot.permissions, update: false, delete: false },
+				})),
+			}),
+		);
+	},
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(/^Everyone in the workspace can see it/),
+		).toBeInTheDocument();
+		await expect(canvas.queryByRole("radiogroup", { name: "Visibility" })).toBeNull();
+		await expect(canvas.getByText("Public")).toBeInTheDocument();
+	},
+});
+
+/** A member of a private bot may take themselves out, after a word that they'll lose it. */
+export const RemovingYourself = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/bots/:botId/members`, () =>
+				HttpResponse.json([
+					{
+						memberId: storyMember.id,
+						name: storyMember.name,
+						email: storyMember.email,
+						image: null,
+						removable: true,
+					},
+					invited,
+				]),
+			),
+			...appHandlers({ models, bots: privateBots }),
+		);
+	},
+	play: async ({ canvas, userEvent }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: "Remove yourself" }));
+		const dialog = await within(document.body).findByRole("dialog", {
+			name: `Remove yourself from ${growthDesk.name}?`,
+		});
+		await expect(
+			within(dialog).getByText(/You won't see it or its chats any more/),
+		).toBeInTheDocument();
 	},
 });
 
