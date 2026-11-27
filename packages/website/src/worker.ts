@@ -6,6 +6,7 @@
 
 import { MARKDOWN_CONTENT_TYPE, markdownPath, markdownResponse } from "./markdown.ts";
 import { NOT_FOUND_PAGE_PATH } from "./not-found.ts";
+import { renamedDocsPath } from "./renamed-docs.ts";
 import { DISCORD_PATH } from "./site-links.ts";
 import { fileUrl } from "./site-meta.ts";
 
@@ -32,6 +33,8 @@ export default {
 			// Temporary, so browsers don't keep sending members to a replaced invite.
 			return Response.redirect(DISCORD_INVITE, 302);
 		}
+		const renamed = renamedDocsPath(pathname);
+		if (renamed) return Response.redirect(new URL(renamed, request.url), 301);
 		// Files such as images, scripts and `llms.txt` are served as they are.
 		if (!isPagePath(pathname)) return env.ASSETS.fetch(request);
 		if (pathname === NOT_FOUND_PAGE_PATH) return notFoundPage(request, env);

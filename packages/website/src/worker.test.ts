@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { RENAMED_DOCS } from "./renamed-docs.ts";
 import worker, { type Env } from "./worker.ts";
 
 const SITE = "https://sugabots.test";
@@ -256,4 +257,19 @@ describe("a file", () => {
 		expect(response.headers.get("Vary")).toBeNull();
 		expect(body).toBe("PNG");
 	});
+});
+
+describe("a renamed docs page", () => {
+	it.each(Object.entries(RENAMED_DOCS))(
+		"%s redirects for good to %s, and its Markdown version to that page's",
+		async (before, now) => {
+			const page = await get(`${before}/`);
+			const markdown = await get(`${before}.md`);
+
+			expect(page.response.status).toBe(301);
+			expect(page.response.headers.get("Location")).toBe(`${SITE}${now}`);
+			expect(markdown.response.status).toBe(301);
+			expect(markdown.response.headers.get("Location")).toBe(`${SITE}${now}.md`);
+		},
+	);
 });
