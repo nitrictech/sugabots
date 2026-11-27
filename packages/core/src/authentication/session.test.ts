@@ -182,10 +182,11 @@ describe("SessionAuthentication", () => {
 		try {
 			await listening;
 			const deliveries = bus.subscribe(memberStream(memberId), { signal: stop.signal });
+			const received = deliveries[Symbol.asyncIterator]().next();
 
 			await onDatabase((db) => db.delete(session).where(eq(session.id, signedIn.id)));
 
-			const { value } = await deliveries[Symbol.asyncIterator]().next();
+			const { value } = await received;
 			expect(value).toEqual({
 				seq: expect.any(Number),
 				event: streamEvent("session.ended", { sessionId: signedIn.id }),
