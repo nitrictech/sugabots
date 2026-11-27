@@ -19,8 +19,8 @@ import { type BotVisibility, WORKSPACE_ROLES, type WorkspaceRole } from "@sugabo
  *   exception: it follows its bot (see `mayInProject`).
  * - **Bot actions** concern a bot, and what its default project holds, as
  *   that project's actions are decided. They are answered from the caller's
- *   role, the bot's visibility, creator and members, and whether it is their
- *   own Personal Assistant, which they manage and run whatever their role.
+ *   role, the bot's visibility, creator and members, and whether it is a
+ *   personal bot of their own, which they manage and run whatever their role.
  *
  * Every permission here is asked for somewhere.
  *
@@ -410,13 +410,14 @@ export function mayOnBot(actor: Actor, permission: BotPermission, bot: BotFacts)
 
 /**
  * The role whose grants decide what `actor` may do with the bot: their own,
- * but on their own Personal Assistant at least an editor's, as a member
- * manages and runs their assistants whatever their role. Anything the
- * assistant does for them elsewhere still has only their own role.
+ * but on a personal bot of their own, a Personal Assistant included, at least
+ * an editor's, as a member manages and runs their personal bots whatever
+ * their role. Anything such a bot does for them elsewhere still has only
+ * their own role.
  */
 function roleOnBot(actor: Actor, bot: BotFacts): WorkspaceRole | undefined {
-	const ownAssistant = bot.assistantOf !== null && bot.createdById === actor.memberId;
-	return ownAssistant && actor.workspaceRole === "viewer" ? "editor" : actor.workspaceRole;
+	const ownPersonalBot = personalBotCreator(bot) === actor.memberId;
+	return ownPersonalBot && actor.workspaceRole === "viewer" ? "editor" : actor.workspaceRole;
 }
 
 /** The roles holding a workspace permission. */

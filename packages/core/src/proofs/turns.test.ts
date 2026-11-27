@@ -286,7 +286,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			expect(await decides(await as.member(a.ed), callId)).toBe("ActionForbidden");
 		});
 
-		it("lets a viewer, and nobody else, decide a request to change their own Personal Assistant's computer, but not their ordinary personal bot's", async () => {
+		it("lets a viewer, and nobody else, decide a request to change the computer of a personal bot of their own", async () => {
 			const { a } = world;
 			const viewerId = await seedMember(a.workspace, "viewer");
 			const viewer = await as.member(viewerId);
@@ -310,11 +310,11 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			const assistantsRequest = await requestIn(assistant);
 			const personalBotsRequest = await requestIn(personalBot);
 			expect(await decides(viewer, assistantsRequest)).toBe("ok");
-			expect(await decides(viewer, personalBotsRequest)).toBe("ActionForbidden");
+			expect(await decides(viewer, personalBotsRequest)).toBe("ok");
 			const askedOf = async (callId: string) =>
 				(await onDatabase((db) => approvalAudience(db, [callId]))).map(({ memberId }) => memberId);
 			expect(await askedOf(assistantsRequest)).toEqual([viewerId]);
-			expect(await askedOf(personalBotsRequest)).not.toContain(viewerId);
+			expect(await askedOf(personalBotsRequest)).toEqual([viewerId]);
 		});
 
 		it("lets admins and the run's bot's managers who reach its chat decide a run's call", async () => {

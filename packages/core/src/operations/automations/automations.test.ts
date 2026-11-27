@@ -371,7 +371,7 @@ describe("the automations operations, beyond who may call them", () => {
 	});
 
 	describe("a viewer's own bots", () => {
-		it("lets a viewer manage and run their own Personal Assistant, but not an ordinary personal bot they made", async () => {
+		it("lets a viewer manage and run their own personal bots, Personal Assistants and ordinary ones alike", async () => {
 			const viewerId = await seedMember(a.workspace, "viewer");
 			const viewer = await as.member(viewerId);
 			/** What the viewer comes to on each way of managing `bot` and running its automations. */
@@ -399,21 +399,22 @@ describe("the automations operations, beyond who may call them", () => {
 				};
 			};
 
+			const managed = {
+				rename: "ok",
+				makeAutomation: "ok",
+				runAutomation: "ok",
+				pauseAutomation: "ok",
+			};
 			expect(
 				await managing(
 					await seedBot(a.workspace, { assistantOf: viewerId, visibility: "personal" }),
 				),
-			).toEqual({ rename: "ok", makeAutomation: "ok", runAutomation: "ok", pauseAutomation: "ok" });
+			).toEqual(managed);
 			expect(
 				await managing(
 					await seedBot(a.workspace, { createdById: viewerId, visibility: "personal" }),
 				),
-			).toEqual({
-				rename: "ActionForbidden",
-				makeAutomation: "ActionForbidden",
-				runAutomation: "ActionForbidden",
-				pauseAutomation: "ActionForbidden",
-			});
+			).toEqual(managed);
 		});
 	});
 });

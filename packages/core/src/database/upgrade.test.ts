@@ -200,6 +200,18 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			]);
 		});
 
+		it("lets a viewer manage a bot of their own from their personal pod, as its owner could on main", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const lee = await upgraded.signIn(legacy.members.lee);
+
+			expect(
+				await call(lee, "bots.update", {
+					botId: legacy.bots.sketch,
+					changes: { name: "Sketchbook" },
+				}),
+			).toMatchObject({ id: legacy.bots.sketch, name: "Sketchbook", visibility: "personal" });
+		});
+
 		it("keeps a shared pod's bots, chats, files, connectors, automations and computer to its members", async () => {
 			const { family } = legacy.pods;
 			const { planner, budget } = legacy.bots;
@@ -357,6 +369,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					// Admins know which personal bots there are, without reaching their chats.
 					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.patsAssistant },
 					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.helper },
+					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.sketch },
 				]),
 			);
 		});

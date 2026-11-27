@@ -363,6 +363,13 @@ describe("bot actions", () => {
 	});
 
 	it.each(NOT_ONLY_ON_PRIVATE_BOTS)(
+		"a viewer may %s on a personal bot of their own, as an editor may",
+		(permission) => {
+			expect(mayOnBot(actor("viewer"), permission, personalBotBy(ALICE))).toBe(true);
+		},
+	);
+
+	it.each(NOT_ONLY_ON_PRIVATE_BOTS)(
 		"an admin may %s on a public bot somebody else made",
 		(permission) => {
 			expect(mayOnBot(actor("admin"), permission, publicBotBy(BOB))).toBe(true);

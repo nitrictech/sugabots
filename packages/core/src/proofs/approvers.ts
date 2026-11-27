@@ -255,9 +255,9 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 	const member = sql`audience.member_id`;
 	const role = sql`audience.role`;
 	const administers = sql<boolean>`${role} in ('owner', 'admin')`;
-	// What `managesBot` decides for one bot: a member manages their own Personal
-	// Assistants whatever their role, and a private bot they made while they are
-	// one of its members.
+	// What `managesBot` decides for one bot: a member manages their own personal
+	// bots whatever their role, and a private bot they made while they are one
+	// of its members.
 	const createdAndReaches = (bot: SQL) => sql<boolean>`(${bot}.created_by_id = ${member} and
 		(${bot}.visibility <> 'private' or exists (
 			select 1 from ${botMember} as manager_bot_member
@@ -265,7 +265,7 @@ export const approvalAudience = Effect.fn("Approvers.approvalAudience")(function
 		)))`;
 	const managesBot = (
 		bot: SQL,
-	) => sql<boolean>`((${bot}.assistant_of is not null and ${bot}.created_by_id = ${member}) or (${role} <> 'viewer' and
+	) => sql<boolean>`((${bot}.visibility = 'personal' and ${bot}.created_by_id = ${member}) or (${role} <> 'viewer' and
 		(${createdAndReaches(bot)} or (${administers} and ${bot}.visibility <> 'personal'))))`;
 	const reachesChat = reachesChatFor(APPROVER_CHAT, member);
 	const managesComputer = sql<boolean>`computer_project.id is not null and case
