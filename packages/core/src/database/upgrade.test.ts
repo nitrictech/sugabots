@@ -462,6 +462,17 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await signIn(legacy.pods.notes)).toEqual(ComputerSignIn.NOT_SIGNED_IN);
 		});
 
+		it("keeps the allowed-host tables and drops the staging table", async () => {
+			expect(
+				await upgraded.rows(`
+					select relname as name from pg_class
+					where relnamespace = 'public'::regnamespace and relkind in ('r', 'p')
+						and right(relname, length('allowed_host')) = 'allowed_host'
+					order by relname
+				`),
+			).toEqual([{ name: "allowed_host" }, { name: "project_allowed_host" }]);
+		});
+
 		it.each([
 			["ana.example.com", legacy.members.ana],
 			["sam.example.com", legacy.members.sam],
@@ -2416,15 +2427,6 @@ it.skipIf(!process.env.DATABASE_URL)(
 	},
 	UPGRADE_TIMEOUT_MS,
 );
-
-it("stages default projects' allowed hosts only for the migration transaction", async () => {
-	const migration = await readFile(
-		join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
-		"utf8",
-	);
-	const permanentTables = migration.match(/create\s+table\s+"[^"]*allowed_host"/gi);
-	expect(permanentTables).toEqual(['CREATE TABLE "project_allowed_host"']);
-});
 
 it("keeps the turn asker function without installing an insert trigger during the upgrade", async () => {
 	const migration = await readFile(
