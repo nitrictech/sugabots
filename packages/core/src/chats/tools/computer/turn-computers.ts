@@ -49,6 +49,7 @@ import {
 	networkNote,
 	openOncePerTurn,
 	type Place,
+	placeOf,
 	readSharableFile,
 	type StepOpened,
 	type TurnComputer,
@@ -204,9 +205,9 @@ export const make = Effect.gen(function* () {
 
 	const forStep: Interface["forStep"] = (principal, turn) =>
 		Effect.gen(function* () {
-			const { workspaceId, projectId, turnId, chatId, botId, acceptsImages, attach } = turn;
+			const { workspaceId, projectId, turnId, acceptsImages, attach } = turn;
 			const key = keyOf(turnId, principal.executionNumber);
-			const place = yield* operation("forStep", loadComputerPlace({ chatId, botId }));
+			const place = placeOf(turn);
 			// Each call proves this again; the note tells a bot that may not use the computer why it has none.
 			const usable = yield* operation("forStep", canAskForComputer(principal));
 			const provider = projectId === null ? undefined : yield* providers.enabled(workspaceId);
@@ -261,7 +262,11 @@ export const make = Effect.gen(function* () {
 						.open(project, checkedProvider, holder)
 						.pipe(
 							Effect.tap(({ computer }) =>
-								prepareFolders(computer, place, checkedProvider.access.provider),
+								operation("forStep", loadComputerPlace(turn)).pipe(
+									Effect.flatMap((placeWithFolderMoves) =>
+										prepareFolders(computer, placeWithFolderMoves, checkedProvider.access.provider),
+									),
+								),
 							),
 						),
 					{ signal: stepEnded },

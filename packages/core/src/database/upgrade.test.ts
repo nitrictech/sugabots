@@ -10,6 +10,7 @@ import { automationsContracts } from "@sugabots/contracts/operations/automations
 import { chatReadsContracts } from "@sugabots/contracts/operations/chat-reads";
 import { chatsContracts } from "@sugabots/contracts/operations/chats";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
+import { sql } from "drizzle-orm";
 import { makeWithDefaults } from "drizzle-orm/effect-postgres";
 import { migrate } from "drizzle-orm/effect-postgres/migrator";
 import {
@@ -1609,12 +1610,17 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await upgraded.read(keyNow(legacyFiles[0] as LegacyFile, new Map()))).toBe("plan");
 		});
 
-		it("checks the upgraded computer's sign-in and network before another tool can use it", async () => {
+		it("loads upgraded computer folders on first use and rechecks sign-in and network for later calls", async () => {
 			const projectId = legacy.pods.family;
 			const chatId = legacy.threads.trip;
 			const botId = legacy.bots.planner;
 			const workspaceId = legacy.workspace;
 			const provider = inMemoryComputers();
+			let preparedCollaborationFolders = false;
+			provider.answerCommandsWith((_computerId, command) => {
+				preparedCollaborationFolders ||= command.includes(migrationScale.orphanedCollaboration);
+				return 0;
+			});
 			const egress = egressToGitHub(github.fetch);
 			const projectComputers = ProjectComputers.layerNoDeps.pipe(
 				Layer.provide([provider.layer, ComputerProviderStore.layer, GitHubSignIn.layer]),
@@ -1674,7 +1680,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						const authenticator = yield* TurnAuthentication.make;
 						const principal = yield* authenticator.authenticate(row.id);
 						const computers = yield* TurnComputers.Service;
-						yield* computers.forStep(principal, {
+						const step = computers.forStep(principal, {
 							workspaceId,
 							projectId,
 							chatId,
@@ -1684,12 +1690,31 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 							naturalBrowsing: false,
 							acceptsImages: false,
 						});
+						const [folderReads] = yield* Effect.scoped(
+							transaction(
+								step.pipe(
+									Effect.andThen(
+										query((db) =>
+											db.execute<{ scans: number }>(
+												sql`select (seq_scan + coalesce(idx_scan, 0))::int as scans
+													from pg_stat_xact_user_tables
+													where schemaname = 'public' and relname = 'computer_folder_move'`,
+												"objects",
+											),
+										),
+									),
+								),
+							),
+						);
+						expect(folderReads?.scans).toBe(0);
+						yield* step;
 						const command = runCommand.run(
 							principal,
 							{ command: "pwd", timeout_seconds: 30 },
 							{ kind: "request" },
 						);
 						expect(yield* command).toMatchObject({ exitCode: 0 });
+						expect(preparedCollaborationFolders).toBe(true);
 						const [machine] = provider.computers();
 						if (!machine) throw new Error("No computer was opened");
 						expect(machine.networks.at(-1)?.credentials).toHaveLength(1);
