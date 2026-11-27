@@ -70,11 +70,14 @@ file backup.
   automations move to their own projects. Their GitHub triggers need a new app.
   Set up a GitHub app for the bot, then point the trigger at a repository in
   that app. Routines and other working triggers continue to run.
-- **A personal pod's GitHub app goes to one bot.** It goes to the oldest bot
-  with automations started by the app, or otherwise the oldest bot other than
-  the Personal Assistant. The other bots' GitHub triggers need their own app
-  and repository. Their routines and other working triggers keep running. If
-  the pod has no other bots, its Personal Assistant keeps the app.
+- **A personal pod's GitHub app goes with its computer.** The bot that gets the
+  computer also gets the app, so Git on the computer keeps read-only sign-in
+  to the selected repositories. If there is no computer, the upgrade chooses
+  among the bots other than the Personal Assistant. It picks the oldest bot
+  whose automations use the app, or the oldest bot if none do. The Personal
+  Assistant gets the app if it is the only bot. The other bots' GitHub triggers
+  need their own app and repository. Their routines and other working triggers
+  keep running.
 - **Existing webhook secrets keep working.** A trigger with only a stored
   bearer digest can still verify calls. The digest cannot reveal the original
   secret. The workspace owner and admins can read encrypted webhook secrets
