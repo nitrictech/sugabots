@@ -1,10 +1,12 @@
+import { listedChat } from "@sugabots/contracts/testing";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { HttpResponse, http } from "msw";
 import { useState } from "react";
 import { expect, fn, within } from "storybook/test";
 import preview from "#storybook/preview";
 import { createQueryClient } from "@/lib/query.ts";
 import { SessionContext } from "@/lib/session.ts";
-import { appHandlers, storyMember } from "@/story-app.test-support.tsx";
+import { appHandlers, storyMember, storyProjectChatFor } from "@/story-app.test-support.tsx";
 import { IconRail } from "./IconRail.tsx";
 import { OwnerSidebar } from "./OwnerSidebar.tsx";
 import { SidebarView } from "./Sidebar.tsx";
@@ -102,6 +104,29 @@ export const SettingsOpen = meta.story({
 	},
 });
 
+/** Revenue's chats mark the ones that need you, so they ask who you are. */
+function signedInAsStoryMember(Story: () => React.ReactNode) {
+	return (
+		<SessionContext value={{ member: storyMember, error: undefined, refresh: async () => {} }}>
+			<Story />
+		</SessionContext>
+	);
+}
+
+/** The rail with Revenue open, and Revenue's own sidebar beside it. */
+const revenueOpen = {
+	rail: (
+		<IconRail
+			assistants={[{ bot: chief, ...nothing }]}
+			projects={projectStandings}
+			bots={[{ bot: growthDesk, ...nothing }]}
+			currentProjectSlug={revenue.slug}
+			currentBotHandle={undefined}
+		/>
+	),
+	focus: <OwnerSidebar owner={{ project: revenue }} selectedChatId={undefined} page={undefined} />,
+};
+
 /**
  * Owner open: on Revenue's pages the workspace narrows to the rail, with
  * Revenue shaded, and beside it Revenue's own sidebar in place of the
@@ -111,28 +136,8 @@ export const OwnerOpen = meta.story({
 	beforeEach({ msw }) {
 		msw.use(...appHandlers());
 	},
-	// Revenue's chats mark the ones that need you, so they ask who you are.
-	decorators: [
-		(Story) => (
-			<SessionContext value={{ member: storyMember, error: undefined, refresh: async () => {} }}>
-				<Story />
-			</SessionContext>
-		),
-	],
-	args: {
-		rail: (
-			<IconRail
-				assistants={[{ bot: chief, ...nothing }]}
-				projects={projectStandings}
-				bots={[{ bot: growthDesk, ...nothing }]}
-				currentProjectSlug={revenue.slug}
-				currentBotHandle={undefined}
-			/>
-		),
-		focus: (
-			<OwnerSidebar owner={{ project: revenue }} selectedChatId={undefined} page={undefined} />
-		),
-	},
+	decorators: [signedInAsStoryMember],
+	args: revenueOpen,
 	play: async ({ canvas }) => {
 		const rail = canvas.getByRole("navigation", { name: "Projects and bots" });
 		await expect(within(rail).getByRole("link", { name: revenue.name })).toHaveAttribute(
@@ -141,6 +146,63 @@ export const OwnerOpen = meta.story({
 		);
 		await expect(canvas.getByRole("navigation", { name: `${revenue.name}'s pages` })).toBeVisible();
 		await expect(canvas.queryByRole("group", { name: "Projects" })).toBeNull();
+	},
+});
+
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+/** Revenue's chats, one as each stands, newest first. */
+const revenueChats = [
+	{ title: "Deploy the pricing page", minutes: 1, standing: { status: working(2) } },
+	{
+		title: "Refund Kestrel Freight",
+		minutes: 3,
+		standing: { needsApproval: true, status: waiting(3) },
+	},
+	{ title: "Quarterly report", minutes: 5, standing: { status: replied(5) } },
+	{ title: "Team lunch", minutes: 60, standing: {} },
+].map(({ title, minutes, standing }, index) =>
+	listedChat(
+		{
+			...storyProjectChatFor(revenue),
+			id: `0199a3a0-0000-7000-8000-0000000000d${index}`,
+			title,
+		},
+		{ lastMessageAt: minutesAgo(minutes), ...standing },
+	),
+);
+
+function working(minutes: number) {
+	return { kind: "working" as const, since: minutesAgo(minutes) };
+}
+function waiting(minutes: number) {
+	return { kind: "waiting" as const, since: minutesAgo(minutes) };
+}
+function replied(minutes: number) {
+	return { kind: "replied" as const, at: minutesAgo(minutes) };
+}
+
+/**
+ * Chats that need you: a chat waiting on your approval keeps its place among
+ * the rest, with a waving hand and Needs you where Working shows in the chat a
+ * bot is working in.
+ */
+export const ChatsThatNeedYou = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get("*/projects/:projectId/chats", () =>
+				HttpResponse.json({ chats: revenueChats, automations: [] }),
+			),
+			...appHandlers(),
+		);
+	},
+	decorators: [signedInAsStoryMember],
+	args: revenueOpen,
+	play: async ({ canvas }) => {
+		const chats = await canvas.findByRole("region", { name: "Chats" });
+		// Second, as when it last moved puts it, not lifted above the others.
+		const [, refund] = await within(chats).findAllByRole("link");
+		await expect(refund).toHaveTextContent(/^Refund Kestrel Freight.*Needs you to approve/);
 	},
 });
 

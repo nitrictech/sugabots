@@ -54,7 +54,7 @@ describe("a project's own sidebar", () => {
 		).toBeFalsy();
 	});
 
-	it("says what each chat's bots are doing: working, waiting on an approval, or replied unread", async () => {
+	it("says what each chat's bots are doing: working, waiting on an approval, needing you, or replied unread", async () => {
 		onWideScreen();
 		const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 		const titled = (title: string, suffix: string) => ({
@@ -74,6 +74,14 @@ describe("a project's own sidebar", () => {
 					listedChat(titled("Report", "f3"), {
 						status: { kind: "replied", at: minutesAgo(1) },
 					}),
+					listedChat(titled("Invoice", "f5"), {
+						needsApproval: true,
+						status: { kind: "waiting", since: minutesAgo(3) },
+					}),
+					listedChat(titled("Launch", "f6"), {
+						mentionsYou: true,
+						status: { kind: "working", since: minutesAgo(1) },
+					}),
 					listedChat(titled("Lunch", "f4")),
 				],
 				automations: [],
@@ -87,6 +95,11 @@ describe("a project's own sidebar", () => {
 		expect((await row("Deploy")).textContent).toContain("Working 20m");
 		expect((await row("Refund")).textContent).toContain("Waiting 2m");
 		expect((await row("Report")).textContent).toContain("Replied");
+		// Waiting on the viewer, a chat stays among the rest and says so in Working's place.
+		expect((await row("Invoice")).textContent).toContain("Needs you to approve");
+		expect((await row("Invoice")).textContent).not.toContain("Waiting");
+		expect((await row("Launch")).textContent).toContain("Needs you to reply");
+		expect((await row("Launch")).textContent).not.toContain("Working");
 		const quiet = (await row("Lunch")).textContent;
 		expect(quiet).not.toMatch(/Working|Waiting|Replied/);
 	});
