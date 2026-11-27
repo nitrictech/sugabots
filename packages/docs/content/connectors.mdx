@@ -36,9 +36,8 @@ connector sends data, and turns it on. Anyone who can talk to the bot in the
 project can then ask it to use the connector, subject to their role and the
 tool's access setting.
 
-This also applies to tools from the bot's own GitHub app. Repository sign-in
-on the project's computer still comes from the project's GitHub app. Opening the bot's connector settings
-still requires permission on the bot itself.
+This also applies to tools from the bot's own GitHub app. Opening the bot's
+connector settings requires permission on the bot itself.
 
 Changing a connector's address or server turns it off in every project it was
 turned on for, even if the address later changes back. The workspace's owner
@@ -144,9 +143,10 @@ events, and its [computer](/docs/projects#computer) is signed in to read those r
 A project has at most one GitHub app, since its computer can be signed in to
 only one account there. A bot working in a project's chat uses the project's
 GitHub app. If the project has none, the bot can use its own GitHub app if
-it's [turned on for that project](#a-bots-own-connectors-in-a-project). The
-project's computer is signed in only to repositories from the project's own
-GitHub app.
+it's [turned on for that project](#a-bots-own-connectors-in-a-project).
+The project's computer uses its own app for read-only Git sign-in. A shared
+project converted during the upgrade can also keep its
+[previous Git sign-in](/docs/upgrading-to-projects#what-changes).
 
 ## Look after it
 

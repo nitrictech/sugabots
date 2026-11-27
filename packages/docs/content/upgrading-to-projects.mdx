@@ -48,6 +48,9 @@ file backup.
   members become members of its bots, and anyone who reaches a bot, but a
   viewer, may start its automations by hand, paused ones included. Before,
   only owners and admins could.
+- **Future automation results are posted only to the automation's feed.**
+  The setting that sent results to a chosen shared chat is removed. The
+  upgrade keeps results already posted to shared chats.
 - **Admins see which personal bots there are.** Each member's personal bots,
   such as their Personal Assistant and the bots of their personal pod, show in
   owners' and admins' lists of bots. Admins still can't talk to them or read
@@ -65,7 +68,11 @@ file backup.
   automations that GitHub started are **paused**. To start them again, set up
   a GitHub app for each of those bots, point the trigger at it, and resume
   the automation. A personal pod whose only bot is its Personal Assistant
-  **loses its GitHub app**.
+  **loses its GitHub app**. The converted shared project's computer keeps
+  read-only Git sign-in to the app's selected repositories. Turning off the
+  bot's GitHub connector in that project removes this sign-in. Turning it
+  back on enables the bot's tools. For a new computer sign-in after that,
+  set up a GitHub app for the project itself.
 - **A personal pod with no bots loses its computer and connectors.** Its
   computer is destroyed at its provider, with everything on it, and its
   connectors are deleted. Its files are kept (see below).
