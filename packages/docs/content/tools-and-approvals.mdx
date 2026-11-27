@@ -78,7 +78,9 @@ If something the request depends on changed after the bot asked, choosing
 **Allow** closes the request and gives the reason. Here's what
 can change while a request waits.
 
-- A connector or its tool settings changed.
+- A connector or its tool settings changed, or the GitHub call would go to a different destination.
+- A connector or one of its tools was switched off. This includes a bot's own
+  connector that needs to be turned on again for the project after an address change.
 - The brief's recipient or destination changed.
 - No computer provider is enabled.
 - The bot can no longer use the computer.
@@ -90,10 +92,14 @@ can change while a request waits.
 
 The closed request says what to do next. If the request itself changed, such
 as the connector or the brief's destination, ask the bot to try again. If a
-setting now stops the call, someone has to change it first: whoever manages
-the bot can turn a tool or computer use back on, and the workspace's owner or
-an admin can enable a computer provider or unblock a host. A removed
-automation can't be edited.
+setting now stops the call, someone has to change it first. The workspace's
+owner or an admin can turn a connector back on for a project, including a
+bot's own connector used there. In the bot's own chats, whoever manages
+the bot can turn its connector back on. Whoever manages the connector can
+change a tool's access in the connector's settings. Whoever manages the bot
+can turn a built-in tool or computer use back on. The workspace's owner or an
+admin can enable a computer provider or unblock a host. A removed automation
+can't be edited.
 
 A request also stops waiting without anyone answering when:
 

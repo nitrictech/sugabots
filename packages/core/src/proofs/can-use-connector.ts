@@ -4,7 +4,7 @@ import {
 	connectorToolWritesOrDeletes,
 } from "@sugabots/contracts";
 import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { and, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { Effect, Result } from "effect";
 import { type Executor, query } from "../database/database.ts";
 import {
@@ -145,7 +145,13 @@ export const checkConnectorCallSettings = (
 		if (connectorRevision === null || remoteToolName === null) return "connectorChanged";
 		const [current] = yield* query((db) =>
 			db
-				.select(connectorToolSettings)
+				.select({
+					...connectorToolSettings,
+					enabled: connector.enabled,
+					revision: connector.configurationRevision,
+					onInChatProject: sql<boolean>`(${connector.projectId} = ${placedChat.projectId}
+						or ${projectBotConnector.connectorId} is not null)`,
+				})
 				.from(turn)
 				.innerJoin(placedChat, eq(placedChat.id, turn.chatId))
 				.innerJoin(connector, eq(connector.workspaceId, placedChat.workspaceId))
@@ -158,26 +164,17 @@ export const checkConnectorCallSettings = (
 						eq(projectBotConnector.addressRevision, connector.addressRevision),
 					),
 				)
-				.where(
-					and(
-						eq(turn.id, call.turnId),
-						eq(connector.id, call.connectorId),
-						eq(connector.enabled, true),
-						eq(connector.configurationRevision, connectorRevision),
-						or(
-							eq(connector.projectId, placedChat.projectId),
-							isNotNull(projectBotConnector.connectorId),
-						),
-					),
-				)
+				.where(and(eq(turn.id, call.turnId), eq(connector.id, call.connectorId)))
 				.limit(1),
 		);
 		if (!current) return "connectorChanged";
+		if (!current.enabled || !current.onInChatProject) return "connectorOff";
 		const { access } = readToolSettings(current, remoteToolName, {
 			unlistedReadOnly: approval?.writeOrDelete === false ? true : null,
 		});
-		if (access === "off") return "toolOff";
-		return approval && connectorApprovalNeedsRefresh(access, approval.approvalConnectorAccess)
+		if (access === "off") return "connectorOff";
+		return current.revision !== connectorRevision ||
+			(approval && connectorApprovalNeedsRefresh(access, approval.approvalConnectorAccess))
 			? "connectorChanged"
 			: undefined;
 	});

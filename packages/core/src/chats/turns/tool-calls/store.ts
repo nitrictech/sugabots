@@ -539,18 +539,6 @@ export const make = Effect.gen(function* () {
 						);
 						// Every call bound to an approval was parked for a member to allow first.
 						if (!row) return { _tag: "NoPendingApproval" };
-						const refuse = (reason: string) =>
-							Effect.gen(function* () {
-								const failed = yield* apply(
-									row,
-									ToolCallEvent.Abandon({
-										userMessage: APPROVAL_NO_LONGER_APPLIES,
-										closedBecause: "connectorChanged",
-									}),
-								);
-								if (failed) yield* emit([ChatEvent.ToolCallFinished(toolCallChange(failed))]);
-								return refusedExecution(reason);
-							});
 						const { binding } = input;
 						if (binding.kind === "connector") {
 							const refusal = yield* checkConnectorCallSettings({
@@ -558,8 +546,18 @@ export const make = Effect.gen(function* () {
 								turnId: row.turnId,
 							});
 							if (refusal) {
-								return yield* refuse(
-									refusal === "toolOff" ? APPROVED_TOOL_TURNED_OFF : APPROVED_CONNECTOR_CHANGED,
+								const failed = yield* apply(
+									row,
+									ToolCallEvent.Abandon({
+										userMessage: APPROVAL_NO_LONGER_APPLIES,
+										closedBecause: refusal,
+									}),
+								);
+								if (failed) yield* emit([ChatEvent.ToolCallFinished(toolCallChange(failed))]);
+								return refusedExecution(
+									refusal === "connectorOff"
+										? APPROVED_TOOL_TURNED_OFF
+										: APPROVED_CONNECTOR_CHANGED,
 								);
 							}
 						}

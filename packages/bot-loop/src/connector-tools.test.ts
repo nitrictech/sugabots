@@ -149,12 +149,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			"connector deleted",
 			"connector disabled",
 			"off in the project",
+			"address changed in the project",
 			"configuration changed",
 			"tool off",
 			"tool off by default",
 		] as const)("closes the approval and wakes the turn after %s", async (change) => {
 			let sourceChatId = chatId;
-			if (change === "off in the project") {
+			if (change === "off in the project" || change === "address changed in the project") {
 				const projectId = await seedProject(workspaceId, { leadBotId: botId });
 				await seedProjectBotConnector(workspaceId, projectId, botId, connectorId);
 				const started = await chatsAs(adminId).startProjectChat({
@@ -183,7 +184,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				);
 			} else {
 				const changes = {
-					"connector disabled": { enabled: false },
+					"connector disabled": { enabled: false, configurationRevision: 2 },
+					"address changed in the project": { addressRevision: 2, configurationRevision: 2 },
 					"configuration changed": { configurationRevision: 2 },
 					"tool off": { toolAccess: { wipe: "off" as const } },
 					"tool off by default": {
@@ -196,10 +198,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				);
 			}
 
-			const error = "This approval was closed because the connector or its tool settings changed.";
+			const switchedOff = change !== "connector deleted" && change !== "configuration changed";
+			const error = switchedOff
+				? "This approval was closed because the connector or its tool is now off."
+				: "This approval was closed because the connector or its tool settings changed.";
 			await expect(
 				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
-			).rejects.toMatchObject({ userMessage: error });
+			).rejects.toMatchObject({
+				reason: switchedOff ? "connectorOff" : "connectorChanged",
+				userMessage: error,
+			});
 			await workflow.completed();
 			expect(await callsOf(turnId)).toMatchObject([
 				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
@@ -208,7 +216,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				waiting: [],
 				answered: [
 					{
-						call: { id: parked.id, error },
+						call: {
+							id: parked.id,
+							error,
+							approval: { closedBecause: switchedOff ? "connectorOff" : "connectorChanged" },
+						},
 						answer: { status: "closed", closedAt: expect.any(String) },
 					},
 				],
@@ -686,6 +698,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(execute).not.toHaveBeenCalled();
 				if (changed === "off") {
 					expect(outcome).toEqual({ _tag: "Finished" });
+					expect(await callsOf(ran.turnId)).toMatchObject([
+						{ approvalClosedBecause: "connectorOff" },
+					]);
 					expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(
 						"its approval no longer applies",
 					);

@@ -26,6 +26,7 @@ export const approvalSettingsChangeSchema = Schema.Literals([
 	"automationRoutineChanged",
 	"automationRemoved",
 	"connectorChanged",
+	"connectorOff",
 	"toolSwitchedOff",
 	"noComputerProvider",
 	"computerUseChanged",
@@ -57,6 +58,8 @@ export class ToolApprovalConflict
 				return userText`This approval was closed because the automation was removed.`;
 			case "connectorChanged":
 				return userText`This approval was closed because the connector or its tool settings changed.`;
+			case "connectorOff":
+				return userText`This approval was closed because the connector or its tool is now off.`;
 			case "toolSwitchedOff":
 				return userText`This approval was closed because the tool is now off.`;
 			case "noComputerProvider":

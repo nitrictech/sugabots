@@ -148,6 +148,17 @@ const blockedHost: AnsweredApproval = {
 	},
 	answer: { status: "closed", closedAt },
 };
+const switchedOffConnectorRequest = request("10", "failed", {
+	...pending,
+	status: "denied",
+	closedBecause: "connectorOff",
+	connector: { id: botConnector.id, revision: 2 },
+});
+const switchedOffConnector: AnsweredApproval = {
+	...switchedOffConnectorRequest,
+	call: { ...switchedOffConnectorRequest.call, finishedAt: closedAt },
+	answer: { status: "closed", closedAt },
+};
 const withoutFields = {
 	...outside,
 	call: { ...outside.call, id: "0199a3a0-0000-7000-8000-000000000805", input: null },
@@ -166,7 +177,7 @@ const brief: ApprovalRequest = {
 
 const approvals: WorkspaceApprovals = {
 	waiting: [answerable, outside, withoutFields, brief],
-	answered: [answered, stopped, closedBrief, unavailable, blockedHost],
+	answered: [answered, stopped, closedBrief, unavailable, blockedHost, switchedOffConnector],
 };
 
 const meta = preview.meta({
@@ -344,6 +355,21 @@ export const SettingBlocksRetry = meta.story({
 				"This approval was closed because the workspace now blocks the requested host. The workspace's owner or an admin can unblock it.",
 			),
 		).toBeVisible();
+		await expect(canvas.queryByText(/try again/)).toBeNull();
+	},
+});
+
+/** ConnectorSwitchedOff shows who can turn a connector or its tool back on. */
+export const ConnectorSwitchedOff = meta.story({
+	render: at(switchedOffConnector.call.id),
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(
+				/The workspace's owner or an admin can turn a connector back on for a project/,
+			),
+		).toHaveTextContent(
+			"whoever manages the connector can change its access in the connector's settings",
+		);
 		await expect(canvas.queryByText(/try again/)).toBeNull();
 	},
 });

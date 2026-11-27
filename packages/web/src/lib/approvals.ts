@@ -60,6 +60,8 @@ export function closedApprovalMessage(call: ToolCallPart, botName: string): stri
 			return `This approval was closed because the automation's routine changed. Ask ${botName} to try again.`;
 		case "connectorChanged":
 			return `This approval was closed because the connector or its tool settings changed. Ask ${botName} to try again.`;
+		case "connectorOff":
+			return "This approval was closed because the connector or its tool is now off. The workspace's owner or an admin can turn a connector back on for a project. In a bot's own chats, whoever manages the bot can turn its connector back on. If only the tool is off, whoever manages the connector can change its access in the connector's settings.";
 		case "computerTargetChanged":
 			return `This approval was closed because the computer ${botName} wanted to use changed. Ask ${botName} to try again.`;
 		case "automationRemoved":

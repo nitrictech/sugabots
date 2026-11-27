@@ -135,9 +135,11 @@ const checkApprovalPermission = (
 				writeOrDelete: call.writeOrDelete,
 			});
 			if (connectorConflict) return connectorConflict;
-			if (yield* checkConnectorCallSettings({ ...call, connectorId: call.connectorId }, call)) {
-				return "connectorChanged" as const;
-			}
+			const settingsConflict = yield* checkConnectorCallSettings(
+				{ ...call, connectorId: call.connectorId },
+				call,
+			);
+			if (settingsConflict) return settingsConflict;
 			if (call.approvalResolvedTargets && "computer" in call.approvalResolvedTargets) {
 				const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
 				const target = yield* Effect.result(
