@@ -34,15 +34,8 @@ export function uploadChatFile({
 	signal: AbortSignal;
 }): Promise<UploadedAttachment> {
 	return new Promise((resolve, reject) => {
-		let url: string;
-		try {
-			url = client.urls.chatFiles.uploadFile({
-				params: { chatId },
-				// The type is left out when the browser has none, so the API takes one from the name.
-				query: file.type ? { name: file.name, type: file.type } : { name: file.name },
-			});
-		} catch {
-			// The URL is checked against the API's rules for a file's name and type as it is built.
+		const url = buildUploadUrl(chatId, file);
+		if (url === undefined) {
 			reject(
 				failureForStatus(
 					400,
@@ -92,4 +85,24 @@ export function chatFileUrl(chatId: string, fileId: string): string {
  */
 export function removeChatFile(chatId: string, fileId: string): void {
 	Effect.runPromise(client.api.chats.removeFile({ params: { chatId, fileId } })).catch(() => {});
+}
+
+/**
+ * The address to upload `file` to, or nothing when its name breaks the API's
+ * rules. The URL is checked against those rules as it is built. A media type
+ * the API won't take is left out, as is a missing one, so the API works the
+ * type out from the name.
+ */
+function buildUploadUrl(chatId: string, file: File): string | undefined {
+	const build = (query: { name: string; type?: string }) => {
+		try {
+			return client.urls.chatFiles.uploadFile({ params: { chatId }, query });
+		} catch {
+			return undefined;
+		}
+	};
+	return (
+		(file.type ? build({ name: file.name, type: file.type }) : undefined) ??
+		build({ name: file.name })
+	);
 }
