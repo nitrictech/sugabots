@@ -7,7 +7,7 @@ import { proveActsForMember } from "./acts-for-member.ts";
 import { proveCanDeleteBot } from "./bot-permissions.ts";
 import { proveCanManageBot } from "./can-manage-bot.ts";
 import { proveCanRestrictBot } from "./can-restrict-bot.ts";
-import { proveMayBrief } from "./may-brief.ts";
+import { withBriefRecipient } from "./may-brief.ts";
 import { named } from "./proof.ts";
 import { underWorkspaceLock } from "./workspace-lock.ts";
 import {
@@ -41,7 +41,7 @@ describe("managing, restricting and briefing bots", () => {
 	const restricts = (principal: Principal, botId: string) =>
 		outcome(named(principal, botId, (p, b) => proveCanRestrictBot(p, b).pipe(Effect.asVoid)));
 	const briefs = (principal: Principal, botId: string) =>
-		outcome(named(principal, botId, (p, b) => proveMayBrief(p, b).pipe(Effect.asVoid)));
+		outcome(named(principal, (p) => withBriefRecipient(p, { id: botId }, () => Effect.void)));
 
 	it("lets a member or their Personal Assistant act for them within member bounds", async () => {
 		const { a } = world;

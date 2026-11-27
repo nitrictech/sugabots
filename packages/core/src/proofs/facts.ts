@@ -232,6 +232,8 @@ export const roleIn = (db: Executor, workspaceId: string, memberId: string) =>
 
 /** A bot as its managers and reachers are decided, with its workspace. */
 export type BotRecord = BotFacts & {
+	readonly name: string;
+	readonly model: string | null;
 	readonly id: string;
 	readonly workspace: string;
 	readonly systemBot: boolean;
@@ -241,12 +243,20 @@ export type BotRecord = BotFacts & {
 
 /** The bot `botId`, or `undefined` when there is none. */
 export const botRecord = (db: Executor, botId: string, who?: { readonly member?: string }) =>
+	isUuid(botId) ? findBotRecord(db, eq(bot.id, botId), who) : Effect.succeed(undefined);
+
+export const findBotRecord = (
+	db: Executor,
+	where: SQL | undefined,
+	who?: { readonly member?: string },
+) =>
 	Effect.gen(function* () {
-		if (!isUuid(botId)) return undefined;
 		const memberId = who?.member && isUuid(who.member) ? who.member : null;
 		const [row] = yield* db
 			.select({
 				id: bot.id,
+				name: bot.name,
+				model: bot.model,
 				workspace: bot.workspaceId,
 				visibility: bot.visibility,
 				createdById: bot.createdById,
@@ -263,11 +273,13 @@ export const botRecord = (db: Executor, botId: string, who?: { readonly member?:
 				project,
 				and(eq(project.defaultOfBotId, bot.id), eq(project.workspaceId, bot.workspaceId)),
 			)
-			.where(eq(bot.id, botId))
+			.where(where)
 			.limit(1);
 		if (!row) return undefined;
 		const record: BotRecord = {
 			id: row.id,
+			name: row.name,
+			model: row.model,
 			workspace: row.workspace,
 			visibility: row.visibility,
 			createdById: row.createdById,

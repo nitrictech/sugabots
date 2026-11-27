@@ -1,20 +1,22 @@
-import { ApprovalNeeded, ResourceHidden } from "@sugabots/contracts/errors/proofs";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { asksBeforeAllTools, type TurnFacts, turnFacts } from "../authentication/turn-facts.ts";
 import { query } from "../database/database.ts";
 import { type BriefTurnRule, bot } from "../database/schema.ts";
+import { isUuid } from "../ids/ids.ts";
 import type { BotForAsker, Principal } from "../principal.ts";
 import {
 	actorOf,
-	botRecord,
+	type BotRecord,
+	findBotRecord,
 	memberReaches,
 	memberReachesBot,
 	projectHasBot,
 	reachFacts,
 	roleIn,
 } from "./facts.ts";
-import { defineProof, type Named, type Proof } from "./proof.ts";
+import { defineProof, type Named, named, type Proof } from "./proof.ts";
 
 /**
  * P is a bot acting for its asker, and the asker can talk to the bot B. With
@@ -27,6 +29,8 @@ export interface MayBrief<P, B> extends Proof<"MayBrief", [P, B]> {
 	readonly asker: string;
 	readonly briefingBot: string;
 	readonly bot: Named<B, string>;
+	readonly name: string;
+	readonly model: string | null;
 	/** B's workspace, which services take from here. */
 	readonly workspace: string;
 	readonly project: string;
@@ -35,43 +39,54 @@ export interface MayBrief<P, B> extends Proof<"MayBrief", [P, B]> {
 
 const MayBriefProof = defineProof("MayBrief");
 
-export const proveMayBrief = <P, B>(principal: Named<P, Principal>, botId: Named<B, string>) =>
+export const withBriefRecipient = <P, A, E, R>(
+	principal: Named<P, Principal>,
+	recipient: { readonly id: string } | { readonly handle: string | undefined },
+	use: <B>(proof: MayBrief<P, B>) => Effect.Effect<A, E, R>,
+) =>
 	Effect.gen(function* () {
 		const acting = principal.value;
-		if (acting._tag !== "BotForAsker") return yield* new ResourceHidden({ resource: "bot" });
-		const { record, turn, destination } = yield* resolveBrief(acting, botId.value);
+		const hidden = new ResourceHidden({ resource: "bot" });
+		if (acting._tag !== "BotForAsker") return yield* hidden;
+		if ("id" in recipient && !isUuid(recipient.id)) return yield* hidden;
+		const record = yield* query((db) =>
+			findBotRecord(
+				db,
+				and(
+					eq(bot.workspaceId, acting.workspace),
+					"id" in recipient
+						? eq(bot.id, recipient.id)
+						: recipient.handle === undefined
+							? eq(bot.id, acting.bot)
+							: and(
+									sql`lower(${bot.handle}) = lower(${recipient.handle.trim().replace(/^@/, "")})`,
+									or(isNull(bot.assistantOf), eq(bot.createdById, acting.asker)),
+								),
+				),
+			),
+		);
+		if (!record) return yield* hidden;
+		const { turn, destination } = yield* resolveBrief(acting, record);
 		const turnRule =
 			acting.bounds.kind === "member"
 				? "memberBounds"
 				: asksBeforeAllTools(turn)
 					? "askBeforeAllTools"
 					: null;
-		const proof: MayBrief<P, B> = MayBriefProof.prove([principal, botId], {
-			principal,
-			bot: botId,
-			workspace: record.workspace,
-			asker: acting.asker,
-			briefingBot: acting.bot,
-			turnRule,
-			project: destination,
+		return yield* named(record.id, <B>(botId: Named<B, string>) => {
+			const proof: MayBrief<P, B> = MayBriefProof.prove([principal, botId], {
+				principal,
+				bot: botId,
+				name: record.name,
+				model: record.model,
+				workspace: record.workspace,
+				asker: acting.asker,
+				briefingBot: acting.bot,
+				turnRule,
+				project: destination,
+			});
+			return use(proof);
 		});
-		return proof;
-	});
-
-/**
- * Fails with `ApprovalNeeded` unless the brief `mayBrief` proved still goes
- * where it was proved to go: its asker still reaches the recipient and the
- * project, and the recipient is still in the same project, the turn's while it
- * is in it, or its own otherwise. Run in the brief's write, under the
- * workspace's lock shared, so a recipient taken out of the turn's project, or
- * an asker who lost it, since the proof is seen before the chat is started.
- */
-export const requireBriefDestination = <P, B>(mayBrief: MayBrief<P, B>) =>
-	Effect.gen(function* () {
-		const acting = mayBrief.principal.value;
-		if (acting._tag !== "BotForAsker") return yield* new ResourceHidden({ resource: "bot" });
-		const { destination } = yield* resolveBrief(acting, mayBrief.bot.value);
-		if (destination !== mayBrief.project) return yield* new ApprovalNeeded();
 	});
 
 /**
@@ -80,11 +95,10 @@ export const requireBriefDestination = <P, B>(mayBrief: MayBrief<P, B>) =>
  * otherwise. Hidden unless the turn may write a brief and its asker reaches
  * the bot and that project.
  */
-const resolveBrief = (acting: BotForAsker, botId: string) =>
+const resolveBrief = (acting: BotForAsker, record: BotRecord) =>
 	Effect.gen(function* () {
 		const hidden = new ResourceHidden({ resource: "bot" });
-		const record = yield* query((db) => botRecord(db, botId));
-		if (!record || record.workspace !== acting.workspace || !record.defaultProject) {
+		if (record.deleting || !record.defaultProject) {
 			return yield* Effect.fail(hidden);
 		}
 		const turn = yield* query((db) => turnFacts(db, acting.turn));
@@ -115,26 +129,3 @@ const resolveBrief = (acting: BotForAsker, botId: string) =>
 export function canWriteBrief(reason: TurnFacts["reason"]): boolean {
 	return reason !== "collaboration" && reason !== "brief";
 }
-
-export const briefRecipient = (principal: BotForAsker, handle: string | undefined) =>
-	Effect.gen(function* () {
-		const [recipient] = yield* query((db) =>
-			db
-				.select({ id: bot.id, model: bot.model })
-				.from(bot)
-				.where(
-					and(
-						eq(bot.workspaceId, principal.workspace),
-						handle === undefined
-							? eq(bot.id, principal.bot)
-							: and(
-									sql`lower(${bot.handle}) = lower(${handle.trim().replace(/^@/, "")})`,
-									or(isNull(bot.assistantOf), eq(bot.createdById, principal.asker)),
-								),
-					),
-				)
-				.limit(1),
-		);
-		if (!recipient) return yield* new ResourceHidden({ resource: "bot" });
-		return recipient;
-	});
