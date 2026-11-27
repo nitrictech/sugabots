@@ -32,8 +32,8 @@ import { BlobDeletions } from "../blob-store/deletions.ts";
 import {
 	commitWrittenFile,
 	executionFence,
-	replayWrittenFile,
 	type FenceRefusal,
+	replayWrittenFile,
 } from "../chats/turns/turns.ts";
 import {
 	type Database,

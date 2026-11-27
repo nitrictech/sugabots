@@ -24,7 +24,7 @@ import {
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { Context, Effect, Layer } from "effect";
 import type { Actor } from "../../authorization/permissions.ts";
-import { holdTurnOf, type FenceRefusal } from "../../chats/turns/turns.ts";
+import { type FenceRefusal, holdTurnOf } from "../../chats/turns/turns.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { serviceOperations, Transaction } from "../../database/database.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";

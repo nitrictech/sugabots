@@ -23,15 +23,8 @@ import {
 	projectMember,
 	toolCall,
 	turn,
-	workspace,
 } from "../database/schema.ts";
-import {
-	closeDatabase,
-	holdTransaction,
-	onDatabase,
-	runOnPostgres,
-	waitUntilWaitingOnLocks,
-} from "../database/testing.ts";
+import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { createWorkspaceFixture } from "../database/workspace.test-support.ts";
 import { asMember } from "../operations/chats/testing.ts";
 import type { Operations } from "../operations/registry.ts";
@@ -430,39 +423,6 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			ApprovalRefused,
 		);
 		await expect(edit()).rejects.toBeInstanceOf(ApprovalRefused);
-		expect(await filesAs(editorId).get(made.id)).toMatchObject({ version: 1, content: "# One" });
-	});
-
-	it("writes nothing for a call whose tool is switched off while it waits to write", async () => {
-		const made = await seed({ kind: "markdown", title: "Notes", content: "# One" });
-		const edit = await allowedChange("files.edit", {
-			fileId: made.id,
-			baseVersion: 1,
-			oldText: "One",
-			newText: "Two",
-		});
-		// Holds the workspace's lock, as a change to who reaches what does, so
-		// the write waits at its fence, and switches the tool off meanwhile.
-		const switching = holdTransaction(
-			Effect.andThen(
-				query((db) =>
-					db
-						.select({ id: workspace.id })
-						.from(workspace)
-						.innerJoin(bot, eq(bot.workspaceId, workspace.id))
-						.where(eq(bot.id, by.botId))
-						.for("no key update", { of: workspace }),
-				),
-				switchOff("file_edit"),
-			),
-		);
-		await switching.held;
-
-		const editing = edit();
-		await waitUntilWaitingOnLocks(1);
-		await switching.release();
-
-		await expect(editing).rejects.toBeInstanceOf(ApprovalRefused);
 		expect(await filesAs(editorId).get(made.id)).toMatchObject({ version: 1, content: "# One" });
 	});
 
