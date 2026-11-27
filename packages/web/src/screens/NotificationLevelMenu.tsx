@@ -196,21 +196,25 @@ function LevelChoices({
 	const followed = levelAbove(settings);
 	const FollowedIcon = LEVEL_ICONS[followed];
 	return (
-		<DropdownMenuRadioGroup
-			value={levelChosenFor(settings, place) ?? FOLLOW}
-			onValueChange={(value: string) =>
-				setLevel.mutate({ place, level: value === FOLLOW ? null : (value as NotificationLevel) })
-			}
-		>
+		<DropdownMenuRadioGroup value={levelChosenFor(settings, place) ?? FOLLOW}>
 			{label && <DropdownMenuGroupLabel>{label}</DropdownMenuGroupLabel>}
-			<DropdownMenuRadioItem value={FOLLOW} closeOnClick>
+			<DropdownMenuRadioItem
+				value={FOLLOW}
+				closeOnClick
+				onClick={() => setLevel.mutate({ place, level: null })}
+			>
 				<FollowedIcon className="text-muted-foreground" />
 				Default ({NOTIFICATION_LEVEL_LABELS[followed].toLowerCase()})
 			</DropdownMenuRadioItem>
 			{NOTIFICATION_LEVELS.map((level) => {
 				const Icon = LEVEL_ICONS[level];
 				return (
-					<DropdownMenuRadioItem key={level} value={level} closeOnClick>
+					<DropdownMenuRadioItem
+						key={level}
+						value={level}
+						closeOnClick
+						onClick={() => setLevel.mutate({ place, level })}
+					>
 						<Icon />
 						{NOTIFICATION_LEVEL_LABELS[level]}
 					</DropdownMenuRadioItem>

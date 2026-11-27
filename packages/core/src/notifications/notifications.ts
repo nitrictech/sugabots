@@ -11,7 +11,7 @@ import {
 	streamEvent,
 } from "@sugabots/contracts";
 import type { UserText } from "@sugabots/errors";
-import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, type SQL } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Duration, Effect, Layer, Schedule } from "effect";
 import type { ChatEvent } from "../chats/events.ts";
 import {
@@ -31,11 +31,13 @@ import {
 	notificationOverride,
 	notificationSettings,
 	pendingNotification,
+	project,
 } from "../database/schema.ts";
 import type { IsMember } from "../proofs/is-member.ts";
 import type { ReachesBot } from "../proofs/reaches-bot.ts";
 import type { ReachesProject } from "../proofs/reaches-project.ts";
 import { processLayer, Tier } from "../tiers.ts";
+import { defaultProjectIdOf } from "../workspaces/bots/bot.ts";
 import {
 	type Addressed,
 	DEFAULT_AUTOMATION_RUNS,
@@ -319,7 +321,17 @@ export const make = Effect.gen(function* () {
 				db.select().from(notificationSettings).where(eq(notificationSettings.memberId, memberId)),
 			);
 			const overrides = yield* query((db) =>
-				db.select().from(notificationOverride).where(eq(notificationOverride.memberId, memberId)),
+				db
+					.select({
+						botId: notificationOverride.botId,
+						projectId: notificationOverride.projectId,
+						level: notificationOverride.level,
+						mutedUntil: notificationOverride.mutedUntil,
+						defaultOfBotId: project.defaultOfBotId,
+					})
+					.from(notificationOverride)
+					.leftJoin(project, eq(project.id, notificationOverride.projectId))
+					.where(eq(notificationOverride.memberId, memberId)),
 			);
 			const now = yield* DateTime.nowAsDate;
 			const levels = {
@@ -331,13 +343,18 @@ export const make = Effect.gen(function* () {
 				bots: {} as Record<string, string>,
 			};
 			for (const override of overrides) {
-				const [kind, id] = override.projectId
-					? (["projects", override.projectId] as const)
-					: (["bots", override.botId] as const);
+				const botId = override.botId ?? override.defaultOfBotId;
+				const [kind, id] = botId
+					? (["bots", botId] as const)
+					: (["projects", override.projectId] as const);
 				if (!id) continue;
-				if (override.level) levels[kind][id] = override.level;
+				if (override.level && (override.botId || !levels[kind][id])) {
+					levels[kind][id] = override.level;
+				}
 				if (override.mutedUntil && override.mutedUntil > now) {
-					mutedUntil[kind][id] = override.mutedUntil.toISOString();
+					const until = override.mutedUntil.toISOString();
+					const current = mutedUntil[kind][id];
+					if (!current || until > current) mutedUntil[kind][id] = until;
 				}
 			}
 			return {
@@ -381,54 +398,63 @@ export const make = Effect.gen(function* () {
 		setLevel: (isMember, reached, level) =>
 			operation(
 				"setLevel",
-				Effect.gen(function* () {
-					const override = overrideOf(isMember.member, placeOf(reached));
-					yield* query((db) =>
-						db
-							.insert(notificationOverride)
-							.values({ ...override.row, level })
-							.onConflictDoUpdate({ ...override.conflict, set: { level, mutedUntil: null } }),
-					);
-				}),
+				transaction(
+					Effect.gen(function* () {
+						const place = placeOf(reached);
+						const inherited = inheritedBotOverride(isMember.member, place);
+						if (inherited) yield* deleteOverrides(inherited);
+						const override = overrideOf(isMember.member, place);
+						yield* query((db) =>
+							db
+								.insert(notificationOverride)
+								.values({ ...override.row, level })
+								.onConflictDoUpdate({ ...override.conflict, set: { level, mutedUntil: null } }),
+						);
+					}),
+				),
 			),
 
 		clearLevel: (isMember, place) =>
 			operation(
 				"clearLevel",
-				query((db) =>
-					db.delete(notificationOverride).where(overrideOf(isMember.member, place).where),
-				).pipe(Effect.asVoid),
+				transaction(
+					Effect.gen(function* () {
+						const inherited = inheritedBotOverride(isMember.member, place);
+						if (inherited) yield* deleteOverrides(inherited);
+						yield* deleteOverrides(overrideOf(isMember.member, place).where);
+					}),
+				),
 			),
 
 		mute: (isMember, reached, until) =>
 			operation(
 				"mute",
-				Effect.gen(function* () {
-					const override = overrideOf(isMember.member, placeOf(reached));
-					yield* query((db) =>
-						db
-							.insert(notificationOverride)
-							.values({ ...override.row, mutedUntil: until })
-							.onConflictDoUpdate({ ...override.conflict, set: { mutedUntil: until } }),
-					);
-				}),
+				transaction(
+					Effect.gen(function* () {
+						const place = placeOf(reached);
+						const inherited = inheritedBotOverride(isMember.member, place);
+						if (inherited) yield* clearMute(inherited);
+						const override = overrideOf(isMember.member, place);
+						yield* query((db) =>
+							db
+								.insert(notificationOverride)
+								.values({ ...override.row, mutedUntil: until })
+								.onConflictDoUpdate({ ...override.conflict, set: { mutedUntil: until } }),
+						);
+					}),
+				),
 			),
 
 		unmute: (isMember, place) =>
 			operation(
 				"unmute",
-				Effect.gen(function* () {
-					const override = overrideOf(isMember.member, place);
-					// A row that only held the mute has nothing left to say.
-					yield* query((db) =>
-						db
-							.delete(notificationOverride)
-							.where(and(override.where, isNull(notificationOverride.level))),
-					);
-					yield* query((db) =>
-						db.update(notificationOverride).set({ mutedUntil: null }).where(override.where),
-					);
-				}),
+				transaction(
+					Effect.gen(function* () {
+						const inherited = inheritedBotOverride(isMember.member, place);
+						if (inherited) yield* clearMute(inherited);
+						yield* clearMute(overrideOf(isMember.member, place).where);
+					}),
+				),
 			),
 
 		sendTest: (isMember) =>
@@ -708,9 +734,36 @@ function overrideOf(memberId: string, place: Place) {
 	const column =
 		place.kind === "project" ? notificationOverride.projectId : notificationOverride.botId;
 	return {
-		where: and(eq(notificationOverride.memberId, memberId), eq(column, place.id)),
+		where: sql`${notificationOverride.memberId} = ${memberId} and ${column} = ${place.id}`,
 		row:
 			place.kind === "project" ? { memberId, projectId: place.id } : { memberId, botId: place.id },
 		conflict: { target: [notificationOverride.memberId, column], targetWhere: isNotNull(column) },
 	};
 }
+
+function inheritedBotOverride(memberId: string, place: Place) {
+	if (place.kind !== "bot") return undefined;
+	const projectId = defaultProjectIdOf(sql`${place.id}::uuid`);
+	return sql`${notificationOverride.memberId} = ${memberId} and ${notificationOverride.projectId} = ${projectId}`;
+}
+
+const deleteOverrides = (where: SQL) =>
+	query((db) => db.delete(notificationOverride).where(where)).pipe(Effect.asVoid);
+
+const clearMute = Effect.fnUntraced(function* (where: SQL) {
+	yield* query((db) =>
+		db.delete(notificationOverride).where(and(where, isNull(notificationOverride.level))),
+	);
+	yield* query((db) =>
+		db
+			.update(notificationOverride)
+			.set({ mutedUntil: null })
+			.where(
+				and(
+					where,
+					isNotNull(notificationOverride.level),
+					isNotNull(notificationOverride.mutedUntil),
+				),
+			),
+	);
+});

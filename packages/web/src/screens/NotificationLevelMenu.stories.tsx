@@ -40,7 +40,8 @@ const approvalsPath = `/${storyWorkspace.slug}/approvals`;
 const meta = preview.meta({
 	title: "Views/NotificationLevelMenu",
 	parameters: { layout: "fullscreen" },
-	beforeEach({ msw }) {
+	beforeEach({ msw, parameters }) {
+		const inheritedMute = parameters.inheritedMute === true;
 		let settings: NotificationSettings = {
 			level: "mentions",
 			pausedUntil: null,
@@ -48,8 +49,11 @@ const meta = preview.meta({
 			turnFailures: true,
 			automationRuns: "failures",
 			projects: {},
-			bots: {},
-			mutedUntil: { projects: {}, bots: {} },
+			bots: inheritedMute ? { [bot.id]: "all" } : {},
+			mutedUntil: {
+				projects: {},
+				bots: inheritedMute ? { [bot.id]: "2099-02-01T10:00:00.000Z" } : {},
+			},
 		};
 		type Field = "projects" | "bots";
 		const fieldOf = (kind: unknown): Field => (kind === "project" ? "projects" : "bots");
@@ -92,7 +96,7 @@ const meta = preview.meta({
 
 /**
  * Right-clicking a bot in the sidebar offers what it notifies about. Choosing
- * Nothing marks it muted, until it goes back to following its project.
+ * Nothing marks it muted, until it goes back to the member's default level.
  */
 export const MutingABot = meta.story({
 	render: () => <StoryApp path={approvalsPath} />,
@@ -131,6 +135,21 @@ export const MutingABotForAWhile = meta.story({
 		await openMenuOf(row);
 		await userEvent.click(await screen.findByRole("menuitem", { name: "More options" }));
 		await chooseAndClose(await screen.findByRole("menuitem", { name: /^Unmute/ }));
+		await waitFor(() => expect(sidebar.queryByRole("img", { name: /^Muted/ })).toBeNull());
+	},
+});
+
+/** A bot's inherited mute is visible and ends when the member chooses Everything again. */
+export const ClearingAnInheritedBotMute = meta.story({
+	parameters: { inheritedMute: true },
+	render: () => <StoryApp path={approvalsPath} />,
+	play: async ({ canvas }) => {
+		const sidebar = within(await canvas.findByRole("navigation", { name: "Sidebar" }));
+		await expect(await sidebar.findByRole("img", { name: /^Muted until / })).toBeVisible();
+		await openMenuOf(await sidebar.findByText(bot.name));
+		const everything = await screen.findByRole("menuitemradio", { name: "Everything" });
+		await expect(everything).toHaveAttribute("aria-checked", "true");
+		await chooseAndClose(everything);
 		await waitFor(() => expect(sidebar.queryByRole("img", { name: /^Muted/ })).toBeNull());
 	},
 });
