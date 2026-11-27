@@ -666,7 +666,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			}
 		});
 
-		it("sends no reply text after a stored change of reach until it has proved again", async () => {
+		it("sends no reply text after a change of reach it has heard of until it has proved again", async () => {
 			const world = await staffed();
 			const provingAgain = Promise.withResolvers<void>();
 			const refuse = Promise.withResolvers<void>();
@@ -698,9 +698,8 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			await commit(chatStream(world.chat), streamEvent("chat.changed", { chatId: world.chat }));
 			expect((await reader.read()).value?.event.type).toBe("chat.changed");
 
-			// Ed is taken out of J, as another process records it: stored, but not yet delivered here.
 			await takeEdOut(world);
-			await commitUnheard(workspaceStream(world.workspace), jChanged(world));
+			await commit(workspaceStream(world.workspace), jChanged(world));
 			await bus.publish(
 				chatStream(world.chat),
 				streamEvent("message.delta", {

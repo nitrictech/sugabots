@@ -592,10 +592,10 @@ export const make = Effect.gen(function* () {
 						const next = yield* Queue.take(woken);
 						if (next.kind === "unstored") {
 							unstoredHeld -= 1;
-							// A change of reach can be stored before its delivery reaches this
-							// process, so what is stored is read first: someone taken out of a
-							// chat gets none of its reply text from then on.
-							if (!(yield* readStored)) return;
+							// Stored events this process heard of before it were queued ahead of
+							// it and read first, so a change of reach heard of applies to the
+							// reply text after it. One stored but not yet heard of here is read
+							// when it is, or when the watcher next checks.
 							if (!(yield* send(yield* decide(next.delivery)))) return;
 							continue;
 						}
