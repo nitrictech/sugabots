@@ -15111,29 +15111,6 @@
         "project_bot_connector"
       ],
       "writes": [
-        "s|fk|public.project_bot_connector.project_bot_connector_turned_on_by_id_member_id_fkey",
-        "n|fk|public.project_bot_connector.project_bot_connector_turned_on_by_id_member_id_fkey",
-        "e|fk|public.project_bot_connector.project_bot_connector_turned_on_by_id_member_id_fkey",
-        "n|con|public.project_bot_connector.project_bot_connector_turned_on_by_id_member_id_fkey"
-      ],
-      "reads": [
-        "n|tbl|public.project_bot_connector",
-        "n|sch|public",
-        "n|tbl|public.member",
-        "n|sch|public",
-        "n|col|public.project_bot_connector.turned_on_by_id",
-        "n|col|public.member.id",
-        "e|uniqueness|public.member.id"
-      ]
-    },
-    {
-      "statementType": "create_fk",
-      "statementTarget": [
-        "table",
-        "public",
-        "project_bot_connector"
-      ],
-      "writes": [
         "s|fk|public.project_bot_connector.project_bot_connector_project_bot_fkey",
         "n|fk|public.project_bot_connector.project_bot_connector_project_bot_fkey",
         "e|fk|public.project_bot_connector.project_bot_connector_project_bot_fkey",
@@ -25140,22 +25117,6 @@
       "row": {
         "schema": "public",
         "table": "project_bot_connector",
-        "name": "turned_on_by_id",
-        "type": "uuid",
-        "typeSchema": null,
-        "notNull": false,
-        "dimensions": 0,
-        "default": null,
-        "generated": null,
-        "identity": null,
-        "entityType": "columns"
-      }
-    },
-    {
-      "op": "create",
-      "row": {
-        "schema": "public",
-        "table": "project_bot_connector",
         "name": "created_at",
         "type": "timestamp with time zone",
         "typeSchema": null,
@@ -25189,26 +25150,6 @@
         "method": "btree",
         "concurrently": false,
         "entityType": "indexes"
-      }
-    },
-    {
-      "op": "create",
-      "row": {
-        "schema": "public",
-        "table": "project_bot_connector",
-        "name": "project_bot_connector_turned_on_by_id_member_id_fkey",
-        "nameExplicit": false,
-        "columns": [
-          "turned_on_by_id"
-        ],
-        "schemaTo": "public",
-        "tableTo": "member",
-        "columnsTo": [
-          "id"
-        ],
-        "onUpdate": "NO ACTION",
-        "onDelete": "SET NULL",
-        "entityType": "fks"
       }
     },
     {

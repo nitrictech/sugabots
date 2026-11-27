@@ -213,7 +213,6 @@ export const projectBotConnectorSchema = Schema.Struct({
 	 */
 	addressRevision: Schema.Int,
 	botId: uuidSchema,
-	botName: Schema.String,
 	on: Schema.Boolean,
 	/** Turned on before its address changed, which turned it off until it is turned on again. */
 	addressChanged: Schema.Boolean,

@@ -78,7 +78,7 @@ export interface Interface {
 	 */
 	readonly setOnInProject: <P, J, K>(
 		canSet: CanSetProjectBotConnector<P, J, K>,
-		change: { readonly on: boolean; readonly addressRevision: number },
+		change: { readonly on: boolean; readonly addressRevision?: number | undefined },
 	) => Effect.Effect<ProjectBotConnector, ConnectorNotFound | ConnectorAddressChanged>;
 	readonly listForRestriction: <P, J>(
 		canRestrict: CanRestrictBotsProject<P, J>,
@@ -351,7 +351,6 @@ export const make = Effect.gen(function* () {
 					yield* connectors.setOnInProject({
 						...where,
 						botId: canSet.bot,
-						memberId: canSet.member,
 						on,
 						addressRevision,
 					});

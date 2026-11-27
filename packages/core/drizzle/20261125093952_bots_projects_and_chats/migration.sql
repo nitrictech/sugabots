@@ -3284,13 +3284,11 @@ CREATE TABLE "project_bot_connector" (
 	"bot_id" uuid NOT NULL,
 	"connector_id" uuid NOT NULL,
 	"address_revision" integer NOT NULL,
-	"turned_on_by_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "project_bot_connector_pkey" PRIMARY KEY("project_id","connector_id")
 );
 --> statement-breakpoint
 CREATE INDEX "project_bot_connector_connector_id_idx" ON "project_bot_connector" ("connector_id");--> statement-breakpoint
-ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_turned_on_by_id_member_id_fkey" FOREIGN KEY ("turned_on_by_id") REFERENCES "member"("id") ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_project_bot_fkey" FOREIGN KEY ("project_id","bot_id") REFERENCES "project_bot"("project_id","bot_id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "project_bot_connector" ADD CONSTRAINT "project_bot_connector_connector_workspace_fkey" FOREIGN KEY ("connector_id","workspace_id") REFERENCES "connector"("id","workspace_id") ON DELETE CASCADE;--> statement-breakpoint
 -- A `shared` `pod`'s bots used their own connectors in the `pod`, so each

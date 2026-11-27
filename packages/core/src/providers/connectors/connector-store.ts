@@ -128,7 +128,7 @@ export interface Interface {
 	) => Effect.Effect<boolean>;
 	/**
 	 * Turns the bot `botId`'s own connector `connectorId` on in the project
-	 * `projectId`, as `memberId`, for the address numbered `addressRevision`,
+	 * `projectId` for the address numbered `addressRevision`,
 	 * failing with `ConnectorAddressChanged` once the connector has another;
 	 * or off. The caller has proved the connector is the bot's and the bot is
 	 * in the project.
@@ -138,9 +138,8 @@ export interface Interface {
 		readonly projectId: string;
 		readonly botId: string;
 		readonly connectorId: string;
-		readonly memberId: string;
 		readonly on: boolean;
-		readonly addressRevision: number;
+		readonly addressRevision?: number | undefined;
 	}) => Effect.Effect<void, ConnectorAddressChanged>;
 	/**
 	 * Records what a test of the configuration last updated at `testedAt`
@@ -504,7 +503,6 @@ export const make = Effect.gen(function* () {
 			projectId,
 			botId,
 			connectorId,
-			memberId,
 			on,
 			addressRevision,
 		}) =>
@@ -538,7 +536,7 @@ export const make = Effect.gen(function* () {
 						}
 						if (current.addressRevision !== addressRevision)
 							return yield* new ConnectorAddressChanged();
-						const turnedOn = { botId, addressRevision, turnedOnById: memberId };
+						const turnedOn = { botId, addressRevision };
 						yield* query((db) =>
 							db
 								.insert(projectBotConnector)

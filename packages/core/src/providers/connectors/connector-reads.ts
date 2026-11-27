@@ -80,7 +80,6 @@ export const projectBotConnectorsIn = (
 				url: connector.url,
 				addressRevision: connector.addressRevision,
 				botId: bot.id,
-				botName: bot.name,
 				botProjectId: project.id,
 				turnedOnFor: projectBotConnector.addressRevision,
 			})

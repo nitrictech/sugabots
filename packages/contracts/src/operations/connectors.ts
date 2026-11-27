@@ -157,8 +157,11 @@ export const connectorsContracts = {
 			connectorId: uuidSchema,
 			on: Schema.Boolean,
 			/** The connector's address revision as the manager saw it; turning it off goes ahead regardless. */
-			addressRevision: Schema.Int,
-		}),
+			addressRevision: Schema.optional(Schema.Int),
+		}).check(Schema.makeFilter(
+			({ on, addressRevision }) => !on || addressRevision !== undefined,
+			{ message: "An address revision is required when turning a connector on" },
+		)),
 		output: projectBotConnectorSchema,
 		errors: [...refusals, ConnectorNotFound, ConnectorAddressChanged],
 		changes: true,

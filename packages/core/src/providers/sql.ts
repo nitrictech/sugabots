@@ -292,7 +292,6 @@ export const projectBotConnector = pgTable(
 		/** The connector's `addressRevision` when it was turned on; it stays on only while that is unchanged. */
 		addressRevision: integer("address_revision").notNull(),
 		/** Who turned it on; null once they have left, or when an upgrade did. */
-		turnedOnById: uuid("turned_on_by_id").references(() => member.id, { onDelete: "set null" }),
 		createdAt: stamp("created_at"),
 	},
 	(table) => [

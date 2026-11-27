@@ -34,8 +34,6 @@ export interface CanSetProjectBotConnector<P, J, K>
 	readonly connector: Named<K, string>;
 	/** The bot whose own connector K is. */
 	readonly bot: string;
-	/** The member managing J, who turns it on. */
-	readonly member: string;
 }
 
 const ReachesConnectorProof = defineProof("ReachesConnector");
@@ -131,7 +129,6 @@ export const proveCanSetProjectBotConnector = <P, J, K>(
 				project: reach.project,
 				connector: connectorId,
 				bot: found.bot,
-				member: canManage.member.actor.memberId,
 			},
 		);
 		return proof;
