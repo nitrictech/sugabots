@@ -2192,6 +2192,69 @@ it("keeps the turn asker function without installing an insert trigger during th
 	);
 });
 
+it.skipIf(!process.env.DATABASE_URL)(
+	"keeps replies referenced by queued work without comparing every reply to every payload",
+	async () => {
+		const migration = await readFile(
+			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+			"utf8",
+		);
+		const cleanup = migration
+			.slice(migration.indexOf("-- A finished asking reply"))
+			.split("--> statement-breakpoint")[0];
+		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
+			await client.query("begin");
+			try {
+				await client.query(`
+					create temp table message (
+						id uuid primary key, parts jsonb, status text, reply_to_message_id uuid
+					);
+					create temp table "turn" (trigger_message_id uuid);
+					create temp table message_reaction (message_id uuid);
+					create temp table file (message_id uuid);
+					create temp table tool_call (message_id uuid);
+					create temp table lane (payload jsonb);
+					create temp table lane_request (payload jsonb);
+					insert into message (id, parts, status)
+					select md5('reply' || ordinal)::uuid, '[{"type":"collaboration"}]', 'complete'
+					from generate_series(1, 3000) ordinal;
+					insert into lane (payload)
+					values (jsonb_build_object('triggerMessageId', md5('reply1')::uuid)),
+						(jsonb_build_object('sourceMessageId', md5('reply2')::uuid)), (null);
+					insert into lane
+					select jsonb_build_object('triggerMessageId', md5('other' || ordinal)::uuid)
+					from generate_series(1, 997) ordinal;
+					insert into lane_request (payload)
+					values (jsonb_build_object('triggerMessageId', md5('reply3')::uuid)),
+						(jsonb_build_object('sourceMessageId', md5('reply4')::uuid)),
+						('{"triggerMessageId":null,"sourceMessageId":"missing"}');
+					insert into lane_request
+					select jsonb_build_object('sourceMessageId', md5('other' || ordinal)::uuid)
+					from generate_series(1, 8997) ordinal;
+					analyze message, lane, lane_request, "turn", message_reaction, file, tool_call;
+				`);
+				const { rows: plan } = await client.query<{ "QUERY PLAN": string }>(
+					`explain (analyze, timing off) ${cleanup}`,
+				);
+				const { rows: kept } = await client.query(
+					`select ordinal from generate_series(1, 3000) ordinal
+					 join message on id = md5('reply' || ordinal)::uuid order by ordinal`,
+				);
+				expect(kept).toEqual([{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }, { ordinal: 4 }]);
+				const discardedPairs = plan.reduce(
+					(count, { "QUERY PLAN": line }) =>
+						count + Number(/Rows Removed by Join Filter: (\d+)/.exec(line)?.[1] ?? 0),
+					0,
+				);
+				expect(discardedPairs).toBeLessThan(10_000);
+			} finally {
+				await client.query("rollback");
+			}
+		});
+	},
+	UPGRADE_TIMEOUT_MS,
+);
+
 /** Migrates the database at `url` through `last`, as an installation of `main` was. */
 async function migrateTo(url: string, last: string) {
 	const folder = await mkdtemp(join(tmpdir(), "migrations-"));

@@ -2736,7 +2736,10 @@ WHERE "message"."parts" @> '[{"type": "collaboration"}]'
 			UNION ALL
 			SELECT "payload" FROM "lane_request"
 		) AS asked
-		WHERE "message"."id"::text IN (asked."payload"->>'triggerMessageId', asked."payload"->>'sourceMessageId')
+		CROSS JOIN LATERAL (
+			VALUES (asked."payload"->>'triggerMessageId'), (asked."payload"->>'sourceMessageId')
+		) AS referenced("message_id")
+		WHERE referenced."message_id" = "message"."id"::text
 	)
 	AND NOT EXISTS (SELECT 1 FROM "message" quoting WHERE quoting."reply_to_message_id" = "message"."id")
 	AND NOT EXISTS (SELECT 1 FROM "message_reaction" WHERE "message_reaction"."message_id" = "message"."id")
