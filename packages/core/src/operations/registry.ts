@@ -167,7 +167,7 @@ const checkApprovalPermission = (
 		const result = yield* Effect.result(
 			runToApproval((check) => operation.run(principal, decoded.success as never, check), {
 				kind: "approvalCheck",
-				forDecision: true,
+				forDecision: { recordedTargets: call.approvalResolvedTargets },
 			}),
 		);
 		if (result._tag === "Failure") {

@@ -353,9 +353,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 		).toEqual([{ project: recipient.defaultProject }]);
 	});
 
-	it.each([false, true])(
-		"closes a renamed recipient's brief approval and wakes its turn (handle reused: %s)",
-		async (reuseHandle) => {
+	it.each([
+		["unused", null],
+		["a bot with a model", "m"],
+		["a bot with no model", null],
+	] as const)(
+		"closes a renamed recipient's brief approval and wakes its turn when its handle goes to %s",
+		async (replacement, modelForReplacement) => {
 			const original = await seedBot(workspaceId, { createdById: adminId });
 			await onDatabase((db) =>
 				db.update(bot).set({ model: "m", handle: "report-writer" }).where(eq(bot.id, original.id)),
@@ -370,13 +374,13 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 			await onDatabase((db) =>
 				db.update(bot).set({ handle: "report-writer-old" }).where(eq(bot.id, original.id)),
 			);
-			if (reuseHandle) {
-				const replacement = await seedBot(workspaceId, { createdById: adminId });
+			if (replacement !== "unused") {
+				const replacementBot = await seedBot(workspaceId, { createdById: adminId });
 				await onDatabase((db) =>
 					db
 						.update(bot)
-						.set({ model: "m", handle: "report-writer" })
-						.where(eq(bot.id, replacement.id)),
+						.set({ model: modelForReplacement, handle: "report-writer" })
+						.where(eq(bot.id, replacementBot.id)),
 				);
 			}
 

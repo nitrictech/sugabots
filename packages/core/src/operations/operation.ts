@@ -31,7 +31,7 @@ export interface ApprovalCheck {
 	/** A call plan checks reach and tool access before an approval request resolves connector targets. */
 	readonly deferConnectorTargets?: true;
 	/** Rechecks permissions for a pending decision after the turn has released its step. */
-	readonly forDecision?: true;
+	readonly forDecision?: { readonly recordedTargets: ResolvedTargets | null };
 }
 
 /**
