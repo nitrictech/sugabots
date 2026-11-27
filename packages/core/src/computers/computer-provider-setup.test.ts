@@ -6,6 +6,7 @@ import {
 	seedProject,
 	seedWorkspace,
 } from "../authentication/seed.test-support.ts";
+import { EventOutbox } from "../database/events/outbox.ts";
 import { computerProvider } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import { proveInWorkspace } from "../proofs/in-workspace.ts";
@@ -40,7 +41,13 @@ it("keeps a provider that makes a project's first computer while it is removed",
 	const setup = await runOnPostgres(
 		Effect.provide(
 			ComputerProviderSetup.Service,
-			ComputerProviderSetup.layer.pipe(Layer.provide([noComputers, unimplemented(Egress.Service)])),
+			ComputerProviderSetup.layer.pipe(
+				Layer.provide([
+					noComputers,
+					unimplemented(Egress.Service),
+					unimplemented(EventOutbox.Service),
+				]),
+			),
 		),
 	);
 	const recording = await recordingFirstComputer({

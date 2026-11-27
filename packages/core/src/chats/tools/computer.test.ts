@@ -12,7 +12,7 @@ import { ComputerProviderStore } from "../../computers/computer-provider-store.t
 import { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
 import { noComputers, removeWorkVolumes } from "../../computers/testing.ts";
-import { allowedHost, bot as botTable, message } from "../../database/schema.ts";
+import { allowedHost, bot as botTable, computerProvider, message } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import { createWorkspaceFixture } from "../../database/workspace.test-support.ts";
 import { ChatFileStore } from "../../files/chat-file-store.ts";
@@ -67,62 +67,83 @@ describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () =>
 		}
 	});
 
-	it("proves again that the turn may use it, so a tool that opens it after computer use is turned off runs nothing", async () => {
-		const workspaceId = await seedWorkspace();
-		const memberId = await seedMember(workspaceId, "editor");
-		const bot = await seedBot(workspaceId, { usesComputer: true, createdById: memberId });
-		const chatId = await seedProjectChat(workspaceId, bot.defaultProject, memberId);
-		const principal = await principals(await authenticators()).botFor(memberId, bot.id, chatId);
-		const providers = await runOnPostgres(
-			Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
-		);
-		await runOnPostgres(
-			providers.create(workspaceId, {
-				createdById: memberId,
-				provider: {
-					settings: {
-						builtIn: "opensandbox",
-						serverUrl: "https://computers.example.com",
-						image: "sugabots-computer:dev",
-						networkMode: "allowed-hosts-only",
+	it.each([
+		{
+			change: "its bot's computer use is turned off",
+			after: (_workspaceId: string, botId: string) =>
+				onDatabase((db) =>
+					db.update(botTable).set({ usesComputer: false }).where(eq(botTable.id, botId)),
+				),
+		},
+		{
+			change: "the workspace's computer provider is switched off",
+			after: (workspaceId: string) =>
+				onDatabase((db) =>
+					db
+						.update(computerProvider)
+						.set({ enabled: false })
+						.where(eq(computerProvider.workspaceId, workspaceId)),
+				),
+		},
+	])(
+		"proves again that the turn may use it, so a tool that opens it after $change runs nothing",
+		async ({ after }) => {
+			const workspaceId = await seedWorkspace();
+			const memberId = await seedMember(workspaceId, "editor");
+			const bot = await seedBot(workspaceId, { usesComputer: true, createdById: memberId });
+			const chatId = await seedProjectChat(workspaceId, bot.defaultProject, memberId);
+			const principal = await principals(await authenticators()).botFor(memberId, bot.id, chatId);
+			const providers = await runOnPostgres(
+				Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer),
+			);
+			await runOnPostgres(
+				providers.create(workspaceId, {
+					createdById: memberId,
+					provider: {
+						settings: {
+							builtIn: "opensandbox",
+							serverUrl: "https://computers.example.com",
+							image: "sugabots-computer:dev",
+							networkMode: "allowed-hosts-only",
+						},
+						enabled: true,
+						apiKey: "never-used",
 					},
-					enabled: true,
-					apiKey: "never-used",
-				},
-			}),
-		);
-		const computers = await runOnPostgres(
-			Effect.provide(TurnComputers.Service, TurnComputers.layer).pipe(Effect.provide(noComputers)),
-		);
-		const scope = Effect.runSync(Scope.make());
-		try {
-			const { step } = await stepOnComputer(
-				computers,
-				principal,
-				{
-					workspaceId,
-					projectId: bot.defaultProject,
-					turnId: principal.turn,
-					chatId,
-					botId: bot.id,
-					color: "orange",
-					naturalBrowsing: false,
-					acceptsImages: false,
-				},
-				scope,
+				}),
 			);
-			const opening = step.atPlace;
-			if (!opening) throw new Error("The step has no computer");
-
-			await onDatabase((db) =>
-				db.update(botTable).set({ usesComputer: false }).where(eq(botTable.id, bot.id)),
+			const computers = await runOnPostgres(
+				Effect.provide(TurnComputers.Service, TurnComputers.layer).pipe(
+					Effect.provide(noComputers),
+				),
 			);
+			const scope = Effect.runSync(Scope.make());
+			try {
+				const { step } = await stepOnComputer(
+					computers,
+					principal,
+					{
+						workspaceId,
+						projectId: bot.defaultProject,
+						turnId: principal.turn,
+						chatId,
+						botId: bot.id,
+						color: "orange",
+						naturalBrowsing: false,
+						acceptsImages: false,
+					},
+					scope,
+				);
+				const opening = step.atPlace;
+				if (!opening) throw new Error("The step has no computer");
 
-			await expect(opening.open()).rejects.toBeInstanceOf(ComputerUseEnded);
-		} finally {
-			await Effect.runPromise(Scope.close(scope, Exit.void));
-		}
-	});
+				await after(workspaceId, bot.id);
+
+				await expect(opening.open()).rejects.toBeInstanceOf(ComputerUseEnded);
+			} finally {
+				await Effect.runPromise(Scope.close(scope, Exit.void));
+			}
+		},
+	);
 });
 
 /**

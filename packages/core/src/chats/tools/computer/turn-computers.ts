@@ -222,11 +222,16 @@ export const make = Effect.gen(function* () {
 			const opening = openOncePerTurn(() => run(prepared, { signal: stepEnded }));
 			const computer: TurnComputer = {
 				// Each call proves again that the turn may use the computer, the
-				// connectors' tools that read from it included, so a call made after
-				// the bot's computer use or its asker's standing went runs nothing there.
+				// connectors' tools that read from it included, and that the provider
+				// the step opened it with is still the workspace's, so a call made
+				// after the bot's computer use, its asker's standing or the provider
+				// went runs nothing there.
 				open: async () => {
-					if (!(await run(operation("forStep", canAskForComputer(principal)))))
-						throw new ComputerUseEnded();
+					const stillUsable = Effect.all([
+						canAskForComputer(principal),
+						Effect.map(providers.enabled(workspaceId), (now) => now?.id === provider.id),
+					]).pipe(Effect.map(([allowed, sameProvider]) => allowed && sameProvider));
+					if (!(await run(operation("forStep", stillUsable)))) throw new ComputerUseEnded();
 					return opening();
 				},
 				run,

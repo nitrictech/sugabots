@@ -164,7 +164,7 @@ export const make = Effect.gen(function* () {
 					const holder: ProjectComputers.Holder = { kind: "viewer", id: yield* ids.random };
 					yield* Effect.addFinalizer(() => projectComputers.release(holder));
 					const { computer } = yield* projectComputers.open(place, provider, holder);
-					const id = yield* computerOf(place.projectId);
+					const id = yield* computerOf(place.projectId, provider.id);
 					if (id === undefined) return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
 					return {
 						id,
@@ -208,7 +208,11 @@ export const make = Effect.gen(function* () {
 				"stillShown",
 				Effect.gen(function* () {
 					yield* requireShown(chat, bot);
-					const id = yield* computerOf(chat.project.id);
+					// A desktop opened through a provider closes once it is no longer
+					// the workspace's: switched off, or another switched on instead.
+					const provider = yield* providers.enabled(chat.workspace);
+					if (!provider) return yield* new DesktopUnavailable({ reason: COMPUTERS_OFF });
+					const id = yield* computerOf(chat.project.id, provider.id);
 					if (id === undefined) return yield* new DesktopUnavailable({ reason: NO_COMPUTER });
 					return id;
 				}),
@@ -222,13 +226,18 @@ export const layer = layerNoDeps.pipe(
 	Layer.provide([ProjectComputers.layer, ComputerProviderStore.layer]),
 );
 
-/** The id of the project's computer, if it has one. */
-const computerOf = (projectId: string) =>
+/** The id of the project's computer, if it has one, and it was made by the provider `providerId`. */
+const computerOf = (projectId: string, providerId: string) =>
 	query((db) =>
 		db
 			.select({ id: computerTable.id })
 			.from(computerTable)
-			.where(eq(computerTable.projectId, projectId))
+			.where(
+				and(
+					eq(computerTable.projectId, projectId),
+					eq(computerTable.computerProviderId, providerId),
+				),
+			)
 			.limit(1),
 	).pipe(Effect.map(([row]) => row?.id));
 

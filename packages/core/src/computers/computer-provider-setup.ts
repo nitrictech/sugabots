@@ -24,11 +24,13 @@ import type { UrlNotAllowed } from "@sugabots/contracts/errors/providers";
 import { userText } from "@sugabots/errors";
 import { Context, Effect, Layer } from "effect";
 import { serviceOperations, transaction } from "../database/database.ts";
+import { EventOutbox } from "../database/events/outbox.ts";
 import type { Named } from "../proofs/proof.ts";
 import type { ReachesComputerProvider } from "../proofs/reaches-computer-provider.ts";
 import type { CanManageWorkspace, CanReadWorkspace } from "../proofs/workspace-permissions.ts";
 import { Egress } from "../providers/network/egress.ts";
 import { requireAllowedUrl, timedTest } from "../providers/tested-configuration.ts";
+import { reachChanged } from "../streams/reach-changes.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { toComputerProvider } from "./computer-provider-reads.ts";
 import { ComputerProviderStore } from "./computer-provider-store.ts";
@@ -120,6 +122,15 @@ export const make = Effect.gen(function* () {
 	const projectComputers = yield* ProjectComputers.Service;
 	const computers = yield* Computers.Service;
 	const egress = yield* Egress.Service;
+	const outbox = yield* EventOutbox.Service;
+
+	/**
+	 * Tells every desktop viewer open in the workspace to check again, in the
+	 * transaction that may change which provider is enabled: one opened
+	 * through a provider closes once that provider is no longer the enabled one.
+	 */
+	const recheckDesktops = (workspaceId: string) =>
+		outbox.publish([reachChanged(workspaceId, { kind: "workspace" })]);
 
 	const requireAllowedUrls = (settings: ComputerProviderSettings | undefined) =>
 		Effect.forEach(
@@ -159,12 +170,14 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					// Checked as it will be stored, with the usual address filled in.
 					yield* requireAllowedUrls(ComputerProviderStore.withUsualAddress(provider.settings));
-					return toComputerProvider(
-						yield* providers.create(workspaceOf(canManage), {
-							createdById: canManage.actor.memberId,
-							provider,
-						}),
+					const workspaceId = workspaceOf(canManage);
+					const created = yield* transaction(
+						Effect.tap(
+							providers.create(workspaceId, { createdById: canManage.actor.memberId, provider }),
+							(row) => (row.enabled ? recheckDesktops(workspaceId) : Effect.void),
+						),
 					);
+					return toComputerProvider(created);
 				}),
 			),
 
@@ -176,7 +189,11 @@ export const make = Effect.gen(function* () {
 					const providerId = provider.value;
 					yield* requireAllowedUrls(changes.settings);
 					const before = yield* requireProvider(workspaceId, providerId);
-					const updated = yield* providers.update(workspaceId, providerId, changes);
+					const updated = yield* transaction(
+						Effect.tap(providers.update(workspaceId, providerId, changes), () =>
+							recheckDesktops(workspaceId),
+						),
+					);
 					if (!updated) return yield* new ComputerProviderNotFound();
 					const modeOf = (row: typeof before) => ComputerProviderStore.networkModeIn(row.settings);
 					if (modeOf(updated) !== modeOf(before)) {
@@ -207,7 +224,9 @@ export const make = Effect.gen(function* () {
 					const removed = yield* transaction(
 						Effect.andThen(
 							ProjectComputers.lockProviderWithoutComputers(workspaceId, providerId),
-							providers.remove(workspaceId, providerId),
+							Effect.tap(providers.remove(workspaceId, providerId), () =>
+								recheckDesktops(workspaceId),
+							),
 						),
 					);
 					if (!removed) return yield* new ComputerProviderNotFound();

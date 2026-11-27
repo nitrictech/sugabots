@@ -3,8 +3,8 @@ import { memberStream, streamEvent } from "@sugabots/contracts";
 import { DesktopUnavailable } from "@sugabots/contracts/errors/computers";
 import type { OutputOf } from "@sugabots/contracts/operations";
 import { userText } from "@sugabots/errors";
-import { eq } from "drizzle-orm";
-import { Cause, Effect, Exit, Layer, Queue, Scope, Stream } from "effect";
+import { and, eq } from "drizzle-orm";
+import { Cause, Effect, Exit, Layer, Queue, Redacted, Scope, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import {
 	seedBot,
@@ -19,11 +19,12 @@ import { DesktopViewer } from "../../chats/tools/browser/viewer.ts";
 import { ComputerProviderStore } from "../../computers/computer-provider-store.ts";
 import { Computers } from "../../computers/computers.ts";
 import { ProjectComputers } from "../../computers/project-computers.ts";
+import { Database, query } from "../../database/database.ts";
 import { EventBus } from "../../database/events/bus.ts";
 import { EventOutbox } from "../../database/events/outbox.ts";
 import { EventStore } from "../../database/events/store.ts";
 import { inMemoryEventStore } from "../../database/events/testing.ts";
-import { chatParticipant, session } from "../../database/schema.ts";
+import { chatParticipant, computerProvider, session } from "../../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../../database/testing.ts";
 import type { MemberSession } from "../../principal.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
@@ -93,10 +94,38 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		});
 	let standIn: DesktopViewer.Interface;
 
+	const unreachableProvider: Computers.ProviderAccess = {
+		provider: "opensandbox",
+		baseUrl: "http://computers.test",
+		apiKey: Redacted.make("never-used"),
+		image: "debian",
+		size: { cpuCount: 1, memoryGiB: 1 },
+		networkMode: "allowed-hosts-only",
+	};
+	/** The workspace's enabled provider, as stored, with no way to reach it: the stand-in makes no computer. */
+	let database: Database["Service"];
+	const enabledProvider = (workspaceId: string) =>
+		query((db) =>
+			db
+				.select({ id: computerProvider.id, updatedAt: computerProvider.updatedAt })
+				.from(computerProvider)
+				.where(
+					and(eq(computerProvider.workspaceId, workspaceId), eq(computerProvider.enabled, true)),
+				)
+				.limit(1),
+		).pipe(
+			Effect.map(
+				([row]): ComputerProviderStore.Configured | undefined =>
+					row && { id: row.id, access: unreachableProvider, configurationUpdatedAt: row.updatedAt },
+			),
+			Effect.provideService(Database, database),
+		);
+
 	beforeAll(async () => {
 		const chats = await chatServicesForTests(bus);
 		({ call } = await servedRegistry({ chats, bus: Layer.succeed(EventBus.Service, bus) }));
 		signedIn = principals(await authenticators());
+		database = await runOnPostgres(Effect.service(Database));
 		standIn = standInOver(
 			await runOnPostgres(
 				Effect.provide(
@@ -104,7 +133,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 					DesktopViewer.layerNoDeps.pipe(
 						Layer.provide([
 							unimplemented(ProjectComputers.Service),
-							unimplemented(ComputerProviderStore.Service),
+							unimplemented(ComputerProviderStore.Service, { enabled: enabledProvider }),
 						]),
 					),
 				),
@@ -214,7 +243,15 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		const chat = await seedProjectChat(workspace, project, ed);
 		await onDatabase((db) => db.insert(chatParticipant).values({ chatId: chat, botId: pub.id }));
 		computers.set(project, await seedComputer(workspace, project));
-		return { workspace, admin, ed, vi, erin, pub, project, chat };
+		const [provider] = await onDatabase((db) =>
+			db
+				.update(computerProvider)
+				.set({ enabled: true })
+				.where(eq(computerProvider.workspaceId, workspace))
+				.returning({ id: computerProvider.id }),
+		);
+		if (!provider) throw new Error("The computer has no provider");
+		return { workspace, admin, ed, vi, erin, pub, project, chat, provider: provider.id };
 	};
 
 	it("lets whoever reaches the chat watch, and take over where they may change things", async () => {
@@ -323,6 +360,23 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		});
 
 		expect(await ed.ends()).toBe(true);
+	});
+
+	it("closes once the workspace's computer provider is switched off, and opens no more", async () => {
+		const world = await staffed();
+		const ed = await signedIn.member(world.ed);
+		const watching = await view(ed, world.chat, world.pub.id);
+
+		await call(await signedIn.member(world.admin), "computerProviders.update", {
+			workspace: world.workspace,
+			providerId: world.provider,
+			changes: { enabled: false },
+		});
+
+		expect(await watching.ends()).toBe(true);
+		await expect(view(ed, world.chat, world.pub.id)).rejects.toMatchObject({
+			_tag: "DesktopUnavailable",
+		});
 	});
 
 	it("closes once its bot leaves the chat's project, and opens no more for it there", async () => {
