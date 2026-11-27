@@ -86,8 +86,7 @@ export const make = Effect.gen(function* () {
 							trigger.id,
 							{
 								settings,
-								secretEncrypted: null,
-								legacyBearerSecretDigest: null,
+								...AutomationStore.NO_WEBHOOK_SECRET,
 								nextScheduledAt:
 									state === "enabled" ? yield* nextOccurrence(settings.schedule, to, now) : null,
 							},

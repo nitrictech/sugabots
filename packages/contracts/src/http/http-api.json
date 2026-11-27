@@ -89,7 +89,8 @@
 				"AutomationTriggerNotFound": 404,
 				"AutomationTriggerRejected": 400,
 				"BotCannotReach": 403,
-				"ResourceHidden": 404
+				"ResourceHidden": 404,
+				"WebhookSecretRestricted": 403
 			}
 		},
 		"automations.list": {

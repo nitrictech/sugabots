@@ -116,6 +116,7 @@ export const automationTrigger = pgTable(
 		createdAt: stamp("created_at"),
 		updatedAt: updatedStamp("updated_at"),
 		legacyBearerSecretDigest: text("legacy_bearer_secret_digest"),
+		secretRestrictedToAdmins: boolean("secret_restricted_to_admins"),
 	},
 	(table) => [
 		foreignKey({
@@ -129,7 +130,7 @@ export const automationTrigger = pgTable(
 		),
 		check(
 			"automation_trigger_legacy_bearer_secret_valid",
-			sql`${table.legacyBearerSecretDigest} is null or (${table.secretEncrypted} is null and ${table.kind} = 'webhook' and ${table.settings}->'auth'->>'kind' = 'bearer')`,
+			sql`${table.legacyBearerSecretDigest} is null or (${table.secretRestrictedToAdmins} is true and ${table.secretEncrypted} is null and ${table.kind} = 'webhook' and ${table.settings}->'auth'->>'kind' is not distinct from 'bearer')`,
 		),
 		check(
 			"automation_trigger_routine_valid",

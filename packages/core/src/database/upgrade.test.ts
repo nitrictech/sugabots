@@ -128,6 +128,9 @@ const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "../../drizzle"
  */
 const UPGRADE_TIMEOUT_MS = 120_000;
 
+const MIGRATED_WEBHOOK_SECRET = "the-existing-webhook-secret";
+const REPLACEMENT_WEBHOOK_SECRET = "a-replacement-webhook-secret";
+
 const WAITING_TURN = "00000002-0000-4000-8000-000000000107";
 const WAITING_REPLY = "00000001-0000-4000-8000-00000000010b";
 const FAILED_TURN = "00000002-0000-4000-8000-000000000108";
@@ -148,6 +151,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 		let reachedOnMain: Reached[];
 		let legacyConnectors: { id: string; pod_id: string; handle: string }[];
 		let legacyBots: { id: string; pod_id: string }[];
+		let migratedWebhook: { automationId: string; triggerId: string };
 
 		beforeAll(async () => {
 			root = await mkdtemp(join(tmpdir(), "upgrade-blobs-"));
@@ -263,6 +267,23 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					`scrypt:${salt.toString("base64url")}:${digest.toString("base64url")}`,
 					legacy.digestOnlyWebhook.trigger,
 				]);
+				await client.query("update agent set created_by_id = $1 where id = $2", [
+					legacy.members.pat,
+					legacy.bots.planner,
+				]);
+				const webhook = await client.query<{ automationId: string; triggerId: string }>(
+					`with added as (
+						insert into routine (workspace_id, agent_id, name, instructions)
+						values ($1, $2, 'Check deployment', 'Check the deployment') returning id, workspace_id
+					)
+					insert into routine_trigger (workspace_id, routine_id, settings, secret_encrypted)
+					select workspace_id, id, '{"kind":"webhook","auth":{"kind":"bearer"}}', $3 from added
+					returning routine_id as "automationId", id as "triggerId"`,
+					[legacy.workspace, legacy.bots.planner, cipher.encrypt(MIGRATED_WEBHOOK_SECRET)],
+				);
+				const [trigger] = webhook.rows;
+				if (!trigger) throw new Error("The webhook trigger was not created");
+				migratedWebhook = trigger;
 				await client.query(
 					`insert into connection (id, workspace_id, pod_id, name, handle, kind, url, auth_kind,
 						secret_header, secret_encrypted, oauth_encrypted, oauth_state, created_by_id) values
@@ -1582,6 +1603,43 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			for (const file of [collaboration, personal]) {
 				expect(queuedByTheUpgrade).not.toContain(`files/${file.fileId}`);
 			}
+		});
+
+		it("keeps a migrated webhook secret from the bot's creator until it is replaced", async () => {
+			const [project] = await upgraded.rows<{ id: string }>(
+				"select id from project where default_of_bot_id = $1",
+				[legacy.bots.planner],
+			);
+			if (!project) throw new Error("Planner has no default project");
+			const call = await servedOperations({ runOn: upgraded.run });
+			const owner = await upgraded.signIn(legacy.members.sam);
+			const creator = await upgraded.signIn(legacy.members.pat);
+			const address = { projectId: project.id, ...migratedWebhook };
+			const secret = { kind: "set", secret: MIGRATED_WEBHOOK_SECRET };
+			const restricted = { userMessage: expect.stringContaining("owner and admins") };
+
+			await expect(call(owner, "automations.getSecret", address)).resolves.toEqual(secret);
+			await expect(call(creator, "automations.getSecret", address)).rejects.toMatchObject(
+				restricted,
+			);
+			await call(creator, "automations.updateTrigger", {
+				...address,
+				trigger: { kind: "webhook", deliveryIdHeader: "X-Delivery" },
+			});
+			await expect(call(creator, "automations.getSecret", address)).rejects.toMatchObject(
+				restricted,
+			);
+			await expect(call(owner, "automations.getSecret", address)).resolves.toEqual(secret);
+			await expect(
+				call(creator, "automations.rotateSecret", {
+					...address,
+					secret: REPLACEMENT_WEBHOOK_SECRET,
+				}),
+			).resolves.toEqual({ secret: REPLACEMENT_WEBHOOK_SECRET });
+			await expect(call(creator, "automations.getSecret", address)).resolves.toEqual({
+				kind: "set",
+				secret: REPLACEMENT_WEBHOOK_SECRET,
+			});
 		});
 
 		it("keeps a legacy bearer webhook and its automation's routine working until the secret is replaced", async () => {

@@ -357,7 +357,7 @@ export const make = Effect.gen(function* () {
 					query((db) =>
 						db
 							.update(automationTrigger)
-							.set({ secretEncrypted: encrypted, legacyBearerSecretDigest: null })
+							.set({ ...NO_WEBHOOK_SECRET, secretEncrypted: encrypted })
 							.where(and(ofAutomation(scope, triggerId), eq(automationTrigger.kind, "webhook")))
 							.returning({ id: automationTrigger.id }),
 					),
@@ -570,11 +570,20 @@ export const layer = processLayer(Layer.effect(Service, make));
 /** What an automation is: its name, what it tells the bot, and whether it runs. */
 export type Definition = Pick<schema.AutomationRow, "name" | "instructions" | "state">;
 
-/** What one of an automation's triggers is, and what it keeps beside that: a webhook's secret, a routine's next time. */
-export type TriggerValues = Pick<
+export type WebhookSecretValues = Pick<
 	schema.AutomationTriggerRow,
-	"settings" | "secretEncrypted" | "legacyBearerSecretDigest" | "nextScheduledAt"
+	"secretEncrypted" | "legacyBearerSecretDigest" | "secretRestrictedToAdmins"
 >;
+
+export const NO_WEBHOOK_SECRET = {
+	secretEncrypted: null,
+	legacyBearerSecretDigest: null,
+	secretRestrictedToAdmins: null,
+} as const satisfies WebhookSecretValues;
+
+/** Trigger settings with the webhook's secret or the routine's next time. */
+export type TriggerValues = Pick<schema.AutomationTriggerRow, "settings" | "nextScheduledAt"> &
+	WebhookSecretValues;
 
 /** The trigger `triggerId`, when it is one of the automation `scope` names, which hasn't been removed. */
 const ofAutomation = (scope: Scope, triggerId: string) =>

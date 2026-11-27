@@ -26,6 +26,7 @@ import type {
 	TriggerSetInSettings,
 	WebhookDeliveryIdHeaderRejected,
 	WebhookRefused,
+	WebhookSecretRestricted,
 	WebhookSecretTooShort,
 } from "@sugabots/contracts/errors/automations";
 import type { InvalidCursor } from "@sugabots/contracts/errors/chat-reads";
@@ -202,7 +203,10 @@ export interface Interface {
 		target: ReachesAutomationTrigger<P, J, A, T>,
 	) => Effect.Effect<
 		AutomationCurrentSecret,
-		AutomationNotFound | AutomationTriggerNotFound | AutomationTriggerRejected
+		| AutomationNotFound
+		| AutomationTriggerNotFound
+		| AutomationTriggerRejected
+		| WebhookSecretRestricted
 	>;
 	/**
 	 * Replaces a webhook trigger's secret with `secret`, with a new one when
@@ -377,10 +381,14 @@ export const make = Effect.gen(function* () {
 				writes.removeTrigger(scopeOf(target, target.automation.value), trigger.value),
 			),
 
-		currentSecret: (_canManage, trigger, target) =>
+		currentSecret: (canManage, trigger, target) =>
 			operation(
 				"currentSecret",
-				writes.currentSecret(scopeOf(target, target.automation.value), trigger.value),
+				writes.currentSecret(
+					scopeOf(target, target.automation.value),
+					trigger.value,
+					canManage.member.actor,
+				),
 			),
 
 		replaceSecret: (_canManage, trigger, target, secret) =>

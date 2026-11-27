@@ -79,6 +79,20 @@ export class WebhookSecretTooShort
 	}
 }
 
+export class WebhookSecretRestricted
+	extends Schema.TaggedError<WebhookSecretRestricted>()("WebhookSecretRestricted", {})
+	implements DomainError
+{
+	readonly isRetryable = false;
+	override readonly [ErrorReporter.severity] = "Info" as const;
+	override get message() {
+		return "The webhook secret can only be read by a workspace administrator";
+	}
+	get userMessage() {
+		return userText`Only the workspace owner and admins can see this webhook secret. Anyone who manages the automation can replace it.`;
+	}
+}
+
 export class WebhookDeliveryIdHeaderRejected
 	extends Schema.TaggedError<WebhookDeliveryIdHeaderRejected>()(
 		"WebhookDeliveryIdHeaderRejected",

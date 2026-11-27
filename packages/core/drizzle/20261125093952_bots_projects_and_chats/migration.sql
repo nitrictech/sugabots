@@ -3387,5 +3387,19 @@ WHERE "approval_status" = 'denied' AND "decided_at" IS NULL AND "finished_at" IS
 	AND "error" IS NOT NULL;
 --> statement-breakpoint
 ALTER TABLE "automation_trigger" ADD COLUMN "legacy_bearer_secret_digest" text;--> statement-breakpoint
-UPDATE "automation_trigger" SET "legacy_bearer_secret_digest" = "secret_digest" WHERE "secret_digest" IS NOT NULL;--> statement-breakpoint
-ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_digest_valid", DROP COLUMN "secret_digest", ADD CONSTRAINT "automation_trigger_legacy_bearer_secret_valid" CHECK ("legacy_bearer_secret_digest" is null or ("secret_encrypted" is null and "kind" = 'webhook' and "settings"->'auth'->>'kind' = 'bearer'));
+ALTER TABLE "automation_trigger" ADD COLUMN "secret_restricted_to_admins" boolean;--> statement-breakpoint
+-- A digest can verify a bearer secret but cannot reveal it to anyone.
+UPDATE "automation_trigger"
+SET "legacy_bearer_secret_digest" = "secret_digest", "secret_restricted_to_admins" = true
+WHERE "secret_digest" IS NOT NULL;--> statement-breakpoint
+-- Only the owner and admins could read webhook secrets in a shared pod.
+UPDATE "automation_trigger" AS webhook
+SET "secret_restricted_to_admins" = true
+FROM "automation" AS automation
+JOIN "project" AS project ON project."id" = automation."project_id"
+JOIN "bot" AS bot ON bot."id" = project."default_of_bot_id"
+WHERE webhook."automation_id" = automation."id"
+	AND bot."visibility" = 'private'
+	AND webhook."kind" = 'webhook'
+	AND webhook."secret_encrypted" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_digest_valid", DROP COLUMN "secret_digest", ADD CONSTRAINT "automation_trigger_legacy_bearer_secret_valid" CHECK ("legacy_bearer_secret_digest" is null or ("secret_restricted_to_admins" is true and "secret_encrypted" is null and "kind" = 'webhook' and "settings"->'auth'->>'kind' is not distinct from 'bearer'));

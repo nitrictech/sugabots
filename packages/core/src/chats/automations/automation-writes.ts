@@ -23,14 +23,17 @@ import {
 	AutomationTriggerRejected,
 	TooManyAutomationTriggers,
 	WebhookDeliveryIdHeaderRejected,
+	WebhookSecretRestricted,
 	WebhookSecretTooShort,
 } from "@sugabots/contracts/errors/automations";
 import { ApprovalNeeded } from "@sugabots/contracts/errors/proofs";
 import { and, eq } from "drizzle-orm";
 import { DateTime, Effect } from "effect";
+import type { Actor } from "../../authorization/permissions.ts";
 import { type Database, query, transaction } from "../../database/database.ts";
 import type * as schema from "../../database/schema.ts";
 import { automation, automationTrigger, connector } from "../../database/schema.ts";
+import { administers } from "../../proofs/facts.ts";
 import { Secrets } from "../../secrets/secrets.ts";
 import { makeAcceptTrigger } from "./acceptance.ts";
 import {
@@ -84,7 +87,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 				yield* DateTime.nowAsDate,
 			);
 			const values: AutomationStore.TriggerValues = {
-				...NO_SECRET,
+				...AutomationStore.NO_WEBHOOK_SECRET,
 				settings,
 				nextScheduledAt: state === "enabled" ? next : null,
 			};
@@ -127,8 +130,7 @@ export const makeAutomationWrites = Effect.gen(function* () {
 								deliveryIdHeader: checked.deliveryIdHeader,
 								filter: checked.filter,
 							},
-							secretEncrypted: checked.secretEncrypted,
-							legacyBearerSecretDigest: checked.legacyBearerSecretDigest,
+							...checked.secretValues,
 							nextScheduledAt: null,
 						},
 						secret: checked.secret,
@@ -136,7 +138,10 @@ export const makeAutomationWrites = Effect.gen(function* () {
 				}
 				case "github": {
 					const settings = yield* inProjectsConnector(project, input);
-					return { values: { ...NO_SECRET, settings, nextScheduledAt: null }, secret: null };
+					return {
+						values: { ...AutomationStore.NO_WEBHOOK_SECRET, settings, nextScheduledAt: null },
+						secret: null,
+					};
 				}
 			}
 		});
@@ -401,12 +406,15 @@ export const makeAutomationWrites = Effect.gen(function* () {
 			),
 
 		/** A webhook trigger's current secret. */
-		currentSecret: (scope: Scope, triggerId: string) =>
+		currentSecret: (scope: Scope, triggerId: string, actor: Actor) =>
 			Effect.gen(function* () {
 				yield* automationIn(scope);
 				const trigger = yield* triggerIn(scope, triggerId);
 				if (trigger.settings.kind !== "webhook") return yield* new AutomationTriggerRejected();
-				if (trigger.legacyBearerSecretDigest !== null) return { kind: "legacy" as const };
+				if (trigger.secretRestrictedToAdmins) {
+					if (trigger.legacyBearerSecretDigest !== null) return { kind: "legacy" as const };
+					if (!administers(actor)) return yield* new WebhookSecretRestricted();
+				}
 				if (trigger.secretEncrypted === null) return { kind: "none" as const };
 				return { kind: "set" as const, secret: secrets.decrypt(trigger.secretEncrypted) };
 			}),
@@ -479,8 +487,6 @@ interface Written {
 	values: AutomationStore.TriggerValues;
 	secret: string | null;
 }
-
-const NO_SECRET = { secretEncrypted: null, legacyBearerSecretDigest: null } as const;
 
 /** The secrets made for `triggers`, written in the same order as `written`. */
 function secretsMade(
@@ -581,8 +587,7 @@ function webhookCheck(
 		auth: WebhookAuth;
 		deliveryIdHeader: string | null | undefined;
 		filter: readonly WebhookFilterTest[] | undefined;
-		secretEncrypted: string | null;
-		legacyBearerSecretDigest: string | null;
+		secretValues: AutomationStore.WebhookSecretValues;
 		secret: string | null;
 	},
 	WebhookSecretTooShort | WebhookDeliveryIdHeaderRejected
@@ -615,8 +620,11 @@ function webhookCheck(
 			auth,
 			deliveryIdHeader,
 			filter,
-			secretEncrypted: current.secretEncrypted,
-			legacyBearerSecretDigest: current.legacyBearerSecretDigest,
+			secretValues: {
+				secretEncrypted: current.secretEncrypted,
+				legacyBearerSecretDigest: current.legacyBearerSecretDigest,
+				secretRestrictedToAdmins: current.secretRestrictedToAdmins,
+			},
 			secret: null,
 		});
 	}
@@ -625,7 +633,7 @@ function webhookCheck(
 			auth,
 			deliveryIdHeader,
 			filter,
-			...NO_SECRET,
+			secretValues: AutomationStore.NO_WEBHOOK_SECRET,
 			secret: null,
 		});
 	}
@@ -634,8 +642,10 @@ function webhookCheck(
 		auth,
 		deliveryIdHeader,
 		filter,
-		secretEncrypted: secrets.encrypt(secret),
-		legacyBearerSecretDigest: null,
+		secretValues: {
+			...AutomationStore.NO_WEBHOOK_SECRET,
+			secretEncrypted: secrets.encrypt(secret),
+		},
 		secret,
 	});
 }

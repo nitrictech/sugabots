@@ -160,6 +160,7 @@ export const failureForError = {
 
 	// Reached, and not the caller's to do.
 	ActionForbidden: Forbidden,
+	WebhookSecretRestricted: Forbidden,
 	BotCannotReach: Forbidden,
 	ApprovalNeeded: Forbidden,
 	ApprovalRefused: Forbidden,

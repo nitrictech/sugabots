@@ -15620,6 +15620,24 @@
       ]
     },
     {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "automation_trigger",
+        "secret_restricted_to_admins"
+      ],
+      "writes": [
+        "s|col|public.automation_trigger.secret_restricted_to_admins",
+        "n|col|public.automation_trigger.secret_restricted_to_admins",
+        "e|col|public.automation_trigger.secret_restricted_to_admins"
+      ],
+      "reads": [
+        "n|tbl|public.automation_trigger",
+        "n|sch|public"
+      ]
+    },
+    {
       "statementType": "add_check",
       "statementTarget": [
         "table",
@@ -15636,6 +15654,7 @@
         "n|tbl|public.automation_trigger",
         "n|sch|public",
         "n|col|public.automation_trigger.legacy_bearer_secret_digest",
+        "n|col|public.automation_trigger.secret_restricted_to_admins",
         "n|col|public.automation_trigger.secret_encrypted",
         "n|col|public.automation_trigger.kind",
         "n|col|public.automation_trigger.settings"
@@ -26046,8 +26065,24 @@
       "row": {
         "schema": "public",
         "table": "automation_trigger",
+        "name": "secret_restricted_to_admins",
+        "type": "boolean",
+        "typeSchema": null,
+        "notNull": false,
+        "dimensions": 0,
+        "default": null,
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation_trigger",
         "name": "automation_trigger_legacy_bearer_secret_valid",
-        "value": "\"legacy_bearer_secret_digest\" is null or (\"secret_encrypted\" is null and \"kind\" = 'webhook' and \"settings\"->'auth'->>'kind' = 'bearer')",
+        "value": "\"legacy_bearer_secret_digest\" is null or (\"secret_restricted_to_admins\" is true and \"secret_encrypted\" is null and \"kind\" = 'webhook' and \"settings\"->'auth'->>'kind' is not distinct from 'bearer')",
         "entityType": "checks"
       }
     }

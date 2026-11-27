@@ -39,6 +39,7 @@ import {
 	TriggerSetInSettings,
 	WebhookDeliveryIdHeaderRejected,
 	WebhookRefused,
+	WebhookSecretRestricted,
 	WebhookSecretTooShort,
 } from "../errors/automations.ts";
 import { InvalidCursor } from "../errors/chat-reads.ts";
@@ -335,7 +336,13 @@ export const automationsContracts = {
 			"A webhook trigger's current secret, or whether it uses a legacy secret or has none.",
 		input: Schema.Struct(aTrigger),
 		output: automationCurrentSecretSchema,
-		errors: [...refusals, AutomationNotFound, AutomationTriggerNotFound, AutomationTriggerRejected],
+		errors: [
+			...refusals,
+			AutomationNotFound,
+			AutomationTriggerNotFound,
+			AutomationTriggerRejected,
+			WebhookSecretRestricted,
+		],
 		changes: false,
 		http: {
 			kind: "offered",
