@@ -10,7 +10,7 @@ import { DesktopUnavailable } from "@sugabots/contracts/errors/computers";
 import { type UserText, userText } from "@sugabots/errors";
 import { Cache, Effect, Schema, Semaphore } from "effect";
 import { Computers } from "../../../computers/computers.ts";
-import { prepareFoldersCommand } from "../computer/folders.ts";
+import { execWithPreparedFolders } from "../computer/folders.ts";
 import type { Place, TurnComputer } from "../computer/tools.ts";
 import type { Failed } from "../failed.ts";
 import type { Image } from "../images.ts";
@@ -138,9 +138,11 @@ const desktopCommand = (
 ) =>
 	Effect.gen(function* () {
 		const directory = `${place.folder}/.browser/${turn.botId}`;
-		const ran = yield* computer.exec(
-			`${prepareFoldersCommand(place)}sugabots-desktop ${command} ${Computers.shellQuoted(sessionName(turn))} ${Computers.shellQuoted(`${directory}/profile`)} ${Computers.shellQuoted(directory)} --accent ${Computers.shellQuoted(botPalettes[turn.color].face)} --folder ${Computers.shellQuoted(place.folder)}`,
+		const ran = yield* execWithPreparedFolders(
+			computer,
+			place,
 			{ env: { HOME: place.home }, timeout: "60 seconds", maxOutputCharacters: 2_000 },
+			`sugabots-desktop ${command} ${Computers.shellQuoted(sessionName(turn))} ${Computers.shellQuoted(`${directory}/profile`)} ${Computers.shellQuoted(directory)} --accent ${Computers.shellQuoted(botPalettes[turn.color].face)} --folder ${Computers.shellQuoted(place.folder)}`,
 		);
 		const reported: Record<string, string | undefined> = Object.fromEntries(
 			ran.stdout.text

@@ -37,7 +37,7 @@ import { type Failed, failed } from "../failed.ts";
 import { MAX_IMAGE_BYTES, shownImageType } from "../images.ts";
 import { unreadableFileRefusal } from "../unreadable-file.ts";
 import { type Copy, copyIntoComputer, safeFileName } from "./attachments.ts";
-import { loadComputerPlace, prepareFoldersCommand } from "./folders.ts";
+import { execWithPreparedFolders, loadComputerPlace } from "./folders.ts";
 import {
 	type AttachToReply,
 	arrivalNote,
@@ -554,7 +554,7 @@ function openAsApproved(
 
 /** prepareFolders moves existing chat and bot folders into place on first use after an upgrade. */
 function prepareFolders(computer: Computers.Computer, place: Place, provider: string) {
-	return computer.exec(prepareFoldersCommand(place), DIRECTORY_COMMAND).pipe(
+	return execWithPreparedFolders(computer, place, DIRECTORY_COMMAND).pipe(
 		Effect.flatMap(({ exitCode, stderr }) =>
 			exitCode === 0
 				? Effect.void

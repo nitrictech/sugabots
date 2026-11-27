@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,22 +13,29 @@ it("moves legacy work before opening a desktop, preserving files already in plac
 	const workspace = await mkdtemp(join(tmpdir(), "desktop-work-"));
 	try {
 		const bot = { botId: "planner", chatId: "trip", color: "green" } as const;
-		const place = { ...placeOf(bot), previousChatIds: ["budget"] };
+		const lastChat = randomUUID();
+		const place = {
+			...placeOf(bot),
+			previousChatIds: ["budget", ...Array.from({ length: 1_000 }, () => randomUUID()), lastChat],
+		};
 		const localPath = (path: string) => path.replace("/workspace", workspace);
 		const oldHome = localPath("/workspace/agents/planner");
 		const oldChat = localPath("/workspace/threads/trip");
 		const helperCheckout = localPath(join(Computers.LEGACY_CHATS_DIRECTORY, "budget/checkout"));
+		const lastFolder = localPath(join(Computers.LEGACY_CHATS_DIRECTORY, lastChat));
 		const otherCheckout = localPath(join(Computers.CHATS_DIRECTORY, "budget/checkout"));
 		for (const folder of [
 			join(oldHome, ".config"),
 			oldChat,
 			helperCheckout,
+			lastFolder,
 			otherCheckout,
 			join(localPath(place.home), ".config"),
 			localPath(place.folder),
 		]) {
 			await mkdir(folder, { recursive: true });
 		}
+		await writeFile(join(lastFolder, "notes.md"), "last collaboration");
 		await writeFile(join(helperCheckout, ".git"), "legacy checkout");
 		await writeFile(join(otherCheckout, ".git"), "other checkout");
 		await writeFile(join(oldHome, ".profile"), "legacy profile");
@@ -45,7 +53,7 @@ it("moves legacy work before opening a desktop, preserving files already in plac
 			id: Computers.ComputerId("desktop-test"),
 			exec: (command) =>
 				Effect.sync(() => {
-					const ran = spawnSync("sh", ["-c", command.replaceAll("/workspace", workspace)], {
+					const ran = spawnSync("bash", ["-c", command.replaceAll("/workspace", workspace)], {
 						encoding: "utf8",
 						env: { ...process.env, PATH: `${workspace}:${process.env.PATH}` },
 					});
@@ -81,6 +89,9 @@ it("moves legacy work before opening a desktop, preserving files already in plac
 				"utf8",
 			),
 		).toBe("other checkout");
+		expect(
+			await readFile(join(workspace, "chats/trip/collaborations", lastChat, "notes.md"), "utf8"),
+		).toBe("last collaboration");
 		await expect(readFile(join(helperCheckout, ".git"))).rejects.toHaveProperty("code", "ENOENT");
 		await expect(readFile(join(otherCheckout, ".git"))).rejects.toHaveProperty("code", "ENOENT");
 		await Effect.runPromise(startDesktop(computer, place, bot));
