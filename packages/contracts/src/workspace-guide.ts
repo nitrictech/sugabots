@@ -39,7 +39,6 @@ export const workspaceGuideSchema = Schema.Struct({
 			description: Schema.NullOr(Schema.String),
 			personal: Schema.Boolean,
 			pinned: Schema.Boolean,
-			youCanTalkToIt: Schema.Boolean,
 		}),
 	),
 	waitingOnYou: Schema.Struct({

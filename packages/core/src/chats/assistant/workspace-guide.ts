@@ -66,8 +66,10 @@ export const make = Effect.gen(function* () {
 					const listedProjects = yield* projects.list(canRead);
 					// The member's own Personal Assistant is among the bots they reach, but is
 					// no bot to suggest to them: it is only named for its failing automations.
+					// Nor is a bot they see but can't talk to, as an admin sees others'
+					// personal bots.
 					const reachedBots = yield* bots.list(canRead);
-					const workspaceBots = reachedBots.filter((bot) => !bot.assistant);
+					const workspaceBots = reachedBots.filter((bot) => !bot.assistant && bot.permissions.talk);
 					// A private project's members talk to its lead there, a private bot
 					// included, without reaching it, so its handle is read for them here.
 					const leadHandles = yield* query((db) =>
@@ -104,7 +106,6 @@ export const make = Effect.gen(function* () {
 							description: bot.description ?? null,
 							personal: bot.visibility === "personal",
 							pinned: bot.pinned,
-							youCanTalkToIt: bot.permissions.talk,
 						})),
 						waitingOnYou: {
 							approvals: approvals.waiting.slice(0, LISTED_ITEMS).map((request) => ({

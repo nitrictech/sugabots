@@ -1,10 +1,12 @@
 import type { NewBot } from "@sugabots/contracts";
 import type { InputOf } from "@sugabots/contracts/operations";
 import { userText } from "@sugabots/errors";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedProjectChat } from "../../authentication/seed.test-support.ts";
 import {
 	automation,
+	membership,
 	message,
 	modelProvider,
 	project,
@@ -114,7 +116,6 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's workspace gui
 				name: "Writer",
 				handle: "@writer",
 				link: `http://sugabots.test/${workspaceSlug}/bots/writer`,
-				youCanTalkToIt: true,
 			}),
 		]);
 		expect(seen.waitingOnYou).toEqual({
@@ -122,6 +123,21 @@ describe.skipIf(!process.env.DATABASE_URL)("a Personal Assistant's workspace gui
 			unreadMentions: [],
 			failingAutomations: [],
 		});
+	});
+
+	it("suggests to an admin no other member's personal bot, which they can't talk to", async () => {
+		await onDatabase((db) =>
+			db
+				.update(membership)
+				.set({ role: "admin" })
+				.where(and(eq(membership.workspaceId, workspaceId), eq(membership.memberId, samId))),
+		);
+		await aBot(adaId, "Writer");
+		await aBot(adaId, "Diary", "personal");
+
+		const seen = await guideForSam();
+
+		expect(seen.bots.map(({ name }) => name)).toEqual(["Writer"]);
 	});
 
 	it("lists automations failing now, though the member has read their failed runs", async () => {
