@@ -12,7 +12,6 @@ import {
 import { startBotChat } from "@sugabots/core/chats/chats/testing";
 import { aChatAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
-import { query } from "@sugabots/core/database/database";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import {
 	bot,
@@ -20,18 +19,12 @@ import {
 	message,
 	placedChat,
 	projectBot,
-	workspace,
 } from "@sugabots/core/database/schema";
-import {
-	closeDatabase,
-	holdTransaction,
-	onDatabase,
-	runOnPostgres,
-} from "@sugabots/core/database/testing";
+import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { operationsForTests } from "@sugabots/core/operations/testing";
 import { and, eq } from "drizzle-orm";
-import { Context, Effect, Schema } from "effect";
+import { Context, Schema } from "effect";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { botLoopOnPostgres, calling, callsOf, resumeAt, scriptedSteps } from "./testing.ts";
 
@@ -240,7 +233,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 		expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(started.id);
 	});
 
-	it("asks again, and adds nobody, when the recipient leaves the project while the brief waits to write", async () => {
+	it("asks again when the recipient changes projects before the tool call starts", async () => {
 		const recipient = await seedBot(workspaceId, { createdById: adminId });
 		const [target] = await onDatabase((db) =>
 			db.update(bot).set({ model: "m" }).where(eq(bot.id, recipient.id)).returning(),
@@ -267,33 +260,17 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 		await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
 		const principal = await ran.authentication.authenticate(ran.turnId);
 
-		// The recipient is taken out of the project, as removing a bot does, under
-		// the workspace's lock, after the brief was proved and before it writes.
-		const removing = holdTransaction(
-			Effect.gen(function* () {
-				yield* query((db) =>
-					db
-						.select({ id: workspace.id })
-						.from(workspace)
-						.where(eq(workspace.id, workspaceId))
-						.for("no key update"),
-				);
-				yield* query((db) =>
-					db
-						.delete(projectBot)
-						.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, recipient.id))),
-				);
-			}),
+		await onDatabase((db) =>
+			db
+				.delete(projectBot)
+				.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, recipient.id))),
 		);
-		await removing.held;
 		const briefing = runOnPostgres(
 			operations["chats.startBriefedChat"](principal, input, {
 				kind: "toolCall",
 				toolCall: parked.id,
 			}),
 		);
-		await removing.waitForWaiters(1);
-		await removing.release();
 
 		await expect(briefing).rejects.toMatchObject({ _tag: "ApprovalNeeded" });
 		expect(

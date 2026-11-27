@@ -7,16 +7,13 @@ import type {
 	ProjectChat,
 	StartedChat,
 } from "@sugabots/contracts";
-import {
+import type {
 	BotHasNoModel,
-	type MessageRetryKeyConflict,
-	type ReplyTargetNotFound,
-	type UnsentAttachmentsNotFound,
+	MessageRetryKeyConflict,
+	ReplyTargetNotFound,
+	UnsentAttachmentsNotFound,
 } from "@sugabots/contracts/errors/chats";
-import {
-	ApprovalRefused,
-	ResourceHidden,
-} from "@sugabots/contracts/errors/proofs";
+import { ApprovalRefused, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { and, eq, isNotNull, isNull, notExists } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { query, serviceOperations, transaction } from "../../database/database.ts";
@@ -46,7 +43,7 @@ import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { FloorControl } from "../floor/floor-control.ts";
 import { memberColumns } from "../store/participants.ts";
 import { ChatStore } from "../store/store.ts";
-import { holdTurnOf, type FenceRefusal, Turns } from "../turns/turns.ts";
+import { type FenceRefusal, holdTurnOf, Turns } from "../turns/turns.ts";
 import { toAutomationFeed, toProjectChat } from "./chat.ts";
 import { chatTitleFrom } from "./chat-title.ts";
 import { reachedChatOfKind } from "./reached-chat.ts";
@@ -136,10 +133,7 @@ export interface Interface {
 	readonly startBriefedChat: <P, B, X>(
 		mayBrief: MayBrief<P, B>,
 		approved: Approved<P, X, [B], "chats.startBriefedChat">,
-	) => Effect.Effect<
-		BotStartedChat,
-		ApprovalRefused | FenceRefusal
-	>;
+	) => Effect.Effect<BotStartedChat, ApprovalRefused | FenceRefusal>;
 	/**
 	 * Records that the member has read the chat `reach` is about up to its
 	 * newest finished message. Only a chat members open; any other is hidden.
