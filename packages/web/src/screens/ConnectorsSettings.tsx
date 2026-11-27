@@ -127,7 +127,8 @@ export function ConnectorsSettings({
 
 /**
  * The own connectors of each of a project's bots, which live in the bot and
- * stay off in the project until one of its managers turns each on there: a
+ * stay off in the project until the workspace's owner or an admin turns each
+ * on there: a
  * row for each bot that has any, saying how many are on, which opens in place
  * to list them, each with where it sends data and a switch.
  */
@@ -135,9 +136,11 @@ export function ProjectBotsConnectors({ project }: { project: Project }) {
 	const canManage = resourcePermissions({ project }).manageConnectors;
 	const bots = useProjectBots(project.id);
 	const connectors = useProjectBotConnectors(project.id);
-	const failed = bots.error ?? connectors.error;
-	if (failed) return <Alert>{failureMessage(failed)}</Alert>;
-	if (!bots.data || !connectors.data) return null;
+	if (!bots.data || !connectors.data) {
+		// A reload that fails once the rows are shown leaves them in place.
+		const failed = bots.error ?? connectors.error;
+		return failed ? <Alert>{failureMessage(failed)}</Alert> : null;
+	}
 	const listed = connectors.data;
 	const withConnectors = bots.data.filter((bot) => listed.some((one) => one.botId === bot.id));
 	if (withConnectors.length === 0) return null;
@@ -145,7 +148,7 @@ export function ProjectBotsConnectors({ project }: { project: Project }) {
 		<SettingsGroup
 			label="Its bots' own"
 			headingLevel={2}
-			note={`A bot's own connectors stay off in ${project.name} until a manager turns them on here. While one is on, the bot can send it what it reads in ${project.name}'s chats. If its address changes, it turns off again until a manager turns it back on.`}
+			note={`A bot's own connectors stay off in ${project.name} until the workspace's owner or an admin turns them on here. While one is on, the bot can send it what it reads in ${project.name}'s chats. If its address changes, it turns off again until one of them turns it back on.`}
 		>
 			<Accordion.Root multiple>
 				{withConnectors.map((bot) => (
@@ -300,16 +303,13 @@ function BotConnectorRow({
 					}
 					side="top"
 				>
-					{/* On a wrapper, as a disabled switch receives no pointer events. */}
-					<span className="inline-flex shrink-0">
-						<Switch
-							checked={connector.on}
-							disabled={pending}
-							aria-label={`${bot.name}'s ${connector.name}`}
-							aria-describedby={line !== undefined ? lineId : undefined}
-							onCheckedChange={onChange}
-						/>
-					</span>
+					<Switch
+						checked={connector.on}
+						disabled={pending}
+						aria-label={`${bot.name}'s ${connector.name}`}
+						aria-describedby={line !== undefined ? lineId : undefined}
+						onCheckedChange={onChange}
+					/>
 				</Tooltip>
 			) : (
 				<SettingsValue>{connector.on ? "On" : "Off"}</SettingsValue>
@@ -324,13 +324,17 @@ function BotConnectorRow({
  * see that, and, to those who can't turn it on or off, who can.
  */
 function botConnectorLine(connector: ProjectBotConnector, canManage: boolean): string | undefined {
-	if (connector.addressChanged)
-		return connector.url === null
-			? "Its address changed. It's off until a manager turns it on again"
-			: `Its address changed to ${connector.url}. It's off until a manager turns it on again`;
+	if (connector.addressChanged) {
+		const changed =
+			connector.url === null ? "Its address changed" : `Its address changed to ${connector.url}`;
+		return canManage
+			? `${changed}. Turn it on to use the new address`
+			: `${changed}. It's off until the workspace's owner or an admin turns it on again`;
+	}
 	const sendsTo = connector.url === null ? undefined : `Sends data to ${connector.url}`;
 	if (canManage) return sendsTo;
-	return sendsTo ? `${sendsTo}. Only managers can change this` : "Only managers can change this";
+	const whoChanges = "Only the workspace's owner and admins can change this";
+	return sendsTo ? `${sendsTo}. ${whoChanges}` : whoChanges;
 }
 
 /**

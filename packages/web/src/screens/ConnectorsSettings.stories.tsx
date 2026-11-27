@@ -346,9 +346,10 @@ const botsOwn: ProjectBotConnector[] = [
 ];
 
 /**
- * The project's bots' own connectors, each off here until a manager turns it
- * on: one bot's row says how many are on and opens to list them, each with
- * where it sends data and a switch.
+ * The project's bots' own connectors, each off here until the workspace's
+ * owner or an admin turns it on: one bot's row says how many are on and opens
+ * to list them, each with where it sends data and a switch, which says what
+ * it does to a keyboard's focus as to a pointer.
  */
 export const BotsOwnConnectors = meta.story({
 	beforeEach({ msw }) {
@@ -362,6 +363,10 @@ export const BotsOwnConnectors = meta.story({
 		await expect(billing).toHaveAccessibleDescription(
 			"Sends data to https://billing.example.com/v1",
 		);
+		billing.focus();
+		await expect(
+			await screen.findByText("Let Growth Desk use Billing API in Revenue"),
+		).toBeVisible();
 		await userEvent.click(billing);
 		await expect(
 			await canvas.findByRole("switch", { name: "Growth Desk's Billing API", checked: true }),
@@ -447,7 +452,60 @@ function botConnectorHandlers(
 	];
 }
 
-/** A bot's connector whose address changed since it was turned on, which turned it off. */
+const addressChangedRefusal = "This connector's address changed since you opened this page.";
+
+/**
+ * A refusal whose reload of the list then fails: the rows shown stay, with
+ * why turning it on failed.
+ */
+export const BotsOwnConnectorReloadFailed = meta.story({
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(`${API}/projects/:projectId/bot-connectors`, () => HttpResponse.json(botsOwn)),
+			http.put(`${API}/projects/:projectId/bot-connectors/:connectorId`, () =>
+				HttpResponse.json(
+					{
+						_tag: "Conflict",
+						message: addressChangedRefusal,
+						error: {
+							_tag: "ConnectorAddressChanged",
+							userMessage: addressChangedRefusal,
+							isRetryable: false,
+						},
+					},
+					{ status: 409 },
+				),
+			),
+		);
+	},
+	play: async ({ canvas, msw }) => {
+		await userEvent.click(await canvas.findByRole("button", { name: /Growth Desk/ }));
+		const billing = await canvas.findByRole("switch", { name: "Growth Desk's Billing API" });
+		let failedReads = 0;
+		msw.use(
+			http.get(`${API}/projects/:projectId/bot-connectors`, () => {
+				failedReads += 1;
+				return HttpResponse.json(
+					{ _tag: "InternalServerError", message: "Something went wrong on our side" },
+					{ status: 500 },
+				);
+			}),
+		);
+		await userEvent.click(billing);
+		// A server failure is asked once more before the query gives up.
+		await waitFor(() => expect(failedReads).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+		await expect(
+			canvas.getByRole("switch", { name: "Growth Desk's Billing API" }),
+		).toHaveAccessibleDescription(addressChangedRefusal);
+		await expect(canvas.getByRole("switch", { name: "Growth Desk's Notion" })).toBeVisible();
+		await expect(canvas.queryByRole("alert")).toBeNull();
+	},
+});
+
+/**
+ * A bot's connector whose address changed since it was turned on, which
+ * turned it off, to someone who can turn it on again.
+ */
 export const BotsOwnConnectorMoved = meta.story({
 	beforeEach({ msw }) {
 		msw.use(
@@ -458,7 +516,7 @@ export const BotsOwnConnectorMoved = meta.story({
 		await userEvent.click(await canvas.findByRole("button", { name: /Account Manager/ }));
 		await expect(
 			await canvas.findByText(
-				"Its address changed to https://crm.example.com/api. It's off until a manager turns it on again",
+				"Its address changed to https://crm.example.com/api. Turn it on to use the new address",
 			),
 		).toBeInTheDocument();
 	},
@@ -481,11 +539,15 @@ export const BotsOwnConnectorsWithoutAddresses = meta.story({
 	play: async ({ canvas }) => {
 		await userEvent.click(await canvas.findByRole("button", { name: /Account Manager/ }));
 		await expect(
-			await canvas.findByText("Its address changed. It's off until a manager turns it on again"),
+			await canvas.findByText(
+				"Its address changed. It's off until the workspace's owner or an admin turns it on again",
+			),
 		).toBeInTheDocument();
 		await expect(canvas.queryByText(/crm\.example\.com/)).toBeNull();
 		await userEvent.click(canvas.getByRole("button", { name: /Growth Desk/ }));
-		await expect(await canvas.findAllByText("Only managers can change this")).toHaveLength(2);
+		await expect(
+			await canvas.findAllByText("Only the workspace's owner and admins can change this"),
+		).toHaveLength(2);
 		await expect(canvas.queryByRole("switch")).toBeNull();
 	},
 });
