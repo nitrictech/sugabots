@@ -16,7 +16,7 @@ import {
 	Workflow,
 	WorkflowEngine,
 } from "effect/unstable/workflow";
-import { expect, it } from "vitest";
+import { expect, it, onTestFinished } from "vitest";
 import { Activities } from "./activities.ts";
 
 /**
@@ -32,7 +32,7 @@ export function conformance(options: {
 	readonly durable: boolean;
 }) {
 	it("memoises activities across a suspension", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const key = crypto.randomUUID();
 		const executionId = await harness.run(Suspending.execute({ key }, { discard: true }));
 		await harness.untilSuspended(executionId);
@@ -43,7 +43,7 @@ export function conformance(options: {
 	});
 
 	it("gives an activity its typed input, running it once per input", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const key = crypto.randomUUID();
 		const executionId = await harness.run(Inputs.execute({ key }, { discard: true }));
 		await harness.untilSuspended(executionId, Inputs);
@@ -56,7 +56,7 @@ export function conformance(options: {
 	});
 
 	it("keeps the first value sent to a deferred", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const key = crypto.randomUUID();
 		const executionId = await harness.run(Suspending.execute({ key }, { discard: true }));
 		await harness.untilSuspended(executionId);
@@ -69,7 +69,7 @@ export function conformance(options: {
 	});
 
 	it("accepts a deferred for an execution that has finished", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const key = crypto.randomUUID();
 		const executionId = await harness.run(Suspending.execute({ key }, { discard: true }));
 		await harness.untilSuspended(executionId);
@@ -80,7 +80,7 @@ export function conformance(options: {
 	});
 
 	it("attaches a repeated start to the running execution", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const key = crypto.randomUUID();
 		const first = await harness.run(Suspending.execute({ key }, { discard: true }));
 		const second = await harness.run(Suspending.execute({ key }, { discard: true }));
@@ -91,7 +91,7 @@ export function conformance(options: {
 	});
 
 	it("ends a suspended execution when interrupted", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const executionId = await harness.run(
 			Suspending.execute({ key: crypto.randomUUID() }, { discard: true }),
 		);
@@ -103,7 +103,7 @@ export function conformance(options: {
 	});
 
 	it("wakes for whichever of several deferreds completes first", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const key = crypto.randomUUID();
 		const executionId = await harness.run(Racing.execute({ key }, { discard: true }));
 		await harness.untilSuspended(executionId, Racing);
@@ -125,7 +125,7 @@ export function conformance(options: {
 	it.runIf(options.durable)("keeps a race's winner across an engine restart", async () => {
 		const key = crypto.randomUUID();
 		const executionId = await (async () => {
-			await using harness = start(options.engine());
+			const harness = start(options.engine());
 			const id = await harness.run(Racing.execute({ key }, { discard: true }));
 			await harness.untilSuspended(id, Racing);
 			await harness.run(
@@ -133,10 +133,11 @@ export function conformance(options: {
 			);
 			await harness.until(() => runs(key).includes("second"));
 			await harness.untilSuspended(id, Racing);
+			await harness.stop();
 			return id;
 		})();
 
-		await using restarted = start(options.engine());
+		const restarted = start(options.engine());
 		await restarted.run(
 			DurableDeferred.succeed(First, { token: racingToken(First, executionId), value: "a" }),
 		);
@@ -146,7 +147,7 @@ export function conformance(options: {
 	});
 
 	it("wakes for a deferred or a timer, whichever comes first", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const signalled = await harness.run(
 			Waiting.execute({ key: crypto.randomUUID(), millis: 30_000 }, { discard: true }),
 		);
@@ -170,7 +171,7 @@ export function conformance(options: {
 	});
 
 	it("retries a failing activity within its budget", async () => {
-		await using harness = start(options.engine());
+		const harness = start(options.engine());
 		const key = crypto.randomUUID();
 
 		expect(await harness.run(Flaky.execute({ key, failures: 2 }))).toBe(3);
@@ -179,13 +180,14 @@ export function conformance(options: {
 	it.runIf(options.durable)("resumes an execution after the engine restarts", async () => {
 		const key = crypto.randomUUID();
 		const executionId = await (async () => {
-			await using harness = start(options.engine());
+			const harness = start(options.engine());
 			const id = await harness.run(Suspending.execute({ key }, { discard: true }));
 			await harness.untilSuspended(id);
+			await harness.stop();
 			return id;
 		})();
 
-		await using restarted = start(options.engine());
+		const restarted = start(options.engine());
 		await restarted.run(DurableDeferred.succeed(Go, { token: goToken(executionId), value: "go" }));
 
 		expect(await restarted.result(executionId)).toBe("before:go:after");
@@ -377,9 +379,13 @@ const workflows = Layer.mergeAll(
 	),
 ).pipe(Layer.provide(probe));
 
-/** A harness over `engine`, whose other services (`R`) the effects it runs may use too. */
+/**
+ * A harness over `engine`, whose other services (`R`) the effects it runs may
+ * use too. Called in a test, which stops it when it ends, unless `stop` did first.
+ */
 export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngine | R, unknown>) {
 	const runtime = ManagedRuntime.make(workflows.pipe(Layer.provideMerge(engine)));
+	onTestFinished(() => runtime.dispose());
 	const run = <A, E>(effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine | R>) =>
 		runtime.runPromise(effect);
 	const retried = <A>(attempt: Effect.Effect<A, unknown, WorkflowEngine.WorkflowEngine>) =>
@@ -424,6 +430,7 @@ export function start<R = never>(engine: Layer.Layer<WorkflowEngine.WorkflowEngi
 			if (Exit.isFailure(exit)) throw new Error(`Execution failed: ${String(exit.cause)}`);
 			return exit.value;
 		},
-		[Symbol.asyncDispose]: () => runtime.dispose(),
+		/** Stops the engine, as a process stopping does. */
+		stop: () => runtime.dispose(),
 	};
 }

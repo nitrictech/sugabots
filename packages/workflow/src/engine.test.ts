@@ -2,7 +2,7 @@ import { PgClient } from "@effect/sql-pg";
 import { Config, Duration, Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { conformance, Go, goToken, Suspending, start } from "./conformance.ts";
 import { WorkflowEngines } from "./engine.ts";
 
@@ -30,14 +30,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		conformance({ engine: singleRunner, durable: true });
 
 		it("refuses to start while another process runs it", async () => {
-			await using first = ManagedRuntime.make(singleRunner());
+			const first = ManagedRuntime.make(singleRunner());
+			onTestFinished(() => first.dispose());
 			await first.runPromise(Effect.void);
 
-			await using second = ManagedRuntime.make(
+			const second = ManagedRuntime.make(
 				WorkflowEngines.singleRunnerWith({ hostLockWait: Duration.seconds(2) }).pipe(
 					Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") })),
 				),
 			);
+			onTestFinished(() => second.dispose());
 			await expect(second.runPromise(Effect.void)).rejects.toThrow(
 				/Another process is already running/,
 			);
@@ -45,7 +47,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
 		it("drops a signal sent in a transaction that rolls back, with the locks on their own sessions", async () => {
 			const url = Config.Redacted("DATABASE_URL");
-			await using harness = start(
+			const harness = start(
 				WorkflowEngines.singleRunnerWith({
 					hostLockWait: Duration.seconds(30),
 					sessions: PgClient.layerConfig({ url }),

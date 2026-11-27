@@ -3,7 +3,7 @@ import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { eq, sql } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, ManagedRuntime, Option, Schedule, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { type Database, layer as databaseLayer, query, transaction } from "../database/database.ts";
 import { Lanes } from "./lanes.ts";
 import { lane, laneRequest } from "./sql.ts";
@@ -466,7 +466,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 	{ timeout: 30_000 },
 	() => {
 		it("wakes an execution granted the lane as soon as the transaction granting it commits", async () => {
-			await using durable = ManagedRuntime.make(
+			const durable = ManagedRuntime.make(
 				HeldLive.pipe(
 					Layer.provideMerge(Lanes.layerFor([Held])),
 					Layer.provideMerge(
@@ -475,6 +475,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					Layer.provideMerge(databaseLayer),
 				),
 			);
+			onTestFinished(() => durable.dispose());
 			const key = crypto.randomUUID();
 			const service = await durable.runPromise(Effect.service(Lanes.Service));
 			const executionOf = (request: string) =>

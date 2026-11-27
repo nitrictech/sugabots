@@ -43,8 +43,6 @@
 		"build:computer": "docker build -t ghcr.io/nitrictech/sugabots-sandbox:latest -t sugabots-computer:dev docker/computer && node packages/core/src/chats/tools/browser/list-tools.ts && biome format --write packages/core/src/chats/tools/browser/playwright-tools.json"
 	},
 	"devDependencies": {
-		"@babel/core": "7.29.13",
-		"@babel/preset-typescript": "7.29.7",
 		"@biomejs/biome": "2.5.12",
 		"@effect/tsgo": "^0.69.0",
 		"@swc/core": "1.16.21",

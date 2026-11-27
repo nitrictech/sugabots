@@ -12,6 +12,9 @@
 /** Packages the web app, the website and other front ends may share with anything. */
 const drawing = ["avatars", "emoji", "provider-logos", "docs"];
 
+/** The stored events, which the server's composition root builds the event bus over. */
+const eventStore = "packages/core/src/database/events/store\\.ts";
+
 /** Each package, and the packages of ours it may import. */
 const mayImport = {
 	errors: [],
@@ -63,15 +66,31 @@ module.exports = {
 				path: "^packages/(server|bot-loop)/src/",
 				pathNot: "(\\.test\\.ts|\\.test-support\\.ts|/testing\\.ts)$",
 			},
-			to: { path: "^packages/core/src/(.*/store/|.*[a-z]-store\\.ts$)", pathNot: "/blob-store/" },
+			to: {
+				path: "^packages/core/src/(.*/store/|.*/store\\.ts$|.*[a-z]-store\\.ts$)",
+				pathNot: ["/blob-store/", `^${eventStore}$`],
+			},
+		},
+		{
+			name: "only-the-server-composes-the-event-store",
+			comment:
+				"The event store is infrastructure the server's composition root builds the bus over. Nothing else outside core reads or writes it directly.",
+			severity: "error",
+			from: {
+				path: "^packages/(server|bot-loop)/src/",
+				pathNot: [
+					"^packages/server/src/index\\.ts$",
+					"(\\.test\\.ts|\\.test-support\\.ts|/testing\\.ts)$",
+				],
+			},
+			to: { path: `^${eventStore}$` },
 		},
 	],
 	options: {
-		// TypeScript 7 has no JavaScript API to parse with, so Babel strips the types.
-		// dependency-cruiser only scans .ts files when it finds a TypeScript or swc it
-		// supports, which is why `@swc/core` is a dev dependency though nothing calls it:
-		// without it, every .ts file is skipped and the rules pass having checked nothing.
-		babelConfig: { fileName: "lint/dependency-cruiser.babel.json" },
+		// TypeScript 7 has no JavaScript API to parse with, so swc parses, keeping
+		// type-only imports as edges. Its syntax tree walker can't read `using`
+		// declarations, so the repo doesn't use them.
+		parser: "swc",
 		doNotFollow: { path: "node_modules" },
 		exclude: { path: "(^|/)(node_modules|dist|build|storybook-static)/" },
 		combinedDependencies: true,

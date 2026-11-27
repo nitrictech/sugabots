@@ -181,8 +181,8 @@ const CHECKED_WORDS: readonly CheckedWord[] = [
 	},
 	{
 		word: "preset",
-		// Others' presets: Biome's rules, ffmpeg's encoder speed and Babel's.
-		otherMeanings: /"preset": "recommended"|"-preset",|@babel\/preset-typescript|"presets"/g,
+		// Others' presets: Biome's rules and ffmpeg's encoder speed.
+		otherMeanings: /"preset": "recommended"|"-preset",/g,
 	},
 	{
 		word: "catalog entry",
