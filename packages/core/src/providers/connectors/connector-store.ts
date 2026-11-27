@@ -12,7 +12,7 @@ import {
 } from "@sugabots/contracts/errors/connectors";
 import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { Context, DateTime, Effect, Layer } from "effect";
+import { Context, DateTime, Effect, Layer, Order } from "effect";
 import stringify from "fast-json-stable-stringify";
 import { query, queryCatching, serviceOperations, transaction } from "../../database/database.ts";
 import { isUniqueViolation } from "../../database/errors.ts";
@@ -581,8 +581,11 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
 					const listing = "definitions" in outcome ? outcome : undefined;
+					const definitions = listing?.definitions.toSorted((first, second) =>
+						Order.String(first.name, second.name),
+					);
 					const fingerprint =
-						listing && createHash("sha256").update(stringify(listing.definitions)).digest("hex");
+						definitions && createHash("sha256").update(stringify(definitions)).digest("hex");
 					yield* query((db) =>
 						db
 							.update(connector)

@@ -146,21 +146,24 @@ describe("the connectors operations, beyond who may call them", () => {
 		const text = { type: "string" };
 		const count = { type: "number" };
 		let properties = { query: text, limit: count };
+		let reversed = false;
 		const fetchListing: typeof fetch = async (input, init) => {
 			const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
 			const server = new Server(
 				{ name: "project-wiki", version: "1.0.0" },
 				{ capabilities: { tools: {} } },
 			);
-			server.setRequestHandler(ListToolsRequestSchema, () => ({
-				tools: [
+			server.setRequestHandler(ListToolsRequestSchema, () => {
+				const tools = [
 					{
 						name: "lookup",
 						description: "Looks up an entry.",
 						inputSchema: { type: "object", properties },
 					},
-				],
-			}));
+					{ name: "summarize", inputSchema: { type: "object" as const } },
+				];
+				return { tools: reversed ? tools.reverse() : tools };
+			});
 			await server.connect(transport);
 			try {
 				return await transport.handleRequest(new Request(input, init));
@@ -177,7 +180,7 @@ describe("the connectors operations, beyond who may call them", () => {
 		const retest = async () => {
 			await expect(callWithListing(who.admin, "connectors.test", address)).resolves.toMatchObject({
 				reachable: true,
-				tools: 1,
+				tools: 2,
 			});
 			const { configurationRevision } = await call(who.admin, "connectors.get", address);
 			if (configurationRevision === undefined) throw new Error("Expected a configuration revision");
@@ -186,6 +189,9 @@ describe("the connectors operations, beyond who may call them", () => {
 
 		const before = await retest();
 		properties = { limit: count, query: text };
+		expect(await retest()).toBe(before);
+
+		reversed = true;
 		expect(await retest()).toBe(before);
 
 		properties = { limit: count, query: count };
