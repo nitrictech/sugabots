@@ -1341,18 +1341,38 @@ it.skipIf(!process.env.DATABASE_URL)(
 			await withClient(url, async (client) => {
 				await client.query(legacyRows);
 				await client.query(legacyCyclicCollaboration);
-				// A busy database can hold up the migration before it reaches the cycle.
+				const {
+					rows: [backend],
+				} = await client.query<{ pid: number }>("select pg_backend_pid() as pid");
+				if (!backend) throw new Error("Postgres returned no migration backend pid");
 				await withClient(url, async (blocker) => {
 					await blocker.query("begin; lock table agent in access exclusive mode");
 					await client.query("begin");
 					try {
 						await client.query(`set local statement_timeout = ${UPGRADE_TIMEOUT_MS}`);
-						await Promise.all([
-							expect(client.query(migration)).rejects.toThrow(
-								`Collaboration chat ancestry has a cycle: ${migrationScale.cyclicChat}`,
-							),
-							blocker.query("select pg_sleep(2.1); commit"),
-						]);
+						const migrating = client.query(migration);
+						void migrating.catch(() => {});
+						try {
+							await expect
+								.poll(
+									async () => {
+										const {
+											rows: [lock],
+										} = await blocker.query<{ waiting: boolean }>(
+											"select pg_backend_pid() = any(pg_blocking_pids($1)) as waiting",
+											[backend.pid],
+										);
+										return lock?.waiting;
+									},
+									{ timeout: 10_000 },
+								)
+								.toBe(true);
+						} finally {
+							await blocker.query("commit");
+						}
+						await expect(migrating).rejects.toThrow(
+							`Collaboration chat ancestry has a cycle: ${migrationScale.cyclicChat}`,
+						);
 					} finally {
 						await client.query("rollback");
 					}
