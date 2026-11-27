@@ -26,12 +26,15 @@ export function FileCards({
 	parts,
 	botName,
 	onOpen,
+	previews = true,
 	className,
 }: {
 	parts: readonly MessagePart[];
 	/** The bot that wrote the reply, whom each card names as its maker. */
 	botName: string;
 	onOpen: (fileId: string) => void;
+	/** Whether each card shows its preview over its line; without, it is only its line. */
+	previews?: boolean;
 	className?: string;
 }) {
 	const written = writtenIn(parts);
@@ -42,7 +45,12 @@ export function FileCards({
 		>
 			{written.map((file) => (
 				<li key={file.fileId} className="w-full">
-					<FileCard file={file} botName={botName} onOpen={() => onOpen(file.fileId)} />
+					<FileCard
+						file={file}
+						botName={botName}
+						preview={previews}
+						onOpen={() => onOpen(file.fileId)}
+					/>
 				</li>
 			))}
 		</ul>
@@ -52,10 +60,12 @@ export function FileCards({
 function FileCard({
 	file,
 	botName,
+	preview,
 	onOpen,
 }: {
 	file: FileAsWritten;
 	botName: string;
+	preview: boolean;
 	onOpen: () => void;
 }) {
 	const query = useFile(file.fileId, file.version);
@@ -71,6 +81,7 @@ function FileCard({
 			botName={botName}
 			content={content}
 			outsideRun={query.data?.outsideRun}
+			preview={preview}
 			onOpen={onOpen}
 		/>
 	);
@@ -91,6 +102,7 @@ export function FileCardView({
 	botName,
 	content,
 	outsideRun,
+	preview = true,
 	onOpen,
 }: {
 	file: FileAsWritten;
@@ -101,6 +113,8 @@ export function FileCardView({
 	 */
 	content: string | "failed" | "deleted" | undefined;
 	outsideRun?: WrittenFile["outsideRun"];
+	/** Whether it shows its preview over its line; without, it is only its line. */
+	preview?: boolean;
 	onOpen: () => void;
 }) {
 	const [pageLoaded, setPageLoaded] = useState(false);
@@ -129,7 +143,7 @@ export function FileCardView({
 			</article>
 		);
 	}
-	const previewed = content !== "failed";
+	const previewed = preview && content !== "failed";
 	return (
 		<article
 			aria-label={file.title}

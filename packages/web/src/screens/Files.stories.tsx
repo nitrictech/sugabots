@@ -417,6 +417,28 @@ export const InlineFailed = meta.story({
 	},
 });
 
+/** While a file is open large beside the chat, its card is only its line, which still opens it. */
+export const LineOnly = meta.story({
+	args: { onOpen: fn() },
+	render: ({ onOpen }) => (
+		<div className="w-full max-w-155 p-6 pl-12.5">
+			<FileCardView
+				file={asWritten(plan)}
+				botName={writer.name}
+				content={planContent}
+				preview={false}
+				onOpen={onOpen}
+			/>
+		</div>
+	),
+	play: async ({ args, canvas, userEvent }) => {
+		await expect(canvas.getByText("Document by Growth Desk")).toBeVisible();
+		await expect(canvas.queryByRole("heading", { name: "Goals" })).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: "Open Q4 outreach plan" }));
+		await expect(args.onOpen).toHaveBeenCalled();
+	},
+});
+
 /** An interactive chart drawn by the page itself in the app's tokens: bars that show their value under the pointer. */
 const chartPage = `<!doctype html>
 <html><head><style>

@@ -1159,8 +1159,9 @@ const fileHandlers = () => {
 
 /**
  * A file the bot made, as a card in its reply. Opening it shows it large
- * beside the chat, and Close puts it away. While it is open, the chat shows no
- * file cards and there is no Details, whose place it has taken.
+ * beside the chat, and Close puts it away. While it is open, its card in the
+ * chat is only its line, without the preview, and there is no Details, whose
+ * place it has taken.
  */
 export const OpenFile = meta.story({
 	beforeEach({ msw }) {
@@ -1173,7 +1174,9 @@ export const OpenFile = meta.story({
 		);
 		const stage = await canvas.findByRole("region", { name: pricing.title });
 		await expect(await within(stage).findByRole("columnheader", { name: "Annual" })).toBeVisible();
-		await expect(canvas.queryByRole("article", { name: pricing.title })).toBeNull();
+		const line = await canvas.findByRole("article", { name: pricing.title });
+		await expect(within(line).queryByRole("columnheader", { name: "Annual" })).toBeNull();
+		await expect(within(line).getByRole("button", { name: `Open ${pricing.title}` })).toBeVisible();
 		await expect(canvas.queryByRole("button", { name: "Details" })).toBeNull();
 		await userEvent.click(within(stage).getByRole("button", { name: "Close" }));
 		await expect(await canvas.findByRole("button", { name: "Details" })).toBeVisible();

@@ -59,7 +59,7 @@ export function ChatTimeline({
 	viewerWriting: boolean;
 	/** A message or run pointed out for a moment, as one jumped to is. */
 	pointedOut: ChatLogPoint | undefined;
-	/** Whether replies show what they made; off while something is open large beside the chat. */
+	/** Whether replies show what they made; off while something is open large beside the chat, when a file's card is only its line. */
 	previews: boolean;
 	onOpenFile: (fileId: string) => void;
 	onOpenDesktop: () => void;

@@ -132,8 +132,9 @@ export function ChatMessages({
 	 */
 	onOpenDesktop?: () => void;
 	/**
-	 * Whether replies show what they made: a card for each file, the
-	 * desktop live. Off while one is open large beside the chat.
+	 * Whether replies show what they made: each file's card with its preview,
+	 * the desktop live. Off while one is open large beside the chat, when a
+	 * file's card is only its line.
 	 */
 	previews?: boolean;
 
@@ -595,11 +596,12 @@ function ChatMessage({
 									/>
 								</div>
 							)}
-						{previews && onOpenFile && (
+						{onOpenFile && (
 							<FileCards
 								parts={message.parts}
 								botName={bot.name}
 								onOpen={onOpenFile}
+								previews={previews}
 								className="pt-1"
 							/>
 						)}
