@@ -60,8 +60,8 @@ export const eventStreamRoutes = HttpApiBuilder.group(ServerApi, "eventStreams",
 	Effect.gen(function* () {
 		const follow = yield* longRunningCaller;
 		const timing = yield* StreamTiming;
-		const streamed = <E>(
-			following: Effect.Effect<Running<Delivery>, E, Scope.Scope>,
+		const streamed = <E, R>(
+			following: Effect.Effect<Running<Delivery>, E, Scope.Scope | R>,
 			source: object,
 		) => respond(following, timing, source instanceof IncomingMessage);
 		return handlers
@@ -99,8 +99,8 @@ export const eventStreamRoutes = HttpApiBuilder.group(ServerApi, "eventStreams",
  * The operation listens before it returns, so nothing published straight
  * after the response arrives is lost.
  */
-const respond = <E>(
-	following: Effect.Effect<Running<Delivery>, E, Scope.Scope>,
+const respond = <E, R>(
+	following: Effect.Effect<Running<Delivery>, E, Scope.Scope | R>,
 	{ ping, maxAge }: Timing,
 	node: boolean,
 ) =>

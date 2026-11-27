@@ -1,5 +1,6 @@
 import {
 	API_BASE_PATH,
+	AuthenticatedRequest,
 	CurrentUserOfRequest,
 	Forbidden,
 	Session,
@@ -19,9 +20,9 @@ import { Ids } from "@sugabots/core/ids/ids";
 import type { Call, Running } from "@sugabots/core/operations/operation";
 import { Operations } from "@sugabots/core/operations/registry";
 import type { MemberSession } from "@sugabots/core/principal";
-import { processLayer, Tier } from "@sugabots/core/tiers";
+import { processLayer } from "@sugabots/core/tiers";
 import { userText } from "@sugabots/errors";
-import { Context, Effect, Layer, Option, type Scope } from "effect";
+import { Effect, Layer, type Scope } from "effect";
 import { Cookies, HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { failureResponse } from "../http/errors.ts";
 import { Authentication } from "./authentication.ts";
@@ -112,47 +113,24 @@ export const sessionLayer = Layer.effect(
 /** The refusal of a request with no session, or one that has expired or was revoked. */
 const signedOut = () => new Unauthorized({ message: userText`Invalid or expired session` });
 
-/**
- * What `sessionLayer` authenticated for the request being answered: an
- * ordinary request, which may trust better-auth's cookie cache. A
- * long-running operation, such as following a stream, is to authenticate with
- * `authenticateLongRunning` instead, which reads the session's row.
- */
-interface RequestAuthentication {
-	/** The member signed in, as better-auth's cookie cache or the bearer token's row has them. */
-	readonly principal: MemberSession;
-	/** This request, as the call each operation is handed. */
-	readonly call: Call;
-	/** The request's headers, which a long-running operation authenticates from again. */
-	readonly headers: Headers;
-	/** better-auth's one reading of the request's cookie, which that reuses. */
-	readonly cookie: SessionAuthentication.CookieSession | undefined;
+declare module "@sugabots/contracts/http/middleware" {
+	/**
+	 * What `sessionLayer` authenticated for the request being answered: an
+	 * ordinary request, which may trust better-auth's cookie cache. A
+	 * long-running operation, such as following a stream, is to authenticate
+	 * with `authenticateLongRunning` instead, which reads the session's row.
+	 */
+	interface RequestAuthentication {
+		/** The member signed in, as better-auth's cookie cache or the bearer token's row has them. */
+		readonly principal: MemberSession;
+		/** This request, as the call each operation is handed. */
+		readonly call: Call;
+		/** The request's headers, which a long-running operation authenticates from again. */
+		readonly headers: Headers;
+		/** better-auth's one reading of the request's cookie, which that reuses. */
+		readonly cookie: SessionAuthentication.CookieSession | undefined;
+	}
 }
-
-/**
- * The request `sessionLayer` authenticated, for the endpoint answering it. A
- * request-tier service, so no layer built once can require or provide it.
- */
-class AuthenticatedRequest extends Context.Service<AuthenticatedRequest, RequestAuthentication>()(
-	"@sugabots/server/AuthenticatedRequest",
-) {
-	declare readonly [Tier]: "request";
-}
-
-/**
- * The request `sessionLayer` authenticated; a defect for an endpoint not behind `Session`.
- *
- * Read as an option rather than required: `Session` declares what it provides in
- * `contracts`, which cannot name these types, so an endpoint's type cannot ask for
- * this service.
- */
-const authenticatedRequest = Effect.gen(function* () {
-	const authenticated = yield* Effect.serviceOption(AuthenticatedRequest);
-	if (Option.isSome(authenticated)) return authenticated.value;
-	return yield* Effect.die(
-		new Error("Only an endpoint behind the Session middleware has a principal"),
-	);
-});
 
 /** The operations the HTTP API serves: at endpoints derived from their contracts, or their own. */
 type ServedOperationName =
@@ -172,8 +150,8 @@ export const operationCaller = Effect.map(
 		<Name extends ServedOperationName>(
 			name: Name,
 			input: InputOf<Name>,
-		): Effect.Effect<OutputOf<Name>, FailureOf<Name>> =>
-			Effect.flatMap(authenticatedRequest, ({ principal, call }) =>
+		): Effect.Effect<OutputOf<Name>, FailureOf<Name>, AuthenticatedRequest> =>
+			Effect.flatMap(Effect.service(AuthenticatedRequest), ({ principal, call }) =>
 				operations[name](principal, input, call),
 			),
 );
@@ -193,10 +171,14 @@ export const longRunningCaller = Effect.gen(function* () {
 	return <Name extends LongRunningOperationName>(
 		name: Name,
 		input: InputOf<Name>,
-	): Effect.Effect<Running<OutputOf<Name>>, FailureOf<Name> | Unauthorized, Scope.Scope> =>
+	): Effect.Effect<
+		Running<OutputOf<Name>>,
+		FailureOf<Name> | Unauthorized,
+		Scope.Scope | AuthenticatedRequest
+	> =>
 		Effect.gen(function* () {
 			const principal = yield* principalFromSessionRow(sessions);
-			const { call } = yield* authenticatedRequest;
+			const { call } = yield* AuthenticatedRequest;
 			return yield* operations[name](principal, input, call);
 		});
 });
@@ -213,7 +195,7 @@ export const sessionRowCheck = Effect.map(SessionAuthentication.Service, (sessio
 /** The member whose session the request carries, read again from the session's row. */
 function principalFromSessionRow(sessions: SessionAuthentication.Interface) {
 	return Effect.gen(function* () {
-		const { headers, cookie } = yield* authenticatedRequest;
+		const { headers, cookie } = yield* AuthenticatedRequest;
 		return yield* sessions.authenticateLongRunning(headers).pipe(
 			Effect.provideService(SessionAuthentication.Cookies, {
 				read: () => Effect.succeed(cookie),

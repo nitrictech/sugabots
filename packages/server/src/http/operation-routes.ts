@@ -1,4 +1,8 @@
-import { type OperationGroup, operationGroups } from "@sugabots/contracts/http";
+import {
+	type AuthenticatedRequest,
+	type OperationGroup,
+	operationGroups,
+} from "@sugabots/contracts/http";
 import {
 	type HttpOperationName,
 	type OperationContracts,
@@ -45,10 +49,13 @@ function groupRoutes(group: HttpApiGroup.Constraint) {
 		(handlers) =>
 			Effect.map(operationCaller, (callOperation) => {
 				// One handler for every endpoint, so each one's own types are of no use here.
+				// Each is behind `Session`, which gives it the request it authenticated.
 				let served = handlers as unknown as {
 					handle: (
 						endpoint: string,
-						handler: (request: DecodedRequest) => Effect.Effect<unknown, unknown>,
+						handler: (
+							request: DecodedRequest,
+						) => Effect.Effect<unknown, unknown, AuthenticatedRequest>,
 					) => typeof served;
 				};
 				for (const endpoint of Object.keys(group.endpoints)) {

@@ -19,13 +19,33 @@ export class CurrentUserOfRequest extends Context.Service<CurrentUserOfRequest, 
 }
 
 /**
+ * What the server's session check found for the request, beyond the member:
+ * what it calls operations with. Empty here, where nothing reads it; the
+ * server fills it in by augmenting this interface, since its parts are core's
+ * types, which this package can't name.
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: the server augments it with its fields.
+export interface RequestAuthentication {}
+
+/**
+ * The request `Session` authenticated. A handler that needs it says so in its
+ * type, and only an endpoint behind `Session` is given it.
+ */
+export class AuthenticatedRequest extends Context.Service<
+	AuthenticatedRequest,
+	RequestAuthentication
+>()("sugabots/http/AuthenticatedRequest") {
+	declare readonly [Tier]: "request";
+}
+
+/**
  * Refuses the request unless its credentials resolve to a session.
  *
  * Not required of the client: a browser's session cookie travels on its own.
  */
 export class Session extends HttpApiMiddleware.Service<
 	Session,
-	{ provides: CurrentUserOfRequest }
+	{ provides: CurrentUserOfRequest | AuthenticatedRequest }
 >()("sugabots/http/Session", { error: Unauthorized }) {}
 
 /**
