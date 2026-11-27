@@ -157,10 +157,6 @@ WHERE "connection"."agent_id" IS NULL AND "pod"."id" = "connection"."pod_id"
 	AND "pod"."kind" = 'personal';--> statement-breakpoint
 ALTER TABLE "connection" ALTER COLUMN "pod_id" DROP NOT NULL;--> statement-breakpoint
 UPDATE "connection" SET "pod_id" = NULL WHERE "agent_id" IS NOT NULL;--> statement-breakpoint
-CREATE TEMP TABLE "default_project_allowed_host" ON COMMIT DROP AS
-SELECT "host"."workspace_id", "agent"."id" AS "bot_id", "host"."host", "host"."added_by_id", "host"."created_at"
-FROM "sandbox_pod_allowed_host" AS "host"
-JOIN "agent" ON "agent"."pod_id" = "host"."pod_id";--> statement-breakpoint
 -- A `pod`'s computer keeps its provider's id and its work, which is named by
 -- the computer's id. A `shared` one's stays with its `pod`, which becomes a
 -- project under the same id and takes it over (see "Projects own resources"
@@ -499,6 +495,10 @@ WHERE "pod"."kind" = 'personal'
 		SELECT 1 FROM "agent" WHERE "agent"."pod_id" = "pod"."id"
 			AND ("agent"."created_by_id" = "pod"."owner_id" OR "agent"."assistant_of" = "pod"."owner_id")
 	);--> statement-breakpoint
+CREATE TEMP TABLE "default_project_allowed_host" ON COMMIT DROP AS
+SELECT "host"."workspace_id", "agent"."id" AS "bot_id", "host"."host", "host"."added_by_id", "host"."created_at"
+FROM "sandbox_pod_allowed_host" AS "host"
+JOIN "agent" ON "agent"."pod_id" = "host"."pod_id";--> statement-breakpoint
 -- A personal chat without a host goes to a bot of the member who reached it.
 WITH "hosts" AS (
 	SELECT DISTINCT ON (p."id") p."id" AS "pod_id", a."id" AS "bot_id"

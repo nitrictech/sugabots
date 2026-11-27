@@ -433,6 +433,25 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await signIn(legacy.pods.notes)).toEqual(ComputerSignIn.NOT_SIGNED_IN);
 		});
 
+		it("keeps a bot-less personal pod's allowed host in the new Personal Assistant's default project", async () => {
+			expect(
+				await upgraded.rows(
+					`select host.host, host.added_by_id, bot.assistant_of
+					from project_allowed_host host
+					join project on project.id = host.project_id
+					join bot on bot.id = project.default_of_bot_id
+					where host.workspace_id = $1 and host.host = 'ana.example.com'`,
+					[legacy.workspace],
+				),
+			).toEqual([
+				{
+					host: "ana.example.com",
+					added_by_id: legacy.members.ana,
+					assistant_of: legacy.members.ana,
+				},
+			]);
+		});
+
 		it("queues the computer of a personal pod with no bots to be destroyed at its provider", async () => {
 			expect(
 				await upgraded.rows(

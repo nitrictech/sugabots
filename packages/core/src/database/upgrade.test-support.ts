@@ -321,6 +321,8 @@ INSERT INTO "sandbox" ("id", "workspace_id", "pod_id", "sandbox_provider_id", "p
  ('00000005-0000-4000-8000-000000000002', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000002', '0000000e-0000-4000-8000-000000000000', 'os-notes', NULL),
  ('00000005-0000-4000-8000-000000000003', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000003', '0000000e-0000-4000-8000-000000000000', 'os-pat', 'sugabots-computer@sha256:1'),
  ('00000005-0000-4000-8000-000000000004', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000004', '0000000e-0000-4000-8000-000000000000', 'os-ana', NULL);
+INSERT INTO "sandbox_pod_allowed_host" ("workspace_id", "pod_id", "host", "added_by_id") VALUES
+ ('0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000004', 'ana.example.com', '0000000b-0000-4000-8000-000000000003');
 
 -- Threads: the Family pod's main chat and a chat Sam started, a conversation
 -- with Planner, the Notes pod's chat, and a conversation with Pat's Helper.
