@@ -77,8 +77,8 @@ function FileCard({
 	);
 }
 
-/** How wide a card stands when it has no preview to show, as a document's does. */
-const PLAIN_WIDTH = "max-w-115";
+/** How wide every card stands, whatever it shows. */
+const CARD_WIDTH = "max-w-115";
 
 /**
  * A file among the messages: a preview of its content on top, as its kind
@@ -113,7 +113,7 @@ export function FileCardView({
 				aria-label={file.title}
 				className={cn(
 					"flex items-center gap-3 rounded-bubble border border-border border-dashed px-3.5 py-3",
-					PLAIN_WIDTH,
+					CARD_WIDTH,
 				)}
 			>
 				<IconTile size="md" tone="faded">
@@ -137,7 +137,7 @@ export function FileCardView({
 			aria-label={file.title}
 			className={cn(
 				"flex min-w-0 flex-col rounded-bubble border border-border bg-card",
-				previewed ? kind.cardWidth : PLAIN_WIDTH,
+				CARD_WIDTH,
 			)}
 		>
 			{previewed && (

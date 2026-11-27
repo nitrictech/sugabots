@@ -510,22 +510,27 @@ const tallPage = `<!doctype html><html><body style="padding: 16px">${Array.from(
 	(_, row) => `<p style="margin: 0 0 12px">Row ${row + 1}</p>`,
 ).join("")}</body></html>`;
 
-/** A page taller than the frame: clipped, shown all, then clipped again. */
+/** A page taller than its preview: cut off and faded, and opened large to be seen whole. */
 export const InlinePageTall = meta.story({
-	render: () => (
+	args: { onOpen: fn() },
+	render: ({ onOpen }) => (
 		<div className="w-full max-w-155 p-6 pl-12.5">
 			<FileCardView
 				file={asWritten(dashboard, "Every deal")}
 				botName={writer.name}
 				content={tallPage}
-				onOpen={fn()}
+				onOpen={onOpen}
 			/>
 		</div>
 	),
-	play: async ({ canvas, userEvent }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Show all" }));
-		await userEvent.click(await canvas.findByRole("button", { name: "Show less" }));
-		await expect(await canvas.findByRole("button", { name: "Show all" })).toBeVisible();
+	play: async ({ args, canvas, userEvent }) => {
+		const frame = await canvas.findByTitle("Every deal");
+		await waitFor(() => expect(frame.getBoundingClientRect().height).toBeGreaterThan(400));
+		await expect(
+			canvas.getByRole("article", { name: "Every deal" }).getBoundingClientRect().height,
+		).toBeLessThan(300);
+		await userEvent.click(canvas.getByRole("button", { name: "Open Every deal" }));
+		await expect(args.onOpen).toHaveBeenCalled();
 	},
 });
 
