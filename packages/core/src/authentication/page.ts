@@ -13,8 +13,8 @@ import { processLayer, Tier } from "../tiers.ts";
 /**
  * The authenticator for a bot-made page's secret address, the content
  * origin's only way in: the address's token, encrypted for that one use,
- * names a version of an HTML page and when it stops working. The principal it
- * builds opens only that page.
+ * names a page version, its recipient and its expiry. The principal it
+ * builds opens only that page while the recipient still reaches it.
  */
 export interface Interface {
 	/** The page the address token `token` opens, while it works. */
@@ -51,7 +51,7 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const address = opened(token);
 					if (Option.isNone(address)) return yield* new PageAddressUnavailable();
-					const { fileId, version, expiresAt } = address.value;
+					const { fileId, memberId, version, expiresAt } = address.value;
 					const now = yield* DateTime.nowAsDate;
 					if (expiresAt <= now.getTime()) {
 						return yield* new PageAddressUnavailable();
@@ -70,6 +70,7 @@ export const make = Effect.gen(function* () {
 					return authenticated.pageAddress({
 						workspace: page.workspace,
 						file: fileId,
+						member: memberId,
 						version,
 						expiresAt,
 					});

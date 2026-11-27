@@ -75,7 +75,7 @@ describe("the workspace and who is in it", () => {
 			const edsBot = await as.botFor(a.ed, a.pub.id, a.chat);
 			const { principal: run } = await as.run(a.workspace, a.project, a.pub.id);
 			const webhook = await as.webhook(a.workspace, a.project);
-			const page = await as.page(a.chat);
+			const page = await as.page(a.chat, a.ed);
 			for (const principal of [edsBot, run, webhook, page]) {
 				expect(await inWorkspace(principal, a.workspace)).toBe("ok");
 				// Ed is an admin of B, but his bot's turn is in A.
@@ -439,7 +439,7 @@ describe("the workspace and who is in it", () => {
 			const compaction = await as.compaction(a.chat, a.pub.id);
 			expect(await projectsReached(compaction)).toEqual([]);
 			expect(await chatsReached(compaction)).toEqual([a.chat]);
-			expect(await chatsReached(await as.page(a.chat))).toEqual([]);
+			expect(await chatsReached(await as.page(a.chat, a.ed))).toEqual([]);
 		});
 
 		it("keeps a bot's chats to its bounds, though its asker reaches more", async () => {

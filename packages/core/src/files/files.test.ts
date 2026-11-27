@@ -1,7 +1,7 @@
 import { MAX_FILE_CONTENT_CHARACTERS } from "@sugabots/contracts";
 import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { InputOf } from "@sugabots/contracts/operations";
-import { eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 import { Effect, Layer, Stream } from "effect";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PageAuthentication } from "../authentication/page.ts";
@@ -219,6 +219,22 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			});
 		});
 
+		it("refuses a fresh page load after the member who opened it is removed", async () => {
+			const made = await aPage();
+			const pages = (await pagesAt("https://pages.example-content.com"))(editorId);
+			const address = await pages.address({ fileId: made.id, version: 1 });
+			const token = address?.split("/pages/")[1] ?? "";
+			expect(await pages.open(token)).toMatchObject({ title: "Chart" });
+
+			await onDatabase((db) =>
+				db
+					.delete(projectMember)
+					.where(and(eq(projectMember.projectId, projectId), eq(projectMember.memberId, editorId))),
+			);
+
+			await expect(pages.open(token)).rejects.toMatchObject({ _tag: "ResourceHidden" });
+		});
+
 		it("gives no address without a content origin, nor for a document", async () => {
 			const made = await aPage();
 			const notes = await seed({ kind: "markdown", title: "Notes", content: "# Notes" });
@@ -253,7 +269,7 @@ describe.skipIf(!process.env.DATABASE_URL)("files, against Postgres", () => {
 			const pages = (await pagesAt("https://pages.example-content.com"))(editorId);
 			const sealed = (expiresAt: number, purpose?: string) =>
 				testCredentials.encrypt(
-					JSON.stringify({ fileId: made.id, version: 1, expiresAt }),
+					JSON.stringify({ fileId: made.id, memberId: editorId, version: 1, expiresAt }),
 					purpose,
 				);
 

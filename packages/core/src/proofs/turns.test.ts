@@ -417,7 +417,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			const principals = [
 				await as.webhook(a.workspace, a.project),
 				await as.compaction(a.chat, a.pub.id),
-				await as.page(a.chat),
+				await as.page(a.chat, a.ed),
 			];
 			for (const principal of principals) {
 				expect(await approved(principal, request, never, input)).toBe("ApprovalRefused");

@@ -15,8 +15,8 @@ import { Files } from "./files.ts";
  * origin of their own, so a page shares nothing with the app: not its
  * cookies, not its site, not its process. The content origin has no session,
  * so a page is reached by an address that carries its own permission: a
- * token naming the page, encrypted for that one use, given out to someone
- * an operation has proved reaches it, and good for a few minutes.
+ * token naming the page and the member it was issued to. The address
+ * works while that member still reaches the page and the token is unexpired.
  */
 export interface Interface {
 	/**
@@ -46,7 +46,7 @@ export const make = Effect.gen(function* () {
 				"address",
 				Effect.gen(function* () {
 					const { contentOrigin } = serverSettings;
-					if (!contentOrigin) return undefined;
+					if (!contentOrigin || reach.as.kind !== "member") return undefined;
 					const page = yield* files.summary(reach);
 					if (page.kind !== "html") return undefined;
 					// Versions are numbered from 1 to the current one, with none removed.
@@ -56,6 +56,7 @@ export const make = Effect.gen(function* () {
 					const now = yield* DateTime.nowAsDate;
 					const address: PageAddress = {
 						fileId: page.id,
+						memberId: reach.as.place.actor.memberId,
 						version,
 						expiresAt: now.getTime() + ADDRESS_LIFETIME_MS,
 					};
@@ -79,9 +80,10 @@ const ADDRESS_LIFETIME_MS = 10 * 60 * 1000;
 /** The use page addresses are encrypted for, so no other value encrypted with the same key opens as one. */
 export const SECRET_PURPOSE = "file-page-address";
 
-/** What a page address's token holds once opened: which version of which page, and until when. */
+/** What a page address's token holds once opened: the page version, the member it was issued to, and when it expires. */
 export const pageAddressSchema = Schema.Struct({
 	fileId: uuidSchema,
+	memberId: uuidSchema,
 	version: Schema.Int,
 	/** In milliseconds since the epoch. */
 	expiresAt: Schema.Number,

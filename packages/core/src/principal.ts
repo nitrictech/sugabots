@@ -208,6 +208,7 @@ class SystemWork extends Authenticated<"SystemWork"> {
 class PageAddress extends Authenticated<"PageAddress"> {
 	readonly workspace: string;
 	readonly file: string;
+	readonly member: string;
 	readonly version: number;
 	readonly expiresAt: number;
 
@@ -215,6 +216,7 @@ class PageAddress extends Authenticated<"PageAddress"> {
 		super("PageAddress");
 		this.workspace = fields.workspace;
 		this.file = fields.file;
+		this.member = fields.member;
 		this.version = fields.version;
 		this.expiresAt = fields.expiresAt;
 		Object.freeze(this);

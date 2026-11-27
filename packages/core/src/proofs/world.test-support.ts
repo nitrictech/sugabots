@@ -237,10 +237,10 @@ export function principals(auth: Authenticators) {
 			};
 		},
 		/** Whoever holds the address of a page in `chatId`. */
-		page: async (chatId: string) => {
+		page: async (chatId: string, memberId: string) => {
 			const pageId = await seedPage(chatId);
 			const token = auth.secrets.encrypt(
-				JSON.stringify({ fileId: pageId, version: 1, expiresAt: Date.now() + 60_000 }),
+				JSON.stringify({ fileId: pageId, memberId, version: 1, expiresAt: Date.now() + 60_000 }),
 				FilePages.SECRET_PURPOSE,
 			);
 			return runOnPostgres(auth.page.open(token));
@@ -292,7 +292,7 @@ export async function everyKindOfPrincipal(world: World, as: ReturnType<typeof p
 		webhook: await as.webhook(a.workspace, a.project),
 		computerSleep: (await as.computerSleep(a.workspace, a.project)).principal,
 		compaction: await as.compaction(a.chat, a.pub.id),
-		page: await as.page(a.chat),
+		page: await as.page(a.chat, a.ed),
 	};
 }
 

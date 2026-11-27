@@ -30,6 +30,7 @@ const withPages = (contentOrigin: string | undefined = CONTENT_ORIGIN) =>
 					token === SEALED
 						? Effect.succeed(
 								pageAddressForTests({
+									member: "0199a3a0-0000-7000-8000-0000000000a0",
 									workspace: "0199a3a0-0000-7000-8000-000000000001",
 									file: "0199a3a0-0000-7000-8000-000000000002",
 									version: 1,

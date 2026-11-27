@@ -206,7 +206,7 @@ describe("reach and what it permits", () => {
 			const webhook = await as.webhook(a.workspace, a.project);
 			const sleep = who.computerSleep;
 			const compaction = await as.compaction(a.chat, a.pub.id);
-			const page = await as.page(a.chat);
+			const page = await as.page(a.chat, a.ed);
 			expect(await reachesProject(run, a.project)).toBe("ok");
 			expect(await reachesProject(run, a.otherProject)).toBe("ResourceHidden");
 			expect(await reachesProject(webhook, a.project)).toBe("ResourceHidden");

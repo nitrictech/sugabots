@@ -20,6 +20,7 @@ describe("PageAuthentication", () => {
 	let secrets: Secrets.Interface;
 	let workspaceId: string;
 	let chatId: string;
+	let memberId: string;
 
 	beforeAll(async () => {
 		auth = await runOnPostgres(
@@ -31,7 +32,7 @@ describe("PageAuthentication", () => {
 			}),
 		);
 		workspaceId = await seedWorkspace();
-		const memberId = await seedMember(workspaceId, "editor");
+		memberId = await seedMember(workspaceId, "editor");
 		const lead = await seedBot(workspaceId);
 		const projectId = await seedProject(workspaceId, { leadBotId: lead.id, members: [memberId] });
 		chatId = await seedProjectChat(workspaceId, projectId, memberId);
@@ -45,7 +46,7 @@ describe("PageAuthentication", () => {
 	const tokenFor = (
 		address: { fileId: string; version: number; expiresAt: number },
 		purpose: string = FilePages.SECRET_PURPOSE,
-	) => secrets.encrypt(JSON.stringify(address), purpose);
+	) => secrets.encrypt(JSON.stringify({ ...address, memberId }), purpose);
 
 	const inTenMinutes = () => Date.now() + 10 * 60 * 1000;
 
@@ -59,6 +60,7 @@ describe("PageAuthentication", () => {
 		expect(principal._tag).toBe("PageAddress");
 		expect(principal.workspace).toBe(workspaceId);
 		expect(principal.file).toBe(pageId);
+		expect(principal.member).toBe(memberId);
 		expect(principal.version).toBe(1);
 	});
 

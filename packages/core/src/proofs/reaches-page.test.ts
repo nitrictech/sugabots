@@ -21,10 +21,11 @@ describe("proveReachesPage", () => {
 	let workspaceId: string;
 	let projectId: string;
 	let fileId: string;
+	let memberId: string;
 
 	beforeEach(async () => {
 		workspaceId = await seedWorkspace();
-		const memberId = await seedMember(workspaceId, "editor");
+		memberId = await seedMember(workspaceId, "editor");
 		const lead = await seedBot(workspaceId);
 		projectId = await seedProject(workspaceId, { leadBotId: lead.id, members: [memberId] });
 		const chatId = await seedProjectChat(workspaceId, projectId, memberId);
@@ -37,6 +38,7 @@ describe("proveReachesPage", () => {
 		const address = pageAddressForTests({
 			workspace: workspaceId,
 			file: fileId,
+			member: memberId,
 			version: 1,
 			expiresAt: 60_000,
 		});
@@ -65,6 +67,7 @@ describe("proveReachesPage", () => {
 		const address = pageAddressForTests({
 			workspace: workspaceId,
 			file: fileId,
+			member: memberId,
 			version: 1,
 			expiresAt: 60_000,
 		});
