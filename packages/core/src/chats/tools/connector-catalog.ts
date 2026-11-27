@@ -569,7 +569,7 @@ export function from({
 					const use = <A>(work: (session: ServerSession) => Promise<A>) =>
 						useSession(target, sessionRevision, work);
 					const offer = (target: ConnectorTarget, listing: ServerListing) =>
-						buildMcpTools(target, listing, uploadSide, use);
+						buildConnectorTools(target, listing, uploadSide, use);
 					const refresh = (name: string) =>
 						Effect.gen(function* () {
 							const fresh = yield* Effect.result(
@@ -645,7 +645,7 @@ function targetWithListing(target: ConnectorTarget, revision: number, listing: S
 	};
 }
 
-function buildMcpTools(
+function buildConnectorTools(
 	target: ConnectorTarget,
 	listing: ServerListing,
 	upload: UploadSide,
