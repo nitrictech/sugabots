@@ -303,15 +303,19 @@ export const make = Effect.gen(function* () {
 				yield* query((db) => db.delete(notificationDelivery).where(ours));
 				return;
 			}
-			const now = yield* DateTime.nowAsDate;
+			// Sent only while the claim outlasts the longest a send may take, so
+			// no other sweep sends it meanwhile.
+			const sendEndsBy = DateTime.toDateUtc(
+				DateTime.addDuration(yield* DateTime.now, SEND_TIMEOUT),
+			);
 			const [stillClaimed] = yield* query((db) =>
 				db
 					.select({ deliveryId: notificationDelivery.deliveryId })
 					.from(notificationDelivery)
-					.where(and(ours, gt(notificationDelivery.claimedUntil, now))),
+					.where(and(ours, gt(notificationDelivery.claimedUntil, sendEndsBy))),
 			);
 			if (!stillClaimed) return;
-			yield* deliver([{ memberId, notification }]);
+			yield* deliver([{ memberId, notification }]).pipe(Effect.timeout(SEND_TIMEOUT));
 			const sentAt = yield* DateTime.nowAsDate;
 			yield* query((db) => db.update(notificationDelivery).set({ sentAt }).where(ours));
 		});
@@ -487,6 +491,9 @@ type NotificationDeliveryRow = typeof notificationDelivery.$inferSelect;
 
 /** How long the process that wrote a notification has to send it before the sweep does. */
 const SEND_GRACE = Duration.seconds(30);
+
+/** The longest sending a notification again may take, well inside the claim `SEND_GRACE` gives it. */
+const SEND_TIMEOUT = Duration.seconds(10);
 
 /** How long a notification is still worth sending; past it, one left unsent is dropped. */
 const NEWS_FOR = Duration.minutes(10);
