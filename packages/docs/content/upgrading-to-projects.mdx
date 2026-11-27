@@ -75,11 +75,10 @@ file backup.
   the Personal Assistant. The other bots' GitHub-triggered automations are
   **paused** until they have their own app and the triggers point at it. If
   the pod has no other bots, its Personal Assistant keeps the app.
-- **Webhook triggers that only kept a digest of their secret are paused.**
-  Older versions stored only a digest of some webhook secrets, which can't be
-  used to check calls any more. Each such trigger refuses every call, and its
-  automation is paused, until someone gives the trigger a new secret and
-  resumes it. Update the secret wherever the webhook is sent from too.
+- **Older bearer webhook secrets still work.** The trigger can check the
+  secret against its stored digest, and the automation and its routines keep
+  their prior state. If you replace the secret, update it wherever the webhook
+  is sent from too.
 - **Direct messages between members are deleted**, with their files. Members
   now talk in projects' chats.
 - **Chat summaries are deleted.** Bots no longer summarise chats. What they
