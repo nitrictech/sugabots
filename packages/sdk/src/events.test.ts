@@ -199,7 +199,7 @@ describe("parsing", () => {
 	});
 
 	it("bounds an unfinished frame", async () => {
-		const { fetch } = scripted(`data: ${"x".repeat(1024 * 1024)}\n`);
+		const { fetch } = scripted(`data: ${"x".repeat(1024 * 1024 + 1)}\n`);
 
 		await expect(take(events(fetch).chat("c1"), 1)).rejects.toMatchObject({
 			_tag: "InternalServerError",

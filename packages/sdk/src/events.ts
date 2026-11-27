@@ -1,7 +1,8 @@
 import { resetEvent, type StreamEvent, streamEventSchema } from "@sugabots/contracts";
-import { type ApiFailure, InternalServerError } from "@sugabots/contracts/http";
+import { Api, type ApiFailure, InternalServerError } from "@sugabots/contracts/http";
 import { type UserText, userText } from "@sugabots/errors";
 import { Schema } from "effect";
+import { HttpApiClient } from "effect/unstable/httpapi";
 import { createParser } from "eventsource-parser";
 import { failureFromResponse } from "./errors.ts";
 
@@ -60,13 +61,13 @@ export function createEventsApi({
 	fetch = globalThis.fetch,
 	retryMs = RETRY_MS,
 }: EventsApiOptions): EventsApi {
-	const open = (path: string): EventStream =>
-		createEventStream({ url: `${baseUrl}${path}`, fetch, retryMs });
+	const urls = HttpApiClient.urlBuilder(Api, { baseUrl }).eventStreams;
+	const open = (url: string): EventStream => createEventStream({ url, fetch, retryMs });
 
 	return {
-		workspace: (workspaceId) => open(`/workspaces/${encodeURIComponent(workspaceId)}/events`),
-		chat: (chatId) => open(`/chats/${encodeURIComponent(chatId)}/events`),
-		me: () => open("/me/events"),
+		workspace: (workspace) => open(urls.workspace({ params: { workspace } })),
+		chat: (chatId) => open(urls.chat({ params: { chatId } })),
+		me: () => open(urls.me()),
 	};
 }
 
@@ -195,10 +196,13 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 	const reader = body.getReader();
 	const decoder = new TextDecoder();
 	const ready: Message[] = [];
-	let buffered = "";
-	let eventChars = 0;
+	let tooLarge = false;
 	const parser = createParser({
+		maxBufferSize: MAX_EVENT_CHARS,
 		onEvent: ({ id, data }) => ready.push({ id, data }),
+		onError: (error) => {
+			if (error.type === "max-buffer-size-exceeded") tooLarge = true;
+		},
 	});
 
 	try {
@@ -207,33 +211,11 @@ async function* readMessages(body: ReadableStream<Uint8Array>): AsyncGenerator<M
 			if (done) {
 				return;
 			}
-
-			buffered += decoder.decode(value, { stream: true });
-			while (true) {
-				const lineEnd = buffered.search(/[\r\n]/);
-				if (lineEnd < 0 || (buffered[lineEnd] === "\r" && lineEnd === buffered.length - 1)) {
-					break;
-				}
-
-				const delimiterLength =
-					buffered[lineEnd] === "\r" && buffered[lineEnd + 1] === "\n" ? 2 : 1;
-				const line = buffered.slice(0, lineEnd + delimiterLength);
-				buffered = buffered.slice(lineEnd + delimiterLength);
-				eventChars += line.length;
-				if (eventChars > MAX_EVENT_CHARS) {
-					throw malformed(userText`The event stream frame exceeded the size limit`, 200);
-				}
-
-				parser.feed(line);
-				if (lineEnd === 0) {
-					eventChars = 0;
-				}
-				while (ready.length > 0) {
-					yield ready.shift() as Message;
-				}
+			parser.feed(decoder.decode(value, { stream: true }));
+			while (ready.length > 0) {
+				yield ready.shift() as Message;
 			}
-
-			if (eventChars + buffered.length > MAX_EVENT_CHARS) {
+			if (tooLarge) {
 				throw malformed(userText`The event stream frame exceeded the size limit`, 200);
 			}
 		}
