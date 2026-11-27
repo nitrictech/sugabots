@@ -674,6 +674,7 @@ export const messageReaction = pgTable(
 	},
 	(table) => [
 		check("message_reaction_one_reactor", sql`num_nonnulls(${table.memberId}, ${table.botId}) = 1`),
+		index("message_reaction_message_idx").on(table.messageId),
 		uniqueIndex("message_reaction_message_member_emoji_idx")
 			.on(table.messageId, table.memberId, table.emoji)
 			.where(sql`${table.memberId} is not null`),

@@ -1604,6 +1604,7 @@ ALTER TABLE "message_reaction" ALTER COLUMN "user_id" DROP NOT NULL;--> statemen
 DROP INDEX "project_slug_idx";--> statement-breakpoint
 CREATE UNIQUE INDEX "project_slug_idx" ON "project" ("workspace_id","slug") WHERE "default_of_bot_id" is null;--> statement-breakpoint
 DROP INDEX "message_reaction_message_user_emoji_idx";--> statement-breakpoint
+CREATE INDEX "message_reaction_message_idx" ON "message_reaction" ("message_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "message_reaction_message_user_emoji_idx" ON "message_reaction" ("message_id","user_id","emoji") WHERE "user_id" is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "message_reaction_message_bot_emoji_idx" ON "message_reaction" ("message_id","bot_id","emoji") WHERE "bot_id" is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "project_default_of_bot_idx" ON "project" ("default_of_bot_id");--> statement-breakpoint

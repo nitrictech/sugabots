@@ -15659,6 +15659,26 @@
         "n|col|public.automation_trigger.kind",
         "n|col|public.automation_trigger.settings"
       ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "message_reaction",
+        "message_reaction_message_idx"
+      ],
+      "writes": [
+        "s|idx|public.message_reaction_message_idx",
+        "n|idx|public.message_reaction_message_idx",
+        "e|idx|public.message_reaction_message_idx",
+        "n|rel|public.message_reaction_message_idx"
+      ],
+      "reads": [
+        "n|tbl|public.message_reaction",
+        "n|sch|public",
+        "n|col|public.message_reaction.message_id"
+      ]
     }
   ],
   "deltas": [
@@ -26084,6 +26104,30 @@
         "name": "automation_trigger_legacy_bearer_secret_valid",
         "value": "\"legacy_bearer_secret_digest\" is null or (\"secret_restricted_to_admins\" is true and \"secret_encrypted\" is null and \"kind\" = 'webhook' and \"settings\"->'auth'->>'kind' is not distinct from 'bearer')",
         "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "message_reaction",
+        "name": "message_reaction_message_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "message_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
       }
     }
   ]

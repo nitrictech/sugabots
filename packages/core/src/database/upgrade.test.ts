@@ -2841,7 +2841,6 @@ it.skipIf(!process.env.DATABASE_URL)(
 );
 
 interface ExecutionPlan {
-	readonly "Node Type": string;
 	readonly "Actual Loops": number;
 	readonly "Rows Removed by Join Filter"?: number;
 	readonly Plans?: readonly ExecutionPlan[];
@@ -2854,9 +2853,11 @@ function countJoinFilterRows(plan: ExecutionPlan): number {
 	);
 }
 
-function collectAggregateLoops(plan: ExecutionPlan): number[] {
-	const loops = (plan.Plans ?? []).flatMap(collectAggregateLoops);
-	return plan["Node Type"] === "Aggregate" ? [plan["Actual Loops"], ...loops] : loops;
+function countPlanNodeExecutions(plan: ExecutionPlan): number {
+	return (
+		plan["Actual Loops"] +
+		(plan.Plans ?? []).reduce((total, child) => total + countPlanNodeExecutions(child), 0)
+	);
 }
 
 async function explainAnalyze(client: pg.Client, statement: string): Promise<ExecutionPlan> {
@@ -2876,93 +2877,124 @@ async function countDiscardedPairs(client: pg.Client, statement: string) {
 it("counts rows discarded by a join filter across every loop of its plan node", () => {
 	expect(
 		countJoinFilterRows({
-			"Node Type": "Nested Loop",
 			"Actual Loops": 1,
 			"Rows Removed by Join Filter": 1,
-			Plans: [
-				{ "Node Type": "Nested Loop", "Actual Loops": 12, "Rows Removed by Join Filter": 3 },
-				{ "Node Type": "Seq Scan", "Actual Loops": 0 },
-			],
+			Plans: [{ "Actual Loops": 12, "Rows Removed by Join Filter": 3 }, { "Actual Loops": 0 }],
 		}),
 	).toBe(37);
 });
 
-it.skipIf(!process.env.DATABASE_URL)(
-	"keeps replies referenced by queued work and rewrites surviving collaboration replies as a batch",
-	async () => {
+async function countReactionRowsRead(client: pg.Client): Promise<number> {
+	const {
+		rows: [stats],
+	} = await client.query<{ reads: string }>(`
+		select seq_tup_read + idx_tup_fetch as reads
+		from pg_stat_xact_user_tables where relid = 'message_reaction'::regclass
+	`);
+	if (!stats) throw new Error("Postgres returned no reaction read counts");
+	return Number(stats.reads);
+}
+
+it.skipIf(!process.env.DATABASE_URL).each([
+	{ replies: 300, reactions: 2_000 },
+	{ replies: 3_000, reactions: 20_000 },
+])(
+	"keeps referenced collaboration replies with bounded work ($replies replies per kind, $reactions reactions)",
+	async ({ replies, reactions }) => {
+		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "collaboration");
 		const migration = await readFile(
 			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
 			"utf8",
 		);
-		const cleanup = migration
-			.slice(migration.indexOf("-- A finished asking reply"))
-			.split("--> statement-breakpoint")[0];
-		if (cleanup === undefined) throw new Error("The migration has no collaboration cleanup");
-		const rewrite = migration
-			.slice(migration.indexOf("-- The other asking replies"))
-			.split("--> statement-breakpoint")[0];
-		if (!rewrite) throw new Error("The migration has no collaboration reply rewrite");
-		const mixedReplies = 3_000;
-		await withClient(process.env.DATABASE_URL ?? "", async (client) => {
-			await client.query("begin");
-			try {
-				await client.query(`
-					create temp table message (
-						id uuid primary key, parts jsonb, status text, reply_to_message_id uuid
+		const [beforeCleanup, cleanupSection, rewriteSection] = migration.split(
+			/(?=-- A finished asking reply|-- The other asking replies)/,
+		);
+		const cleanup = cleanupSection?.split("--> statement-breakpoint")[0];
+		const rewrite = rewriteSection?.split("--> statement-breakpoint")[0];
+		if (!beforeCleanup || !cleanup || !rewrite) {
+			throw new Error("The migration has no collaboration cleanup or reply rewrite");
+		}
+		await recreateDatabase(url);
+		try {
+			await migrateTo(url, LAST_MAIN_MIGRATION);
+			await withClient(url, async (client) => {
+				await client.query(legacyRows);
+				await client.query("begin");
+				try {
+					await client.query(beforeCleanup);
+					const chatId = "0000000f-0000-4000-8000-000000000099";
+					await client.query(`
+						insert into chat (id, workspace_id, kind, title)
+						values ('${chatId}', '${legacy.workspace}', 'project_chat', 'Planning');
+						insert into project_chat (chat_id, workspace_id, project_id)
+						select '${chatId}', workspace_id, project_id from project_chat
+						where chat_id = '${legacy.threads.trip}';
+						insert into message (id, chat_id, author_bot_id, parts, content, status)
+						select md5(prefix || ordinal)::uuid, '${chatId}', '${legacy.bots.planner}',
+							parts::jsonb, content, 'complete'
+						from (values
+							('reply', ${replies}, '[{"type":"collaboration"}]', ''),
+							('mixed reply', ${replies}, '[{"type":"text","text":"Before "},{"type":"collaboration"},{"type":"text","text":"after"}]', 'Before after'),
+							('other', ${reactions}, '[{"type":"text","text":"Thanks"}]', 'Thanks')
+						) as messages(prefix, count, parts, content)
+						cross join lateral generate_series(1, messages.count) ordinal;
+						insert into message_reaction (message_id, member_id, emoji)
+						select md5('other' || ordinal)::uuid, '${legacy.members.sam}', '👍'
+						from generate_series(1, ${reactions}) ordinal;
+						insert into lane (key, payload)
+						values ('trigger reply', jsonb_build_object('triggerMessageId', md5('reply1')::uuid)),
+							('source reply', jsonb_build_object('sourceMessageId', md5('reply2')::uuid)), ('idle', null);
+						insert into lane (key, payload)
+						select 'other' || ordinal, jsonb_build_object('triggerMessageId', md5('other' || ordinal)::uuid)
+						from generate_series(1, ${replies / 3}) ordinal;
+						insert into lane_request (lane_key, workflow, payload)
+						values ('trigger reply', 'turn', jsonb_build_object('triggerMessageId', md5('reply3')::uuid)),
+							('source reply', 'turn', jsonb_build_object('sourceMessageId', md5('reply4')::uuid)),
+							('idle', 'turn', '{"triggerMessageId":null,"sourceMessageId":"missing"}');
+						insert into lane_request (lane_key, workflow, payload)
+						select 'idle', 'turn', jsonb_build_object('sourceMessageId', md5('other' || ordinal)::uuid)
+						from generate_series(1, ${3 * replies}) ordinal;
+						analyze message, lane, lane_request, "turn", message_reaction, file, tool_call;
+					`);
+					const beforeReads = await countReactionRowsRead(client);
+					const discardedPairs = await countDiscardedPairs(client, cleanup);
+					const reactionReads = (await countReactionRowsRead(client)) - beforeReads;
+					const { rows: kept } = await client.query(
+						`select ordinal from generate_series(1, $1::int) ordinal
+						 join message on id = md5('reply' || ordinal)::uuid order by ordinal`,
+						[replies],
 					);
-					create temp table "turn" (trigger_message_id uuid);
-					create temp table message_reaction (message_id uuid);
-					create temp table file (message_id uuid);
-					create temp table tool_call (message_id uuid);
-					create temp table lane (payload jsonb);
-					create temp table lane_request (payload jsonb);
-					insert into message (id, parts, status)
-					select md5('reply' || ordinal)::uuid, '[{"type":"collaboration"}]', 'complete'
-					from generate_series(1, 3000) ordinal;
-					insert into message (id, parts, status)
-					select md5('mixed reply' || ordinal)::uuid,
-						'[{"type":"text","text":"Before "},{"type":"collaboration"},{"type":"text","text":"after"}]',
-						'complete'
-					from generate_series(1, ${mixedReplies}) ordinal;
-					insert into lane (payload)
-					values (jsonb_build_object('triggerMessageId', md5('reply1')::uuid)),
-						(jsonb_build_object('sourceMessageId', md5('reply2')::uuid)), (null);
-					insert into lane
-					select jsonb_build_object('triggerMessageId', md5('other' || ordinal)::uuid)
-					from generate_series(1, 997) ordinal;
-					insert into lane_request (payload)
-					values (jsonb_build_object('triggerMessageId', md5('reply3')::uuid)),
-						(jsonb_build_object('sourceMessageId', md5('reply4')::uuid)),
-						('{"triggerMessageId":null,"sourceMessageId":"missing"}');
-					insert into lane_request
-					select jsonb_build_object('sourceMessageId', md5('other' || ordinal)::uuid)
-					from generate_series(1, 8997) ordinal;
-					analyze message, lane, lane_request, "turn", message_reaction, file, tool_call;
-				`);
-				const discardedPairs = await countDiscardedPairs(client, cleanup);
-				const { rows: kept } = await client.query(
-					`select ordinal from generate_series(1, 3000) ordinal
-					 join message on id = md5('reply' || ordinal)::uuid order by ordinal`,
-				);
-				expect(kept).toEqual([{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }, { ordinal: 4 }]);
-				expect(discardedPairs).toBeLessThan(10_000);
-				const plan = await explainAnalyze(client, rewrite);
-				expect(new Set(collectAggregateLoops(plan))).toEqual(new Set([1]));
-				const { rows: rewritten } = await client.query(`
-					select count(*) filter (where parts = '[]')::int as "clearedReplies",
-						count(*) filter (
-							where parts = '[{"type":"text","text":"Before after"}]'
-						)::int as "joinedReplies",
-						count(*)::int as total
-					from message
-				`);
-				expect(rewritten).toEqual([
-					{ clearedReplies: 4, joinedReplies: mixedReplies, total: mixedReplies + 4 },
-				]);
-			} finally {
-				await client.query("rollback");
-			}
-		});
+					expect(kept).toEqual([{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }, { ordinal: 4 }]);
+					const rewriteExecutions = countPlanNodeExecutions(await explainAnalyze(client, rewrite));
+					const { rows: rewritten } = await client.query(
+						`
+						select count(*) filter (where parts = '[]')::int as "clearedReplies",
+							count(*) filter (
+								where parts = '[{"type":"text","text":"Before after"}]'
+							)::int as "joinedReplies",
+							count(*)::int as total
+						from message where chat_id = $1
+					`,
+						[chatId],
+					);
+					expect(rewritten).toEqual([
+						{ clearedReplies: 4, joinedReplies: replies, total: replies + reactions + 4 },
+					]);
+					expect(discardedPairs).toBeLessThan(replies * 4);
+					expect(
+						reactionReads,
+						"reaction rows read during cleanup, including cascades",
+					).toBeLessThan(reactions * 3);
+					expect(rewriteExecutions, "plan node executions during the reply rewrite").toBeLessThan(
+						replies * 6,
+					);
+				} finally {
+					await client.query("rollback");
+				}
+			});
+		} finally {
+			await dropDatabase(url);
+		}
 	},
 	UPGRADE_TIMEOUT_MS,
 );
@@ -2987,7 +3019,14 @@ async function migrateTo(url: string, last: string) {
 /** This worker's database with `_upgrade_<store>` on the end of its name, so workers never share one. */
 function upgradeDatabaseUrl(
 	workerUrl: string,
-	store: Store | "cycle" | "bot_names" | "project_leads" | "assistant_existing" | "assistant_new",
+	store:
+		| Store
+		| "cycle"
+		| "bot_names"
+		| "project_leads"
+		| "assistant_existing"
+		| "assistant_new"
+		| "collaboration",
 ): string {
 	if (!workerUrl) return "";
 	const parsed = new URL(workerUrl);
