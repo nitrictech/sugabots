@@ -489,7 +489,8 @@ export const LegacyBearerWebhook = meta.story({
 	render: () => <StoryApp path={feedPath(deployCheck)} />,
 	play: async ({ canvas }) => {
 		const dialog = within(await openFirstTrigger(canvas));
-		await expect(await dialog.findByText(/Your existing bearer secret still works/)).toBeVisible();
+		const legacyNote = await dialog.findByText(/Your existing bearer secret still works/);
+		await waitFor(() => expect(legacyNote).toBeVisible());
 		await expect(dialog.getByLabelText("Token")).toHaveValue("");
 	},
 });
