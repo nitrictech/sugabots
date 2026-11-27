@@ -42,12 +42,14 @@ function request(
 }
 
 const pending = {
+	id: "approval-1",
 	status: "pending",
 	approvers: "chat",
 	decidedByName: null,
 	decidedAt: null,
 } as const;
 const denied = {
+	id: "approval-1",
 	status: "denied",
 	approvers: "chat",
 	decidedByName: "Rowan Ellis",

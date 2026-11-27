@@ -3,6 +3,7 @@ import {
 	DEFAULT_CHAT_HISTORY_LIMIT,
 	type Message,
 	type ToolApprovalDecision,
+	type ToolCallPart,
 } from "@sugabots/contracts";
 import {
 	queryOptions,
@@ -157,15 +158,22 @@ export function useChat(chatId: string | undefined) {
 export function useReviewToolCall(chatId: string | null) {
 	const queries = useQueryClient();
 	return useMutation({
+		/**
+		 * Decides the approval the member was shown on `call`: one asked again
+		 * since has a new approval, which this doesn't decide.
+		 */
 		mutationFn: async ({
-			toolCallId,
+			call,
 			decision,
 		}: {
-			toolCallId: string;
+			call: Pick<ToolCallPart, "id" | "approval">;
 			decision: ToolApprovalDecision["decision"];
 		}) =>
 			Effect.runPromise(
-				client.api.approvals.decide({ params: { toolCallId }, payload: { decision } }),
+				client.api.approvals.decide({
+					params: { toolCallId: call.id },
+					payload: { approvalId: call.approval?.id ?? "", decision },
+				}),
 			),
 		onSuccess: () =>
 			Promise.all([

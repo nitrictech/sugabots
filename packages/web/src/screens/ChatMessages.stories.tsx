@@ -1578,12 +1578,14 @@ export const AnsweredApprovals = meta.story({
 	args: {
 		messages: [
 			asked("0199a3a0-0000-7000-8000-000000000b21", "linear__create_issue", {
+				id: "approval-1",
 				status: "allowed",
 				approvers: "chat",
 				decidedByName: "Sam Rivera",
 				decidedAt: "2026-09-22T04:31:00.000Z",
 			}),
 			asked("0199a3a0-0000-7000-8000-000000000b31", "linear__update_issue", {
+				id: "approval-1",
 				status: "denied",
 				approvers: "chat",
 				decidedByName: "Jay Park",

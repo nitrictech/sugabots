@@ -45,12 +45,14 @@ function request(id: string, approval: ToolCallPart["approval"]): ApprovalReques
 }
 
 const waiting = request("0199a3a0-0000-7000-8000-0000000003c1", {
+	id: "approval-1",
 	status: "pending",
 	approvers: "chat",
 	decidedByName: null,
 	decidedAt: null,
 });
 const decided = {
+	id: "approval-1",
 	status: "allowed",
 	approvers: "chat",
 	decidedByName: "Mia Chen",

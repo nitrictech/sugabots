@@ -48,14 +48,16 @@ export function toToolCallPart(
 		input: row.input,
 		output: row.output ?? null,
 		status: row.status,
-		approval: row.approvalStatus
-			? {
-					status: row.approvalStatus,
-					approvers: approversOf(row.tool),
-					decidedByName,
-					decidedAt: row.decidedAt?.toISOString() ?? null,
-				}
-			: null,
+		approval:
+			row.approvalStatus && row.approvalId
+				? {
+						id: row.approvalId,
+						status: row.approvalStatus,
+						approvers: approversOf(row.tool),
+						decidedByName,
+						decidedAt: row.decidedAt?.toISOString() ?? null,
+					}
+				: null,
 		error: row.error,
 		atOffset: row.atOffset,
 		startedAt: row.startedAt.toISOString(),

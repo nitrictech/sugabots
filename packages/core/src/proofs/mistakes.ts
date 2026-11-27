@@ -1000,17 +1000,17 @@ export const decisionMistakes = named(principal, otherPrincipal, "call", (princi
 
 		// A call decided as another principal's member than the approver `CanDecide` found.
 		// @ts-expect-error TS2345 [Argument of type 'CanDecide<NameA, NameC>' is not assignable to parameter of type 'CanDecide<NameB, NameC>']
-		yield* turnControls.decide(otherMember, canDecide, "deny", changesNothing);
+		yield* turnControls.decide(otherMember, canDecide, "approval", "deny", changesNothing);
 
 		// A call decided with no proof that the member is its approver, only its id.
 		// @ts-expect-error TS2740 [from type 'CanDecide<NameA, unknown>']
-		yield* turnControls.decide(isMember, call, "deny", changesNothing);
+		yield* turnControls.decide(isMember, call, "approval", "deny", changesNothing);
 
 		// A host request granted as another member than the approver `CanDecide` found.
 		// @ts-expect-error TS2345 [Argument of type 'CanDecide<NameA, NameC>' is not assignable to parameter of type 'CanDecide<NameB, NameC>']
 		yield* computerNetwork.grantHostRequest(otherMember, canDecide);
 
-		yield* turnControls.decide(isMember, canDecide, "deny", changesNothing);
+		yield* turnControls.decide(isMember, canDecide, "approval", "deny", changesNothing);
 		yield* computerNetwork.grantHostRequest(isMember, canDecide);
 	}),
 );

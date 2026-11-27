@@ -2893,7 +2893,13 @@ describe("the app's badge", () => {
 			atOffset: 0,
 			startedAt: "2026-09-18T09:00:00.000Z",
 			finishedAt: null,
-			approval: { status: "pending", approvers: "chat", decidedByName: null, decidedAt: null },
+			approval: {
+				id: "approval-1",
+				status: "pending",
+				approvers: "chat",
+				decidedByName: null,
+				decidedAt: null,
+			},
 		},
 		bot: {
 			kind: "bot",

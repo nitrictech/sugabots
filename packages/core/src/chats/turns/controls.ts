@@ -25,7 +25,7 @@ export const makeControls = Effect.gen(function* () {
 	const turns = yield* TurnStore.Service;
 	const signals = yield* TurnSignals.Service;
 	return {
-		decide: (isMember, canDecide, decision, allowed) =>
+		decide: (isMember, canDecide, shownApprovalId, decision, allowed) =>
 			operation(
 				"decide",
 				transaction(
@@ -59,7 +59,11 @@ export const makeControls = Effect.gen(function* () {
 								.limit(1)
 								.for("update", { of: toolCall }),
 						);
-						if (!candidate?.call.approvalId || !awaitsDecisions(candidate.turn)) {
+						// A call asked again has a new approval, which the one shown doesn't decide.
+						if (
+							candidate?.call.approvalId !== shownApprovalId ||
+							!awaitsDecisions(candidate.turn)
+						) {
 							return yield* new ToolApprovalNotFound();
 						}
 						if (!awaitsDecision(candidate.call)) return yield* new ToolApprovalConflict();

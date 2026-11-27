@@ -158,7 +158,7 @@ export function PendingApprovalAnswer({
 		<Answer
 			pending={review.isPending || review.isSuccess}
 			error={review.error}
-			onDecide={(decision) => review.mutate({ toolCallId: call.id, decision })}
+			onDecide={(decision) => review.mutate({ call, decision })}
 			actionLabel={actionLabel}
 			pinned={phone}
 		/>

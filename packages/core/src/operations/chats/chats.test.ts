@@ -180,7 +180,11 @@ describe("attachments and approvals in a chat", () => {
 		it("lets only the member a turn acts for decide its call, now that an admin or another editor may not", async () => {
 			const toolCallId = await waitingCall(a.ed);
 			const decide = (principal: Principal) =>
-				operationOutcome(call, principal, "approvals.decide", { toolCallId, decision: "deny" });
+				operationOutcome(call, principal, "approvals.decide", {
+					toolCallId,
+					approvalId: "",
+					decision: "deny",
+				});
 
 			expect(
 				await outcomesFor(
@@ -206,6 +210,7 @@ describe("attachments and approvals in a chat", () => {
 				await outcomesFor({ asker: who.ed, admin: who.admin }, (principal) =>
 					operationOutcome(call, principal, "approvals.decide", {
 						toolCallId,
+						approvalId: "",
 						decision: "allow_once",
 					}),
 				),

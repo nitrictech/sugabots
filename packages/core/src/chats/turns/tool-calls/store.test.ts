@@ -1,4 +1,4 @@
-import { ToolApprovalConflict } from "@sugabots/contracts/errors/approvals";
+import { ToolApprovalConflict, ToolApprovalNotFound } from "@sugabots/contracts/errors/approvals";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { userText } from "@sugabots/errors";
 import { jsonSchema, tool } from "ai";
@@ -636,6 +636,33 @@ describe.skipIf(!process.env.DATABASE_URL)("tool calls, against Postgres", async
 				decidedById: null,
 			});
 			expect(heard).toEqual([]);
+		});
+
+		it("decides nothing on an approval the call was asked again under since", async () => {
+			const pending = await park(workflowCall());
+			const shownApprovalId = pending.approvalId ?? "";
+			// Asked again, as a call is once the computer it was allowed on is replaced.
+			const askedAgain = crypto.randomUUID();
+			await onDatabase((db) =>
+				db.update(toolCall).set({ approvalId: askedAgain }).where(eq(toolCall.id, pending.id)),
+			);
+			const deciding = approvalsAs(adminId, await signalledBy(listening));
+
+			await expect(
+				deciding.decide({
+					toolCallId: pending.id,
+					approvalId: shownApprovalId,
+					decision: "allow_once",
+				}),
+			).rejects.toBeInstanceOf(ToolApprovalNotFound);
+			expect(await storedCall(pending.id)).toMatchObject({
+				approvalStatus: "pending",
+				decidedById: null,
+			});
+			expect(heard).toEqual([]);
+
+			await deciding.decide({ toolCallId: pending.id, approvalId: askedAgain, decision: "deny" });
+			expect(await storedCall(pending.id)).toMatchObject({ approvalStatus: "denied" });
 		});
 
 		it("tells a second member the approval is already decided", async () => {

@@ -21,6 +21,7 @@ const bot = {
 function asking(
 	input: ToolCallPart["input"],
 	approval: ToolCallPart["approval"] = {
+		id: "approval-1",
 		status: "pending",
 		approvers: "chat",
 		decidedByName: null,
@@ -80,7 +81,10 @@ describe("an approval request", () => {
 		fireEvent.click(inCard(/^Allow/));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
-		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({
+			approvalId: "approval-1",
+			decision: "allow_once",
+		});
 	});
 
 	it("keeps the answer given until the turn records it, then announces it", async () => {
@@ -93,6 +97,7 @@ describe("an approval request", () => {
 			...asking(
 				{ team: "Platform" },
 				{
+					id: "approval-1",
 					status: "allowed",
 					approvers: "chat",
 					decidedByName: "You",
@@ -125,7 +130,10 @@ describe("an approval request", () => {
 		fireEvent.click(inCard(/^Deny/));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
-		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "deny" });
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({
+			approvalId: "approval-1",
+			decision: "deny",
+		});
 	});
 
 	it("lays out every field, structured values as fields of their own", () => {
@@ -156,7 +164,10 @@ describe("an approval request", () => {
 		fireEvent.click(within(request).getByRole("button", { name: /^Allow/ }));
 
 		await waitFor(() => expect(approval).toHaveBeenCalled());
-		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({
+			approvalId: "approval-1",
+			decision: "allow_once",
+		});
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 	});
 
@@ -185,6 +196,7 @@ describe("an approval request", () => {
 				asking(
 					{ team: "Platform" },
 					{
+						id: "approval-1",
 						status,
 						approvers: "chat",
 						decidedByName: "Mia Chen",

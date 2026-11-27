@@ -74,7 +74,7 @@ export function ToolApprovalCard({
 	// the call is decided, a moment after the decision is accepted.
 	const sent = review.isPending || review.isSuccess;
 	const decide = (decision: Decision) =>
-		review.mutate({ toolCallId: call.id, decision }, { onSuccess: () => setReviewing(false) });
+		review.mutate({ call, decision }, { onSuccess: () => setReviewing(false) });
 	const decided = call.approval;
 	// Only an answer given here is announced; one already in the history is just read.
 	const announced = review.isSuccess;

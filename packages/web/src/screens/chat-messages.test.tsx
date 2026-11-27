@@ -351,6 +351,7 @@ describe("a reply still being written", () => {
 						output: null,
 						finishedAt: null,
 						approval: {
+							id: "approval-1",
 							status: "pending",
 							approvers: "chat",
 							decidedByName: null,
@@ -375,6 +376,7 @@ describe("a reply still being written", () => {
 						output: null,
 						finishedAt: null,
 						approval: {
+							id: "approval-1",
 							status: "allowed",
 							approvers: "chat",
 							decidedByName: "Rowan Ellis",
@@ -399,7 +401,13 @@ describe("a write that needs approving", () => {
 		output: null,
 		finishedAt: null,
 		input: { team: "Platform", title: "Checkout requests time out" },
-		approval: { status: "pending", approvers: "chat", decidedByName: null, decidedAt: null },
+		approval: {
+			id: "approval-1",
+			status: "pending",
+			approvers: "chat",
+			decidedByName: null,
+			decidedAt: null,
+		},
 	});
 	const asking = reply([{ type: "text", text: "I want to open an issue." }, pending]);
 
@@ -421,7 +429,10 @@ describe("a write that needs approving", () => {
 
 		fireEvent.click(await screen.findByRole("button", { name: /^Allow/ }));
 		await waitFor(() => expect(approval).toHaveBeenCalled());
-		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "allow_once" });
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({
+			approvalId: "approval-1",
+			decision: "allow_once",
+		});
 		expect(screen.queryByRole("checkbox")).toBeNull();
 	});
 
@@ -431,7 +442,10 @@ describe("a write that needs approving", () => {
 
 		fireEvent.click(await screen.findByRole("button", { name: /^Deny/ }));
 		await waitFor(() => expect(approval).toHaveBeenCalled());
-		expect(approval.mock.calls[0]?.[0].payload).toEqual({ decision: "deny" });
+		expect(approval.mock.calls[0]?.[0].payload).toEqual({
+			approvalId: "approval-1",
+			decision: "deny",
+		});
 	});
 
 	it("says so when the reader is not the one who can answer", async () => {
@@ -450,6 +464,7 @@ describe("a write that needs approving", () => {
 					output: null,
 					finishedAt: null,
 					approval: {
+						id: "approval-1",
 						status: "denied",
 						approvers: "chat",
 						decidedByName: "Rowan Ellis",

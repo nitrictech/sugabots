@@ -33,6 +33,7 @@ const waiting = {
 	status: "awaiting_approval" as const,
 	finishedAt: null,
 	approval: {
+		id: "approval-1",
 		status: "pending" as const,
 		approvers: "chat" as const,
 		decidedByName: null,
@@ -80,6 +81,7 @@ describe("a reply's tool line", () => {
 	it("says which tool source was refused", () => {
 		const denied = {
 			approval: {
+				id: "approval-1",
 				status: "denied" as const,
 				approvers: "chat" as const,
 				decidedByName: "Rowan",

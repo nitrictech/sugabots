@@ -27,8 +27,12 @@ export const decide = defineOperation(approvalsContracts["approvals.decide"], (p
 				workspace,
 				Effect.gen(function* () {
 					const canDecide = yield* proveCanDecide(isMember, call);
-					return yield* controls.decide(isMember, canDecide, input.decision, (approver) =>
-						network.grantHostRequest(isMember, approver),
+					return yield* controls.decide(
+						isMember,
+						canDecide,
+						input.approvalId,
+						input.decision,
+						(approver) => network.grantHostRequest(isMember, approver),
 					);
 				}),
 			);

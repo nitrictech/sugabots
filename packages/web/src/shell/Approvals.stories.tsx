@@ -40,12 +40,13 @@ function request(id: string, tool: string, approval: ToolCallPart["approval"]) {
 }
 
 function answered(id: string, tool: string, answer: AnsweredApproval["answer"]): AnsweredApproval {
-	return { ...request(id, tool, { ...answer, approvers: "chat" }), answer };
+	return { ...request(id, tool, { ...answer, id: "approval-1", approvers: "chat" }), answer };
 }
 
 const approvals: WorkspaceApprovals = {
 	waiting: [
 		request("01", "stripe__send_quote", {
+			id: "approval-1",
 			status: "pending",
 			approvers: "chat",
 			decidedByName: null,
@@ -134,6 +135,7 @@ export const Clear = meta.story({
 export const HostRequestOutsideTheChat = meta.story({
 	beforeEach({ msw }) {
 		const pending = request("04", "request_host", {
+			id: "approval-1",
 			status: "pending",
 			approvers: "computer-managers",
 			decidedByName: null,

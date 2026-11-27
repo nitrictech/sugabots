@@ -118,7 +118,7 @@ describe("a defect", () => {
 			new Request(new URL("/api/tool-calls/call-id/approval", BASE_URL), {
 				method: "POST",
 				headers: { ...signedInWith("good-token"), "content-type": "application/json" },
-				body: JSON.stringify({ decision: "allow_once" }),
+				body: JSON.stringify({ approvalId: "approval-1", decision: "allow_once" }),
 			}),
 		);
 		await dispose();
@@ -162,7 +162,7 @@ describe("JSON body limit", () => {
 	it("rejects a declared oversized JSON body before parsing it", async () => {
 		const response = await decideApproval(
 			{ "content-type": "application/json", "content-length": String(MAX_JSON_BODY_BYTES + 1) },
-			JSON.stringify({ decision: "allow_once" }),
+			JSON.stringify({ approvalId: "approval-1", decision: "allow_once" }),
 		);
 
 		expect(response.status).toBe(413);
@@ -173,7 +173,11 @@ describe("JSON body limit", () => {
 	it("rejects an oversized streamed body without content-length, whatever type it names", async () => {
 		const response = await decideApproval(
 			{ "content-type": "text/plain" },
-			JSON.stringify({ decision: "allow_once", padding: "x".repeat(MAX_JSON_BODY_BYTES) }),
+			JSON.stringify({
+				approvalId: "approval-1",
+				decision: "allow_once",
+				padding: "x".repeat(MAX_JSON_BODY_BYTES),
+			}),
 		);
 
 		expect(response.status).toBe(413);
@@ -204,7 +208,7 @@ describe("JSON body limit", () => {
 	it("parses a JSON body under the limit", async () => {
 		const response = await decideApproval(
 			{ "content-type": "application/json" },
-			JSON.stringify({ decision: "allow_once" }),
+			JSON.stringify({ approvalId: "approval-1", decision: "allow_once" }),
 		);
 
 		expect(response.status).toBe(202);
@@ -253,7 +257,7 @@ describe("cookie request origins", () => {
 		cookieApp.request("/tool-calls/call-id/approval", {
 			method: "POST",
 			headers: { "content-type": "application/json", ...headers },
-			body: JSON.stringify({ decision: "allow_once" }),
+			body: JSON.stringify({ approvalId: "approval-1", decision: "allow_once" }),
 		});
 
 	it("accepts an unsafe cookie request from a trusted origin", async () => {

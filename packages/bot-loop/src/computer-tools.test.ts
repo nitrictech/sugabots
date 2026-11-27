@@ -543,8 +543,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 											),
 									),
 								);
-								return yield* controls.decide(isMember, canDecide, "allow_once", (approver) =>
-									network.grantHostRequest(isMember, approver),
+								return yield* controls.decide(
+									isMember,
+									canDecide,
+									parked.approvalId ?? "",
+									"allow_once",
+									(approver) => network.grantHostRequest(isMember, approver),
 								);
 							}),
 						);

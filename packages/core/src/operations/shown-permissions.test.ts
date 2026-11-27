@@ -380,6 +380,7 @@ describe("what the API tells a member agrees with what its operations let them d
 					"approvals.decide",
 					{
 						toolCallId: waitingOn.id,
+						approvalId: "",
 						decision: "deny",
 					},
 					"ToolApprovalNotFound",
@@ -427,7 +428,11 @@ describe("what the API tells a member agrees with what its operations let them d
 				interruptTurns: [],
 			});
 			expect(
-				await allowed(pubForEd, "approvals.decide", { toolCallId: asked.id, decision: "deny" }),
+				await allowed(pubForEd, "approvals.decide", {
+					toolCallId: asked.id,
+					approvalId: "",
+					decision: "deny",
+				}),
 			).toBe(false);
 		});
 

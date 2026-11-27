@@ -10,6 +10,7 @@
 			},
 			"query": {},
 			"body": {
+				"approvalId": "string",
 				"decision": "\"allow_once\" | \"deny\""
 			},
 			"errors": {

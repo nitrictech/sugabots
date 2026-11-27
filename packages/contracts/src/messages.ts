@@ -286,6 +286,8 @@ export const toolCallPartSchema = Schema.Struct({
 	/** Null unless the call asked for approval: a write/delete connector tool call, or a request a member decides. */
 	approval: Schema.NullOr(
 		Schema.Struct({
+			/** Which request this is: a call asked again gets a new one, which a decision names. */
+			id: Schema.String,
 			status: toolApprovalStatusSchema,
 			approvers: toolApproversSchema,
 			decidedByName: Schema.NullOr(Schema.String),

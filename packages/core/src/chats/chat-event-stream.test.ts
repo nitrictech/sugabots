@@ -289,6 +289,7 @@ const toolCall: ToolCallPart = {
 	output: null,
 	status: "running",
 	approval: {
+		id: "approval-1",
 		status: "allowed",
 		approvers: "chat",
 		decidedByName: "Ada",

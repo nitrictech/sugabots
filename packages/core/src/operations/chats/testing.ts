@@ -7,7 +7,11 @@ import {
 } from "@sugabots/contracts";
 import type { UploadInterrupted } from "@sugabots/contracts/errors/chats";
 import type { InputOf, RequestOperationName } from "@sugabots/contracts/operations";
+import { eq } from "drizzle-orm";
 import type { Stream } from "effect";
+import { toolCall } from "../../database/schema.ts";
+import { onDatabase } from "../../database/testing.ts";
+import { isUuid } from "../../ids/ids.ts";
 import type { MemberSession } from "../../principal.ts";
 import { signedIn } from "../../proofs/world.test-support.ts";
 import type { CallOperation } from "../testing.ts";
@@ -74,8 +78,16 @@ export function asMember(call: CallOperation, memberId: string) {
 		get: (chatId: string, history: ChatHistoryQuery = { limit: DEFAULT_CHAT_HISTORY_LIMIT }) =>
 			as("chats.get", { chatId, ...history }),
 		context: (chatId: string) => as("chats.context", { chatId }),
-		decide: (input: { toolCallId: string; decision: ToolApprovalDecision["decision"] }) =>
-			as("approvals.decide", input),
+		/** Decides the approval the call waits for now, unless `approvalId` names one shown before. */
+		decide: async (input: {
+			toolCallId: string;
+			approvalId?: string;
+			decision: ToolApprovalDecision["decision"];
+		}) =>
+			as("approvals.decide", {
+				...input,
+				approvalId: input.approvalId ?? (await currentApprovalId(input.toolCallId)),
+			}),
 		interruptTurn: (input: { chatId: string; turnId: string }) => as("chats.interruptTurn", input),
 		/** The files in chats: those bots wrote, by their ids. */
 		files: {
@@ -91,3 +103,16 @@ export function asMember(call: CallOperation, memberId: string) {
 }
 
 export type AsMember = ReturnType<typeof asMember>;
+
+/** The approval the tool call `toolCallId` was last asked under, or none. */
+export async function currentApprovalId(toolCallId: string): Promise<string> {
+	if (!isUuid(toolCallId)) return "";
+	const [row] = await onDatabase((db) =>
+		db
+			.select({ approvalId: toolCall.approvalId })
+			.from(toolCall)
+			.where(eq(toolCall.id, toolCallId))
+			.limit(1),
+	);
+	return row?.approvalId ?? "";
+}

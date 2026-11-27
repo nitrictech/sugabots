@@ -230,18 +230,21 @@ type SystemTurnOutcome<A> =
 /** What members may do to a turn, once proved. */
 export interface ControlsInterface {
 	/**
-	 * Decides the tool call `canDecide` is about, for the member `isMember`
-	 * names, its approver. In one transaction, once the call's turn is locked,
+	 * Decides the approval `approvalId` of the tool call `canDecide` is about,
+	 * for the member `isMember` names, its approver. In one transaction, once
+	 * the call's turn is locked,
 	 * it proves again that they may still decide it, records the decision, so
 	 * the chat's watchers see it at once, makes the change an allowed call
 	 * asks of its approver (`allowed`, given the fresh proof), and sends the
 	 * decision to the turn's workflow, which runs what was allowed. A call
-	 * that waits for no decision, or whose turn no longer waits, is not found;
-	 * one somebody decided first is a conflict.
+	 * that waits for no decision, whose turn no longer waits, or that was asked
+	 * again under another approval since, is not found; one somebody decided
+	 * first is a conflict.
 	 */
 	readonly decide: <P, X>(
 		isMember: IsMember<P>,
 		canDecide: CanDecide<P, X>,
+		approvalId: string,
 		decision: ToolApprovalDecision["decision"],
 		allowed: (canDecide: CanDecide<P, X>) => Effect.Effect<void>,
 	) => Effect.Effect<

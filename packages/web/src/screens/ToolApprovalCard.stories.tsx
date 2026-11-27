@@ -44,7 +44,13 @@ function asking(over: Partial<ToolCallPart> = {}): ToolCallPart {
 		atOffset: 0,
 		startedAt: "2026-11-10T09:00:00.000Z",
 		finishedAt: null,
-		approval: { status: "pending", approvers: "chat", decidedByName: null, decidedAt: null },
+		approval: {
+			id: "approval-1",
+			status: "pending",
+			approvers: "chat",
+			decidedByName: null,
+			decidedAt: null,
+		},
 		...over,
 	};
 }
@@ -66,6 +72,7 @@ const bigLinearIssue = asking({
 const decided = (status: "allowed" | "denied", by: string) =>
 	asking({
 		approval: {
+			id: "approval-1",
 			status,
 			approvers: "chat",
 			decidedByName: by,
@@ -200,6 +207,7 @@ export const ANetworkRequest = meta.story({
 				host: "api.stripe.com",
 			},
 			approval: {
+				id: "approval-1",
 				status: "pending",
 				approvers: "computer-managers",
 				decidedByName: null,
