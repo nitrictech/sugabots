@@ -221,7 +221,7 @@ export function WebhookGroups({
 	const { automation, owner } = placed;
 	const canManage = resourcePermissions(owner).manageAutomations;
 	const address = { projectId: automation.projectId, automationId: automation.id, triggerId };
-	const { data: currentSecret, error, isPending } = useAutomationSecret({ ...address, canManage });
+	const { data: currentSecret, error } = useAutomationSecret({ ...address, canManage });
 	const restrictedNote =
 		isApiFailure(error) && error.error?._tag === "WebhookSecretRestricted"
 			? error.error.userMessage
@@ -237,7 +237,7 @@ export function WebhookGroups({
 				</SettingsControlRow>
 				<SourceRow
 					auth={auth}
-					disabled={canManage && (isPending || saved?.kind === "legacy")}
+					disabled={canManage && (saved === undefined || saved.kind === "legacy")}
 					onChange={onChangeAuth}
 				/>
 			</SettingsGroup>
@@ -260,7 +260,7 @@ export function WebhookGroups({
 				<SettingsGroup note={authNote(auth)}>
 					<AuthRows
 						auth={auth}
-						authChangeDisabled={canManage && isPending}
+						authChangeDisabled={canManage}
 						onChange={onChangeAuth}
 						deliveryIdHeader={
 							deliveryIdHeader === undefined ? AUTOMATIC_DELIVERY_ID : deliveryIdHeader
@@ -559,7 +559,7 @@ function SecretGroup({
 			note={
 				restrictedNote ??
 				(saved.kind === "legacy"
-					? "Your existing bearer token still works. Enter a new token before changing authentication."
+					? "Your existing token still works. Enter a new token before changing Auth or Source."
 					: saved.kind === "set"
 						? authNote(auth)
 						: NO_SECRET_NOTE)

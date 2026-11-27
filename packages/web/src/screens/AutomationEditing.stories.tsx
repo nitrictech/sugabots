@@ -540,7 +540,7 @@ export const LegacyBearerWebhook = meta.story({
 	render: () => <StoryApp path={feedPath(deployCheck)} />,
 	play: async ({ canvas, userEvent }) => {
 		const dialog = within(await openFirstTrigger(canvas));
-		const legacyNote = await dialog.findByText(/Enter a new token before changing authentication/);
+		const legacyNote = await dialog.findByText(/Enter a new token before changing Auth or Source/);
 		await waitFor(() => expect(legacyNote).toBeVisible());
 		await expect(dialog.getByRole("button", { name: "Auth: Bearer" })).toBeDisabled();
 		await expect(dialog.getByRole("button", { name: "Source: Generic" })).toBeDisabled();
