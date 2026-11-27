@@ -81,6 +81,8 @@ export const legacy = {
 	notesConnection: "00000011-0000-4000-8000-000000000003",
 	/** Ana's file, in her personal pod, which had no bots and no chat left. */
 	diary: "00000006-0000-4000-8000-000000000004",
+	/** A file written in the Notes pod, which has no bots and no main chat, whose chat is gone. */
+	groceries: "00000006-0000-4000-8000-000000000005",
 	/** A file a bot wrote, deleted, with its folder's deletion still queued. */
 	deletedArtifact: "00000006-0000-4000-8000-0000000000dd",
 	/** What a summary of Trip cost, in {@link legacySummaryRequest}. */
@@ -141,6 +143,12 @@ export const legacyFiles: readonly LegacyFile[] = [
 		fileId: legacy.diary,
 		versionId: "00000007-0000-4000-8000-000000000004",
 		text: "Dear.",
+	},
+	{
+		kind: "version",
+		fileId: legacy.groceries,
+		versionId: "00000007-0000-4000-8000-000000000005",
+		text: "Eggs",
 	},
 ];
 
@@ -274,6 +282,11 @@ INSERT INTO "artifact" ("id", "workspace_id", "pod_id", "kind", "title", "curren
  ('00000006-0000-4000-8000-000000000004', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000004', 'document', 'Diary', 1, NULL, NULL);
 INSERT INTO "artifact_version" ("id", "artifact_id", "number", "content_type", "size") VALUES
  ('00000007-0000-4000-8000-000000000004', '00000006-0000-4000-8000-000000000004', 1, 'text/markdown', 5);
+-- Groceries, written in the Notes pod in a chat deleted since.
+INSERT INTO "artifact" ("id", "workspace_id", "pod_id", "kind", "title", "current_version", "created_by_agent_id", "created_in_thread_id") VALUES
+ ('00000006-0000-4000-8000-000000000005', '0000000a-0000-4000-8000-000000000001', '0000000d-0000-4000-8000-000000000002', 'document', 'Groceries', 1, NULL, NULL);
+INSERT INTO "artifact_version" ("id", "artifact_id", "number", "content_type", "size") VALUES
+ ('00000007-0000-4000-8000-000000000005', '00000006-0000-4000-8000-000000000005', 1, 'text/markdown', 4);
 
 -- Deletions queued and not yet done: a thread's folder and a written file's.
 INSERT INTO "blob_deletion" ("prefix") VALUES

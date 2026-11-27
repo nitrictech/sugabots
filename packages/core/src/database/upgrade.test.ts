@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { PgClient } from "@effect/sql-pg";
+import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { sql } from "drizzle-orm";
 import { makeWithDefaults } from "drizzle-orm/effect-postgres";
@@ -39,7 +40,9 @@ import { Ids } from "../ids/ids.ts";
 import { requestOutcome, servedOperations } from "../operations/testing.ts";
 import type { Principal } from "../principal.ts";
 import { proveCanReachConnector } from "../proofs/can-use-connector.ts";
+import { proveCanRunAutomations } from "../proofs/project-permissions.ts";
 import { named } from "../proofs/proof.ts";
+import { proveReachesProject } from "../proofs/reaches-project.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { effectRunner, query, type RunEffect, transaction } from "./database.ts";
 import { applyMigrations } from "./migrations.ts";
@@ -292,14 +295,29 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			expect(await reachedBy(legacy.members.pat)).toBe(false);
 		});
 
+		it("lets a bot-less shared pod's members read a file written there whose chat is gone, and nobody else", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const read = async (member: string) => {
+				const principal = await upgraded.signIn(member);
+				return call(principal, "files.get", { fileId: legacy.groceries }).then(
+					(file) => file.content,
+					(refusal: unknown) => refusal,
+				);
+			};
+
+			expect(await read(legacy.members.sam)).toBe("Eggs");
+			expect(await read(legacy.members.pat)).toBe("Eggs");
+			expect(await read(legacy.members.ana)).toBeInstanceOf(ResourceHidden);
+		});
+
 		it("leaves each member reaching, through the operations, what they reached on main, but for admins seeing personal bots", async () => {
 			const call = await servedOperations({ runOn: upgraded.run });
 			const legacyIds = new Set(reachedOnMain.map(({ id }) => id));
 			const chats = [
 				...new Set(reachedOnMain.filter(({ kind }) => kind === "chat").map(({ id }) => id)),
 			];
-			const automationProjects = await upgraded.rows<{ project_id: string }>(
-				`select distinct project_id from automation`,
+			const projectIds = (await upgraded.rows<{ id: string }>(`select id from project`)).map(
+				({ id }) => id,
 			);
 			const reachedNow: Reached[] = [];
 			for (const member of Object.values(legacy.members)) {
@@ -311,10 +329,20 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				for (const project of await call(principal, "projects.list", { workspace })) {
 					reachedNow.push({ member, kind: "project", id: project.id });
 				}
-				for (const { project_id: projectId } of automationProjects) {
-					const listed = await call(principal, "automations.list", { projectId }).catch(() => []);
-					for (const automation of listed) {
+				for (const projectId of projectIds) {
+					const automations = await call(principal, "automations.list", { projectId }).catch(
+						() => [],
+					);
+					for (const automation of automations) {
 						reachedNow.push({ member, kind: "automation", id: automation.id });
+					}
+					const files = await call(principal, "files.listInProject", { projectId }).catch(() => []);
+					for (const file of files) reachedNow.push({ member, kind: "file", id: file.id });
+					const connectors = await call(principal, "connectors.list", { projectId }).catch(
+						() => [],
+					);
+					for (const connector of connectors) {
+						reachedNow.push({ member, kind: "connector", id: connector.id });
 					}
 				}
 				for (const chatId of chats) {
@@ -331,6 +359,30 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					{ member: legacy.members.sam, kind: "bot", id: legacy.bots.helper },
 				]),
 			);
+		});
+
+		it("lets a shared pod's members start its bots' automations by hand, which on main only owners and admins could", async () => {
+			// Pods' members are editors now, and an editor who reaches a bot runs its automations.
+			const [plannersOwn] = await upgraded.rows<{ id: string }>(
+				`select id from project where default_of_bot_id = $1`,
+				[legacy.bots.planner],
+			);
+			const startsRuns = async (member: string) => {
+				const principal = await upgraded.signIn(member);
+				return upgraded.run(
+					named(principal, plannersOwn?.id ?? "", (acting, project) =>
+						proveReachesProject(acting, project).pipe(
+							Effect.flatMap(proveCanRunAutomations),
+							Effect.as("allowed"),
+							Effect.catchTag("ActionForbidden", () => Effect.succeed("forbidden")),
+							Effect.catchTag("ResourceHidden", () => Effect.succeed("hidden")),
+						),
+					),
+				);
+			};
+
+			expect(await startsRuns(legacy.members.pat)).toBe("allowed");
+			expect(await startsRuns(legacy.members.ana)).toBe("hidden");
 		});
 
 		it("makes a shared pod a private project, and its bots private, with its members as theirs", async () => {
@@ -632,16 +684,20 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 	},
 );
 
-/** Something a member reaches: a bot, a project (on main, a `shared` `pod`), a chat or an automation. */
+/**
+ * Something a member reaches: a bot, a project (on main, a `shared` `pod`), a
+ * chat, an automation, a file or a connector.
+ */
 interface Reached {
 	member: string;
-	kind: "bot" | "project" | "chat" | "automation";
+	kind: "bot" | "project" | "chat" | "automation" | "file" | "connector";
 	id: string;
 }
 
 /**
  * What each member reached on main, read from main's own tables: the bots,
- * threads, routines and `shared` `pod`s of each `pod` they were in or owned,
+ * threads, routines, files, connections and `shared` `pod`s of each `pod`
+ * they were in or owned,
  * as main's access rules read them. Direct messages, which the upgrade deletes, are in
  * no `pod`.
  */
@@ -662,7 +718,19 @@ const REACHED_ON_MAIN = `
 	select reach.user_id::text, 'automation', routine.id::text
 		from routine join agent on agent.id = routine.agent_id
 		join reach on reach.pod_id = agent.pod_id
-		where routine.deleted_at is null`;
+		where routine.deleted_at is null
+	union all
+	-- A tool's result is read with its call, in a chat, not listed among files.
+	select reach.user_id::text, 'file', thread_file.id::text
+		from thread_file join thread on thread.id = thread_file.thread_id
+		join reach on reach.pod_id = thread.pod_id
+		where thread_file.kind <> 'tool_result'
+	union all
+	select reach.user_id::text, 'file', artifact.id::text
+		from artifact join reach on reach.pod_id = artifact.pod_id
+	union all
+	select reach.user_id::text, 'connector', connection.id::text
+		from connection join reach on reach.pod_id = connection.pod_id`;
 
 function sortedReach(reached: readonly Reached[]): string[] {
 	return reached.map(({ member, kind, id }) => `${member} ${kind} ${id}`).sort();
