@@ -2269,14 +2269,14 @@ it.skipIf(!process.env.DATABASE_URL)(
 				`);
 				const walk = backfill.lastIndexOf("WITH RECURSIVE");
 				await client.query(backfill.slice(0, walk));
-				const { rows } = await client.query<{ "QUERY PLAN": string }>(
-					`explain (analyze, buffers, timing off) ${backfill.slice(walk)}`,
-				);
-				const updateBuffers = rows.find(({ "QUERY PLAN": line }) => line.startsWith("  Buffers:"));
-				const written = /temp (?:read=\d+ )?written=(\d+)/.exec(
-					updateBuffers?.["QUERY PLAN"] ?? "",
-				);
-				expect(Number(written?.[1] ?? 0)).toBeLessThan(8_192);
+				const {
+					rows: [explained],
+				} = await client.query<{
+					"QUERY PLAN": [{ Plan: { "Temp Written Blocks": number } }];
+				}>(`explain (analyze, buffers, timing off, format json) ${backfill.slice(walk)}`);
+				const plan = explained?.["QUERY PLAN"][0]?.Plan;
+				if (!plan) throw new Error("Postgres did not return a plan for the turn asker backfill");
+				expect(plan["Temp Written Blocks"]).toBeLessThan(8_192);
 				const result = await client.query(`
 					select count(*)::integer as turns_by_member
 					from "turn" where asker_id = md5('member')::uuid and not asked_by_automation
