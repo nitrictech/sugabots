@@ -32,7 +32,6 @@ import {
 	helpersWithoutReply,
 	type ReadingLimit,
 	readingLimitOf,
-	turnAskingFor,
 	withinReadingLimit,
 } from "./collaboration.ts";
 import {
@@ -43,7 +42,7 @@ import {
 } from "./context-window.ts";
 import { type Ended, TURN_CANCELLED } from "./lifecycle.ts";
 import type { TurnSetting } from "./loop-values.ts";
-import { answersAlone, type TurnRequest } from "./requests.ts";
+import type { TurnRequest } from "./requests.ts";
 import { type NotRunnable, notRunnable, TurnStore } from "./store.ts";
 
 /**
@@ -131,10 +130,6 @@ export const make = Effect.gen(function* () {
 			const windowTokens = yield* query((db) => loadContextWindow(db, loaded.workspaceId, model));
 			const acceptsImages = yield* modelAcceptsImages(loaded.workspaceId, model);
 			const messages = loaded.messages.reverse().map((stored) => messageFromRelations(stored));
-			// A helper and a hand-back answer for the turn whose reply asked.
-			const askingFor = answersAlone(request.reason)
-				? yield* query((db) => turnAskingFor(db, request.triggerMessageId))
-				: { reason: request.reason };
 			// The bots its reply would ask if it mentioned every one with a model.
 			const modelled = (loaded.project?.bots ?? []).filter(({ model }) => model !== null);
 			const askable = helpersAskedBy({
@@ -198,7 +193,6 @@ export const make = Effect.gen(function* () {
 				workspaceSlug: loaded.workspace.slug,
 				workspaceTimeZone: loaded.workspace.timeZone,
 				askerId,
-				startedFor: askingFor?.reason === "brief" ? loaded.startedById : null,
 				botsToAsk: botsToAsk.map(({ id, name, handle, description }) => ({
 					id,
 					name,
@@ -504,7 +498,6 @@ const loadTurnContext = Effect.fn("TurnExecution.loadTurnContext")(function* (
 			botId: true,
 			title: true,
 			kind: true,
-			startedById: true,
 		},
 		with: {
 			workspace: { columns: { name: true, slug: true, timeZone: true } },

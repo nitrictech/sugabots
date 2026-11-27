@@ -181,10 +181,6 @@ export const asTheLoop = <A, E, R>(
 	use: <P, T>(runsTurn: RunsTurn<P, T>) => Effect.Effect<A, E, R>,
 ) => asRunningTurn(turn.principal, use).pipe(Effect.orDie);
 
-/** What the model is told for `turn`, as its step loads it. */
-export const contextOf = (turn: OpenedTurnForTests) =>
-	Effect.flatMap(TurnExecution.Service, (execution) => execution.context(turn.turnId));
-
 /** A turn opened for its run, with what the model is told, as its first step has them. */
 export interface PreparedTurnForTests extends OpenedTurnForTests {
 	readonly context: TurnContext;
@@ -198,7 +194,7 @@ export interface PreparedTurnForTests extends OpenedTurnForTests {
 export const prepareTurn = (run: TurnRun) =>
 	Effect.gen(function* () {
 		const opened = yield* openTurn(run);
-		const context = yield* contextOf(opened);
+		const context = yield* TurnExecution.Service.use((execution) => execution.context(opened.turnId));
 		const prepared: PreparedTurnForTests = { ...opened, context };
 		return prepared;
 	});

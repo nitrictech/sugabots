@@ -79,7 +79,6 @@ export interface TurnSetting {
 	 * theirs, so it never vouches for anything else they could do, such as
 	 * starting another chat or changing instructions.
 	 */
-	readonly startedFor: string | null;
 	/** What the Compaction bot left in place of older history, once the chat has been compacted. */
 	readonly compaction: TurnCompaction | undefined;
 }

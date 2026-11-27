@@ -59,37 +59,6 @@ export const botsAskedBefore = Effect.fn("Collaboration.botsAskedBefore")(functi
 	return new Set(rows.map((row) => row.bot_id));
 });
 
-/**
- * Why the turn a helper's or a hand-back's asking message `askingMessageId`
- * goes back to was taken: the one answering a member's message, a brief or a
- * run that started its chain. Undefined when the message was not written by a
- * turn.
- */
-export const turnAskingFor = Effect.fn("Collaboration.turnAskingFor")(function* (
-	db: Executor,
-	askingMessageId: string,
-) {
-	const [row] = yield* db.execute<{ reason: TurnReason | null }>(
-		sql`with recursive asking (turn_id, reason, trigger_message_id, depth) as (
-			select ${turn.id}, ${turn.reason}, ${turn.triggerMessageId}, 0
-			from ${message} join ${turn} on ${turn.id} = ${message.turnId}
-			where ${message.id} = ${askingMessageId}
-			union all
-			select earlier.id, earlier.reason, earlier.trigger_message_id, asking.depth + 1
-			from asking
-			join ${message} as written on written.id = asking.trigger_message_id
-			join ${turn} as earlier on earlier.id = written.turn_id
-			where asking.reason = ${"hand_back" satisfies TurnReason}
-		)
-		select asking.reason
-		from asking
-		order by asking.depth desc
-		limit 1`,
-		"objects",
-	);
-	return row && { reason: row.reason };
-});
-
 /** A turn, as `readingLimitOf` reads its limit. */
 interface ReadingTurn {
 	readonly turnId: string;

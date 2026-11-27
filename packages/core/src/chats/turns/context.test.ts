@@ -624,7 +624,6 @@ function context(): EditableContext {
 		workspaceSlug: "suga",
 		workspaceTimeZone: "UTC",
 		askerId: null,
-		startedFor: null,
 		botsToAsk: [],
 		helpersWithoutReply: [],
 		participants: [
