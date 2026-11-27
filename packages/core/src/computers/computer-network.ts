@@ -110,7 +110,7 @@ export interface Interface {
 	readonly grantHostRequest: <P, X>(
 		isMember: IsMember<P>,
 		canDecide: CanDecide<P, X>,
-	) => Effect.Effect<void>;
+	) => Effect.Effect<void, NoComputerProvider>;
 	/**
 	 * What became of the turn's host request for `host`, once `approved` shows
 	 * an approver allowed it: their decision added it, unless the workspace
@@ -365,6 +365,8 @@ export const make = Effect.gen(function* () {
 					if (Option.isNone(asked)) return;
 					const { host } = asked.value;
 					const project = { workspaceId: call.workspaceId, projectId };
+					if (!(yield* providers.enabled(project.workspaceId)))
+						return yield* new NoComputerProvider();
 					// Blocked while the request waited for its answer.
 					if ((yield* blockFor(project.workspaceId, host)) !== undefined) return;
 					if (TRUSTED_HOSTS.includes(host)) return;

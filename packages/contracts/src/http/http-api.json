@@ -15,6 +15,7 @@
 			},
 			"errors": {
 				"ActionForbidden": 403,
+				"NoComputerProvider": 400,
 				"ResourceHidden": 404,
 				"ToolApprovalConflict": 409,
 				"ToolApprovalNotFound": 404

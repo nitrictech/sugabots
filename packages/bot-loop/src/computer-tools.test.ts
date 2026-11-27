@@ -583,6 +583,31 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(await projectHosts()).toEqual([]);
 			});
 
+			it("refuses a host approval once the workspace has no enabled computer provider", async () => {
+				const asked = await anEditorsChat();
+				const { model } = calling(HOST_REQUEST_TOOL, { host: "api.example.com" });
+				const ran = await loop.runTurn(asked.chatId, { model });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No call parked");
+
+				const admin = await signedIn.member(adminId);
+				const [provider] = await loop.call(admin, "computerProviders.list", {
+					workspace: workspaceId,
+				});
+				if (!provider) throw new Error("No computer provider");
+				await loop.call(admin, "computerProviders.update", {
+					workspace: workspaceId,
+					providerId: provider.id,
+					changes: { enabled: false },
+				});
+
+				await expect(
+					chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+				).rejects.toBeInstanceOf(NoComputerProvider);
+				expect(await projectHosts()).toEqual([]);
+				expect(await callsOf(ran.turnId)).toMatchObject([{ approvalStatus: "pending" }]);
+			});
+
 			it("adds nothing when the host is denied", async () => {
 				const asked = await anEditorsChat();
 				const { model } = calling(HOST_REQUEST_TOOL, { host: "api.example.com" });

@@ -26,6 +26,7 @@ import type {
 	ToolApprovalConflict,
 	ToolApprovalNotFound,
 } from "@sugabots/contracts/errors/approvals";
+import type { NoComputerProvider } from "@sugabots/contracts/errors/computers";
 import type { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import type { DomainError, UserText } from "@sugabots/errors";
 import { inArray, type SQLWrapper } from "drizzle-orm";
@@ -246,10 +247,14 @@ export interface ControlsInterface {
 		canDecide: CanDecide<P, X>,
 		approvalId: string,
 		decision: ToolApprovalDecision["decision"],
-		allowed: (canDecide: CanDecide<P, X>) => Effect.Effect<void>,
+		allowed: (canDecide: CanDecide<P, X>) => Effect.Effect<void, NoComputerProvider>,
 	) => Effect.Effect<
 		void,
-		ToolApprovalNotFound | ToolApprovalConflict | ResourceHidden | ActionForbidden
+		| ToolApprovalNotFound
+		| ToolApprovalConflict
+		| ResourceHidden
+		| ActionForbidden
+		| NoComputerProvider
 	>;
 	/**
 	 * Makes `steer.messageId`, the message the turn's asker just posted, which
