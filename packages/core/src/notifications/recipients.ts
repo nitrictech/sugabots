@@ -1,4 +1,3 @@
-import { readCurrentApproval } from "../chats/turns/tool-calls/pending-approval.ts";
 import {
 	type AutomationRunNotifications,
 	chatNotificationTag,
@@ -16,6 +15,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { membersReachingProject, reachesChatFor } from "../authorization/access.ts";
 import { fixedApprovalInput } from "../chats/tools/approvers.ts";
+import { readCurrentApproval } from "../chats/turns/turns.ts";
 import type { Executor } from "../database/database.ts";
 import type { Audience } from "../database/events/audience.ts";
 import {

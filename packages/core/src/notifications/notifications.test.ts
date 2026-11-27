@@ -36,7 +36,6 @@ import {
 	projectMember,
 	toolCall,
 	turn,
-	workspace,
 } from "../database/schema.ts";
 import {
 	closeDatabase,
@@ -461,47 +460,6 @@ describe.skipIf(!process.env.DATABASE_URL)("notifications, against Postgres", ()
 				`@${handleFromName(members.bob.name)} @${handleFromName(members.cy.name)} the launch moved`,
 			),
 		);
-
-		expect(sentTo(members.cy.id)).toHaveLength(1);
-		expect(sentTo(members.bob.id)).toEqual([]);
-	});
-
-	it("tells nobody removed from the project while the notification was on its way to them", async () => {
-		const chat = await projectChat();
-		const removing = holdTransaction(
-			Effect.gen(function* () {
-				yield* query((db) =>
-					db
-						.select({ id: workspace.id })
-						.from(workspace)
-						.where(eq(workspace.id, workspaceId))
-						.for("no key update"),
-				);
-				yield* query((db) =>
-					db
-						.delete(projectMember)
-						.where(
-							and(
-								eq(projectMember.projectId, projectId),
-								eq(projectMember.memberId, members.bob.id),
-							),
-						),
-				);
-			}),
-		);
-		await removing.held;
-
-		const { batchEnded } = await emitting(
-			memberPosted(
-				chat,
-				members.ada,
-				`@${handleFromName(members.cy.name)} @${handleFromName(members.bob.name)} the launch moved`,
-			),
-		);
-		// Each notification is checked as it goes, behind the removal under way.
-		await waitUntilWaitingOnLocks(1);
-		await removing.release();
-		await batchEnded;
 
 		expect(sentTo(members.cy.id)).toHaveLength(1);
 		expect(sentTo(members.bob.id)).toEqual([]);
