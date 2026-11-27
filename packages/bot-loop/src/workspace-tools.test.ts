@@ -6,7 +6,6 @@ import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import {
 	bot,
 	membership,
-	pinnedBot,
 	project,
 	projectBot,
 	projectMember,
@@ -14,6 +13,7 @@ import {
 } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
+import { authenticators, principals } from "@sugabots/core/proofs/world.test-support";
 import { INTERVIEW_PROMPT } from "@sugabots/core/workspaces/bots/interview-prompt";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -206,8 +206,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		describe("a Personal Assistant acting for its member", () => {
-			/** The admin's Personal Assistant, on a model, and a chat with it they wrote in. */
-			const assistantChat = async () => {
+			const anAssistant = async () => {
 				const assistant = await seedBot(workspaceId, {
 					assistantOf: adminId,
 					visibility: "personal",
@@ -215,6 +214,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				await onDatabase((db) =>
 					db.update(bot).set({ model: "m" }).where(eq(bot.id, assistant.id)),
 				);
+				return assistant;
+			};
+
+			/** The admin's Personal Assistant, on a model, and a chat with it they wrote in. */
+			const assistantChat = async () => {
+				const assistant = await anAssistant();
 				const started = await startBotChat(chatsAs(adminId), {
 					botId: assistant.id,
 					messageId: crypto.randomUUID(),
@@ -368,28 +373,26 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				).toHaveLength(1);
 			});
 
-			it("pins and unpins a bot in its member's sidebar, each once approved", async () => {
-				const { assistant } = await assistantChat();
-				const other = await seedBot(workspaceId, { createdById: null });
-				const pinned = () =>
-					onDatabase((db) =>
-						db
-							.select({ memberId: pinnedBot.memberId })
-							.from(pinnedBot)
-							.where(eq(pinnedBot.botId, other.id)),
-					);
+			it.each([
+				["pin_bot", false, true],
+				["unpin_bot", true, false],
+			] as const)(
+				"applies %s to its member's sidebar once approved",
+				async (tool, before, after) => {
+					const assistant = await anAssistant();
+					const other = await seedBot(workspaceId, { createdById: null });
+					const member = await principals(await authenticators()).member(adminId);
+					if (before) await loop.call(member, "bots.pin", { botId: other.id });
+					const pinned = async () =>
+						(await loop.call(member, "bots.list", { workspace: workspaceId })).find(
+							({ id }) => id === other.id,
+						)?.pinned;
 
-				expect(await pinned()).toEqual([]);
-				await approvedInItsOwnChat(adminId, assistant.defaultProject, "pin_bot", {
-					botId: other.id,
-				});
-				expect(await pinned()).toEqual([{ memberId: adminId }]);
-
-				await approvedInItsOwnChat(adminId, assistant.defaultProject, "unpin_bot", {
-					botId: other.id,
-				});
-				expect(await pinned()).toEqual([]);
-			});
+					expect(await pinned()).toBe(before);
+					await approvedInItsOwnChat(adminId, assistant.defaultProject, tool, { botId: other.id });
+					expect(await pinned()).toBe(after);
+				},
+			);
 
 			it("is refused a change its member, a viewer, couldn't make themselves", async () => {
 				await onDatabase((db) =>

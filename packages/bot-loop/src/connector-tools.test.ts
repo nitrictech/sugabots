@@ -3,9 +3,9 @@ import { toolCallPartSchema } from "@sugabots/contracts/messages";
 import {
 	seedBot,
 	seedConnector,
+	seedMember,
 	seedMessage,
 	seedProject,
-	seedProjectBotConnector,
 	seedProjectChat,
 	seedTurnAnswering,
 } from "@sugabots/core/authentication/seed.test-support";
@@ -17,6 +17,8 @@ import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
 import { bot, connector, membership } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
+import { authenticators, principals } from "@sugabots/core/proofs/world.test-support";
+import { ConnectorStore } from "@sugabots/core/providers/connectors/connector-store";
 import { Models } from "@sugabots/core/providers/models/models";
 import { tool } from "ai";
 import { eq } from "drizzle-orm";
@@ -430,70 +432,99 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
-		it.each([
-			["once the asking project turned it on", true],
-			["not when the asking project hasn't turned it on, though the catalog offers it", false],
-		] as const)(
-			"calls a helper’s own allowed connector in the asking chat %s",
-			async (_case, on) => {
-				const helper = await seedBot(workspaceId, { createdById: adminId });
-				await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, helper.id)));
-				const ownConnector = await seedConnector(workspaceId, helper.defaultProject);
-				const projectId = await seedProject(workspaceId, { leadBotId: botId, bots: [helper.id] });
-				if (on) await seedProjectBotConnector(workspaceId, projectId, helper.id, ownConnector);
-				const source = await seedProjectChat(workspaceId, projectId, adminId);
+		it("calls a helper's own connector only after a project manager turns it on", async () => {
+			const helper = await seedBot(workspaceId, { createdById: adminId });
+			await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, helper.id)));
+			const editor = await seedMember(workspaceId, "editor");
+			const projectId = await seedProject(workspaceId, {
+				leadBotId: botId,
+				bots: [helper.id],
+				members: [editor],
+			});
+			const described = {
+				name: "lookup",
+				description: "Find a page",
+				readOnly: true,
+				destructive: false,
+			};
+			const connectorId = await seedConnector(workspaceId, helper.defaultProject, {
+				tools: [described],
+			});
+			await onDatabase((db) =>
+				db.update(connector).set({ handle: "wiki" }).where(eq(connector.id, connectorId)),
+			);
+			const run = vi.fn(async () => ({ found: true }));
+			const list = async () => ({
+				definitions: { tools: [] },
+				instructions: undefined,
+				tools: [
+					{
+						described,
+						inputSchema: { type: "object" as const },
+						tool: tool({
+							inputSchema: Schema.Struct({}).pipe(
+								Schema.toStandardSchemaV1,
+								Schema.toStandardJSONSchemaV1,
+							),
+						}),
+					},
+				],
+			});
+			const catalog = ConnectorCatalog.from({
+				connectors: await runOnPostgres(
+					ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+				),
+				httpClients: { for: () => fetch },
+				connect: async () => ({ list, run, close: async () => {} }),
+			});
+			const tryLookup = async () => {
+				const chatId = await seedProjectChat(workspaceId, projectId, editor);
 				const parent = await seedTurnAnswering(
-					source,
+					chatId,
 					botId,
-					{ member: adminId },
+					{ member: editor },
 					{ status: "done" },
 				);
-				const triggerMessageId = await seedMessage(source, { bot: botId, turn: parent });
+				const triggerMessageId = await seedMessage(chatId, { bot: botId, turn: parent });
 				await runOnPostgres(
 					Context.get(loop.services, Turns.Service).ask({
-						chatId: source,
+						chatId,
 						botId: helper.id,
 						triggerMessageId,
 						reason: "collaboration",
 					}),
 				);
-				const execute = vi.fn(async () => ({ removed: true }));
-				const discovery: ConnectorCatalog.Interface = {
-					forTurn: (workspace, projects, side, sessions) => {
-						expect(projects).toEqual({ projectId, ownProjectId: helper.defaultProject });
-						return wiki("allow", execute, ownConnector).forTurn(
-							workspace,
-							projects,
-							side,
-							sessions,
-						);
-					},
-				};
-				const { model } = scriptedSteps(
-					{
-						calls: [
-							{
-								toolCallId: "wipe",
-								toolName: CALL_TOOL,
-								input: { tool: "wiki__wipe", arguments: {} },
-							},
-						],
-					},
-					{ text: ["Done."] },
-				);
-				const result = await loop.runTurn(source, { model, connectorTools: discovery });
-				expect(execute).toHaveBeenCalledTimes(on ? 1 : 0);
-				expect(await callsOf(result.turnId)).toMatchObject([
-					{
-						chatId: source,
-						connectorId: ownConnector,
-						approvalStatus: null,
-						status: on ? "completed" : "failed",
-					},
-				]);
-			},
-			15_000,
-		);
+				const { model } = calling(CALL_TOOL, { tool: "wiki__lookup", arguments: {} });
+				const result = await loop.runTurn(chatId, { model, connectorTools: catalog });
+				return callsOf(result.turnId);
+			};
+
+			const signedIn = principals(await authenticators());
+			const manager = await signedIn.member(adminId);
+			const offered = (await loop.call(manager, "connectors.listProjectBots", { projectId })).find(
+				({ id }) => id === connectorId,
+			);
+			expect(offered).toMatchObject({ id: connectorId, on: false });
+			const input = {
+				projectId,
+				connectorId,
+				on: true,
+				addressRevision: offered?.addressRevision ?? 0,
+			};
+			expect(await tryLookup()).toEqual([]);
+			expect(run).not.toHaveBeenCalled();
+
+			await expect(
+				loop.call(await signedIn.member(editor), "connectors.setOnInProject", input),
+			).rejects.toBeInstanceOf(ActionForbidden);
+			expect(await tryLookup()).toEqual([]);
+			expect(run).not.toHaveBeenCalled();
+
+			await loop.call(manager, "connectors.setOnInProject", input);
+			const calls = await tryLookup();
+			expect(run).toHaveBeenCalledTimes(1);
+			expect(calls).toMatchObject([{ connectorId, status: "completed", approvalStatus: null }]);
+		}, 15_000);
 
 		it("hides a connector outside chat bounds even when the catalog offers it", async () => {
 			const project = await seedProject(workspaceId, { leadBotId: botId });

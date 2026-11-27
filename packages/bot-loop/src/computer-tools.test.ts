@@ -36,7 +36,7 @@ import { unimplemented } from "@sugabots/core/testing";
 import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { botLoopOnPostgres, callsOf, parkedCallOf, scriptedSteps } from "./testing.ts";
 
 /**
@@ -370,53 +370,111 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				expect(JSON.stringify(requests[1]?.continuationMessages)).toContain("denied");
 			});
 
-			it("asks again before running an approved command on a computer made since in its place", async () => {
-				await onDatabase((db) =>
-					db
-						.update(bot)
-						.set({ assistantOf: adminId, visibility: "personal" })
-						.where(eq(bot.id, botId)),
-				);
-				const projectId = await runOnPostgres(defaultProjectOf(botId));
-				const providerId = (
-					await runOnPostgres(
-						Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer).pipe(
-							Effect.flatMap((providers) => providers.enabled(workspaceId)),
-						),
-					)
-				)?.id;
-				if (!providerId) throw new Error("No provider");
-				const makeComputer = (name: string) =>
-					onDatabase((db) =>
-						db.insert(computer).values({
-							workspaceId,
-							projectId,
-							computerProviderId: providerId,
-							providerComputerId: Computers.ComputerId(name),
-							image: "sugabots-computer:dev",
-						}),
+			it.each(["before the call", "while opening"] as const)(
+				"asks again before running an approved command on a computer replaced %s",
+				async (when) => {
+					await onDatabase((db) =>
+						db
+							.update(bot)
+							.set({ assistantOf: adminId, visibility: "personal" })
+							.where(eq(bot.id, botId)),
 					);
-				await makeComputer("first");
-				const { model } = calling("run_command", command);
-				const ran = await loop.runTurn(chatId, { model });
-				const [parked] = await callsOf(ran.turnId);
-				if (!parked) throw new Error("No command parked");
-				await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
+					const projectId = await runOnPostgres(defaultProjectOf(botId));
+					const providerId = (
+						await runOnPostgres(
+							Effect.provide(ComputerProviderStore.Service, ComputerProviderStore.layer).pipe(
+								Effect.flatMap((providers) => providers.enabled(workspaceId)),
+							),
+						)
+					)?.id;
+					if (!providerId) throw new Error("No provider");
+					const makeComputer = (name: string) =>
+						onDatabase((db) =>
+							db.insert(computer).values({
+								workspaceId,
+								projectId,
+								computerProviderId: providerId,
+								providerComputerId: Computers.ComputerId(name),
+								image: "sugabots-computer:dev",
+							}),
+						);
+					await makeComputer("first");
+					const approvedCommand = { ...command, command: "echo approved-command" };
+					const { model } = calling("run_command", approvedCommand);
+					const opening = Promise.withResolvers<void>();
+					const missing = Promise.withResolvers<void>();
+					onTestFinished(() => missing.resolve());
+					const replacement = Computers.ComputerId("replacement");
+					const service = computerService(replacement, "allowed-hosts-only");
+					const commandOnReplacement = vi.fn();
+					const providerFetch: typeof fetch = async (request, init) => {
+						const url = new URL(request instanceof Request ? request.url : request.toString());
+						const method = request instanceof Request ? request.method : init?.method;
+						if (url.hostname === "computers.example.com" && url.pathname.endsWith("/first")) {
+							if (method === "DELETE") return new Response(null, { status: 204 });
+							opening.resolve();
+							await missing.promise;
+							return Response.json({ code: "NOT_FOUND", message: "Missing" }, { status: 404 });
+						}
+						if (url.hostname === "computers.example.com" && method === "POST") {
+							return Response.json(
+								{
+									id: replacement,
+									status: { state: "Running" },
+									createdAt: "2026-01-01T00:00:00Z",
+								},
+								{ status: 202 },
+							);
+						}
+						if (url.pathname === "/command") {
+							const body =
+								request instanceof Request
+									? await request.clone().json()
+									: JSON.parse(String(init?.body));
+							if (String(body.command).includes(approvedCommand.command)) commandOnReplacement();
+						}
+						return service(request);
+					};
+					const ran = await loop.runTurn(chatId, {
+						model,
+						egress: unimplemented(Egress.Service, { providers: { for: () => providerFetch } }),
+						computerSignIn: ComputerSignIn.none,
+					});
+					const [parked] = await callsOf(ran.turnId);
+					if (!parked) throw new Error("No command parked");
+					await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" });
 
-				// The computer is reset after the approval: a new one takes its place.
-				await onDatabase((db) => db.delete(computer).where(eq(computer.projectId, projectId)));
-				await makeComputer("replacement");
-				const principal = await ran.authentication.authenticate(ran.turnId);
-				const resumed = await ran.steps.step(ran.run.request, principal, {
-					turnId: ran.turnId,
-					attempt: 0,
-					step: 1,
-				});
+					if (when === "before the call") {
+						await onDatabase((db) => db.delete(computer).where(eq(computer.projectId, projectId)));
+						await makeComputer(replacement);
+					}
+					const principal = await ran.authentication.authenticate(ran.turnId);
+					const resuming = ran.steps.step(ran.run.request, principal, {
+						turnId: ran.turnId,
+						attempt: 0,
+						step: 1,
+					});
+					try {
+						if (when === "while opening") {
+							await Promise.race([
+								opening.promise,
+								resuming.then(() => {
+									throw new Error("The call did not open the approved computer");
+								}),
+							]);
+						}
+					} finally {
+						missing.resolve();
+						await resuming;
+					}
 
-				const [reparked] = await callsOf(ran.turnId);
-				expect(reparked).toMatchObject({ id: parked.id, approvalStatus: "pending" });
-				expect(resumed).toMatchObject({ _tag: "Waiting" });
-			});
+					expect(commandOnReplacement).not.toHaveBeenCalled();
+					expect(await resuming).toMatchObject({ _tag: "Waiting" });
+					const [reparked] = await callsOf(ran.turnId);
+					expect(reparked).toMatchObject({ id: parked.id, approvalStatus: "pending" });
+					expect(reparked?.approvalId).not.toBe(parked.approvalId);
+				},
+			);
 
 			it("keeps a host decision when its approver is demoted before the turn resumes", async () => {
 				const asked = await anEditorsChat();
