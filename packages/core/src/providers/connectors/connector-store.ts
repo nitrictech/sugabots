@@ -276,11 +276,7 @@ export const make = Effect.gen(function* () {
 		listing: ToolListing | undefined,
 		test?: { at: Date; error: UserText | null },
 	) => {
-		const definitions = listing?.definitions.toSorted((first, second) =>
-			Order.String(first.name, second.name),
-		);
-		const fingerprint =
-			definitions && createHash("sha256").update(stringify(definitions)).digest("hex");
+		const fingerprint = listing && fingerprintToolDefinitions(listing.definitions);
 		return query((db) =>
 			db
 				.update(connector)
@@ -974,9 +970,14 @@ type TestOutcome = ToolListing | { error?: UserText };
 
 type ToolListing = { tools: ConnectorTool[]; definitions: ServerToolDefinitions };
 
+export function fingerprintToolDefinitions(definitions: ServerToolDefinitions): string {
+	const ordered = definitions.toSorted((first, second) => Order.String(first.name, second.name));
+	return createHash("sha256").update(stringify(ordered)).digest("hex");
+}
+
 type ObservationTarget = Pick<
 	ConnectorTarget,
-	"connectorId" | "configurationRevision" | "configurationUpdatedAt"
+	"connectorId" | "configurationRevision" | "configurationUpdatedAt" | "toolDefinitionsFingerprint"
 >;
 
 /** A GitHub connector's address until its app is installed on an account: the app's own page. */

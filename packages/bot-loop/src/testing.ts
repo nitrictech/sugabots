@@ -184,6 +184,7 @@ export const wikiWipe = (
 	access: "allow" | "ask" | "off",
 	execute: (input: unknown, options: { readonly abortSignal?: AbortSignal }) => Promise<unknown>,
 ): ConnectorCatalog.Interface => ({
+	...ConnectorCatalog.none,
 	forTurn: () =>
 		Effect.promise(async () => {
 			await onDatabase((db) =>
@@ -523,6 +524,8 @@ export async function botLoopOnPostgres(
 				: standInTurnSignals.withdraw(signal);
 		},
 	});
+	const callWithConnectorCatalog = (connectorCatalog: ConnectorCatalog.Interface) =>
+		servedOperations({ chats: services, connectorCatalog });
 	const call = await servedOperations({ chats: services });
 
 	const environments: Array<{ outside: Outside; built: ReturnType<typeof buildEnvironment> }> = [];
@@ -713,6 +716,7 @@ export async function botLoopOnPostgres(
 	return {
 		services,
 		call,
+		callWithConnectorCatalog,
 		loopOver,
 		runTurn,
 		runWorkflow,

@@ -27,10 +27,12 @@ import { ComputerUseOff, proveCanUseChatComputer } from "../proofs/can-use-compu
 import {
 	checkConnectorApprovalPermission,
 	checkConnectorCallSettings,
+	proveCanReachConnector,
 } from "../proofs/can-use-connector.ts";
 import { briefRecipientChanged } from "../proofs/may-brief.ts";
 import { named } from "../proofs/proof.ts";
 import { ToolSwitchedOff } from "../proofs/tool-switches.ts";
+import { ConnectorCalls } from "../providers/connectors/connector-calls.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { makeDecide } from "./approvals/decide.ts";
 import { automationsOperations } from "./automations/index.ts";
@@ -121,6 +123,53 @@ const offeredTools = botLoopTools(operationContracts);
 type ApprovalOperationName = (typeof offeredTools)[number]["operation"];
 type ApprovalServices = ServicesOf<(typeof operationsExceptDecide)[ApprovalOperationName]>;
 
+const checkConnectorApprovalSettings = (
+	member: string,
+	call: Turns.ApprovalCall & { readonly connectorId: string },
+) =>
+	Effect.gen(function* () {
+		const permission = yield* checkConnectorApprovalPermission(member, call);
+		return permission ?? (yield* checkConnectorCallSettings(call, call));
+	});
+
+const checkConnectorApprovalTarget = (
+	member: string,
+	call: Turns.ApprovalCall,
+	executionNumber: number,
+) =>
+	Effect.gen(function* () {
+		if (!call.connectorId) return;
+		const conflict = yield* checkConnectorApprovalSettings(member, {
+			...call,
+			connectorId: call.connectorId,
+		});
+		if (conflict) return conflict;
+		const decoded = Schema.decodeUnknownResult(operationContracts["connectors.callTool"].input)({
+			connectorId: call.connectorId,
+			tool: call.remoteToolName,
+			arguments: call.executionInput ?? call.input,
+		});
+		if (decoded._tag === "Failure") return "connectorChanged" as const;
+		const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
+		const calls = yield* ConnectorCalls.Service;
+		const matches = yield* named(principal, call.connectorId, (principal, id) =>
+			proveCanReachConnector(principal, id).pipe(
+				Effect.flatMap((reach) =>
+					reach.revision === call.connectorRevision
+						? calls.checkApproval(
+								reach,
+								decoded.success.tool,
+								decoded.success.arguments,
+								call.approvalResolvedTargets,
+							)
+						: Effect.succeed(false),
+				),
+				Effect.orElseSucceed(() => false),
+			),
+		);
+		return matches ? undefined : ("connectorChanged" as const);
+	});
+
 const checkApprovalPermission = (
 	member: string,
 	call: Turns.ApprovalCall,
@@ -129,17 +178,11 @@ const checkApprovalPermission = (
 	Effect.gen(function* () {
 		const forbidden = new ActionForbidden({ proof: "CanDecide" });
 		if (call.connectorId) {
-			const connectorConflict = yield* checkConnectorApprovalPermission(member, {
+			const conflict = yield* checkConnectorApprovalSettings(member, {
+				...call,
 				connectorId: call.connectorId,
-				turnId: call.turnId,
-				writeOrDelete: call.writeOrDelete,
 			});
-			if (connectorConflict) return connectorConflict;
-			const settingsConflict = yield* checkConnectorCallSettings(
-				{ ...call, connectorId: call.connectorId },
-				call,
-			);
-			if (settingsConflict) return settingsConflict;
+			if (conflict) return conflict;
 			if (call.approvalResolvedTargets && "computer" in call.approvalResolvedTargets) {
 				const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
 				const target = yield* Effect.result(
@@ -242,7 +285,7 @@ function checkComputerApprovalTarget(
 /** Every operation's body, by name: exactly one for each registered contract. */
 const operations = {
 	...operationsExceptDecide,
-	"approvals.decide": makeDecide(checkApprovalPermission),
+	"approvals.decide": makeDecide(checkApprovalPermission, checkConnectorApprovalTarget),
 } satisfies {
 	readonly [Name in OperationName]: Name extends LongRunningOperationName
 		? LongRunningOperation<OperationContracts[Name], unknown>

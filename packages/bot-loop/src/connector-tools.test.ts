@@ -11,7 +11,6 @@ import {
 	seedTurnAnswering,
 	setRole,
 } from "@sugabots/core/authentication/seed.test-support";
-import { startBotChat } from "@sugabots/core/chats/chats/testing";
 import { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
 import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import { aChatWithConnectorAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
@@ -34,9 +33,8 @@ import { Models } from "@sugabots/core/providers/models/models";
 import { defaultProjectOf } from "@sugabots/core/workspaces/projects/project-reads";
 import { type JSONSchema7, jsonSchema, tool } from "ai";
 import { eq } from "drizzle-orm";
-import { Clock, Context, Effect, Exit, Layer, Schema, Scope } from "effect";
-import { TestClock } from "effect/testing";
-import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { Context, Effect, Layer, Schema } from "effect";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	botLoopOnPostgres,
 	calling,
@@ -229,61 +227,81 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			expect(execute).not.toHaveBeenCalled();
 		});
 
-		it("closes an approval when a catalog refresh finds a changed input schema", async () => {
-			const described = { name: "wipe", description: null, readOnly: false, destructive: false };
-			await onDatabase((db) =>
-				db
-					.update(connector)
-					.set({ handle: "wiki", toolAccess: { wipe: "ask" } })
-					.where(eq(connector.id, connectorId)),
-			);
-			let inputSchema: JSONSchema7 = { type: "object", additionalProperties: false };
-			const list = vi.fn(async () => ({
-				definitions: { tools: [{ name: described.name, inputSchema }] },
-				instructions: undefined,
-				tools: [{ described, inputSchema, tool: { inputSchema: jsonSchema(inputSchema) } }],
-			}));
-			const run = vi.fn(async () => ({ removed: true }));
-			const catalog = ConnectorCatalog.from({
-				connectors: await runOnPostgres(
-					ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
-				),
-				httpClients: { for: () => fetch },
-				connect: async () => ({ list, run, close: async () => {} }),
-			});
-			const scope = Scope.makeUnsafe();
-			onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
-			const clock = await Effect.runPromise(Scope.provide(TestClock.make(), scope));
-			const connectorTools: ConnectorCatalog.Interface = {
-				forTurn: (...args) =>
-					catalog.forTurn(...args).pipe(Effect.provideService(Clock.Clock, clock)),
-			};
-			const { model } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
-			const workflow = await loop.runWorkflow(chatId, { model, connectorTools });
-			await workflow.suspended();
-			const { turnId, parked } = await parkedCallOf(workflow.executionId);
-			expect(parked).toMatchObject({ connectorId, approvalStatus: "pending", input: {} });
-			expect(list).toHaveBeenCalledOnce();
+		it.each(["before Allow", "after Allow"] as const)(
+			"does not send an approved connector call when its server changes the definition %s",
+			async (when) => {
+				const described = { name: "wipe", description: null, readOnly: false, destructive: false };
+				await onDatabase((db) =>
+					db
+						.update(connector)
+						.set({ handle: "wiki", toolAccess: { wipe: "ask" } })
+						.where(eq(connector.id, connectorId)),
+				);
+				let inputSchema: JSONSchema7 = { type: "object", additionalProperties: false };
+				const list = vi.fn(async () => ({
+					definitions: { tools: [{ name: described.name, inputSchema }] },
+					instructions: undefined,
+					tools: [{ described, inputSchema, tool: { inputSchema: jsonSchema(inputSchema) } }],
+				}));
+				const run = vi.fn(async () => ({ removed: true }));
+				const connectorTools = ConnectorCatalog.from({
+					connectors: await runOnPostgres(
+						ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+					),
+					httpClients: { for: () => fetch },
+					connect: async () => ({ list, run, close: async () => {} }),
+				});
+				const { model } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
+				const ran = await loop.runTurn(chatId, { model, connectorTools });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No connector call parked");
+				expect(parked).toMatchObject({ connectorId, approvalStatus: "pending", input: {} });
+				expect(list).toHaveBeenCalledOnce();
 
-			inputSchema = { ...inputSchema, properties: { reason: { type: "string" } } };
-			await Effect.runPromise(clock.adjust(ConnectorCatalog.LISTING_LIFETIME));
-			const other = await startBotChat(chatsAs(adminId), {
-				botId,
-				messageId: crypto.randomUUID(),
-				content: "Check the wiki.",
-			});
-			await loop.runTurn(other.chat.id, { ...scriptedSteps({ text: ["Ready."] }), connectorTools });
-			expect(list).toHaveBeenCalledTimes(2);
+				const admin = asMember(await loop.callWithConnectorCatalog(connectorTools), adminId);
+				const allow = () => admin.decide({ toolCallId: parked.id, decision: "allow_once" });
+				const changeDefinition = () => {
+					inputSchema = { ...inputSchema, properties: { reason: { type: "string" } } };
+				};
+				if (when === "before Allow") {
+					changeDefinition();
+					await expect(allow()).rejects.toMatchObject({
+						_tag: "ToolApprovalConflict",
+						reason: "connectorChanged",
+					});
+					expect(await callsOf(ran.turnId)).toMatchObject([
+						{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null },
+					]);
+					expect(list).toHaveBeenCalledTimes(2);
+					expect(run).not.toHaveBeenCalled();
+					return;
+				}
 
-			await expect(
-				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
-			).rejects.toMatchObject({ _tag: "ToolApprovalConflict", reason: "connectorChanged" });
-			await workflow.completed();
-			expect(await callsOf(turnId)).toMatchObject([
-				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null },
-			]);
-			expect(run).not.toHaveBeenCalled();
-		});
+				await allow();
+				changeDefinition();
+				expect(await resumeAt(ran, 1)).toMatchObject({ _tag: "Waiting" });
+				expect(list).toHaveBeenCalledTimes(3);
+				expect(run).not.toHaveBeenCalled();
+				const [renewed] = await callsOf(ran.turnId);
+				expect(renewed).toMatchObject({
+					id: parked.id,
+					approvalStatus: "pending",
+					connectorRevision: 3,
+				});
+				expect(renewed?.approvalId).not.toBe(parked.approvalId);
+
+				await allow();
+				expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+				expect(run).toHaveBeenCalledExactlyOnceWith(
+					expect.objectContaining({
+						definitions: { tools: [{ name: described.name, inputSchema }] },
+					}),
+					described.name,
+					{},
+					expect.anything(),
+				);
+			},
+		);
 
 		it("closes a Personal Assistant's pending approval and wakes the turn when tool access changes from Allow to Ask", async () => {
 			await onDatabase((db) =>
@@ -297,7 +315,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const { model, requests } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
 			const workflow = await loop.runWorkflow(chatId, {
 				model,
-				connectorTools: { forTurn: (...args) => wiki(access, execute).forTurn(...args) },
+				connectorTools: {
+					...ConnectorCatalog.none,
+					forTurn: (...args) => wiki(access, execute).forTurn(...args),
+				},
 			});
 			await workflow.suspended();
 			const { turnId, parked } = await parkedCallOf(workflow.executionId);
@@ -577,7 +598,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			);
 			const result = await loop.runTurn(chatId, {
 				model,
-				connectorTools: { forTurn: (...args) => wiki(access, execute).forTurn(...args) },
+				connectorTools: {
+					...ConnectorCatalog.none,
+					forTurn: (...args) => wiki(access, execute).forTurn(...args),
+				},
 			});
 			expect(execute).not.toHaveBeenCalled();
 			expect(runningId).toBeDefined();
@@ -683,7 +707,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				const { model, requests } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
 				const ran = await loop.runTurn(chatId, {
 					model,
-					connectorTools: { forTurn: (...args) => wiki(access, execute).forTurn(...args) },
+					connectorTools: {
+						...ConnectorCatalog.none,
+						forTurn: (...args) => wiki(access, execute).forTurn(...args),
+					},
 				});
 				const [parked] = await callsOf(ran.turnId);
 				if (!parked) throw new Error("No call parked");
@@ -699,7 +726,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				if (changed === "off") {
 					expect(outcome).toEqual({ _tag: "Finished" });
 					expect(await callsOf(ran.turnId)).toMatchObject([
-						{ approvalClosedBecause: "connectorOff" },
+						{ error: "The tool was not run because the connector or its tool is now off." },
 					]);
 					expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(
 						"its approval no longer applies",
@@ -731,7 +758,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		it.each([
 			{ change: "before Allow", name: "selected repositories swap paths before Allow" },
 			{ change: "after Allow", name: "selected repositories swap paths after Allow" },
-			{ change: "default base branch", name: "the default base branch changes after Allow" },
+			{ change: "branch before Allow", name: "the default base branch changes before Allow" },
+			{ change: "branch after Allow", name: "the default base branch changes after Allow" },
 		] as const)(
 			"does not send the original GitHub call after its target changes, when $name",
 			async ({ change }) => {
@@ -805,10 +833,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					swappedPaths = true;
 					await addRepository("acme/web");
 				};
-				const adminChat = chatsAs(adminId);
+				const adminChat = asMember(await loop.callWithConnectorCatalog(connectorTools), adminId);
 				const allow = () => adminChat.decide({ toolCallId: parked.id, decision: "allow_once" });
-				if (change === "before Allow") {
-					await refreshPaths();
+				if (change === "before Allow" || change === "branch before Allow") {
+					if (change === "before Allow") await refreshPaths();
+					else defaultBase = "release";
 					await expect(allow()).rejects.toMatchObject({
 						_tag: "ToolApprovalConflict",
 						reason: "connectorChanged",

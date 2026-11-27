@@ -1,6 +1,6 @@
 import { toolCallPartSchema } from "@sugabots/contracts/messages";
 import { WEB_FETCH_TOOL } from "@sugabots/contracts/operations/web";
-import type { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
+import { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
 import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import {
 	aChatWithConnectorAwaitingReply,
@@ -433,6 +433,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				let access: "allow" | "ask" | "off" = initialAccess;
 				// Read as each step builds its tools, so a change shows in the next step.
 				const liveWiki: ConnectorCatalog.Interface = {
+					...ConnectorCatalog.none,
 					forTurn: (...args) => wiki(access, wipe).forTurn(...args),
 				};
 				const { model, requests } = scriptedSteps(

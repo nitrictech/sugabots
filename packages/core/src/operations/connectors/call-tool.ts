@@ -27,14 +27,21 @@ export const callTool = defineOperation(
 							const described = calls.described(principal, input);
 							if (!described && calling.value.kind === "approvalCheck")
 								return yield* new ResourceHidden({ resource: "connector" });
-							const { use, approved } = yield* proveConnectorCall(
+							const proveCall = proveConnectorCall(
 								running,
 								connector,
 								calling,
 								approvedInput,
 								described,
 							);
+							const checked = yield* proveCall;
 							if (!described) return yield* new ResourceHidden({ resource: "connector" });
+							const { use, approved } = (yield* calls.refreshApprovedTool(
+								running,
+								checked.approved,
+							))
+								? yield* proveCall
+								: checked;
 							if (use.writeOrDelete) {
 								const records = yield* Turns.Records.Service;
 								yield* records.markActed(running);

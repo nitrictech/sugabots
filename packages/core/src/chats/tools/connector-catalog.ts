@@ -14,11 +14,12 @@ import { asSchema, type JSONSchema7, type Tool } from "ai";
 import { Clock, Context, Duration, Effect, Layer } from "effect";
 import { type Database, effectRunner } from "../../database/database.ts";
 import type { ChatFileStore } from "../../files/chat-file-store.ts";
-import type { ResolvedTargets } from "../../operations/operation.ts";
+import { type ResolvedTargets, sameResolvedTargets } from "../../operations/operation.ts";
 import type { Principal } from "../../principal.ts";
 import {
 	discoverConnectorRevisions,
 	proveCanReachConnector,
+	type ReachesEnabledConnector,
 } from "../../proofs/can-use-connector.ts";
 import { named } from "../../proofs/proof.ts";
 import {
@@ -26,7 +27,11 @@ import {
 	connectorSessions,
 } from "../../providers/connectors/connector-sessions.ts";
 import { ConnectorSignIn } from "../../providers/connectors/connector-sign-in.ts";
-import { ConnectorStore, everyToolOff } from "../../providers/connectors/connector-store.ts";
+import {
+	ConnectorStore,
+	everyToolOff,
+	fingerprintToolDefinitions,
+} from "../../providers/connectors/connector-store.ts";
 import type { ConnectorTarget } from "../../providers/connectors/connector-target.ts";
 import type { Connected } from "../../providers/connectors/github/connected.ts";
 import {
@@ -48,7 +53,7 @@ import {
 import { processLayer, Tier } from "../../tiers.ts";
 import { offerAugmentationTools } from "./augmentations.ts";
 import type { ComputerAtPlace } from "./computer/tools.ts";
-import { gitHubNote, gitHubTools } from "./github/tools.ts";
+import { gitHubNote, gitHubTools, resolveGitHubTargets } from "./github/tools.ts";
 import { httpTools } from "./http/tools.ts";
 import type { UploadSide } from "./signed-upload/tool.ts";
 
@@ -81,6 +86,7 @@ import type { UploadSide } from "./signed-upload/tool.ts";
 
 export interface OfferedTool {
 	tool: Tool;
+	refreshForApproval?: () => Effect.Effect<OfferedTool | undefined>;
 	usesComputer?: (input: Readonly<Record<string, unknown>>) => boolean;
 	resolveApprovalTargets?: (
 		input: Readonly<Record<string, unknown>>,
@@ -176,6 +182,12 @@ interface ExpiredConnector {
 }
 
 export interface Interface {
+	checkApproval<P, K>(
+		reach: ReachesEnabledConnector<P, K>,
+		tool: string,
+		input: Readonly<Record<string, unknown>>,
+		recordedTargets: ResolvedTargets | null,
+	): Effect.Effect<boolean>;
 	forTurn(
 		workspaceId: string,
 		projects: TurnProjects,
@@ -274,6 +286,29 @@ export function from({
 	const kept = new Map<string, KeptListing>();
 	const failedAt = new Map<string, number>();
 
+	const openSession = (
+		workspaceId: string,
+		target: ConnectorTarget,
+		providers: OAuthProviders | undefined,
+	) =>
+		connect(
+			{
+				url: target.url,
+				headers: target.headers,
+				oauth:
+					target.auth === "oauth"
+						? providers?.for(workspaceId, target.connectorId, target.url)
+						: undefined,
+			},
+			target.auth === "oauth" && oauth ? oauth.fetch : httpClients.for({ baseUrl: target.url }),
+		);
+
+	const recordListing = (workspaceId: string, target: ConnectorTarget, listing: ServerListing) =>
+		connectors.recordListing(workspaceId, target, {
+			tools: listing.tools.map(({ described }) => described),
+			definitions: listing.definitions.tools,
+		});
+
 	/**
 	 * The GitHub app's tools, and whether its repositories can be read in the computer.
 	 */
@@ -351,6 +386,45 @@ export function from({
 		});
 
 	return {
+		checkApproval: (reach, tool, input, recordedTargets) =>
+			Effect.gen(function* () {
+				if (reach.connectorKind === "http") return true;
+				if (reach.connectorKind === "github") {
+					const connected = github && (yield* github.forConnector(reach));
+					if (!connected) return false;
+					const current = yield* Effect.option(resolveGitHubTargets(connected, tool, input));
+					if (current._tag === "None") return false;
+					const {
+						computer: _computer,
+						provider: _provider,
+						machine: _machine,
+						...recorded
+					} = recordedTargets ?? {};
+					return sameResolvedTargets(recorded, current.value);
+				}
+				const { targets } = yield* connectors.targetsForProject(reach.workspace, reach.project);
+				const target = targets.find(({ connectorId }) => connectorId === reach.connector.value);
+				if (!target || target.configurationRevision !== reach.revision) return false;
+				const providers = oauth ? yield* oauth.clients : undefined;
+				const listed = yield* Effect.result(
+					Effect.tryPromise(async () => {
+						const session = await openSession(reach.workspace, target, providers);
+						try {
+							return await session.list();
+						} finally {
+							await session.close();
+						}
+					}),
+				);
+				if (listed._tag === "Failure") {
+					yield* Effect.logWarning(
+						"Checking an approved connector's tools failed",
+						listed.failure.cause,
+					);
+					return false;
+				}
+				return (yield* recordListing(reach.workspace, target, listed.success)) === reach.revision;
+			}),
 		forTurn: (workspaceId, { projectId, ownProjectId }, turn, sessions = connectorSessions()) =>
 			Effect.gen(function* () {
 				if (projectId === null) return offerNothing();
@@ -402,21 +476,7 @@ export function from({
 				) =>
 					sessions.use(
 						`${target.connectorId}:${revision}`,
-						() =>
-							connect(
-								{
-									url: target.url,
-									headers: target.headers,
-									oauth:
-										target.auth === "oauth"
-											? providers?.for(workspaceId, target.connectorId, target.url)
-											: undefined,
-								},
-								// OAuth refresh may reach a different host from the connector.
-								target.auth === "oauth" && oauth
-									? oauth.fetch
-									: httpClients.for({ baseUrl: target.url }),
-							),
+						() => openSession(workspaceId, target, providers),
 						work,
 					);
 				const loadListing = (target: OwnedTarget) =>
@@ -445,10 +505,7 @@ export function from({
 							}),
 						);
 						failedAt.delete(failure);
-						const revision = yield* connectors.recordListing(workspaceId, target, {
-							tools: listing.tools.map(({ described }) => described),
-							definitions: listing.definitions.tools,
-						});
+						const revision = yield* recordListing(workspaceId, target, listing);
 						if (revision === undefined) return undefined;
 						const recorded = {
 							listing,
@@ -474,7 +531,9 @@ export function from({
 						);
 						if (revisions.get(current.connectorId) !== current.configurationRevision)
 							return "unavailable" as const;
-						return (yield* loadListing({ ...current, projectId: target.projectId })) ?? "unavailable";
+						return (
+							(yield* loadListing({ ...current, projectId: target.projectId })) ?? "unavailable"
+						);
 					});
 				const listings = yield* Effect.forEach(
 					targets,
@@ -500,7 +559,7 @@ export function from({
 				const listed = listings.flatMap((recorded) => {
 					if (typeof recorded !== "object") return [];
 					const { target, revision } = recorded;
-					return [{ ...recorded, target: { ...target, configurationRevision: revision } }];
+					return [{ ...recorded, target: targetWithListing(target, revision, recorded.listing) }];
 				});
 				const leftOut = (outcome: ListingOutcome) =>
 					targets.filter((_, index) => listings[index] === outcome);
@@ -513,8 +572,11 @@ export function from({
 								listing.tools.map(({ described }) => described),
 								uploadSide,
 							),
-							...buildOfferedTools(target, listing, (work) =>
-								useSession(target, sessionRevision, work),
+							...buildOfferedTools(
+								target,
+								listing,
+								(work) => useSession(target, sessionRevision, work),
+								(target, fresh) => recordListing(workspaceId, target, fresh),
 							),
 						})),
 						ownTools.tools,
@@ -557,25 +619,61 @@ type OwnedTarget = ConnectorTarget & { projectId: string };
 /** What asking a connector's server for its tools came to. */
 type ListingOutcome = (KeptListing & { target: OwnedTarget }) | "unavailable" | "sign_in_expired";
 
+function targetWithListing(target: ConnectorTarget, revision: number, listing: ServerListing) {
+	return {
+		...target,
+		configurationRevision: revision,
+		toolDefinitionsFingerprint: fingerprintToolDefinitions(listing.definitions.tools),
+	};
+}
+
 function buildOfferedTools(
 	target: ConnectorTarget,
 	listing: ServerListing,
 	useSession: <A>(work: (session: ServerSession) => Promise<A>) => Promise<A>,
+	recordListing: (
+		target: ConnectorTarget,
+		listing: ServerListing,
+	) => Effect.Effect<number | undefined>,
 ): Record<string, OfferedTool> {
-	return Object.fromEntries(
-		listing.tools.map(({ described, inputSchema, tool }) =>
-			offeredTool(
-				target,
-				described,
-				{
-					...tool,
-					execute: (input, options) =>
-						useSession((session) => session.run(listing, described.name, input, options)),
-				},
-				{ description: described.description ?? "", inputSchema },
-			),
-		),
-	);
+	const build = (
+		target: ConnectorTarget,
+		listing: ServerListing,
+		{ described, inputSchema, tool }: ServerListing["tools"][number],
+	): [string, OfferedTool] => {
+		const entry = offeredTool(
+			target,
+			described,
+			{
+				...tool,
+				execute: (input, options) =>
+					useSession((session) => session.run(listing, described.name, input, options)),
+			},
+			{ description: described.description ?? "", inputSchema },
+		);
+		entry[1].refreshForApproval = () =>
+			Effect.gen(function* () {
+				const fresh = yield* Effect.result(
+					Effect.tryPromise(() => useSession((session) => session.list())),
+				);
+				if (fresh._tag === "Failure") {
+					yield* Effect.logWarning(
+						"Checking an approved connector's tools failed",
+						fresh.failure.cause,
+					);
+					return undefined;
+				}
+				const revision = yield* recordListing(target, fresh.success);
+				if (revision === undefined) return undefined;
+				const current = fresh.success.tools.find((tool) => tool.described.name === described.name);
+				return (
+					current &&
+					build(targetWithListing(target, revision, fresh.success), fresh.success, current)[1]
+				);
+			});
+		return entry;
+	};
+	return Object.fromEntries(listing.tools.map((tool) => build(target, listing, tool)));
 }
 
 /** No connector tools, made new for each caller, since the set's lists can be changed. */
@@ -591,5 +689,6 @@ const offerNothing = (): ConnectorToolSet => ({
 
 /** No connectors at all, for a case that offers a turn none. */
 export const none: Interface = {
+	checkApproval: () => Effect.succeed(false),
 	forTurn: () => Effect.sync(offerNothing),
 };

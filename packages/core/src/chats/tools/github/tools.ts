@@ -65,9 +65,9 @@ export function gitHubTools({
 	);
 }
 
-function resolveGitHubTargets(
+export function resolveGitHubTargets(
 	connected: Connected,
-	toolName: GitHubToolName,
+	toolName: string,
 	input: Readonly<Record<string, unknown>>,
 ): Effect.Effect<ResolvedTargets, ApprovalRefused> {
 	return Effect.gen(function* () {

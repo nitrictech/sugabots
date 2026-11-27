@@ -162,13 +162,24 @@ export function connectorToolsForStep(
 									Effect.catch((error) =>
 										Effect.gen(function* () {
 											if (error._tag === "ApprovalNeeded" && current) {
-												const details = yield* check(decoded);
-												if (details)
+												const fresh = calls.described(principal, decoded);
+												const reviewed = yield* calls.validateArguments(
+													principal,
+													binding.connectorId,
+													binding.remoteToolName,
+													decoded.arguments,
+												);
+												if ("invalid" in reviewed)
+													return yield* new ToolCallError({
+														userMessage: userText`The connector's tool changed and can no longer use this information. Search for the tool and try again.`,
+													});
+												const details = fresh && (yield* check(decoded));
+												if (fresh && details)
 													return yield* Effect.fail(
 														new ToolApprovalRequired({
 															tool: key,
 															input: decoded.arguments,
-															binding,
+															binding: { ...binding, connectorRevision: fresh.revision },
 															...details,
 															reopenCallId: callId,
 														}),

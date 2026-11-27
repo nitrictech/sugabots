@@ -257,9 +257,10 @@ export interface ControlsInterface {
 	 * and signalled. If `allow` returns an invalidation reason, the approval
 	 * is closed and the turn wakes before the conflict is returned. An
 	 * approval that is no longer current is not found.
+	 * checkConnector checks the connector's server before the decision's transaction starts.
 	 * An approval that already has a decision is a conflict.
 	 */
-	readonly decide: <P, X, R>(
+	readonly decide: <P, X, R, ConnectorRequirements = never>(
 		isMember: IsMember<P>,
 		canDecide: CanDecide<P, X>,
 		approvalId: string,
@@ -269,10 +270,14 @@ export interface ControlsInterface {
 			call: ApprovalCall,
 			executionNumber: number,
 		) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden, R>,
+		checkConnector?: (
+			call: ApprovalCall,
+			executionNumber: number,
+		) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden, ConnectorRequirements>,
 	) => Effect.Effect<
 		void,
 		ToolApprovalNotFound | ToolApprovalConflict | ResourceHidden | ActionForbidden,
-		R
+		R | ConnectorRequirements
 	>;
 	/**
 	 * Makes `steer.messageId`, the message the turn's asker just posted, which

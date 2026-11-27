@@ -36,6 +36,7 @@ export interface ReachesEnabledConnector<P, K> extends Proof<"ReachesEnabledConn
 	readonly project: string;
 	readonly revision: number;
 	readonly handle: string;
+	readonly connectorKind: ConnectorRow["kind"];
 }
 
 export interface CanUseConnector<P, K> extends Proof<"CanUseConnector", [P, K]> {
@@ -74,6 +75,7 @@ const connectorReach = <P, K>(principal: Named<P, Principal>, id: Named<K, strin
 				project: row.projectId,
 				revision: row.configurationRevision,
 				handle: row.handle,
+				connectorKind: row.kind,
 			},
 		);
 		return { row, reach, mayWrite };

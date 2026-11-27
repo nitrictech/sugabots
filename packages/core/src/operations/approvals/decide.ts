@@ -15,12 +15,17 @@ import { defineOperation } from "../operation.ts";
  * authority, in the decision's transaction; the turn then reads what became
  * of it.
  */
-export const makeDecide = <R>(
+export const makeDecide = <R, ConnectorRequirements>(
 	checkApprovalPermission: (
 		member: string,
 		call: Turns.ApprovalCall,
 		executionNumber: number,
 	) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden, R>,
+	checkConnector: (
+		member: string,
+		call: Turns.ApprovalCall,
+		executionNumber: number,
+	) => Effect.Effect<ToolApprovalConflict["reason"], ActionForbidden, ConnectorRequirements>,
 ) =>
 	defineOperation(approvalsContracts["approvals.decide"], (principal, input) =>
 		named(principal, input.toolCallId, (principal, call) =>
@@ -45,6 +50,7 @@ export const makeDecide = <R>(
 									}),
 								)
 							: checkApprovalPermission(isMember.member, call, executionNumber),
+					(call, executionNumber) => checkConnector(isMember.member, call, executionNumber),
 				);
 			}),
 		),

@@ -8,6 +8,7 @@ import type {
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Queue, Scope, Stream } from "effect";
 import { Accounts } from "../accounts/accounts.ts";
 import { chatServicesForTests } from "../chats/testing.ts";
+import { ConnectorCatalog } from "../chats/tools/connector-catalog.ts";
 import { noComputers } from "../computers/testing.ts";
 import type { RunEffect } from "../database/database.ts";
 import { EventBus } from "../database/events/bus.ts";
@@ -15,13 +16,14 @@ import { EventStore } from "../database/events/store.ts";
 import { runOnPostgres, type TestInfrastructure } from "../database/testing.ts";
 import { Email } from "../email/email.ts";
 import type { Principal } from "../principal.ts";
+import { ConnectorCalls } from "../providers/connectors/connector-calls.ts";
 import { Models } from "../providers/models/models.ts";
 import { unusedModel } from "../providers/models/testing.ts";
 import type { Egress } from "../providers/network/egress.ts";
 import { ServerSettings } from "../server-settings/server-settings.ts";
 import { Streams } from "../streams/streams.ts";
 import { unimplemented } from "../testing.ts";
-import { layer } from "./layer.ts";
+import { layer, layerNoDeps } from "./layer.ts";
 import { Operations } from "./registry.ts";
 
 /** Calls the operation `name` with `input` for `principal`, as one request, against the test database. */
@@ -73,6 +75,8 @@ export interface ServedOver {
 	readonly chats?: ChatServicesForTests;
 	/** The internet, as operations reach it; by default nothing, so any request dies. */
 	readonly egress?: Layer.Layer<Egress.Service>;
+	/** The connector catalog used in a case that checks live tools at approval. */
+	readonly connectorCatalog?: ConnectorCatalog.Interface;
 	/**
 	 * Stands in for the test infrastructure's server settings: for a server with
 	 * a content origin, or served at another address, which GitHub apps are made with.
@@ -219,6 +223,11 @@ export async function operationsForTests(over: ServedOver = {}): Promise<Operati
 	return Context.get(await buildOperationRegistries(over), Operations.Service);
 }
 
+const parkedConnectorCalls: ConnectorCatalog.Interface = {
+	...ConnectorCatalog.none,
+	checkApproval: () => Effect.succeed(true),
+};
+
 async function buildOperationRegistries(over: ServedOver) {
 	const bus = EventBus.inProcess();
 	const runOn = over.runOn ?? runOnPostgres;
@@ -236,9 +245,18 @@ async function buildOperationRegistries(over: ServedOver) {
 		over.eventStore ? Layer.succeed(EventStore.Service, over.eventStore) : EventStore.layer,
 		over.streamsTiming ? Layer.succeed(Streams.Timing, over.streamsTiming) : Layer.empty,
 	);
+	const approvalCatalog = over.connectorCatalog ?? (over.egress ? undefined : parkedConnectorCalls);
+	const registry = approvalCatalog
+		? layerNoDeps.pipe(
+				Layer.provide(Layer.succeed(ConnectorCalls.Service, ConnectorCalls.from(approvalCatalog))),
+			)
+		: layer;
 	return runOn(
 		Effect.gen(function* () {
-			return yield* Layer.buildWithScope(layer.pipe(Layer.provide(outside)), yield* Scope.make());
+			return yield* Layer.buildWithScope(
+				registry.pipe(Layer.provide(outside)),
+				yield* Scope.make(),
+			);
 		}),
 	);
 }

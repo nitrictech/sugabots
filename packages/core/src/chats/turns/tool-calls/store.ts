@@ -3,7 +3,7 @@ export * as ToolCallStore from "./store.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { FileWritten, JsonValue, ToolApprovalStatus, ToolCallPart } from "@sugabots/contracts";
 import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
-import type { UserText } from "@sugabots/errors";
+import { type UserText, userText } from "@sugabots/errors";
 import { and, desc, eq, inArray, isNotNull, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
@@ -426,13 +426,14 @@ export const make = Effect.gen(function* () {
 									eq(toolCall.status, "running"),
 								),
 							);
-							if (!row || !sameCallAsApproved(row, approval))
+							if (!row || !sameCallForApproval(row, approval))
 								return yield* Effect.die(new Error("Tool call cannot be reopened for approval"));
 							const updated = yield* query((db) =>
 								db
 									.update(toolCall)
 									.set({
 										approvalId: approval.approvalId,
+										...bindingColumns(approval.binding),
 										approvalStatus: "pending",
 										approvalClosedBecause: null,
 										approvalReason: approval.reason ?? null,
@@ -549,7 +550,10 @@ export const make = Effect.gen(function* () {
 								const failed = yield* apply(
 									row,
 									ToolCallEvent.Abandon({
-										userMessage: APPROVAL_NO_LONGER_APPLIES,
+										userMessage:
+											refusal === "connectorOff"
+												? userText`The tool was not run because the connector or its tool is now off.`
+												: APPROVAL_NO_LONGER_APPLIES,
 										closedBecause: refusal,
 									}),
 								);
@@ -811,7 +815,20 @@ function refusedExecution(reason: string): BeganExecution {
 	return { _tag: "Refused", reason };
 }
 
-/** sameCallAsApproved reports whether the call about to run is the one a member saw and allowed. */
+/** sameCallForApproval compares the input and tool, even when it needs approval under a new revision. */
+function sameCallForApproval(
+	row: ToolCallRow,
+	input: { tool: string; input: unknown; binding: ApprovalBinding },
+): boolean {
+	const binding = bindingColumns(input.binding);
+	return (
+		row.tool === input.tool &&
+		row.connectorId === binding.connectorId &&
+		row.remoteToolName === binding.remoteToolName &&
+		sameExecutionInput({ ...row, executionInput: row.executionInput ?? row.input }, input.input)
+	);
+}
+
 function sameCallAsApproved(
 	row: ToolCallRow,
 	input: {
@@ -821,16 +838,8 @@ function sameCallAsApproved(
 	},
 ): boolean {
 	return (
-		row.tool === input.tool &&
-		isDeepStrictEqual(
-			{
-				connectorId: row.connectorId,
-				connectorRevision: row.connectorRevision,
-				remoteToolName: row.remoteToolName,
-			},
-			bindingColumns(input.binding),
-		) &&
-		sameExecutionInput({ ...row, executionInput: row.executionInput ?? row.input }, input.input)
+		row.connectorRevision === bindingColumns(input.binding).connectorRevision &&
+		sameCallForApproval(row, input)
 	);
 }
 

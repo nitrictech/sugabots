@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ModelRequests } from "@sugabots/core/accounting/model-requests";
 import { startBotChat } from "@sugabots/core/chats/chats/testing";
-import type { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
+import { ConnectorCatalog } from "@sugabots/core/chats/tools/connector-catalog";
 import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import { aChatWithConnectorAwaitingReply } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
@@ -490,6 +490,7 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's replies, against Postgres",
 			return new Promise<void>(() => {});
 		});
 		const neverClose: ConnectorCatalog.Interface = {
+			...ConnectorCatalog.none,
 			forTurn: (...args) =>
 				Effect.map(opened.forTurn(...args), (tools) => ({ ...tools, close: closing })),
 		};

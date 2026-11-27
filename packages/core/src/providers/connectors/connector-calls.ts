@@ -1,6 +1,7 @@
 export * as ConnectorCalls from "./connector-calls.ts";
 
 import { safeValidateTypes } from "@ai-sdk/provider-utils";
+import { connectorToolKey } from "@sugabots/contracts";
 import { ApprovalNeeded, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { asSchema } from "ai";
 import { Context, Duration, Effect, Layer, Option } from "effect";
@@ -21,6 +22,11 @@ import { processLayer, Tier } from "../../tiers.ts";
 import { type ConnectorSessions, connectorSessions } from "./connector-sessions.ts";
 
 export interface Interface {
+	readonly checkApproval: ConnectorCatalog.Interface["checkApproval"];
+	readonly refreshApprovedTool: <P, T, K, X>(
+		turn: RunsTurn<P, T>,
+		approved: Approved<NoInfer<P>, X, [T, K], "connectors.callTool">,
+	) => Effect.Effect<boolean, ResourceHidden | ApprovalNeeded>;
 	readonly offer: (
 		principal: BotPrincipal,
 		projects: ConnectorCatalog.TurnProjects,
@@ -72,7 +78,9 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
 export const layer = layerNoDeps.pipe(Layer.provide(ConnectorCatalog.layer));
 
 type Catalog = Omit<ConnectorCatalog.ConnectorToolSet, "tools" | "close"> & {
-	readonly tools: Readonly<Record<string, Omit<OfferedTool, "tool" | "resolveApprovalTargets">>>;
+	readonly tools: Readonly<
+		Record<string, Omit<OfferedTool, "tool" | "resolveApprovalTargets" | "refreshForApproval">>
+	>;
 };
 
 interface TurnConnectors {
@@ -93,6 +101,30 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 	};
 
 	return Service.of({
+		checkApproval: discovery.checkApproval,
+		refreshApprovedTool: (running, approved) =>
+			Effect.gen(function* () {
+				const principal = running.principal.value;
+				const binding = approved.connectorCall;
+				if (
+					approved.decidedBy === null ||
+					!binding ||
+					(principal._tag !== "BotForAsker" && principal._tag !== "AutomationRun")
+				)
+					return false;
+				const turn = turns.get(principal.turn);
+				const offered = find(principal, binding.connectorId, binding.tool);
+				if (!offered?.refreshForApproval || !turn) return false;
+				const fresh = yield* offered.refreshForApproval();
+				if (!fresh || turns.get(principal.turn) !== turn)
+					return yield* new ResourceHidden({ resource: "connector" });
+				turn.tools = {
+					...turn.tools,
+					[connectorToolKey(fresh.handle, fresh.remoteToolName)]: fresh,
+				};
+				if (fresh.connectorRevision !== binding.revision) return yield* new ApprovalNeeded();
+				return true;
+			}),
 		offer: (principal, projects, side) =>
 			Effect.gen(function* () {
 				let turn = turns.get(principal.turn);
@@ -248,10 +280,15 @@ function describeCatalog({
 		...catalog,
 		tools: Object.fromEntries(
 			Object.entries(tools).map(
-				([key, { tool: _, resolveApprovalTargets: _resolve, ...description }]) => [
+				([
 					key,
-					description,
-				],
+					{
+						tool: _,
+						resolveApprovalTargets: _resolve,
+						refreshForApproval: _refresh,
+						...description
+					},
+				]) => [key, description],
 			),
 		),
 	};

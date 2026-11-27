@@ -22,7 +22,7 @@ import {
 import { turnFacts } from "../authentication/turn-facts.ts";
 import { reachesChatFor } from "../authorization/access.ts";
 import { offerAugmentationTools } from "../chats/tools/augmentations.ts";
-import { offeredTool } from "../chats/tools/connector-catalog.ts";
+import { ConnectorCatalog, offeredTool } from "../chats/tools/connector-catalog.ts";
 import { Turns } from "../chats/turns/turns.ts";
 import { Computers } from "../computers/computers.ts";
 import { inMemoryComputers } from "../computers/testing.ts";
@@ -718,6 +718,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				),
 			);
 			const calls = ConnectorCalls.from({
+				...ConnectorCatalog.none,
 				forTurn: () =>
 					Effect.succeed({
 						tools,
@@ -971,6 +972,7 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				side,
 			);
 			const calls = ConnectorCalls.from({
+				...ConnectorCatalog.none,
 				forTurn: () =>
 					Effect.succeed({
 						tools,
