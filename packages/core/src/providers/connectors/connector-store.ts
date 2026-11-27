@@ -7,6 +7,7 @@ import { handleFromName } from "@sugabots/contracts";
 import {
 	ConnectorAddressChanged,
 	ConnectorNameTaken,
+	ConnectorNotFound,
 	UnknownConnectorTool,
 } from "@sugabots/contracts/errors/connectors";
 import type { UserText } from "@sugabots/errors";
@@ -19,6 +20,7 @@ import {
 	connector,
 	type GitHubConnectorRepository,
 	type GitHubConnectorSettings,
+	projectBot,
 	projectBotConnector,
 	type ToolAccess,
 } from "../../database/schema.ts";
@@ -140,7 +142,7 @@ export interface Interface {
 		readonly connectorId: string;
 		readonly on: boolean;
 		readonly addressRevision?: number | undefined;
-	}) => Effect.Effect<void, ConnectorAddressChanged>;
+	}) => Effect.Effect<void, ConnectorAddressChanged | ConnectorNotFound>;
 	/**
 	 * Records what a test of the configuration last updated at `testedAt`
 	 * found, unless the connector has been reconfigured since.
@@ -529,6 +531,14 @@ export const make = Effect.gen(function* () {
 						}
 						if (current.addressRevision !== addressRevision)
 							return yield* new ConnectorAddressChanged();
+						const [placed] = yield* query((db) =>
+							db
+								.select({ botId: projectBot.botId })
+								.from(projectBot)
+								.where(and(eq(projectBot.projectId, projectId), eq(projectBot.botId, botId)))
+								.for("key share"),
+						);
+						if (!placed) return yield* new ConnectorNotFound();
 						const turnedOn = { botId, addressRevision };
 						yield* query((db) =>
 							db

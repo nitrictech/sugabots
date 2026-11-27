@@ -90,30 +90,3 @@ export const readCommittedTransaction = <A, E, R>(body: Effect.Effect<A, E, R>) 
 			body,
 		),
 	);
-
-/**
- * Runs a write in a transaction
- * that first takes the workspace's row `FOR SHARE`, so it waits for a change
- * to who reaches what and sees it, and is refused in a workspace being
- * deleted. If a transaction is already open, it must use `READ COMMITTED`.
- * The workspace share precedes any turn locks.
- */
-export const underWorkspaceShare = <A, E, R>(workspaceId: string, body: Effect.Effect<A, E, R>) =>
-	Effect.gen(function* () {
-		if (!isUuid(workspaceId)) return yield* new ResourceHidden({ resource: "workspace" });
-		const outer = yield* Effect.serviceOption(Transaction);
-		const withShare = Option.isSome(outer) ? transaction : readCommittedTransaction;
-		return yield* withShare(
-			Effect.gen(function* () {
-				const [locked] = yield* query((db) =>
-					db
-						.select({ deleting: workspaceTable.deleting })
-						.from(workspaceTable)
-						.where(eq(workspaceTable.id, workspaceId))
-						.for("share"),
-				);
-				if (!locked || locked.deleting) return yield* new ResourceHidden({ resource: "workspace" });
-				return yield* body;
-			}),
-		);
-	});
