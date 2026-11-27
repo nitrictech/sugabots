@@ -68,6 +68,9 @@ module.exports = {
 	],
 	options: {
 		// TypeScript 7 has no JavaScript API to parse with, so Babel strips the types.
+		// dependency-cruiser only scans .ts files when it finds a TypeScript or swc it
+		// supports, which is why `@swc/core` is a dev dependency though nothing calls it:
+		// without it, every .ts file is skipped and the rules pass having checked nothing.
 		babelConfig: { fileName: "lint/dependency-cruiser.babel.json" },
 		doNotFollow: { path: "node_modules" },
 		exclude: { path: "(^|/)(node_modules|dist|build|storybook-static)/" },
