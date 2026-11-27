@@ -134,7 +134,8 @@ function ProjectDetails({ project }: { project: Project }) {
 	const [confirmingPublic, setConfirmingPublic] = useState(false);
 	const isPublic = project.visibility === "public";
 	// The server refuses to make a project with private bots public, so the switch says so first.
-	const privateBotNames = (useProjectBots(project.id).data ?? [])
+	const projectBots = useProjectBots(project.id).data ?? [];
+	const privateBotNames = projectBots
 		.filter((bot) => bot.visibility === "private")
 		.map((bot) => bot.name);
 	const publicBlocked = !isPublic && privateBotNames.length > 0;
@@ -171,6 +172,7 @@ function ProjectDetails({ project }: { project: Project }) {
 					<SettingsControlRow label="Lead bot">
 						<LeadBotPicker
 							value={project.leadBotId}
+							currentLead={projectBots.find((bot) => bot.id === project.leadBotId)}
 							privateProject={project.visibility === "private"}
 							disabled={relead.isPending}
 							onChange={(leadBotId) => void relead.mutateAsync({ leadBotId }).catch(() => {})}

@@ -25,12 +25,18 @@ export function canBeInProject(bot: Bot, project: { readonly private: boolean })
  */
 export function LeadBotPicker({
 	value,
+	currentLead,
 	onChange,
 	privateProject,
 	disabled = false,
 }: {
 	/** The lead bot's id; null while none is chosen. */
 	value: string | null;
+	/**
+	 * The lead bot as the project lists it, so it shows even when it is a
+	 * private bot the viewer doesn't reach and so can't pick.
+	 */
+	currentLead?: Bot;
 	onChange: (botId: string) => void;
 	/** Whether the project is private, so a private bot may lead it. */
 	privateProject: boolean;
@@ -38,7 +44,9 @@ export function LeadBotPicker({
 }) {
 	const { bots } = useBots();
 	const leadable = bots?.filter((bot) => canBeInProject(bot, { private: privateProject })) ?? [];
-	const lead = leadable.find((bot) => bot.id === value);
+	const lead =
+		leadable.find((bot) => bot.id === value) ??
+		(currentLead?.id === value ? currentLead : undefined);
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger
