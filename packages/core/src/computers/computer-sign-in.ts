@@ -12,17 +12,22 @@ import type { Computers } from "./computers.ts";
  * `providers/connectors/github/github-sign-in.ts`).
  */
 export interface Interface {
-	/** The project's sign-ins now. One that can't be had is left out, and logged. */
+	/** Selects the current sign-in without asking its source for credentials. */
 	readonly forProject: (project: {
 		workspaceId: string;
 		projectId: string;
-	}) => Effect.Effect<SignedIn>;
+	}) => Effect.Effect<Source | undefined>;
 }
 
 export class Service extends Context.Service<Service, Interface>()(
 	"@sugabots/core/ComputerSignIn",
 ) {
 	declare readonly [Tier]: "process";
+}
+
+export interface Source {
+	readonly revision: string;
+	readonly load: Effect.Effect<SignedIn>;
 }
 
 /** Sign-ins for a project's computer, and when they must be replaced. */
@@ -37,6 +42,6 @@ export const NOT_SIGNED_IN: Readonly<SignedIn> = { credentials: [], expiresAt: u
 /** For a project whose computer is signed in to nothing. */
 export const none = processLayer(
 	Layer.succeed(Service, {
-		forProject: () => Effect.succeed(NOT_SIGNED_IN),
+		forProject: () => Effect.undefined,
 	}),
 );

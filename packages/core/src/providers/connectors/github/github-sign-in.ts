@@ -12,19 +12,7 @@ import { GitHubConnectors } from "./github-connectors.ts";
  */
 export const make = Effect.gen(function* () {
 	const connectors = yield* GitHubConnectors.Service;
-	return ComputerSignIn.Service.of({
-		forProject: (project) =>
-			connectors
-				.signInComputer(project)
-				.pipe(
-					Effect.catch((failure) =>
-						Effect.as(
-							Effect.logWarning("Couldn't get a read token for a project's GitHub app", failure),
-							ComputerSignIn.NOT_SIGNED_IN,
-						),
-					),
-				),
-	});
+	return ComputerSignIn.Service.of({ forProject: connectors.signInComputer });
 });
 
 export const layer = processLayer(Layer.effect(ComputerSignIn.Service, make)).pipe(

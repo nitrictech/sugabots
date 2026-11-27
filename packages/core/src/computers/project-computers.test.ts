@@ -99,7 +99,10 @@ async function startWorld(providerOptions: Parameters<typeof inMemoryComputers>[
 			Effect.provide([
 				Layer.succeed(ComputerSignIn.Service, {
 					forProject: ({ projectId }) =>
-						Effect.sync(() => signedInAs.get(projectId) ?? ComputerSignIn.NOT_SIGNED_IN),
+						Effect.sync(() => {
+							const signedIn = signedInAs.get(projectId);
+							return signedIn && { revision: projectId, load: Effect.succeed(signedIn) };
+						}),
 				}),
 				unimplemented(Egress.Service, { providers: { for: () => registryFetch } }),
 			]),

@@ -12,6 +12,7 @@ import {
 	ConfigProvider,
 	Duration,
 	Effect,
+	Fiber,
 	Layer,
 	ManagedRuntime,
 	Option,
@@ -33,12 +34,18 @@ import { BlobDeletions } from "../blob-store/deletions.ts";
 import { fromFileSystem } from "../blob-store/implementations/filesystem.ts";
 import { Compaction, CompactionRequest } from "../chats/compaction/compaction.workflow.ts";
 import { DesktopViewer } from "../chats/tools/browser/viewer.ts";
+import { TurnComputers } from "../chats/tools/computer/turn-computers.ts";
 import { TurnRequests } from "../chats/turns/turns.ts";
+import { ComputerProviderStore } from "../computers/computer-provider-store.ts";
 import { ComputerSignIn } from "../computers/computer-sign-in.ts";
+import { ProjectComputers } from "../computers/project-computers.ts";
+import { inMemoryComputers } from "../computers/testing.ts";
 import { ChatFileStore } from "../files/chat-file-store.ts";
 import { Files } from "../files/files.ts";
 import { Ids } from "../ids/ids.ts";
+import { runCommand } from "../operations/computers/use-computer.ts";
 import { viewDesktop } from "../operations/computers/view-desktop.ts";
+import { setOnInProject } from "../operations/connectors/set-on-in-project.ts";
 import { servedOperations } from "../operations/testing.ts";
 import { usageMonth } from "../operations/workspace/usage-month.ts";
 import type { Principal } from "../principal.ts";
@@ -46,6 +53,9 @@ import { proveCanReachConnector } from "../proofs/can-use-connector.ts";
 import { proveCanRunAutomations } from "../proofs/project-permissions.ts";
 import { named } from "../proofs/proof.ts";
 import { proveReachesProject } from "../proofs/reaches-project.ts";
+import { ConnectorSignIn } from "../providers/connectors/connector-sign-in.ts";
+import { ConnectorStore } from "../providers/connectors/connector-store.ts";
+import { Connectors } from "../providers/connectors/connectors.ts";
 import { encryptAppCredential } from "../providers/connectors/github/credential.ts";
 import {
 	egressToGitHub,
@@ -275,7 +285,13 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			const signIn = (projectId: string) =>
 				upgraded.run(
 					ComputerSignIn.Service.use((signIns) =>
-						signIns.forProject({ workspaceId: legacy.workspace, projectId }),
+						signIns
+							.forProject({ workspaceId: legacy.workspace, projectId })
+							.pipe(
+								Effect.flatMap(
+									(signIn) => signIn?.load ?? Effect.succeed(ComputerSignIn.NOT_SIGNED_IN),
+								),
+							),
 					).pipe(
 						Effect.provide(GitHubSignIn.layer.pipe(Layer.provide(egressToGitHub(github.fetch)))),
 					),
@@ -1089,6 +1105,116 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				);
 			}
 			expect(await upgraded.read(keyNow(legacyFiles[0] as LegacyFile, new Map()))).toBe("plan");
+		});
+
+		it("withdraws the upgraded computer's sign-in before another tool can use it", async () => {
+			const projectId = legacy.pods.family;
+			const chatId = legacy.threads.trip;
+			const botId = legacy.bots.planner;
+			const workspaceId = legacy.workspace;
+			const provider = inMemoryComputers();
+			const egress = egressToGitHub(github.fetch);
+			const projectComputers = ProjectComputers.layerNoDeps.pipe(
+				Layer.provide([provider.layer, ComputerProviderStore.layer, GitHubSignIn.layer]),
+			);
+			const turnComputers = TurnComputers.layerNoDeps.pipe(
+				Layer.provide([
+					projectComputers,
+					provider.layer,
+					ComputerProviderStore.layer,
+					ChatFileStore.layer,
+				]),
+			);
+			const connectors = Connectors.layerNoDeps.pipe(
+				Layer.provide([projectComputers, ConnectorStore.layer, ConnectorSignIn.layer]),
+			);
+
+			const [asked] = await upgraded.run(
+				query((db) =>
+					db
+						.insert(message)
+						.values({
+							chatId,
+							authorMemberId: legacy.members.sam,
+							status: "complete",
+							parts: [],
+							content: "Check the checkout",
+						})
+						.returning({ id: message.id }),
+				),
+			);
+			if (!asked) throw new Error("Missing message");
+			const [row] = await upgraded.run(
+				query((db) =>
+					db
+						.insert(turn)
+						.values({
+							chatId,
+							botId,
+							triggerMessageId: asked.id,
+							...askerColumns({ chatId, botId, triggerMessageId: asked.id }),
+							status: "running",
+							model: "m",
+							reason: "mention",
+							startedAt: new Date(),
+						})
+						.returning({ id: turn.id }),
+				),
+			);
+			if (!row) throw new Error("Missing turn");
+			const member = await upgraded.signIn(legacy.members.sam);
+			await upgraded.run(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const authenticator = yield* TurnAuthentication.make;
+						const principal = yield* authenticator.authenticate(row.id);
+						const computers = yield* TurnComputers.Service;
+						yield* computers.forStep(principal, {
+							workspaceId,
+							projectId,
+							chatId,
+							botId,
+							turnId: row.id,
+							color: "orange",
+							naturalBrowsing: false,
+							acceptsImages: false,
+						});
+						const command = runCommand.run(
+							principal,
+							{ command: "pwd", timeout_seconds: 30 },
+							{ kind: "request" },
+						);
+						expect(yield* command).toMatchObject({ exitCode: 0 });
+						const [machine] = provider.computers();
+						if (!machine) throw new Error("No computer was opened");
+						expect(machine.networks.at(-1)?.credentials).toHaveLength(1);
+
+						const refresh = provider.holdOpening(machine.id);
+						const switchingOff = yield* Effect.forkScoped(
+							setOnInProject.run(
+								member,
+								{
+									projectId,
+									connectorId: legacy.familyGitHubConnector,
+									on: false,
+								},
+								{ kind: "request" },
+							),
+						);
+						yield* Effect.addFinalizer(() => Effect.sync(refresh.release));
+						const started = yield* Effect.raceFirst(
+							Effect.promise(() => refresh.started(1)).pipe(Effect.as(true)),
+							Fiber.join(switchingOff).pipe(Effect.as(false)),
+						);
+						expect(started).toBe(true);
+						expect(yield* command).toMatchObject({ status: "failed" });
+						refresh.release();
+						expect(yield* Fiber.join(switchingOff)).toMatchObject({ on: false });
+						expect(machine.networks.at(-1)?.credentials).toEqual([]);
+						expect(yield* command).toMatchObject({ exitCode: 0 });
+					}),
+				).pipe(Effect.provide([turnComputers, connectors]), Effect.provide(egress)),
+			);
 		});
 	},
 );

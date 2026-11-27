@@ -361,6 +361,7 @@ export const make = Effect.gen(function* () {
 						where.connectorId,
 					);
 					if (!row) return yield* new ConnectorNotFound();
+					if (!on && row.shown.kind === "github") yield* computers.applyNetwork(where);
 					return row.shown;
 				}),
 			),

@@ -119,6 +119,12 @@ export interface Interface {
 		provider: ComputerProviderStore.Configured,
 		holder: Holder,
 	) => Effect.Effect<Opened, Computers.Unavailable>;
+	/** Checks that the opened machine has the sign-in its project allows now. */
+	readonly checkSignIn: (
+		project: Project,
+		provider: ComputerProviderStore.Configured,
+		opened: Opened,
+	) => Effect.Effect<void, Computers.Unavailable>;
 	/**
 	 * Extends `holder`'s leases, and starts signing their computers in afresh when their
 	 * credentials are about to expire. Nothing happens if it has none.
@@ -250,6 +256,13 @@ export const make = Effect.gen(function* () {
 	// When each project's computer must be signed in again, from when it last was by
 	// this process. Another process's computers are signed in on first renewal.
 	const signInDue = new Map<string, number>();
+	const appliedSignIn = new Map<
+		string,
+		{
+			readonly machine: Computers.ComputerId;
+			readonly revision: string | undefined;
+		}
+	>();
 
 	// What each image's tag named when its registry was last asked, and until when that is relied on.
 	const tagged = new Map<string, { pinned: string | undefined; until: number }>();
@@ -301,14 +314,19 @@ export const make = Effect.gen(function* () {
 	 */
 	const applyNetwork = (project: Project, computer: Computers.Computer, at: Computers.Provider) =>
 		Effect.gen(function* () {
+			const source =
+				at.capabilities.credentials === "none" ? undefined : yield* signIns.forProject(project);
 			const [reach, signedIn] = yield* Effect.all([
 				reachOf(project, at),
-				signIns.forProject(project),
+				source?.load ?? Effect.succeed(ComputerSignIn.NOT_SIGNED_IN),
 			]);
 			yield* computer.setNetwork({
 				reach,
 				credentials: fittedTo(at.capabilities.credentials, signedIn.credentials),
 			});
+			if (at.capabilities.credentials !== "none") {
+				appliedSignIn.set(project.projectId, { machine: computer.id, revision: source?.revision });
+			}
 			if (signedIn.expiresAt === undefined) {
 				signInDue.delete(project.projectId);
 				return;
@@ -1408,9 +1426,38 @@ export const make = Effect.gen(function* () {
 						if (!result) continue;
 						const record = yield* lease(project, holder, result.computer.id);
 						if (!record) continue;
-						yield* applyNetwork(project, result.computer, computers.forAccess(provider.access));
-						return { ...result, record } satisfies Opened;
+						const { value: ready } = yield* withComputerIntent(
+							sameComputer({
+								id: record,
+								computerProviderId: provider.id,
+								providerComputerId: result.computer.id,
+							}),
+							() => isNull(computerTable.sleptAt),
+							() =>
+								applyNetwork(project, result.computer, computers.forAccess(provider.access)).pipe(
+									Effect.as(true),
+									Effect.uninterruptible,
+								),
+						).pipe(Effect.catchTag("ClaimLost", () => Effect.succeed({ value: undefined })));
+						if (ready) return { ...result, record } satisfies Opened;
 					}
+				}),
+			),
+
+		checkSignIn: (project, provider, opened) =>
+			operation(
+				"checkSignIn",
+				Effect.gen(function* () {
+					if (computers.forAccess(provider.access).capabilities.credentials === "none") return;
+					const source = yield* signIns.forProject(project);
+					const applied = appliedSignIn.get(project.projectId);
+					if (applied?.machine === opened.computer.id && applied.revision === source?.revision)
+						return;
+					return yield* new Computers.Unavailable({
+						provider: provider.access.provider,
+						reason: userText`The computer's sign-in is being updated. Try again shortly.`,
+						cause: "The computer's sign-in does not match the project settings",
+					});
 				}),
 			),
 

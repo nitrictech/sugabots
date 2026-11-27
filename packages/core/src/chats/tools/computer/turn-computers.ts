@@ -239,7 +239,14 @@ export const make = Effect.gen(function* () {
 					Effect.tap(({ computer }) => prepareFolders(computer, place, provider.access.provider)),
 				);
 			const opening = openOncePerTurn(() => run(prepared, { signal: stepEnded }));
-			const computer: TurnComputer = { open: opening, run };
+			const computer: TurnComputer = {
+				run,
+				open: async () => {
+					const opened = await opening();
+					await run(projectComputers.checkSignIn(project, provider, opened));
+					return opened;
+				},
+			};
 			const browser = browserSession(run, place, turn);
 			yield* Effect.addFinalizer(() =>
 				Effect.tryPromise(() => browser.close()).pipe(
@@ -283,7 +290,7 @@ export const make = Effect.gen(function* () {
 							),
 						);
 						if (!usable) throw new ComputerUseEnded();
-						return opening();
+						return computer.open();
 					},
 				},
 				signsIn: at.capabilities.credentials !== "none",

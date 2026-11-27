@@ -89,9 +89,7 @@ export interface Interface {
 	/** The GitHub app owned by the project. */
 	readonly forProject: (project: Project) => Effect.Effect<Connected | undefined>;
 	/** Read-only Git sign-in for the project's computer. */
-	readonly signInComputer: (
-		project: Project,
-	) => Effect.Effect<ComputerSignIn.SignedIn, GitHubRequestFailed>;
+	readonly signInComputer: (project: Project) => Effect.Effect<ComputerSignIn.Source | undefined>;
 	readonly forConnector: <P, K>(
 		reach: ReachesEnabledConnector<P, K>,
 	) => Effect.Effect<Connected | undefined>;
@@ -261,9 +259,24 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const connected = connectedTo(yield* findGitHubConnectorForComputer(project));
 					if (!connected || connected.repositories.length === 0) {
-						return ComputerSignIn.NOT_SIGNED_IN;
+						return undefined;
 					}
-					return yield* connected.computerSignIn();
+					return {
+						revision: `${connected.connector.id}/${connected.connector.configurationRevision}`,
+						load: connected
+							.computerSignIn()
+							.pipe(
+								Effect.catch((failure) =>
+									Effect.as(
+										Effect.logWarning(
+											"Couldn't get a read token for a project's GitHub app",
+											failure,
+										),
+										ComputerSignIn.NOT_SIGNED_IN,
+									),
+								),
+							),
+					};
 				}),
 			),
 
