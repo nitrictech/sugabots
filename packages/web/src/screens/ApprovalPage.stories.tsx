@@ -73,11 +73,11 @@ const answerable = request("01", "awaiting_approval", {
 });
 const stopped = request("02", "failed", pending);
 const answered: AnsweredApproval = { ...request("03", "failed", denied), answer: denied };
-const brief = request("06", "awaiting_approval", pending);
-const briefRequest: ApprovalRequest = {
-	...brief,
+const changedBriefBase = request("07", "awaiting_approval", pending);
+const changedBrief: ApprovalRequest = {
+	...changedBriefBase,
 	call: {
-		...brief.call,
+		...changedBriefBase.call,
 		tool: "start_chat",
 		input: { title: "Draft the report", brief: "Summarize the launch.", with: "@report-writer" },
 	},
@@ -86,9 +86,9 @@ const briefClosedReason =
 	"This approval was closed because the chat the bot wanted to start changed.";
 const closedAt = "2026-09-18T09:04:00.000Z";
 const closedBrief: AnsweredApproval = {
-	...briefRequest,
+	...changedBrief,
 	call: {
-		...briefRequest.call,
+		...changedBrief.call,
 		status: "failed",
 		error: briefClosedReason,
 		finishedAt: closedAt,
@@ -175,17 +175,17 @@ export const Answered = meta.story({
 /** A changed brief closes on Allow, and the reason stays visible on the request and in Approvals. */
 export const ClosedAfterAllow = meta.story({
 	globals: { theme: "light" },
-	render: at(briefRequest.call.id),
+	render: at(changedBrief.call.id),
 	loaders: [() => ({ closedRequest: Promise.withResolvers<void>() })],
 	beforeEach({ msw, loaded }) {
 		let closed = false;
 		msw.use(
 			http.get(`${API}/workspaces/:workspace/chats/approvals`, async () => {
-				if (!closed) return HttpResponse.json({ waiting: [briefRequest], answered: [] });
+				if (!closed) return HttpResponse.json({ waiting: [changedBrief], answered: [] });
 				await loaded.closedRequest.promise;
 				return HttpResponse.json({ waiting: [], answered: [closedBrief] });
 			}),
-			http.post(`${API}/tool-calls/${briefRequest.call.id}/approval`, () => {
+			http.post(`${API}/tool-calls/${changedBrief.call.id}/approval`, () => {
 				closed = true;
 				return HttpResponse.json({ _tag: "Conflict", message: briefClosedReason }, { status: 409 });
 			}),
