@@ -92,7 +92,7 @@ export function ChatFooter({
 				interrupt={
 					interruptible.length > 0
 						? {
-								label: interruptible.length === 1 ? "Interrupt the reply" : "Interrupt the replies",
+								label: interruptible.length === 1 ? "Interrupt reply" : "Interrupt replies",
 								pending: stopping,
 								onInterrupt: () => interrupt.mutate(interruptible),
 							}

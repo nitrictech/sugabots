@@ -466,7 +466,7 @@ describe("the workspace while the API is not answering", () => {
 	it("says it is trying again for as long as it is, and opens once the API answers", async () => {
 		client.api.workspaces.list.mockReturnValue(notAnswering());
 		mountDuringOutage();
-		await screen.findByText("Could not reach the API");
+		await screen.findByText("Could not reach Sugabots");
 
 		const checking = pendingAnswer();
 		client.api.workspaces.list.mockReturnValue(checking.effect);
@@ -1574,7 +1574,7 @@ describe("routes", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-		expect((await screen.findByRole("alert")).textContent).toContain("Could not reach the API");
+		expect((await screen.findByRole("alert")).textContent).toContain("Could not reach Sugabots");
 		expect(refresh).toHaveBeenCalledOnce();
 	});
 
@@ -2396,7 +2396,7 @@ describe("workspace settings", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-		expect((await screen.findByRole("alert")).textContent).toContain("Could not reach the API");
+		expect((await screen.findByRole("alert")).textContent).toContain("Could not reach Sugabots");
 		expect((name as HTMLInputElement).value).toBe("Nitric");
 		screen.getByRole("button", { name: "Continue" });
 	});

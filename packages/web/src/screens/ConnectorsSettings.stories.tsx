@@ -136,6 +136,27 @@ const meta = preview.meta({
 	render: () => <StoryApp path={projectPath} />,
 });
 
+export const ListLoadError = meta.story({
+	parameters: {
+		docs: { description: { story: "Retry loading connectors after the server did not answer." } },
+	},
+	beforeEach({ msw }) {
+		let requests = 0;
+		msw.use(
+			http.get(`${API}/projects/:projectId/connectors`, () => {
+				requests += 1;
+				return requests <= 2 ? HttpResponse.error() : HttpResponse.json([]);
+			}),
+		);
+	},
+	play: async ({ canvas }) => {
+		const retry = await canvas.findByRole("button", { name: "Try again" });
+		await expect(canvas.getByRole("alert")).toHaveTextContent("Could not load connectors");
+		await userEvent.click(retry);
+		await expect(await canvas.findByText("No connectors yet")).toBeVisible();
+	},
+});
+
 /**
  * Each connector with what its tools are set to, one set tool by tool with no
  * one setting chosen, the one that failed its check, the one waiting on a

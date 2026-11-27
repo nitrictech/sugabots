@@ -200,7 +200,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 			{may.delete && (
 				<SettingsDanger
 					label="Delete bot"
-					description="Its chats, automations and settings go with it."
+					description="This deletes its chats, files, connectors, automations and everything on its computer."
 					action="Delete"
 					onClick={() => setConfirmingDelete(true)}
 				/>
@@ -209,7 +209,7 @@ function BotSettings({ bot }: { bot: Bot }) {
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${bot.name}?`}
-				description="Its chats, automations and settings go with it. This can't be undone."
+				description="This deletes its chats, files, connectors, automations and everything on its computer. This can't be undone."
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={deleteBot}
@@ -746,7 +746,8 @@ function ToolRow({
 
 /** What each visibility means for who reaches a bot, as its settings say it. */
 const VISIBILITY_MEANINGS = {
-	public: "Everyone in the workspace can see it, talk to it and add it to projects",
+	public:
+		"Everyone in the workspace can talk to this public bot. Members who can manage a project's bot list can add it.",
 	private: "Only its members can see it and talk to it. It can join private projects only",
 } as const;
 
@@ -881,13 +882,14 @@ function BotMembers({ bot }: { bot: Bot }) {
 				isYou(member.memberId)
 					? {
 							title: `Remove yourself from ${bot.name}?`,
-							description: "You won't see it or its chats any more, unless a member adds you back.",
+							description:
+								"You'll lose access to this bot's own chats and files. You can still talk to it in private projects you belong to.",
 							confirmLabel: "Remove",
 						}
 					: {
 							title: `Remove ${member.name} from ${bot.name}?`,
 							description:
-								"They won't see it or its chats any more. You can add them back at any time.",
+								"They'll lose access to this bot's own chats and files. They can still talk to it in private projects they belong to.",
 							confirmLabel: "Remove",
 						}
 			}

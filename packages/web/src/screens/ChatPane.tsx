@@ -171,7 +171,7 @@ export function ChatPane({
 				{header}
 				{!opened.isPending && (
 					<EmptyState title="Could not load this chat">
-						The API did not answer. Reload this page to try again.
+						Sugabots did not answer. Reload this page to try again.
 					</EmptyState>
 				)}
 			</div>

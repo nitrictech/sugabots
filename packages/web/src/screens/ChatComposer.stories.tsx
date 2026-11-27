@@ -305,13 +305,13 @@ export const Sending = meta.story({
 /** While a bot replies, the stop button stands in Send's place until there is something to send. */
 export const WhileABotReplies = meta.story({
 	args: {
-		interrupt: { label: "Interrupt the reply", pending: false, onInterrupt: fn() },
+		interrupt: { label: "Interrupt reply", pending: false, onInterrupt: fn() },
 	},
 	play: async ({ args, canvas, userEvent }) => {
-		await userEvent.click(canvas.getByRole("button", { name: "Interrupt the reply" }));
+		await userEvent.click(canvas.getByRole("button", { name: "Interrupt reply" }));
 		await expect(args.interrupt?.onInterrupt).toHaveBeenCalled();
 		await userEvent.type(canvas.getByRole("textbox"), "Check the tests too");
-		await expect(canvas.queryByRole("button", { name: "Interrupt the reply" })).toBeNull();
+		await expect(canvas.queryByRole("button", { name: "Interrupt reply" })).toBeNull();
 		await expect(canvas.getByRole("button", { name: "Send message" })).toBeVisible();
 	},
 });
@@ -319,10 +319,10 @@ export const WhileABotReplies = meta.story({
 /** Once asked to stop, the stop button waits, disabled, for the replies to end. */
 export const Interrupting = meta.story({
 	args: {
-		interrupt: { label: "Interrupt the reply", pending: true, onInterrupt: fn() },
+		interrupt: { label: "Interrupt reply", pending: true, onInterrupt: fn() },
 	},
 	play: async ({ canvas }) => {
-		await expect(canvas.getByRole("button", { name: "Interrupt the reply" })).toBeDisabled();
+		await expect(canvas.getByRole("button", { name: "Interrupt reply" })).toBeDisabled();
 	},
 });
 

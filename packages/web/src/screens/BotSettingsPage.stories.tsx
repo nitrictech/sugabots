@@ -148,7 +148,12 @@ const meta = preview.meta({
 	tags: ["ai-generated"],
 	parameters: { layout: "fullscreen" },
 	beforeEach({ msw }) {
-		msw.use(...appHandlers({ models, bots }));
+		msw.use(
+			http.get(`${API}/workspaces/:workspace/search-provider/web-access`, () =>
+				HttpResponse.json({ enabled: false }),
+			),
+			...appHandlers({ models, bots }),
+		);
 	},
 	render: () => <StoryApp path={cardPath} />,
 });
@@ -196,8 +201,9 @@ export const Avatar = meta.story({
 
 /** The model, chosen in its profile from the models switched on for the workspace, each by its provider, the one in use checked. */
 export const ModelPage = meta.story({
-	play: async ({ canvas }) => {
-		await userEvent.click(await canvas.findByRole("button", { name: "Model: Claude Sonnet" }));
+	play: async ({ canvas, userEvent }) => {
+		const model = await canvas.findByRole("button", { name: "Model: Claude Sonnet" });
+		await userEvent.click(model);
 		const menu = await screen.findByRole("menu");
 		await expect(within(menu).getByRole("menuitemradio", { name: /^GPT-5/ })).toHaveAttribute(
 			"aria-checked",
@@ -207,6 +213,9 @@ export const ModelPage = meta.story({
 			within(menu).getByRole("menuitemradio", { name: /^Claude Sonnet/ }),
 		).toHaveAttribute("aria-checked", "true");
 		await expect(within(menu).getByText("OpenAI")).toBeInTheDocument();
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+		await expect(model).toHaveFocus();
 	},
 });
 
@@ -354,7 +363,7 @@ export const VisibilityForViewer = meta.story({
 	},
 	play: async ({ canvas }) => {
 		await expect(
-			await canvas.findByText(/^Everyone in the workspace can see it/),
+			await canvas.findByText(/^Everyone in the workspace can talk to this public bot/),
 		).toBeInTheDocument();
 		await expect(canvas.queryByRole("radiogroup", { name: "Visibility" })).toBeNull();
 		await expect(canvas.getByText("Public")).toBeInTheDocument();
@@ -386,7 +395,7 @@ export const RemovingYourself = meta.story({
 			name: `Remove yourself from ${growthDesk.name}?`,
 		});
 		await expect(
-			within(dialog).getByText(/You won't see it or its chats any more/),
+			within(dialog).getByText(/You'll lose access to this bot's own chats and files/),
 		).toBeInTheDocument();
 	},
 });

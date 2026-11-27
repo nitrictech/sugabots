@@ -26,7 +26,7 @@ const meta = preview.meta({
 /** The request never reached the API, as while a release restarts it. */
 export const Unreachable = meta.story({
 	play: async ({ canvas }) => {
-		await expect(canvas.getByText("Could not reach the API")).toBeInTheDocument();
+		await expect(canvas.getByText("Could not reach Sugabots")).toBeInTheDocument();
 		await expect(canvas.getByRole("button", { name: "Try again" })).toBeEnabled();
 	},
 });

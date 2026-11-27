@@ -89,7 +89,21 @@ export function ConnectorsSettings({
 	const projectId = resourceProjectId(owner);
 	const connectors = useConnectors(projectId);
 	if (connectors.isPending) return null;
-	if (connectors.isError) return <Alert>{failureMessage(connectors.error)}</Alert>;
+	if (connectors.isError) {
+		return (
+			<div className="flex flex-col items-start gap-2">
+				<Alert>Could not load connectors. {failureMessage(connectors.error)}</Alert>
+				<Button
+					variant="secondary"
+					size="sm"
+					disabled={connectors.isFetching}
+					onClick={() => void connectors.refetch()}
+				>
+					Try again
+				</Button>
+			</div>
+		);
+	}
 	const listed = connectors.data;
 	const taken = new Set(listed.map((one) => builtInConnectorFor(one.url)?.id));
 
@@ -99,7 +113,7 @@ export function ConnectorsSettings({
 			<SettingsGroup
 				label={"project" in owner ? `${ownerName(owner)}'s own` : undefined}
 				headingLevel={2}
-				note="Bots act as whoever connected each one. Open one to choose for each tool."
+				note="Bots use the credentials saved for each connector. Open a connector to choose what its tools can do."
 			>
 				{listed.map((one) => (
 					<ConnectorRow key={one.id} connector={one} owner={owner} canManage={canManage} />

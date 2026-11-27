@@ -339,7 +339,7 @@ describe("a bot's chat", () => {
 		);
 		mount(chatPage);
 		await screen.findByLabelText(`Message ${linear.name}`);
-		expect(screen.queryByRole("button", { name: "Interrupt the reply" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Interrupt reply" })).toBeNull();
 		cleanup();
 
 		answerChatWith(() =>
@@ -352,7 +352,7 @@ describe("a bot's chat", () => {
 		);
 		mount(chatPage);
 		const composer = await screen.findByLabelText(`Message ${linear.name}`);
-		fireEvent.click(await screen.findByRole("button", { name: "Interrupt the reply" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Interrupt reply" }));
 		await waitFor(() =>
 			expect(client.api.chats.interruptTurn).toHaveBeenCalledWith({
 				params: { chatId: chat.id, turnId: TURN },
@@ -361,7 +361,7 @@ describe("a bot's chat", () => {
 
 		// Something to send puts Send back, which steers the reply rather than stopping it.
 		writeDraft(composer, "Check the tests too");
-		expect(screen.queryByRole("button", { name: "Interrupt the reply" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Interrupt reply" })).toBeNull();
 		screen.getByRole("button", { name: "Send message" });
 	});
 

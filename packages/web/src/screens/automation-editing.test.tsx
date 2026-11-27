@@ -864,7 +864,7 @@ describe("a bot's automations", () => {
 			Effect.succeed({ automation: hourly.automation, secrets: [] }),
 		);
 		await openPanel(hourly);
-		const routine = await openTrigger(/^Custom schedule/);
+		const routine = await openTrigger(/^Custom routine/);
 
 		within(routine).getByText("15 */2 * * *");
 		expect(within(routine).getByRole("radio", { name: "Daily" }).getAttribute("aria-checked")).toBe(

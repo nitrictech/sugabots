@@ -255,7 +255,7 @@ function ProjectDetails({ project }: { project: Project }) {
 			{may.delete && (
 				<SettingsDanger
 					label="Delete project"
-					description="Removes its chats and files."
+					description="Deletes its chats, files, connectors, automations and everything on its computer."
 					action="Delete"
 					onClick={() => setConfirmingDelete(true)}
 				/>
@@ -264,7 +264,7 @@ function ProjectDetails({ project }: { project: Project }) {
 				open={confirmingDelete}
 				onOpenChange={setConfirmingDelete}
 				title={`Delete ${project.name}?`}
-				description="Its chats and files will be deleted. This can't be undone."
+				description="This deletes its chats, files, connectors, automations and everything on its computer. Its bots stay in the workspace. This can't be undone."
 				pending={remove.isPending}
 				error={remove.error ? failureMessage(remove.error) : undefined}
 				onDelete={deleteProject}

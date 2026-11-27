@@ -371,7 +371,7 @@ export function FileStageView({
 			<Stage label="File" icon={null} title="" onClose={onClose}>
 				{file === "failed" && (
 					<EmptyState title="No such file here">
-						It may have been removed, or the API did not answer.
+						It may have been removed, or Sugabots did not answer.
 					</EmptyState>
 				)}
 			</Stage>

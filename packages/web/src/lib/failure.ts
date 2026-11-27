@@ -2,7 +2,7 @@ import type { ApiFailure } from "@sugabots/contracts/http";
 import { isApiFailure } from "@sugabots/sdk";
 
 /** What a page says when a request it needed never reached the API. */
-export const API_DID_NOT_ANSWER = "The API did not answer. Reload this page to try again.";
+export const API_DID_NOT_ANSWER = "Sugabots did not answer. Reload this page to try again.";
 
 // biome-ignore lint/plugin/errors-implement-domain-error: The UI uses this signal while its workspace is loading.
 export class NotReadyError extends Error {
@@ -27,7 +27,7 @@ export function failureMessage(
 		return "Your workspace is not ready yet";
 	}
 	if (!isApiFailure(failure)) {
-		return "Could not reach the API";
+		return "Could not reach Sugabots";
 	}
 	return instead[failure._tag] ?? failure.message;
 }

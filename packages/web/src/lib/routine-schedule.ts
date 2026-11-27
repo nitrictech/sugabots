@@ -206,13 +206,13 @@ function readCron(expression: string): RoutineReading {
 	const [minute, hour, dayOfMonth, month, dayOfWeek, ...rest] = expression.split(/\s+/);
 	const written = (label: string): RoutineReading => ({ kind: "written", expression, label });
 	if (!minute || !hour || !dayOfWeek || dayOfMonth !== "*" || month !== "*" || rest.length > 0) {
-		return written("Custom schedule");
+		return written("Custom routine");
 	}
 	if (/^\d+$/.test(minute) && /^\d+-23$/.test(hour) && dayOfWeek === "*") {
 		const from = Number(hour.split("-")[0]) * 60 + Number(minute);
 		return written(`Every hour from ${formatTime(from)}`);
 	}
-	if (!/^\d+$/.test(minute) || !/^\d+(?:,\d+)*$/.test(hour)) return written("Custom schedule");
+	if (!/^\d+$/.test(minute) || !/^\d+(?:,\d+)*$/.test(hour)) return written("Custom routine");
 	const times = hour.split(",").map((each) => Number(each) * 60 + Number(minute));
 	// Only times a picked schedule can hold: each once, and no more than it allows.
 	if (
@@ -220,12 +220,12 @@ function readCron(expression: string): RoutineReading {
 		new Set(times).size < times.length ||
 		times.length > MAX_ROUTINE_TIMES
 	) {
-		return written("Custom schedule");
+		return written("Custom routine");
 	}
 	const base = { every: 1, times, startsOn: today() };
 	if (dayOfWeek === "*") return { kind: "picked", schedule: { repeat: "daily", ...base } };
 	const days = dayOfWeek === "1-5" ? WEEKDAYS : cronDays(dayOfWeek);
-	if (!days) return written("Custom schedule");
+	if (!days) return written("Custom routine");
 	return { kind: "picked", schedule: { repeat: "weekly", ...base, days } };
 }
 

@@ -14,9 +14,9 @@ describe("failureMessage", () => {
 	});
 
 	it("says a failure that never reached the API could not reach it, whatever it was", () => {
-		expect(failureMessage(new TypeError("Failed to fetch"))).toBe("Could not reach the API");
+		expect(failureMessage(new TypeError("Failed to fetch"))).toBe("Could not reach Sugabots");
 		expect(failureMessage(new TypeError("Failed to fetch"), { Conflict: "Taken" })).toBe(
-			"Could not reach the API",
+			"Could not reach Sugabots",
 		);
 	});
 
