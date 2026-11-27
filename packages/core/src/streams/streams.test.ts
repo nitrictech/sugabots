@@ -322,10 +322,11 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			),
 		);
 
-	const observeStartupSnapshot = async (requested: () => void) =>
+	const observeStartupSnapshot = async (requested: () => void, clock?: Clock.Clock) =>
 		(
 			await servedRegistry({
 				bus: Layer.succeed(EventBus.Service, bus),
+				clock,
 				eventStore: {
 					...stored,
 					latest(streams, signal) {
@@ -410,23 +411,19 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		const ed = await signedIn.member(world.ed);
 		const stream = chatStream(world.chat);
 		const since = (await stored.latest([stream])).get(stream);
+		if (since === undefined) throw new Error("The stream has no cursor");
+		const requestedSnapshot = Promise.withResolvers<void>();
+		const followDuringStartup = await observeStartupSnapshot(requestedSnapshot.resolve, clock);
 		const writer = holdStreamWriter(stream);
 		try {
 			await writer.held;
-			const outcome = await Promise.race([
-				follow(ed, "events.followChat", { chatId: world.chat, since }).then(async (opened) => {
-					try {
-						return await opened.next();
-					} finally {
-						await opened.close();
-					}
-				}),
-				new Promise((resolve) => {
-					const timer = setTimeout(() => resolve("still waiting"), 3_000);
-					onTestFinished(() => clearTimeout(timer));
-				}),
-			]);
-			expect(outcome).toBe("ended");
+			const starting = pastReady(followDuringStartup)(ed, "events.followChat", {
+				chatId: world.chat,
+				since,
+			});
+			await requestedSnapshot.promise;
+			await Effect.runPromise(clock.adjust("2 seconds"));
+			expect(await (await starting).next()).toBe("ended");
 		} finally {
 			await writer.release();
 		}
@@ -596,7 +593,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: live });
 	});
 
-	it("checkpoints 5,000 filtered events at startup before sending live events", async () => {
+	it("checkpoints multiple pages of filtered events at startup before sending live events", async () => {
 		const world = await staffed();
 		const erin = await signedIn.member(world.erin);
 		const stream = workspaceStream(world.workspace);
@@ -609,7 +606,7 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			streamEvent("chat.changed", { chatId: world.chat }),
 		);
 		await runOnPostgres(
-			transaction(outbox.publish(Array.from({ length: 5_000 }, () => ({ stream, event: hidden })))),
+			transaction(outbox.publish(Array.from({ length: 101 }, () => ({ stream, event: hidden })))),
 		);
 		const start = (await stored.latest([stream])).get(stream);
 		const { follow: followWithLiveEvent } = await servedRegistry({
@@ -643,31 +640,6 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 			since: checkpoint.seq,
 		});
 		expect(await reconnected.next()).toEqual(received);
-	});
-
-	it("resets at the startup cursor before replaying any of 5,001 missed events", async () => {
-		const world = await staffed();
-		const ed = await signedIn.member(world.ed);
-		const stream = workspaceStream(world.workspace);
-		const changed = Audience.forWorkspace(streamEvent("chat.changed", { chatId: world.chat }));
-		await commit(stream, changed);
-		const since = (await stored.latest([stream])).get(stream);
-		if (since === undefined) throw new Error("The stream has no cursor");
-		await runOnPostgres(
-			transaction(
-				outbox.publish(Array.from({ length: 5_001 }, () => ({ stream, event: changed }))),
-			),
-		);
-		const start = (await stored.latest([stream])).get(stream);
-		const resumed = await following(ed, "events.followWorkspace", {
-			workspace: world.workspace,
-			since,
-		});
-		expect(await resumed.next()).toEqual({ seq: start, event: streamEvent("reset") });
-
-		const live = streamEvent("chat.changed", { chatId: world.spareChat });
-		await commit(stream, Audience.forWorkspace(live));
-		expect(await resumed.next()).toEqual({ seq: expect.any(Number), event: live });
 	});
 
 	it("resets when pruning removes an event beyond the first replay page", async () => {

@@ -203,8 +203,6 @@ const READ_AHEAD = 16;
 /** How many stored events a stream, or a watcher, reads at a time. */
 const BATCH = 100;
 
-const MAX_REPLAY_EVENTS = 5_000;
-
 const SNAPSHOT_TIMEOUT = Duration.seconds(2);
 
 /**
@@ -542,10 +540,6 @@ export const make = Effect.gen(function* () {
 				const watcherControls = new Map(
 					[...feeds].filter(([feed]) => controlStreams.includes(feed)),
 				);
-				const replayControls = () =>
-					[...feeds]
-						.filter(([feed]) => feed !== stream)
-						.map(([stream, since]) => ({ stream, since, types: CONTROL_EVENT_TYPES }));
 				// Changes that committed before the snapshot may be behind its control cursors.
 				const first = yield* operation("follow", prove);
 				const outbox = yield* Queue.bounded<Delivery, Cause.Done>(READ_AHEAD);
@@ -560,9 +554,7 @@ export const make = Effect.gen(function* () {
 									{
 										stream,
 										cursor: since,
-										controls: replayControls(),
 										through: startPosition,
-										maxReplayEvents: MAX_REPLAY_EVENTS,
 									},
 									BATCH,
 									signal,
@@ -661,7 +653,6 @@ export const make = Effect.gen(function* () {
 							store.replayPage(
 								{
 									feed: { stream, since: position },
-									controls: replayControls(),
 									through: startPosition,
 								},
 								BATCH,

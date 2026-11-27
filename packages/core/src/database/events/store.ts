@@ -42,9 +42,9 @@ export interface Interface {
 	): Promise<Map<EventStream, StreamCursor>>;
 
 	/**
-	 * replayPage reads a batch through `page.through` if given. It returns
-	 * undefined if the starting position is unusable or the followed stream
-	 * has more than `page.maxReplayEvents` events in that range, when set.
+	 * replayPage reads one stream's events through `page.through` if given. It returns
+	 * undefined if the starting position is unusable or the first page's cursor
+	 * misses more than `MAX_REPLAY_EVENTS` events in that range.
 	 */
 	replayPage(
 		page: ReplayPage,
@@ -142,11 +142,11 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 
 			const rows = await run((db) => {
 				const withinLimit =
-					"cursor" in page && page.maxReplayEvents !== undefined
-						? sql`not exists (${firstEventOverReplayLimit(db, feed, page.maxReplayEvents, page.through)})`
+					"cursor" in page
+						? sql`not exists (${firstEventOverReplayLimit(db, feed, page.through)})`
 						: sql`true`;
 				const canReplay = sql`${feed.since} >= (${retentionBoundary(feed.stream)}) and ${validReplayPosition(page)} and ${withinLimit}`;
-				const batch = selectFeedRows(db, [feed, ...page.controls], limit, page.through);
+				const batch = selectFeedRows(db, [feed], limit, page.through);
 				// Materialize the check once. LIMIT 0 keeps Postgres from reading
 				// any payloads when the cursor needs a reset.
 				return db.execute<Omit<EventRow, "seq"> & { can_replay: boolean; seq: string | null }>(
@@ -188,6 +188,8 @@ export const make: Effect.Effect<Interface, never, Database> = Effect.gen(functi
 
 export const layer = processLayer(Layer.effect(Service, make));
 
+export const MAX_REPLAY_EVENTS = 5_000;
+
 const sequencePosition = sql`select case when is_called then last_value else 0 end from event_seq_seq`;
 
 const retentionBoundary = (stream: EventStream | SQL) =>
@@ -224,12 +226,7 @@ interface EventRow {
 	payload: StreamEvent;
 }
 
-function firstEventOverReplayLimit(
-	db: Executor,
-	feed: Feed,
-	maxReplayEvents: number,
-	through?: number,
-) {
+function firstEventOverReplayLimit(db: Executor, feed: Feed, through?: number) {
 	return db
 		.select({ seq: event.seq })
 		.from(event)
@@ -241,7 +238,7 @@ function firstEventOverReplayLimit(
 			),
 		)
 		.orderBy(asc(event.stream), asc(event.seq))
-		.offset(maxReplayEvents)
+		.offset(MAX_REPLAY_EVENTS)
 		.limit(1);
 }
 
@@ -308,11 +305,9 @@ export type ReplayPage = (
 	| {
 			readonly stream: EventStream;
 			readonly cursor: StreamCursor;
-			readonly maxReplayEvents?: number;
 	  }
 	| { readonly feed: Feed }
 ) & {
-	readonly controls: readonly Feed[];
 	readonly through?: number;
 };
 

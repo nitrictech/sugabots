@@ -79,9 +79,9 @@ export function inMemoryEventStore({
 			if ("feed" in page) {
 				return page.feed.since < (prunedThrough.get(page.feed.stream) ?? 0)
 					? undefined
-					: following([page.feed, ...page.controls], limit, page.through);
+					: following([page.feed], limit, page.through);
 			}
-			const { stream, cursor, controls } = page;
+			const { stream, cursor, through } = page;
 			const position = EventStore.afterCursor(cursor);
 			const boundary = prunedThrough.get(stream) ?? 0;
 			if (position < boundary) return undefined;
@@ -91,9 +91,13 @@ export function inMemoryEventStore({
 						position <= next &&
 						!rows.some((row) => row.stream === stream && row.seq >= boundary && row.seq <= position)
 					: rows.some((row) => row.seq === cursor && row.stream === stream);
-			return retained
-				? following([{ stream, since: position }, ...controls], limit, page.through)
-				: undefined;
+			if (!retained) return undefined;
+			const replay = following(
+				[{ stream, since: position }],
+				EventStore.MAX_REPLAY_EVENTS + 1,
+				through,
+			);
+			return replay.length > EventStore.MAX_REPLAY_EVENTS ? undefined : replay.slice(0, limit);
 		},
 
 		async prune(before) {

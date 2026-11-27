@@ -140,15 +140,11 @@ for (const { name, skip, make, backdate } of stores) {
 		it("knows whether a resume point is still here", async () => {
 			const seq = await append(stream, rawEvent("message.created"));
 
-			expect(await store.replayPage({ stream, cursor: seq, controls: [] }, 10)).toBeDefined();
-			expect(
-				await store.replayPage({ stream, cursor: seq + 1_000_000, controls: [] }, 10),
-			).toBeUndefined();
+			expect(await store.replayPage({ stream, cursor: seq }, 10)).toBeDefined();
+			expect(await store.replayPage({ stream, cursor: seq + 1_000_000 }, 10)).toBeUndefined();
 			// Another stream's row, after events of the stream the client is resuming.
 			const elsewhere = await append(`chat:${crypto.randomUUID()}`, rawEvent("message.created"));
-			expect(
-				await store.replayPage({ stream, cursor: elsewhere, controls: [] }, 10),
-			).toBeUndefined();
+			expect(await store.replayPage({ stream, cursor: elsewhere }, 10)).toBeUndefined();
 		});
 
 		it("refuses an empty stream's cursor on another empty stream", async () => {
@@ -156,8 +152,8 @@ for (const { name, skip, make, backdate } of stores) {
 			const cursor = (await store.latest([stream, other])).get(stream);
 			if (cursor === undefined) throw new Error("The stream has no cursor");
 
-			expect(await store.replayPage({ stream: other, cursor, controls: [] }, 10)).toBeUndefined();
-			expect(await store.replayPage({ stream, cursor, controls: [] }, 10)).toEqual([]);
+			expect(await store.replayPage({ stream: other, cursor }, 10)).toBeUndefined();
+			expect(await store.replayPage({ stream, cursor }, 10)).toEqual([]);
 		});
 
 		it("starts a stream with nothing stored where every stream is, and resumes it from there", async () => {
@@ -169,11 +165,36 @@ for (const { name, skip, make, backdate } of stores) {
 
 			const first = await append(stream, rawEvent("message.created"));
 
-			expect(
-				(await store.replayPage({ stream, cursor: cursor, controls: [] }, 10))?.map(
-					({ seq }) => seq,
-				),
-			).toEqual([first]);
+			expect((await store.replayPage({ stream, cursor }, 10))?.map(({ seq }) => seq)).toEqual([
+				first,
+			]);
+		});
+
+		it("replays at most 5,000 missed events through the startup cursor", async () => {
+			const changed = rawEvent("chat.changed");
+			const cursor = await append(stream, changed);
+			await append(`chat:${crypto.randomUUID()}`, changed);
+			const first = await append(stream, changed);
+			const middleEvents = 5_000 - 2;
+			if (name === "postgres") {
+				await onDatabase((db) =>
+					db.execute(
+						sql`insert into event (stream, type, payload)
+							select ${stream}, ${changed.type}, ${JSON.stringify(changed)}::jsonb
+							from generate_series(1, ${middleEvents}::int)`,
+						"objects",
+					),
+				);
+			} else {
+				for (let index = 0; index < middleEvents; index++) await append(stream, changed);
+			}
+			const through = await append(stream, changed);
+			const overflow = await append(stream, changed);
+
+			expect(await store.replayPage({ stream, cursor, through }, 1)).toEqual([
+				{ stream, seq: first, event: changed },
+			]);
+			expect(await store.replayPage({ stream, cursor, through: overflow }, 1)).toBeUndefined();
 		});
 
 		it.skipIf(name !== "postgres")(
@@ -203,7 +224,7 @@ for (const { name, skip, make, backdate } of stores) {
 			},
 		);
 
-		it("merges capped replay feeds in sequence order without repeating overlapping events", async () => {
+		it("merges live feeds in sequence order without repeating overlapping events", async () => {
 			const control: EventStream = `workspace:${crypto.randomUUID()}`;
 			const cursor = await append(stream, rawEvent("message.created"));
 			await append(control, rawEvent("chat.changed"));
@@ -212,8 +233,8 @@ for (const { name, skip, make, backdate } of stores) {
 			await append(control, rawEvent("reach.changed"));
 			const feed = { stream: control, since: cursor, types: ["reach.changed"] as const };
 
-			const page = await store.replayPage({ stream, cursor, controls: [feed, feed] }, 2);
-			expect(page?.map(({ seq }) => seq)).toEqual([first, second]);
+			const page = await store.following([{ stream, since: cursor }, feed, feed], 2);
+			expect(page.map(({ seq }) => seq)).toEqual([first, second]);
 		});
 
 		it.skipIf(name !== "postgres").each(["replay", "following"] as const)(
@@ -254,7 +275,7 @@ for (const { name, skip, make, backdate } of stores) {
 							] as const;
 							const page = yield* Effect.promise((signal) =>
 								read === "replay"
-									? inTransaction.replayPage({ stream, cursor, controls }, 100, signal)
+									? inTransaction.replayPage({ stream, cursor }, 100, signal)
 									: inTransaction.following([{ stream, since: cursor }, ...controls], 100, signal),
 							);
 							const fetched = (yield* countFetched) - fetchedBefore;
@@ -262,7 +283,7 @@ for (const { name, skip, make, backdate } of stores) {
 						}),
 					),
 				);
-				expect(page?.map(({ seq }) => seq)).toEqual([after, changed]);
+				expect(page?.map(({ seq }) => seq)).toEqual(read === "replay" ? [after] : [after, changed]);
 				expect(fetched).toBeGreaterThan(0);
 				expect(fetched).toBeLessThan(100);
 			},
@@ -274,8 +295,8 @@ for (const { name, skip, make, backdate } of stores) {
 			const kept = await append(stream, rawEvent("message.completed"));
 
 			expect(await store.prune(new Date(Date.now() - 60_000))).toBeGreaterThanOrEqual(1);
-			expect(await store.replayPage({ stream, cursor: old, controls: [] }, 10)).toBeUndefined();
-			expect(await store.replayPage({ stream, cursor: kept, controls: [] }, 10)).toBeDefined();
+			expect(await store.replayPage({ stream, cursor: old }, 10)).toBeUndefined();
+			expect(await store.replayPage({ stream, cursor: kept }, 10)).toBeDefined();
 		});
 	});
 }
