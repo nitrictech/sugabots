@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { PgClient } from "@effect/sql-pg";
+import { botUpdateSchema } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { makeWithDefaults } from "drizzle-orm/effect-postgres";
@@ -1579,6 +1580,23 @@ it.skipIf(!process.env.DATABASE_URL)(
 			`,
 					[legacy.workspace],
 				);
+				const unicodeName = `Launch ${"🚀".repeat(2)}${"x".repeat(53)}`;
+				const duplicateIds = [
+					"30000000-0000-4000-8000-000000000001",
+					"30000000-0000-4000-8000-000000000002",
+				];
+				await client.query(
+					`insert into agent (id, workspace_id, pod_id, name, handle, color, face, created_at)
+					values ($1, $3, $4, $6, 'launch', 'sky', 'dot', '2026-10-01'),
+						($2, $3, $5, $6, 'launch', 'sky', 'dot', '2026-10-02')`,
+					[
+						...duplicateIds,
+						legacy.workspace,
+						"10000000-0000-4000-8000-000000000001",
+						"10000000-0000-4000-8000-000000000002",
+						unicodeName,
+					],
+				);
 				await client.query("begin");
 				try {
 					await client.query(migration);
@@ -1589,6 +1607,15 @@ it.skipIf(!process.env.DATABASE_URL)(
 						from pg_stat_xact_user_tables where schemaname = 'public' and relname = 'bot'
 					`);
 					expect(Number(stats?.read)).toBeLessThan(1_000_000);
+					const { rows: repaired } = await client.query<{ name: string }>(
+						"select name from bot where id = any($1::uuid[]) order by id",
+						[duplicateIds],
+					);
+					const decode = Schema.decodeUnknownSync(botUpdateSchema);
+					expect(repaired.map(({ name }) => decode({ name }).name)).toEqual([
+						unicodeName,
+						`${unicodeName.slice(0, -2)} 2`,
+					]);
 					await client.query("commit");
 				} catch (error) {
 					await client.query("rollback");

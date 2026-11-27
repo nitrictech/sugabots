@@ -263,6 +263,7 @@ DECLARE
 	prefix_key text;
 	suffix_number bigint;
 	width_limit bigint;
+	prefix_limit integer;
 	candidate text;
 BEGIN
 	FOREACH repair_handle IN ARRAY ARRAY[true, false] LOOP
@@ -293,7 +294,15 @@ BEGIN
 			-- prefix at this width compete for the same numbers.
 			<<by_width>>
 			FOR width IN 1..10 LOOP
-				rendered_prefix := rtrim(left(candidate_base, max_length - 1 - width), separator);
+				prefix_limit := max_length - 1 - width;
+				rendered_prefix := left(candidate_base, prefix_limit);
+				IF NOT repair_handle THEN
+					-- The bot form counts UTF-16 code units, so supplementary characters count twice.
+					WHILE length(rendered_prefix) + regexp_count(rendered_prefix, U&'[\+010000-\+10FFFF]') > prefix_limit LOOP
+						rendered_prefix := left(rendered_prefix, -1);
+					END LOOP;
+				END IF;
+				rendered_prefix := rtrim(rendered_prefix, separator);
 				prefix_key := CASE WHEN repair_handle THEN rendered_prefix ELSE lower(rendered_prefix) END;
 				width_limit := power(10, width)::bigint;
 				SELECT coalesce((
