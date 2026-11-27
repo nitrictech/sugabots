@@ -11,8 +11,6 @@ import {
 	type MemberPlace,
 	mayInProjectAs,
 	type ProjectFacts,
-	type ReachedAs,
-	type ReachFacts,
 	reachFacts,
 	turnChatPlace,
 	useTurnAdmission,
@@ -100,6 +98,8 @@ export interface CanUseChatComputer<P, C> extends Proof<"CanUseChatComputer", [P
 
 const CanUseChatComputerProof = defineProof("CanUseChatComputer");
 
+export class ComputerUseOff extends ActionForbidden {}
+
 /**
  * Proves a bot's turn may work on its chat's project's computer: only the
  * turn's own chat, within its bounds, with the bot's computer use on and, for
@@ -127,8 +127,16 @@ export const proveCanUseChatComputer = <P, C>(
 		if (decision.kind === "botCannotReach") {
 			return yield* Effect.fail(new BotCannotReach({ resource: "computer" }));
 		}
-		if (!botUsesComputer(decision.as, useTurnAdmission(acting, facts))) {
+		const as = decision.as;
+		if (
+			as.kind !== "run" &&
+			(as.kind !== "asker" ||
+				!mayInProjectAs(as.place, useTurnAdmission(acting, facts).project, "project.change"))
+		) {
 			return yield* Effect.fail(new ActionForbidden({ proof: "CanUseComputer" }));
+		}
+		if (!facts.bot?.usesComputer) {
+			return yield* Effect.fail(new ComputerUseOff({ proof: "CanUseComputer" }));
 		}
 		const [target] = yield* query((db) =>
 			db
@@ -170,20 +178,3 @@ export const turnUsesComputer = (db: Executor, facts: TurnFacts, projectId: stri
 			? mayInProjectAs(place.member, place.project, "project.change")
 			: facts.askedBy.kind === "automation";
 	});
-
-/**
- * Whether a bot reaching the project `facts` describe, as `as`, may work on
- * its computer: with its computer use on, and acting for an asker, one who
- * may change things there. A run may whatever its bot reaches.
- */
-function botUsesComputer(as: ReachedAs, facts: ReachFacts): boolean {
-	if (!facts.bot?.usesComputer) return false;
-	switch (as.kind) {
-		case "asker":
-			return mayInProjectAs(as.place, facts.project, "project.change");
-		case "run":
-			return true;
-		default:
-			return false;
-	}
-}

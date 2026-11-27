@@ -22,7 +22,7 @@ import { isBrowserTool } from "../chats/tools/browser/browser.ts";
 import type { Turns } from "../chats/turns/turns.ts";
 import type { Principal } from "../principal.ts";
 import { type ComputerApprovalTarget, computerApprovalTarget } from "../proofs/approved.ts";
-import { proveCanUseChatComputer } from "../proofs/can-use-computer.ts";
+import { ComputerUseOff, proveCanUseChatComputer } from "../proofs/can-use-computer.ts";
 import {
 	checkConnectorApprovalPermission,
 	checkConnectorCallSettings,
@@ -173,6 +173,7 @@ const checkApprovalPermission = (
 		);
 		if (result._tag === "Failure") {
 			if (result.failure instanceof NoComputerProvider) return "noComputerProvider" as const;
+			if (result.failure instanceof ComputerUseOff) return "computerUseChanged" as const;
 			if (name === "automations.updateInChat" && result.failure instanceof TriggerSetInSettings)
 				return "automationRoutineChanged" as const;
 			const approvedBot = call.approvalResolvedTargets?.bot;

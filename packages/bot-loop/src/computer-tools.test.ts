@@ -246,7 +246,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			},
 		);
 
-		it("closes a command approval when the workspace disables its computer provider", async () => {
+		it.each([
+			{
+				change: "disables its computer provider",
+				reason: "noComputerProvider",
+				error: "This approval was closed because the workspace has no enabled computer provider.",
+			},
+			{
+				change: "switches off the bot's computer use",
+				reason: "computerUseChanged",
+				error: "This approval was closed because the bot can no longer use the computer.",
+			},
+		])("closes a command approval when a manager $change", async ({ reason, error }) => {
 			const provider = await enableComputers();
 			const source = await queueOutsideRun(await runOnPostgres(defaultProjectOf(botId)), "github");
 			const { model, requests } = calling("run_command", command);
@@ -254,17 +265,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			await workflow.suspended();
 			const { turnId, parked } = await parkedCallOf(workflow.executionId);
 
-			await loop.call(await signedIn.member(adminId), "computerProviders.update", {
-				workspace: workspaceId,
-				providerId: provider.id,
-				changes: { enabled: false },
-			});
-
-			const error =
-				"This approval was closed because the workspace has no enabled computer provider.";
+			const manager = await signedIn.member(adminId);
+			if (reason === "computerUseChanged") {
+				await loop.call(manager, "bots.update", { botId, changes: { usesComputer: false } });
+			} else {
+				await loop.call(manager, "computerProviders.update", {
+					workspace: workspaceId,
+					providerId: provider.id,
+					changes: { enabled: false },
+				});
+			}
 			await expect(
 				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
-			).rejects.toMatchObject({ _tag: "ToolApprovalConflict", userMessage: error });
+			).rejects.toMatchObject({ _tag: "ToolApprovalConflict", reason, userMessage: error });
 			await workflow.completed();
 			expect(await callsOf(turnId)).toMatchObject([
 				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
