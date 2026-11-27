@@ -66,6 +66,7 @@ const forMemberInMemberBounds = <const Tool extends string>(tool: Tool) =>
 		tool,
 		offeredIn: "memberBounds",
 		approval: { kind: "always", approvers: "turn" },
+		personalBotAsks: true,
 	}) as const;
 
 /** Held back: it changes who reaches a bot, which a bot may do only in member bounds. */
@@ -166,6 +167,7 @@ export const botsContracts = {
 			tool: "save_instructions",
 			offeredIn: "ownChats",
 			approval: { kind: "always", approvers: "turn" },
+			personalBotAsks: true,
 		},
 	}),
 	"bots.remove": OperationContract.make("bots.remove", {

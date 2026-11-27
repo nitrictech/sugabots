@@ -13,12 +13,15 @@ import {
 	seedProjectChat,
 	seedTurnAnswering,
 } from "../authentication/seed.test-support.ts";
+import { turnFacts } from "../authentication/turn-facts.ts";
+import { query } from "../database/database.ts";
 import { connector, projectMember, toolCall, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { Call } from "../operations/operation.ts";
 import type { BotForAsker, Principal } from "../principal.ts";
 import {
 	type ApprovalRule,
+	approvalNeed,
 	approvalRule,
 	type OrdinaryApproval,
 	proveApproved,
@@ -351,12 +354,14 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			tool: "create_issue",
 			approval: { kind: "never" },
 			changes: true,
+			personalBotAsks: true,
 		};
 		const always: ApprovalRule<OrdinaryApproval, "web.search"> = {
 			operation: "web.search",
 			tool: "create_issue",
 			approval: { kind: "always", approvers: "turn" },
 			changes: true,
+			personalBotAsks: true,
 		};
 		const approved = (
 			principal: Principal,
@@ -539,9 +544,9 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			for (const { bot, chat } of personalBots) {
 				const personalBot = await as.botFor(a.ed, bot.id, chat);
 				expect(await approved(personalBot, request, never, input)).toBe("ApprovalNeeded");
-				expect(await approved(personalBot, request, { ...never, changes: false }, input)).toBe(
-					"ok",
-				);
+				expect(
+					await approved(personalBot, request, { ...never, personalBotAsks: false }, input),
+				).toBe("ok");
 				const allowed = await seedApprovalCall(personalBot, { status: "allowed", decidedBy: a.ed });
 				expect(await approved(personalBot, toolCallOf(allowed), never, input)).toBe("ok");
 
@@ -551,10 +556,18 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 					bot.id,
 					"webhook",
 				);
-				expect(await approved(fromOutside, request, { ...never, changes: false }, input)).toBe(
-					"ApprovalNeeded",
-				);
+				expect(
+					await approved(fromOutside, request, { ...never, personalBotAsks: false }, input),
+				).toBe("ApprovalNeeded");
 			}
+		});
+
+		it("makes a personal bot ask its creator before it shares a file from its computer", async () => {
+			const { a } = world;
+			const personalBot = await as.botFor(a.ed, a.personal.id, a.personalChat);
+			const facts = await runOnPostgres(query((db) => turnFacts(db, personalBot.turn)));
+			if (!facts) throw new Error("fixture");
+			expect(approvalNeed(facts, approvalRule("computers.shareFile"))).toBe("approver");
 		});
 
 		it("makes a turn a personal bot's brief started ask before any change, as the personal bot would", async () => {

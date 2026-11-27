@@ -62,9 +62,9 @@ const modelOnly = {
 	reason: "This tool acts in the bot's turn. Members use the project and chat file endpoints.",
 } as const;
 /**
- * inTurn sets the file tools' approval to `never`. `approvalNeed` still asks for
- * changes by a personal bot or a turn that inherits its rule through a brief.
- * It asks for every call in a personal bot's webhook or GitHub run.
+ * The file tools need no approval, but a personal bot, and a turn that
+ * inherits its rule through a brief, asks before writing (`personalBotAsks`).
+ * A personal bot's webhook or GitHub run asks before every call.
  */
 const inTurn = { kind: "offered", offeredIn: "everywhere", approval: { kind: "never" } } as const;
 
@@ -91,7 +91,7 @@ export const filesContracts = {
 		errors: readErrors,
 		changes: false,
 		http: modelOnly,
-		botLoop: { ...inTurn, tool: FILE_LIST_TOOL },
+		botLoop: { ...inTurn, tool: FILE_LIST_TOOL, personalBotAsks: false },
 	}),
 	"files.readWritten": OperationContract.make("files.readWritten", {
 		description:
@@ -105,7 +105,7 @@ export const filesContracts = {
 		errors: readErrors,
 		changes: false,
 		http: modelOnly,
-		botLoop: { ...inTurn, tool: FILE_READ_TOOL },
+		botLoop: { ...inTurn, tool: FILE_READ_TOOL, personalBotAsks: false },
 	}),
 	"files.write": OperationContract.make("files.write", {
 		description: `Write a file for work members will come back to, such as a plan, report, notes or page. To create one, provide \`kind\` and \`title\`. To replace the content of an existing file as a new version, provide its \`fileId\` and \`baseVersion\`. Use file_edit for a small change. ${KIND_RULES}`,
@@ -124,7 +124,7 @@ export const filesContracts = {
 		errors: [...writeErrors, FileKindFixed, InvalidFileWrite],
 		changes: true,
 		http: modelOnly,
-		botLoop: { ...inTurn, tool: FILE_WRITE_TOOL },
+		botLoop: { ...inTurn, tool: FILE_WRITE_TOOL, personalBotAsks: true },
 	}),
 	"files.edit": OperationContract.make("files.edit", {
 		description:
@@ -142,6 +142,6 @@ export const filesContracts = {
 		errors: [...writeErrors, FileEditTextUnmatched],
 		changes: true,
 		http: modelOnly,
-		botLoop: { ...inTurn, tool: FILE_EDIT_TOOL },
+		botLoop: { ...inTurn, tool: FILE_EDIT_TOOL, personalBotAsks: true },
 	}),
 } as const;

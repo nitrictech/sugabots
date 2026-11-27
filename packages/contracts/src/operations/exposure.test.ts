@@ -8,6 +8,7 @@ const contracts = {
 			tool: "resolve_chat",
 			offeredIn: "everywhere",
 			approval: { kind: "never" },
+			personalBotAsks: true,
 		},
 	},
 	"chats.rename": {
@@ -23,6 +24,7 @@ const contracts = {
 			tool: "request_host",
 			offeredIn: "everywhere",
 			approval: { kind: "always", approvers: "computerManagers" },
+			personalBotAsks: true,
 		},
 	},
 	"automations.create": {
@@ -31,6 +33,7 @@ const contracts = {
 			tool: "create_automation",
 			offeredIn: "chatBounds",
 			approval: { kind: "always", approvers: "turn" },
+			personalBotAsks: true,
 		},
 	},
 	"events.followChat": {

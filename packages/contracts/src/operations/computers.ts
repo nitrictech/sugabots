@@ -171,17 +171,20 @@ const heldForBots = <const What extends string>(what: What) =>
 
 /**
  * Offered as `tool` in every turn, which works on its chat's project's
- * computer when it may. Each tool declares when it needs the turn’s approvers.
+ * computer when it may. Each tool declares when it needs the turn’s approvers,
+ * and whether a personal bot asks its creator first.
  */
 const worksOnComputer = <const Tool extends string, const Policy extends "never" | "outsideRuns">(
 	tool: Tool,
 	policy: Policy,
+	{ personalBotAsks }: { readonly personalBotAsks: boolean },
 ) =>
 	({
 		kind: "offered",
 		tool,
 		offeredIn: "everywhere",
 		approval: { kind: policy },
+		personalBotAsks,
 	}) as const;
 
 export const computersContracts = {
@@ -520,7 +523,7 @@ export const computersContracts = {
 		errors: computerUseRefusals,
 		changes: true,
 		http: heldForBots("its terminal"),
-		botLoop: worksOnComputer("run_command", "outsideRuns"),
+		botLoop: worksOnComputer("run_command", "outsideRuns", { personalBotAsks: true }),
 	}),
 	"computers.readFile": OperationContract.make("computers.readFile", {
 		description:
@@ -542,7 +545,7 @@ export const computersContracts = {
 		errors: computerUseRefusals,
 		changes: false,
 		http: heldForBots("its files"),
-		botLoop: worksOnComputer("read_file", "never"),
+		botLoop: worksOnComputer("read_file", "never", { personalBotAsks: false }),
 	}),
 	"computers.writeFile": OperationContract.make("computers.writeFile", {
 		description:
@@ -560,7 +563,7 @@ export const computersContracts = {
 		errors: computerUseRefusals,
 		changes: true,
 		http: heldForBots("its files"),
-		botLoop: worksOnComputer("write_file", "outsideRuns"),
+		botLoop: worksOnComputer("write_file", "outsideRuns", { personalBotAsks: true }),
 	}),
 	"computers.copyChatFile": OperationContract.make("computers.copyChatFile", {
 		description:
@@ -577,7 +580,7 @@ export const computersContracts = {
 		errors: computerUseRefusals,
 		changes: true,
 		http: heldForBots("its files"),
-		botLoop: worksOnComputer("copy_file_to_computer", "outsideRuns"),
+		botLoop: worksOnComputer("copy_file_to_computer", "outsideRuns", { personalBotAsks: true }),
 	}),
 	"computers.shareFile": OperationContract.make("computers.shareFile", {
 		description: `Share a file from your computer with everyone in this chat, such as a chart, picture or spreadsheet you made: it is attached to your reply as soon as you call this, an image shown as a picture and anything else offered to download. Never paste a file's contents, base64 or a link to it into your reply instead. Files up to ${MAX_SHARED_FILE_MEGABYTES} MB, at most ${MAX_ATTACHMENTS_PER_MESSAGE} on one reply.`,
@@ -594,13 +597,12 @@ export const computersContracts = {
 			computerFailedSchema,
 		]),
 		errors: computerUseRefusals,
-		// Part of the bot's own reply, as its text is: it changes nothing anyone else made.
-		changes: false,
+		changes: true,
 		http: {
 			kind: "heldBack",
 			reason: "A member attaches a file to their own message instead.",
 		},
-		botLoop: worksOnComputer("share_file", "never"),
+		botLoop: worksOnComputer("share_file", "never", { personalBotAsks: true }),
 	}),
 	"computers.useBrowser": OperationContract.make("computers.useBrowser", {
 		description:
@@ -619,7 +621,7 @@ export const computersContracts = {
 		errors: computerUseRefusals,
 		changes: true,
 		http: heldForBots("its browser"),
-		botLoop: worksOnComputer("browser_*", "outsideRuns"),
+		botLoop: worksOnComputer("browser_*", "outsideRuns", { personalBotAsks: true }),
 	}),
 	"computers.requestHost": OperationContract.make("computers.requestHost", {
 		description:
@@ -650,6 +652,7 @@ export const computersContracts = {
 			tool: HOST_REQUEST_TOOL,
 			offeredIn: "everywhere",
 			approval: { kind: "always", approvers: "computerManagers" },
+			personalBotAsks: true,
 		},
 	}),
 } as const;

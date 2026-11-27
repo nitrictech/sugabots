@@ -52,6 +52,7 @@ const resolveChatTool = {
 	tool: "resolve_chat",
 	offeredIn: "everywhere",
 	approval: { kind: "never" },
+	personalBotAsks: true,
 } as const;
 declare const computedReason: string;
 
@@ -165,6 +166,7 @@ export const unbounded = rename(nameAt, {
 	kind: "offered",
 	tool: "rename_chat",
 	approval: { kind: "never" },
+	personalBotAsks: true,
 });
 
 export const managesWithoutAsking = rename(nameAt, {
@@ -174,6 +176,7 @@ export const managesWithoutAsking = rename(nameAt, {
 	// Managing a project in chat bounds without the asker's approval.
 	// @ts-expect-error TS2322 [Type '"never"' is not assignable to type '"always"']
 	approval: { kind: "never" },
+	personalBotAsks: true,
 });
 
 export const ownChatsByToolAccess = rename(nameAt, {
@@ -183,6 +186,7 @@ export const ownChatsByToolAccess = rename(nameAt, {
 	// A bot's own settings changed in its own chats by tool access, not the asker.
 	// @ts-expect-error TS2322 [Type '"byToolAccess"' is not assignable to type '"always"']
 	approval: { kind: "byToolAccess" },
+	personalBotAsks: true,
 });
 
 const resolveById = OperationContract.make("chats.resolveById", {

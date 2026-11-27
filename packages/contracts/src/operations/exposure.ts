@@ -46,8 +46,8 @@ export type HttpDecision =
 
 /**
  * When a bot's call waits for an approver before it runs. A personal bot's
- * call to an operation that changes something always waits, and
- * so does every call in its runs that a webhook or GitHub event started,
+ * call waits for its creator wherever its tool's `personalBotAsks` says so,
+ * and so does every call in its runs that a webhook or GitHub event started,
  * whatever this says.
  *
  * - `never`: it runs at once.
@@ -93,6 +93,12 @@ export type OfferedIn = "everywhere" | "chatBounds" | "ownChats" | "memberBounds
  *
  * A tool offered in `chatBounds` or `ownChats` manages a project for the
  * asker, so it always waits for the asker's approval.
+ *
+ * `personalBotAsks` says whether a personal bot's call waits for its creator,
+ * since it acts across everything its creator reaches, and so does a call in
+ * a turn a personal bot's brief started. It is the tool's approval policy, set
+ * apart from the contract's `changes`, which says only whether the operation
+ * writes something.
  */
 export type BotLoopDecision =
 	| {
@@ -100,12 +106,14 @@ export type BotLoopDecision =
 			readonly tool: string;
 			readonly offeredIn: "everywhere" | "memberBounds";
 			readonly approval: Approval;
+			readonly personalBotAsks: boolean;
 	  }
 	| {
 			readonly kind: "offered";
 			readonly tool: string;
 			readonly offeredIn: "chatBounds" | "ownChats";
 			readonly approval: AskersApproval;
+			readonly personalBotAsks: boolean;
 	  }
 	| { readonly kind: "heldBack"; readonly reason: string }
 	| { readonly kind: "coveredBy"; readonly operation: string; readonly reason: string };

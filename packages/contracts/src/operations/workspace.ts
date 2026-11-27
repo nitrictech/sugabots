@@ -114,6 +114,7 @@ export const workspaceContracts = {
 			tool: "workspace_guide",
 			offeredIn: "memberBounds",
 			approval: { kind: "never" },
+			personalBotAsks: false,
 		},
 	}),
 	"workspaces.list": OperationContract.make("workspaces.list", {

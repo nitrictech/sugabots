@@ -100,6 +100,7 @@ export const connectorsContracts = {
 			tool: TOOL_SEARCH,
 			offeredIn: "everywhere",
 			approval: { kind: "never" },
+			personalBotAsks: false,
 		},
 	}),
 	"connectors.callTool": OperationContract.make("connectors.callTool", {
@@ -118,6 +119,8 @@ export const connectorsContracts = {
 			tool: "call_tool",
 			offeredIn: "everywhere",
 			approval: { kind: "byToolAccess" },
+			// Each connector tool's own hints say whether it writes or deletes, which decides instead.
+			personalBotAsks: true,
 		},
 	}),
 	"connectors.list": OperationContract.make("connectors.list", {

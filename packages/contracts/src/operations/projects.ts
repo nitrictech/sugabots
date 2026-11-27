@@ -73,6 +73,7 @@ const changesReachForMember = <const Tool extends string>(tool: Tool) =>
 		tool,
 		offeredIn: "memberBounds",
 		approval: { kind: "always", approvers: "turn" },
+		personalBotAsks: true,
 	}) as const;
 
 /** Held back: it changes who reaches the project, which a bot may only in member bounds. */

@@ -159,6 +159,7 @@ export const chatsContracts = {
 			tool: START_CHAT_TOOL,
 			offeredIn: "chatBounds",
 			approval: { kind: "always", approvers: "turn" },
+			personalBotAsks: true,
 		},
 	}),
 	"chats.renameChat": OperationContract.make("chats.renameChat", {
@@ -183,6 +184,7 @@ export const chatsContracts = {
 			tool: "mark_resolved",
 			offeredIn: "everywhere",
 			approval: { kind: "never" },
+			personalBotAsks: true,
 		},
 	}),
 	"chats.markRead": OperationContract.make("chats.markRead", {

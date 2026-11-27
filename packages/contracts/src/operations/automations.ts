@@ -189,6 +189,7 @@ export const automationsContracts = {
 			tool: "list_automations",
 			offeredIn: "everywhere",
 			approval: { kind: "never" },
+			personalBotAsks: false,
 		},
 	}),
 	"automations.createWithRoutine": OperationContract.make("automations.createWithRoutine", {
@@ -211,6 +212,7 @@ export const automationsContracts = {
 			tool: "create_automation",
 			offeredIn: "chatBounds",
 			approval: { kind: "always", approvers: "turn" },
+			personalBotAsks: true,
 		},
 	}),
 	"automations.updateInChat": OperationContract.make("automations.updateInChat", {
@@ -241,6 +243,7 @@ export const automationsContracts = {
 			tool: "update_automation",
 			offeredIn: "chatBounds",
 			approval: { kind: "always", approvers: "turn" },
+			personalBotAsks: true,
 		},
 	}),
 	"automations.remove": OperationContract.make("automations.remove", {

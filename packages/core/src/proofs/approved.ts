@@ -37,7 +37,10 @@ export interface ApprovalRule<
 	readonly operation: N;
 	readonly tool: string;
 	readonly approval: A;
+	/** Whether the operation writes something, which a call records. */
 	readonly changes: boolean;
+	/** Whether a personal bot's call waits for its creator (see the contract's `personalBotAsks`). */
+	readonly personalBotAsks: boolean;
 }
 
 export function approvalRule<N extends BotLoopOperationName<typeof operationContracts>>(
@@ -51,8 +54,14 @@ export function approvalRule(
 >;
 export function approvalRule(name: ApprovedOperation): ApprovalRule {
 	const policy = name === "automations.list" ? "automations.listInChat" : name;
-	const { tool, approval } = operationContracts[policy].botLoop;
-	return { operation: name, tool, approval, changes: operationContracts[name].changes };
+	const { tool, approval, personalBotAsks } = operationContracts[policy].botLoop;
+	return {
+		operation: name,
+		tool,
+		approval,
+		changes: operationContracts[name].changes,
+		personalBotAsks,
+	};
 }
 
 /**
@@ -61,7 +70,7 @@ export function approvalRule(name: ApprovedOperation): ApprovalRule {
  * access still lets it, and the arguments they allowed equal X's input. The
  * decision is stored, not a proof, and this proves it again each time.
  *
- * A personal bot's call that changes anything always waits, and so does
+ * A personal bot's call waits where its tool's policy says so, and so does
  * every call in its runs a webhook or GitHub event started, and a brief's
  * first turn follows a personal bot's rule when one wrote the brief.
  */
@@ -343,10 +352,12 @@ function matchesApprovalTargets(
 }
 
 /**
- * What a call needs, by its rule and the turn's: a personal bot's calls that
- * change anything, since it acts across everything its creator reaches, and
- * every call in its runs that came from outside, wait for its creator. An exposed tool may add its own approval rule, and a
- * connector's tool follows how that tool is configured.
+ * What a call needs, by its rule and the turn's: a personal bot's calls its
+ * tool's policy says it asks before, since it acts across everything its
+ * creator reaches, and every call in its runs that came from outside, wait for
+ * its creator. An exposed tool may add its own approval rule, and a
+ * connector's tool follows how that tool is configured, asking a personal
+ * bot's creator before any call that may write or delete.
  */
 export function approvalNeed(
 	facts: TurnFacts,
@@ -355,10 +366,10 @@ export function approvalNeed(
 ): Need {
 	if (rule.approval.kind === "byToolAccess" && (!connectorUse || connectorUse.access === "off"))
 		return "refused";
-	const changes = connectorUse?.writeOrDelete ?? rule.changes;
+	const personalBotAsks = connectorUse?.writeOrDelete ?? rule.personalBotAsks;
 	if (
 		asksBeforeAllTools(facts) ||
-		((facts.personalBotCreator !== null || facts.briefedByPersonalBot) && changes)
+		((facts.personalBotCreator !== null || facts.briefedByPersonalBot) && personalBotAsks)
 	)
 		return "approver";
 	if (rule.approval.kind === "outsideRuns" && startedFromOutside(facts)) return "approver";

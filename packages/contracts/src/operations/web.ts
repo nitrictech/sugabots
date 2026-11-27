@@ -44,6 +44,7 @@ export const webContracts = {
 			tool: WEB_FETCH_TOOL,
 			offeredIn: "everywhere",
 			approval: { kind: "outsideRunsOrMemberBounds" },
+			personalBotAsks: false,
 		},
 	}),
 	"web.search": OperationContract.make("web.search", {
@@ -95,6 +96,7 @@ export const webContracts = {
 			tool: WEB_SEARCH_TOOL,
 			offeredIn: "everywhere",
 			approval: { kind: "never" },
+			personalBotAsks: false,
 		},
 	}),
 };

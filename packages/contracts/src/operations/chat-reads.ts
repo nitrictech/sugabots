@@ -105,7 +105,13 @@ const readByFileTools = {
 const turnReadTool = (tool: string) =>
 	({
 		http: { kind: "heldBack", reason: "Formats a read for the bot in a turn." },
-		botLoop: { kind: "offered", tool, offeredIn: "everywhere", approval: { kind: "never" } },
+		botLoop: {
+			kind: "offered",
+			tool,
+			offeredIn: "everywhere",
+			approval: { kind: "never" },
+			personalBotAsks: false,
+		},
 	}) as const;
 
 export const chatReadsContracts = {
