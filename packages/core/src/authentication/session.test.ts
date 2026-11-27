@@ -231,9 +231,11 @@ describe("SessionAuthentication", () => {
 				),
 			);
 
-		await expect(runOnPostgres(endThenTell(endingSecond.id, first))).rejects.toThrow(
-			/out of order/,
+		// The database refuses it; the driver keeps its message in the cause.
+		const refused = await runOnPostgres(endThenTell(endingSecond.id, first)).catch(
+			(error: Error) => error,
 		);
+		expect(String(refused instanceof Error && refused.cause)).toMatch(/out of order/);
 		await runOnPostgres(endThenTell(endingFirst.id, second));
 	});
 });

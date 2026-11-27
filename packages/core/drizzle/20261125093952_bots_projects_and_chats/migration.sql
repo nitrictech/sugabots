@@ -3297,24 +3297,26 @@ CREATE INDEX "turn_end_requested_idx" ON "turn" ("status","finished_at") WHERE "
 -- member's stream in the same transaction, and notifies every process's event
 -- relay, which Postgres sends once it commits.
 --
--- Each stream is locked, as the event outbox locks it, so its events keep one
--- order. A transaction takes its streams' locks in one order, by name, and
--- lists them in its `sugabots.locked_streams` setting, as the outbox does too:
--- locking a stream that sorts before one it already holds fails at once,
--- rather than waiting on a transaction that may be waiting on this one.
-CREATE FUNCTION publish_ended_sessions() RETURNS trigger LANGUAGE plpgsql AS $$
+-- Before a transaction stores events, it locks their streams with
+-- `lock_event_streams`, as the event outbox does too, so each stream's events
+-- commit in the order of their `seq`. It takes a transaction's stream locks in
+-- one order, by name, and lists them in the transaction's
+-- `sugabots.locked_streams` setting: locking a stream that sorts before one it
+-- already holds fails at once, rather than waiting on a transaction that may
+-- be waiting on this one.
+CREATE FUNCTION lock_event_streams(streams text[]) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
-	stored record;
 	locked text[] := coalesce(string_to_array(nullif(current_setting('sugabots.locked_streams', true), ''), ','), '{}');
+	last_locked text := (SELECT max(held COLLATE "C") FROM unnest(locked) AS held);
 	to_lock text[];
 	next_stream text;
 BEGIN
-	SELECT coalesce(array_agg(ended.stream ORDER BY ended.stream COLLATE "C"), '{}') INTO to_lock
-	FROM (SELECT DISTINCT 'member:' || "member_id"::text AS stream FROM ended_sessions) AS ended
-	WHERE NOT ended.stream = ANY (locked);
-	IF to_lock[1] COLLATE "C" < (SELECT max(held COLLATE "C") FROM unnest(locked) AS held) THEN
+	SELECT coalesce(array_agg(wanted ORDER BY wanted COLLATE "C"), '{}') INTO to_lock
+	FROM (SELECT DISTINCT wanted FROM unnest(streams) AS wanted) AS distinct_streams
+	WHERE NOT wanted = ANY (locked);
+	IF to_lock[1] COLLATE "C" < last_locked THEN
 		RAISE EXCEPTION 'Locking event stream % after % would take a transaction''s stream locks out of order',
-			to_lock[1], (SELECT max(held COLLATE "C") FROM unnest(locked) AS held);
+			to_lock[1], last_locked;
 	END IF;
 	FOREACH next_stream IN ARRAY to_lock LOOP
 		PERFORM pg_advisory_xact_lock(hashtextextended(next_stream, 0));
@@ -3322,6 +3324,13 @@ BEGIN
 	IF cardinality(to_lock) > 0 THEN
 		PERFORM set_config('sugabots.locked_streams', array_to_string(locked || to_lock, ','), true);
 	END IF;
+END;
+$$;--> statement-breakpoint
+CREATE FUNCTION publish_ended_sessions() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+	stored record;
+BEGIN
+	PERFORM lock_event_streams(ARRAY(SELECT 'member:' || "member_id"::text FROM ended_sessions));
 	FOR stored IN
 		INSERT INTO "event" ("stream", "type", "payload")
 		SELECT 'member:' || "member_id"::text, 'session.ended',

@@ -63,63 +63,38 @@ export interface CommittedEvent extends PendingEvent {
  * The lock is what gives a stream's events one order: without it two
  * transactions could take sequence numbers in one order and commit in the
  * other, and a client resuming from the lower id would miss the higher one.
+ * The database's `lock_event_streams` takes the locks, as the trigger that
+ * stores `session.ended` when a session is deleted does too, in one order so
+ * that transactions touching the same streams cannot deadlock.
  *
- * Every transaction takes its streams' locks in one order, by name, so two
- * transactions touching the same streams cannot deadlock. The locks are also
- * taken by the trigger that stores `session.ended` when a session is deleted,
- * and both record what they locked in the transaction's `LOCKED_STREAMS`
- * setting. Locking a stream that sorts before one the transaction already
- * holds fails at once, rather than waiting on a transaction that may be
- * waiting on this one.
+ * One statement, so one round trip: each row joins the locking's one row, so the locks are held
+ * before any row takes its `seq`.
  */
 const appendEvents = Effect.fn("EventOutbox.appendEvents")(function* (
 	db: Executor,
 	pending: readonly PendingEvent[],
 ) {
-	const [setting] = yield* db.execute<{ locked: string | null }>(
-		sql`select current_setting(${LOCKED_STREAMS}, true) as locked`,
+	if (pending.length === 0) return [];
+	const rows = pending.map(({ stream, event }) => ({ stream, type: event.type, payload: event }));
+	// Postgres numbers and returns the rows of one insert in the order given.
+	const inserted = yield* db.execute<{ seq: string | number }>(
+		sql`with pending as (
+				select item, ordinal
+				from jsonb_array_elements(${JSON.stringify(rows)}::jsonb) with ordinality as given(item, ordinal)
+			),
+			locked as materialized (
+				select lock_event_streams(array(select item ->> 'stream' from pending))
+			)
+			insert into ${event} ("stream", "type", "payload")
+			select item ->> 'stream', item ->> 'type', item -> 'payload'
+			from pending cross join locked
+			order by ordinal
+			returning "seq"`,
 		"objects",
 	);
-	const locked = setting?.locked ? setting.locked.split(",") : [];
-	const toLock = [...new Set(pending.map(({ stream }) => stream))]
-		.filter((stream) => !locked.includes(stream))
-		.sort();
-	const lastLocked = locked.toSorted().at(-1);
-	const [firstToLock] = toLock;
-	if (firstToLock !== undefined && lastLocked !== undefined && firstToLock < lastLocked) {
-		return yield* Effect.die(
-			new Error(
-				`Locking event stream ${firstToLock} after ${lastLocked} would take a transaction's stream locks out of order`,
-			),
-		);
-	}
-	for (const stream of toLock) {
-		yield* db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${stream}, 0))`);
-	}
-	if (toLock.length > 0) {
-		yield* db.execute(
-			sql`select set_config(${LOCKED_STREAMS}, ${[...locked, ...toLock].join(",")}, true)`,
-		);
-	}
-
-	if (pending.length === 0) return [];
-	// Postgres numbers and returns the rows of one insert in the order given.
-	const rows = yield* db
-		.insert(event)
-		.values(
-			pending.map((pendingEvent) => ({
-				stream: pendingEvent.stream,
-				type: pendingEvent.event.type,
-				payload: pendingEvent.event,
-			})),
-		)
-		.returning({ seq: event.seq });
 	return pending.map((pendingEvent, index): CommittedEvent => {
-		const row = rows[index];
+		const row = inserted[index];
 		if (!row) throw new Error(`Storing a ${pendingEvent.event.type} returned no row`);
-		return { ...pendingEvent, seq: row.seq };
+		return { ...pendingEvent, seq: Number(row.seq) };
 	});
 });
-
-/** The transaction-local setting listing the event streams the transaction has locked. */
-const LOCKED_STREAMS = "sugabots.locked_streams";
