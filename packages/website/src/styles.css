@@ -219,6 +219,11 @@ html[data-os="linux"] [data-for-os="linux"] {
 	display: contents;
 }
 
+/* Every page's column width, as `max-w-site`. */
+@theme {
+	--container-site: 1200px;
+}
+
 /*
  * Sizes that depend on the page at runtime, such as the height of the site's
  * header, which no standard utility can express.
