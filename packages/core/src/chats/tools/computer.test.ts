@@ -252,7 +252,7 @@ describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () =>
 		},
 	);
 
-	it("refuses work from a step offered before the enabled provider was reconfigured", async () => {
+	it.each(["test result", "settings update"])("checks a provider %s", async (change) => {
 		const workspaceId = await seedWorkspace();
 		const memberId = await seedMember(workspaceId, "editor");
 		const bot = await seedBot(workspaceId, { usesComputer: true, createdById: memberId });
@@ -273,8 +273,21 @@ describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () =>
 				provider: { settings, enabled: true, apiKey: "never-used" },
 			}),
 		);
+		const provider = inMemoryComputers();
 		const computers = await runOnPostgres(
-			Effect.provide(TurnComputers.Service, TurnComputers.layer).pipe(Effect.provide(noComputers)),
+			Effect.provide(TurnComputers.Service, TurnComputers.layerNoDeps).pipe(
+				Effect.provide([
+					ProjectComputers.layerNoDeps,
+					ComputerProviderStore.layer,
+					ChatFileStore.layer,
+				]),
+				Effect.provide([
+					provider.layer,
+					ComputerProviderStore.layer,
+					ComputerSignIn.none,
+					localComputerEgress,
+				]),
+			),
 		);
 		const scope = Effect.runSync(Scope.make());
 		try {
@@ -295,6 +308,19 @@ describe.skipIf(!process.env.DATABASE_URL)("computer tool step lifetimes", () =>
 			);
 			const opening = step.atPlace;
 			if (!opening) throw new Error("The step has no computer");
+
+			if (change === "test result") {
+				await runOnPostgres(
+					providers.recordTest(workspaceId, configured.id, configured.configurationRevision),
+				);
+				expect((await runOnPostgres(providers.list(workspaceId)))[0]?.lastTestedAt).toBeInstanceOf(
+					Date,
+				);
+				await expect(
+					call("computers.runCommand", { command: "pwd", timeout_seconds: 30 }),
+				).resolves.toMatchObject({ exitCode: 0 });
+				return;
+			}
 
 			await runOnPostgres(
 				providers.update(workspaceId, configured.id, {

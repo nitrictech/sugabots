@@ -106,7 +106,10 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 	const enabledProvider = (workspaceId: string) =>
 		query((db) =>
 			db
-				.select({ id: computerProvider.id, updatedAt: computerProvider.updatedAt })
+				.select({
+					id: computerProvider.id,
+					configurationRevision: computerProvider.configurationRevision,
+				})
 				.from(computerProvider)
 				.where(
 					and(eq(computerProvider.workspaceId, workspaceId), eq(computerProvider.enabled, true)),
@@ -115,7 +118,7 @@ describe.skipIf(!process.env.DATABASE_URL)("the desktop viewer, which proves aga
 		).pipe(
 			Effect.map(
 				([row]): ComputerProviderStore.Configured | undefined =>
-					row && { id: row.id, access: unreachableProvider, configurationUpdatedAt: row.updatedAt },
+					row && { ...row, access: unreachableProvider },
 			),
 			Effect.provideService(Database, database),
 		);

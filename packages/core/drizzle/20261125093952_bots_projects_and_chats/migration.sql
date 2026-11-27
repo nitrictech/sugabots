@@ -3379,3 +3379,5 @@ CREATE TABLE "event_retention" (
 );
 --> statement-breakpoint
 ALTER TABLE "computer" ADD COLUMN "applied_settings" jsonb;
+--> statement-breakpoint
+ALTER TABLE "computer_provider" ADD COLUMN "configuration_revision" integer DEFAULT 0 NOT NULL;

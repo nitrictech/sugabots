@@ -46,6 +46,7 @@ export const computerProvider = pgTable(
 		 * again once the settings or key change.
 		 */
 		managedResources: jsonb("managed_resources").$type<ComputerManagedResources>(),
+		configurationRevision: integer("configuration_revision").notNull().default(0),
 		lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
 		lastTestError: text("last_test_error"),
 		createdById: uuid("created_by_id").references(() => member.id, { onDelete: "set null" }),

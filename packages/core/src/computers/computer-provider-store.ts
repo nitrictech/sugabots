@@ -18,8 +18,8 @@ import {
 	ComputerProviderIncomplete,
 } from "@sugabots/contracts/errors/computers";
 import type { UserText } from "@sugabots/errors";
-import { and, asc, eq, ne } from "drizzle-orm";
-import { Context, DateTime, Effect, Layer, Redacted } from "effect";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { Context, DateTime, Effect, Equal, Layer, Redacted } from "effect";
 import { query, serviceOperations, transaction, writtenRow } from "../database/database.ts";
 import {
 	type ComputerProviderRow,
@@ -27,7 +27,6 @@ import {
 	computerDestruction,
 	computerProvider,
 } from "../database/schema.ts";
-import { stillConfiguredAs } from "../providers/tested-configuration.ts";
 import { Secrets } from "../secrets/secrets.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import type { Computers } from "./computers.ts";
@@ -55,14 +54,13 @@ export interface Interface {
 	/** Deletes the row. Its computers must have been destroyed first. */
 	readonly remove: (workspaceId: string, providerId: string) => Effect.Effect<boolean>;
 	/**
-	 * Records how a test of the configuration last updated at `testedAt`
-	 * went, `error` saying why it failed, unless the provider has been
-	 * reconfigured since.
+	 * Records the result for `configurationRevision` if it is still current.
+	 * `error` says why the test failed.
 	 */
 	readonly recordTest: (
 		workspaceId: string,
 		providerId: string,
-		testedAt: Date,
+		configurationRevision: number,
 		error?: UserText,
 	) => Effect.Effect<void>;
 	/** Remembers the template build Sugabots last started for the provider, until its settings or key change. */
@@ -90,8 +88,7 @@ export class Service extends Context.Service<Service, Interface>()(
 export interface Configured {
 	readonly id: string;
 	readonly access: Computers.ProviderAccess;
-	/** So a test result is recorded against the configuration it tested. */
-	readonly configurationUpdatedAt: Date;
+	readonly configurationRevision: number;
 }
 
 export const make = Effect.gen(function* () {
@@ -100,7 +97,7 @@ export const make = Effect.gen(function* () {
 
 	const toConfigured = (row: ComputerProviderRow): Configured | undefined => {
 		const access = toAccess(row);
-		return access && { id: row.id, access, configurationUpdatedAt: row.updatedAt };
+		return access && { id: row.id, access, configurationRevision: row.configurationRevision };
 	};
 
 	const toAccess = (row: ComputerProviderRow): Computers.ProviderAccess | undefined =>
@@ -158,7 +155,10 @@ export const make = Effect.gen(function* () {
 		query((db) =>
 			db
 				.update(computerProvider)
-				.set({ enabled: false })
+				.set({
+					enabled: false,
+					configurationRevision: sql`${computerProvider.configurationRevision} + 1`,
+				})
 				.where(
 					and(
 						eq(computerProvider.workspaceId, workspaceId),
@@ -241,12 +241,17 @@ export const make = Effect.gen(function* () {
 							next.enabled = false;
 						}
 						if (next.enabled) yield* disableOthers(workspaceId, providerId);
+						const changed =
+							next.enabled !== current.enabled ||
+							next.apiKeyEncrypted !== current.apiKeyEncrypted ||
+							!Equal.equals(next.settings, current.settings);
 						return yield* query((db) =>
 							db
 								.update(computerProvider)
 								.set({
 									...values,
 									enabled: next.enabled,
+									configurationRevision: current.configurationRevision + Number(changed),
 									// What Sugabots made for other settings or another account
 									// says nothing about the ones now configured.
 									...(changes.settings || changes.apiKey !== undefined
@@ -276,7 +281,7 @@ export const make = Effect.gen(function* () {
 				).pipe(Effect.map((rows) => rows.length > 0)),
 			),
 
-		recordTest: (workspaceId, providerId, testedAt, error) =>
+		recordTest: (workspaceId, providerId, configurationRevision, error) =>
 			operation(
 				"recordTest",
 				Effect.gen(function* () {
@@ -289,7 +294,7 @@ export const make = Effect.gen(function* () {
 								and(
 									eq(computerProvider.workspaceId, workspaceId),
 									eq(computerProvider.id, providerId),
-									stillConfiguredAs(computerProvider.updatedAt, testedAt),
+									eq(computerProvider.configurationRevision, configurationRevision),
 								),
 							),
 					);

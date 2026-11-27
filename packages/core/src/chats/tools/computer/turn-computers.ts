@@ -487,7 +487,7 @@ function sameProviderConfiguration(
 ): boolean {
 	return (
 		offered.id === current.id &&
-		offered.configurationUpdatedAt.getTime() === current.configurationUpdatedAt.getTime() &&
+		offered.configurationRevision === current.configurationRevision &&
 		Equal.equals(offered.access, current.access)
 	);
 }

@@ -15472,6 +15472,24 @@
         "n|col|public.chat.id",
         "e|uniqueness|public.chat.id"
       ]
+    },
+    {
+      "statementType": "add_column",
+      "statementTarget": [
+        "column",
+        "public",
+        "computer_provider",
+        "configuration_revision"
+      ],
+      "writes": [
+        "s|col|public.computer_provider.configuration_revision",
+        "n|col|public.computer_provider.configuration_revision",
+        "e|col|public.computer_provider.configuration_revision"
+      ],
+      "reads": [
+        "n|tbl|public.computer_provider",
+        "n|sch|public"
+      ]
     }
   ],
   "deltas": [
@@ -25758,6 +25776,22 @@
         ],
         "nameExplicit": false,
         "entityType": "pks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "computer_provider",
+        "name": "configuration_revision",
+        "type": "integer",
+        "typeSchema": null,
+        "notNull": true,
+        "dimensions": 0,
+        "default": "0",
+        "generated": null,
+        "identity": null,
+        "entityType": "columns"
       }
     }
   ]

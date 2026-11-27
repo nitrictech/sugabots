@@ -299,7 +299,7 @@ export const make = Effect.gen(function* () {
 					yield* providers.recordTest(
 						workspaceId,
 						providerId,
-						configured.configurationUpdatedAt,
+						configured.configurationRevision,
 						tested.error,
 					);
 					return tested;
