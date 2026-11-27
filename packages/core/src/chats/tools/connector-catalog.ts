@@ -343,7 +343,7 @@ export function from({
 	return {
 		forTurn: (workspaceId, { projectId, ownProjectId }, turn, sessions = connectorSessions()) =>
 			Effect.gen(function* () {
-				if (projectId === null) return nothingOffered;
+				if (projectId === null) return offerNothing();
 				const projectIds =
 					ownProjectId === null || ownProjectId === projectId
 						? [projectId]
@@ -372,7 +372,7 @@ export function from({
 				};
 				const targets = reached.filter((target) => target.kind === "mcp");
 				if (targets.length === 0) {
-					return { ...nothingOffered, ...ownTools, signInExpired, addable, fromProjectAndBot };
+					return { ...offerNothing(), ...ownTools, signInExpired, addable, fromProjectAndBot };
 				}
 				const uploadSide: UploadSide = {
 					chatId: turn.chatId,
@@ -536,7 +536,8 @@ function buildOfferedTools(
 	);
 }
 
-const nothingOffered: ConnectorToolSet = {
+/** No connector tools, made new for each caller, since the set's lists can be changed. */
+const offerNothing = (): ConnectorToolSet => ({
 	tools: {},
 	unavailable: [],
 	signInExpired: [],
@@ -544,9 +545,9 @@ const nothingOffered: ConnectorToolSet = {
 	addable: [],
 	fromProjectAndBot: false,
 	close: async () => undefined,
-};
+});
 
 /** No connectors at all, for a case that offers a turn none. */
 export const none: Interface = {
-	forTurn: () => Effect.succeed(nothingOffered),
+	forTurn: () => Effect.sync(offerNothing),
 };

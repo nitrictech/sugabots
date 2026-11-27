@@ -1672,7 +1672,7 @@ export const ReplyDraft = Schema.Struct({
 });
 export type ReplyDraft = typeof ReplyDraft.Type;
 
-const emptyReply: ReplyDraft = { content: "", toolCalls: [] };
+const emptyReply: Readonly<ReplyDraft> = { content: "", toolCalls: [] };
 
 const MODEL_MESSAGE_ROLES: readonly unknown[] = ["system", "user", "assistant", "tool"];
 
@@ -1779,7 +1779,7 @@ export const TurnCheckpoint = Schema.Struct({
 });
 export type TurnCheckpoint = typeof TurnCheckpoint.Type;
 
-const emptyCheckpoint: TurnCheckpoint = {
+const emptyCheckpoint: Readonly<TurnCheckpoint> = {
 	messages: [],
 	reply: emptyReply,
 	steps: 0,

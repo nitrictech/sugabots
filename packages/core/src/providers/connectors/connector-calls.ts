@@ -86,7 +86,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 		offer: (principal, projects, side) =>
 			Effect.gen(function* () {
 				let turn = turns.get(principal.turn);
-				if (turn && turn.executionNumber > principal.executionNumber) return emptyCatalog;
+				if (turn && turn.executionNumber > principal.executionNumber) return emptyCatalog();
 				if (turn?.executionNumber !== principal.executionNumber) {
 					const previous = turn;
 					turn = {
@@ -98,7 +98,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 					turns.set(principal.turn, turn);
 					if (previous) yield* closeTurnSessions(principal.turn, previous);
 				}
-				if (turns.get(principal.turn) !== turn) return emptyCatalog;
+				if (turns.get(principal.turn) !== turn) return emptyCatalog();
 				const catalog = yield* discovery.forTurn(
 					principal.workspace,
 					projects,
@@ -113,7 +113,7 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 				);
 				if (turns.get(principal.turn) !== turn) {
 					yield* closeTurnSessions(principal.turn, { ...turn, close: catalog.close });
-					return emptyCatalog;
+					return emptyCatalog();
 				}
 				turn.tools = catalog.tools;
 				turn.close = catalog.close;
@@ -221,11 +221,12 @@ function describeCatalog({
 	};
 }
 
-const emptyCatalog: Catalog = {
+/** No tools, made new for each caller, since the catalog's lists can be changed. */
+const emptyCatalog = (): Catalog => ({
 	tools: {},
 	unavailable: [],
 	signInExpired: [],
 	instructions: {},
 	addable: [],
 	fromProjectAndBot: false,
-};
+});

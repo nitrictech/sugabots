@@ -32,7 +32,7 @@ export interface SignedIn {
 	readonly expiresAt: DateTime.Utc | undefined;
 }
 
-export const NOT_SIGNED_IN: SignedIn = { credentials: [], expiresAt: undefined };
+export const NOT_SIGNED_IN: Readonly<SignedIn> = { credentials: [], expiresAt: undefined };
 
 /** For a project whose computer is signed in to nothing. */
 export const none = processLayer(

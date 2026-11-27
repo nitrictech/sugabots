@@ -306,7 +306,7 @@ function toPlacedChat(row: schema.PlacedChatRow, working: boolean): PlacedChat {
 type ApprovalPermissions = NonNullable<ChatDetails["permissions"]>;
 
 /** What a principal acting for no member, who decides no approval, may decide. */
-const NO_APPROVALS: ApprovalPermissions = {
+const NO_APPROVALS: Readonly<ApprovalPermissions> = {
 	approveToolCallsIn: [],
 	approveComputerRequests: false,
 	interruptTurns: [],

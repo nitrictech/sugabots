@@ -1,23 +1,46 @@
 language js(typescript)
 
 // A module's top level runs once per process, so whatever it holds is shared by every
-// workspace and request. Constants and filled lookup tables are fine; a `let` or an empty
-// collection (a Map, a Set, an object or an array) is state, filled by whoever comes first.
-// An empty collection typed as readonly is a constant. `JsVariableDeclarationClause` is
-// the declaration in an `export`.
+// workspace and request. This rule is a heuristic: it reads the shape of the code, not what
+// is done with it. It flags a top-level `let`, and a top-level declaration whose value holds
+// an empty collection: `{}`, `[]` or an empty `new Map()`, `Set`, `WeakMap`, `WeakSet` or
+// `Array`, alone, cast (`{} as X`, `satisfies`) or as a field of an object (`{ items: [] }`).
+// It flags a class's static field set to one too. It doesn't look inside functions or call
+// arguments, so a collection a call builds or fills, or a counter field such as `{ count: 0 }`,
+// gets past it. A declaration typed readonly, or `as const`, is a constant.
+// `JsVariableDeclarationClause` is the declaration in an `export`.
 or {
-	JsVariableStatement(),
-	JsVariableDeclarationClause()
-} as $state where {
-	not $state <: within or {
-		JsFunctionBody(),
-		JsStaticInitializationBlockClassMember()
-	} ,
-	$state <: or {
-		r"^let\s[\s\S]*",
-		r"^(?:const|let|var)\s+[\w$]+(?:\s*:[^=]+)?\s*=\s*new\s+(?:Map|Set|WeakMap|WeakSet)\s*(?:<[\s\S]*>)?\s*\(\s*(?:\[\s*\])?\s*\)\s*;?$",
-		r"^(?:const|let|var)\s+[\w$]+(?:\s*:[^=]+)?\s*=\s*(?:\{\s*\}|\[\s*\])\s*;?$"
+	or {
+		JsVariableStatement(),
+		JsVariableDeclarationClause()
+	} as $state where {
+		not $state <: within or {
+			JsFunctionBody(),
+			JsStaticInitializationBlockClassMember()
+		},
+		$state <: or {
+			r"^let\s[\s\S]*",
+			contains or {
+				JsObjectExpression() as $object where { $object <: r"^\{\s*\}$" },
+				JsArrayExpression() as $array where { $array <: r"^\[\s*\]$" },
+				JsNewExpression() as $new where {
+					$new <: r"^new\s+(?:Map|Set|WeakMap|WeakSet|Array)\s*(?:<[\s\S]*>)?\s*\(\s*(?:\[\s*\])?\s*\)$"
+				}
+			} until or {
+				JsArrowFunctionExpression(),
+				JsFunctionExpression(),
+				JsMethodObjectMember(),
+				JsCallExpression(),
+				JsNewExpression() as $filled where { $filled <: r"^new\s[\s\S]*\(\s*\S[\s\S]*\)$" }
+			}
+		},
+		not $state <: r"^const\s+[\w$]+\s*:\s*(?:readonly\s|Readonly)[\s\S]*",
+		not $state <: r"[\s\S]*\bas\s+const\s*;?$",
+		register_diagnostic(span=$state, message="State at a module's top level lives for the whole process and is shared by every workspace and request. Keep it in a service, keyed by what it belongs to, or pass it as an argument.")
 	},
-	not $state <: r"^const\s+[\w$]+\s*:\s*(?:readonly\s|Readonly)[\s\S]*",
-	register_diagnostic(span=$state, message="State at a module's top level lives for the whole process and is shared by every workspace and request. Keep it in a service, keyed by what it belongs to, or pass it as an argument.")
+	JsPropertyClassMember() as $field where {
+		$field <: r"^(?:(?:public|private|protected)\s+)?static\s[\s\S]*=\s*(?:\{\s*\}|\[\s*\]|new\s+(?:Map|Set|WeakMap|WeakSet|Array)\s*(?:<[\s\S]*>)?\s*\(\s*\))\s*;?$",
+		not $field <: r"[\s\S]*\breadonly\s[\s\S]*",
+		register_diagnostic(span=$field, message="A class's static field lives for the whole process and is shared by every workspace and request. Keep it in a service, keyed by what it belongs to, or pass it as an argument.")
+	}
 }
