@@ -845,6 +845,7 @@ UPDATE "message" SET "parts" = (
 	SELECT jsonb_agg(
 		CASE WHEN part->>'type' = 'artifact'
 			THEN (part - 'type' - 'artifactId') || jsonb_build_object('type', 'written_file', 'fileId', part->'artifactId')
+				|| CASE WHEN part->>'kind' = 'document' THEN '{"kind":"markdown"}'::jsonb ELSE '{}'::jsonb END
 			ELSE part
 		END
 		ORDER BY position
@@ -856,12 +857,16 @@ UPDATE "message" SET "parts" = (
 -- as a reply's file cards and an automation's posted result are read from them.
 UPDATE "tool_call" SET
 	"tool" = 'file_' || substring("tool" from 10),
-	"input" = CASE WHEN jsonb_typeof("input") = 'object' AND "input" ? 'artifactId'
-		THEN ("input" - 'artifactId') || jsonb_build_object('fileId', "input"->'artifactId')
+	"input" = CASE WHEN jsonb_typeof("input") = 'object' THEN
+		("input" - 'artifactId')
+		|| CASE WHEN "input" ? 'artifactId' THEN jsonb_build_object('fileId', "input"->'artifactId') ELSE '{}'::jsonb END
+		|| CASE WHEN "tool" = 'artifact_write' AND "input"->>'kind' = 'document' THEN '{"kind":"markdown"}'::jsonb ELSE '{}'::jsonb END
 		ELSE "input"
 	END,
-	"execution_input" = CASE WHEN jsonb_typeof("execution_input") = 'object' AND "execution_input" ? 'artifactId'
-		THEN ("execution_input" - 'artifactId') || jsonb_build_object('fileId', "execution_input"->'artifactId')
+	"execution_input" = CASE WHEN jsonb_typeof("execution_input") = 'object' THEN
+		("execution_input" - 'artifactId')
+		|| CASE WHEN "execution_input" ? 'artifactId' THEN jsonb_build_object('fileId', "execution_input"->'artifactId') ELSE '{}'::jsonb END
+		|| CASE WHEN "tool" = 'artifact_write' AND "execution_input"->>'kind' = 'document' THEN '{"kind":"markdown"}'::jsonb ELSE '{}'::jsonb END
 		ELSE "execution_input"
 	END,
 	"output" = CASE
@@ -870,6 +875,7 @@ UPDATE "tool_call" SET
 				SELECT coalesce(jsonb_agg(
 					CASE WHEN jsonb_typeof(entry) = 'object' AND entry ? 'artifactId'
 						THEN (entry - 'artifactId') || jsonb_build_object('fileId', entry->'artifactId')
+							|| CASE WHEN entry->>'kind' = 'document' THEN '{"kind":"markdown"}'::jsonb ELSE '{}'::jsonb END
 						ELSE entry
 					END ORDER BY position
 				), '[]'::jsonb)
@@ -877,9 +883,13 @@ UPDATE "tool_call" SET
 			))
 		WHEN jsonb_typeof("output") = 'object' AND "output" ? 'artifactId'
 			THEN ("output" - 'artifactId') || jsonb_build_object('fileId', "output"->'artifactId')
+				|| CASE WHEN "output"->>'kind' = 'document' THEN '{"kind":"markdown"}'::jsonb ELSE '{}'::jsonb END
 		ELSE "output"
 	END
 WHERE "tool" IN ('artifact_list', 'artifact_read', 'artifact_write', 'artifact_edit');--> statement-breakpoint
+UPDATE "tool_call" SET "tool" = 'start_chat',
+	"output" = ("output" - 'thread') || jsonb_build_object('chat', "output"->'thread')
+WHERE "tool" = 'start_thread' AND "status" = 'completed' AND jsonb_typeof("output"->'thread') = 'object';--> statement-breakpoint
 -- The file tools a bot has switched off, by their new names.
 UPDATE "agent" SET "disabled_tools" = (
 	SELECT jsonb_agg(

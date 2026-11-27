@@ -62,6 +62,7 @@ export const legacy = {
 		/** The Family pod's main chat, which nobody started. */
 		general: "0000000f-0000-4000-8000-000000000001",
 		trip: "0000000f-0000-4000-8000-000000000002",
+		askPlanner: "0000000f-0000-4000-8000-000000000003",
 		shopping: "0000000f-0000-4000-8000-000000000004",
 		report: "0000000f-0000-4000-8000-000000000005",
 		/** Deleted, with its folder's deletion still queued. */
@@ -153,10 +154,17 @@ export const migrationScale = {
 			versionId: "00000007-0000-4000-8000-000000000021",
 			text: "# Personal notes",
 		},
+		digest: {
+			kind: "version",
+			fileId: "00000006-0000-4000-8000-000000000022",
+			versionId: "00000007-0000-4000-8000-000000000022",
+			text: "# Daily digest",
+		},
 	},
 } as const;
 
 export const personalPodMute = "2099-01-01T10:00:00.000Z";
+export const startedThreadCall = "00000003-0000-4000-8000-000000000124";
 export const fileToolCalls = {
 	write: "00000003-0000-4000-8000-000000000121",
 	read: "00000003-0000-4000-8000-000000000122",
@@ -642,9 +650,13 @@ SET "trigger_identity" = "id"::text,
 	"trigger" = jsonb_build_object('kind', 'manual', 'requestId', "id", 'requestedAt', '2026-10-08T09:00:00.000Z', 'requestedByUserId', '${legacy.members.sam}')
 WHERE "trigger_kind" = 'manual';
 UPDATE "routine" SET "results" = 'post_to_chat', "chat_id" = '${legacy.threads.trip}' WHERE "id" = '${legacy.routine}';
+INSERT INTO "artifact" ("id", "workspace_id", "pod_id", "kind", "title", "current_version", "created_by_agent_id", "created_in_thread_id")
+VALUES ('${migrationScale.files.digest.fileId}', '${legacy.workspace}', '${legacy.pods.family}', 'document', 'Daily digest', 1, '${legacy.bots.planner}', '${migrationScale.resultRunChat}');
+INSERT INTO "artifact_version" ("id", "artifact_id", "number", "content_type", "size")
+VALUES ('${migrationScale.files.digest.versionId}', '${migrationScale.files.digest.fileId}', 1, 'text/markdown', ${migrationScale.files.digest.text.length});
 INSERT INTO "message" ("id", "thread_id", "author_agent_id", "routine_execution_id", "kind", "status", "parts", "content", "created_at") VALUES
- ('${migrationScale.feedResult}', '${migrationScale.feed}', '${legacy.bots.planner}', '${migrationScale.resultRun}', 'text', 'complete', '[{"type":"text","text":"Digest ready."}]', 'Digest ready.', '2026-10-09 09:02'),
- ('${migrationScale.chatResult}', '${legacy.threads.trip}', '${legacy.bots.planner}', '${migrationScale.resultRun}', 'text', 'complete', '[{"type":"text","text":"Digest ready."}]', 'Digest ready.', '2026-10-09 09:01');
+ ('${migrationScale.feedResult}', '${migrationScale.feed}', '${legacy.bots.planner}', '${migrationScale.resultRun}', 'text', 'complete', '[{"type":"text","text":"Digest ready."},{"type":"artifact","artifactId":"${migrationScale.files.digest.fileId}","kind":"document","title":"Daily digest","version":1}]', 'Digest ready.', '2026-10-09 09:02'),
+ ('${migrationScale.chatResult}', '${legacy.threads.trip}', '${legacy.bots.planner}', '${migrationScale.resultRun}', 'text', 'complete', '[{"type":"text","text":"Digest ready."},{"type":"artifact","artifactId":"${migrationScale.files.digest.fileId}","kind":"document","title":"Daily digest","version":1}]', 'Digest ready.', '2026-10-09 09:01');
 
 -- The reply and read must go with the direct chat.
 INSERT INTO "message" ("thread_id", "author_user_id", "reply_to_message_id", "kind", "status", "parts", "content")
@@ -660,11 +672,11 @@ INSERT INTO "notification_override" ("user_id", "agent_id", "level", "muted_unti
  ('${legacy.members.lee}', '${legacy.bots.sketch}', NULL, '${personalPodMute}');
 `;
 
-export const legacyFileToolCalls = `
+export const legacyRecordedToolCalls = `
 INSERT INTO "tool_call" ("id", "thread_id", "message_id", "turn_id", "tool", "input", "execution_input", "output", "status", "at_offset") VALUES
  ('${fileToolCalls.write}', '${legacy.threads.trip}', '${legacy.tripMessages.answered}', '00000002-0000-4000-8000-000000000001', 'artifact_write',
-  '{"artifactId":"00000006-0000-4000-8000-000000000001","baseVersion":1,"content":"artifactId"}',
-  '{"artifactId":"00000006-0000-4000-8000-000000000001","baseVersion":1,"content":"artifactId"}',
+  '{"artifactId":"00000006-0000-4000-8000-000000000001","baseVersion":1,"kind":"document","content":"artifactId document"}',
+  '{"artifactId":"00000006-0000-4000-8000-000000000001","baseVersion":1,"kind":"document","content":"artifactId document"}',
   '{"status":"written","artifactId":"00000006-0000-4000-8000-000000000001","kind":"document","title":"artifacts","version":2}', 'completed', 0),
  ('${fileToolCalls.read}', '${legacy.threads.trip}', '${legacy.tripMessages.answered}', '00000002-0000-4000-8000-000000000001', 'artifact_read',
   '{"artifactId":"00000006-0000-4000-8000-000000000001"}', NULL,
@@ -672,6 +684,18 @@ INSERT INTO "tool_call" ("id", "thread_id", "message_id", "turn_id", "tool", "in
  ('${fileToolCalls.list}', '${legacy.threads.trip}', '${legacy.tripMessages.answered}', '00000002-0000-4000-8000-000000000001', 'artifact_list',
   '{}', NULL,
   '{"artifacts":[{"artifactId":"00000006-0000-4000-8000-000000000001","kind":"document","title":"artifacts","version":2,"updatedAt":"2026-10-05T09:02:00.000Z"}]}', 'completed', 0);
+
+INSERT INTO "tool_call" ("id", "thread_id", "message_id", "turn_id", "tool", "input", "output", "status", "mutating", "at_offset") VALUES
+ ('${startedThreadCall}', '${legacy.threads.trip}', '${legacy.tripMessages.answered}', '00000002-0000-4000-8000-000000000001', 'start_thread',
+  '{"title":"Ask Planner","brief":"Plan the trip"}',
+  '{"thread":{"id":"${legacy.threads.askPlanner}","title":"Ask Planner"}}', 'completed', true, 0);
+
+UPDATE "message" SET "parts" = "parts" || jsonb_build_array(
+ jsonb_build_object('type', 'tool_call', 'toolCallId', '${fileToolCalls.write}'),
+ jsonb_build_object('type', 'tool_call', 'toolCallId', '${fileToolCalls.read}'),
+ jsonb_build_object('type', 'tool_call', 'toolCallId', '${fileToolCalls.list}'),
+ jsonb_build_object('type', 'tool_call', 'toolCallId', '${startedThreadCall}')
+) WHERE "id" = '${legacy.tripMessages.answered}';
 `;
 
 export const legacyCyclicCollaboration = `

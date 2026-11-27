@@ -4,10 +4,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { PgClient } from "@effect/sql-pg";
-import { botUpdateSchema } from "@sugabots/contracts";
+import { botUpdateSchema, filesWrittenBy } from "@sugabots/contracts";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { automationsContracts } from "@sugabots/contracts/operations/automations";
 import { chatReadsContracts } from "@sugabots/contracts/operations/chat-reads";
+import { chatsContracts } from "@sugabots/contracts/operations/chats";
 import { WorkflowEngines } from "@sugabots/workflow/engine";
 import { makeWithDefaults } from "drizzle-orm/effect-postgres";
 import { migrate } from "drizzle-orm/effect-postgres/migrator";
@@ -92,16 +93,17 @@ import {
 	legacyCyclicCollaboration,
 	legacyFacilitationRequest,
 	legacyFiles,
-	legacyFileToolCalls,
 	legacyKeyOf,
 	legacyMigrationScaleRows,
 	legacyPersonalPodNotifications,
+	legacyRecordedToolCalls,
 	legacyRows,
 	legacySessions,
 	legacySessionToken,
 	legacySummaryRequest,
 	migrationScale,
 	personalPodMute,
+	startedThreadCall,
 } from "./upgrade.test-support.ts";
 
 /**
@@ -190,7 +192,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 				);
 				await client.query(legacyMigrationScaleRows);
 				await client.query(legacyPersonalPodNotifications);
-				await client.query(legacyFileToolCalls);
+				await client.query(legacyRecordedToolCalls);
 				await client.query(
 					`with added as (
 						insert into routine (workspace_id, agent_id, name, instructions, state)
@@ -866,7 +868,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 							chatId: legacy.threads.trip,
 							authorMemberId: legacy.members.sam,
 							status: "complete",
-							parts: [],
+							parts: [{ type: "text", text: "Check the calendar" }],
 							content: "Check the calendar",
 						})
 						.returning({ id: message.id }),
@@ -1052,6 +1054,36 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			]);
 		});
 
+		it("reads historical Markdown files on both copies of an automation result", async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const sam = await upgraded.signIn(legacy.members.sam);
+			for (const [chatId, messageId] of [
+				[migrationScale.feed, migrationScale.feedResult],
+				[legacy.threads.trip, migrationScale.chatResult],
+			] as const) {
+				const page = await call(sam, "chats.messages", { chatId, limit: 20 });
+				const response = Schema.encodeSync(chatReadsContracts["chats.messages"].output)(page);
+				expect(response.items).toContainEqual(
+					expect.objectContaining({
+						kind: "message",
+						message: expect.objectContaining({
+							id: messageId,
+							parts: [
+								{ type: "text", text: "Digest ready." },
+								{
+									type: "written_file",
+									fileId: migrationScale.files.digest.fileId,
+									kind: "markdown",
+									title: "Daily digest",
+									version: 1,
+								},
+							],
+						}),
+					}),
+				);
+			}
+		});
+
 		const manualRun = {
 			id: migrationScale.resultRun,
 			trigger: {
@@ -1101,29 +1133,55 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			});
 		});
 
-		it("renames the file tool keys while preserving recorded text", async () => {
-			const [write, read, list] = await upgraded.rows(
-				"select tool, input, execution_input, output from tool_call where id = any($1) order by id",
-				[Object.values(fileToolCalls)],
+		const readRecordedToolCalls = async () => {
+			const call = await servedOperations({ runOn: upgraded.run });
+			const sam = await upgraded.signIn(legacy.members.sam);
+			const page = await call(sam, "chats.messages", { chatId: legacy.threads.trip, limit: 20 });
+			const reply = page.items.find(
+				(item) => item.kind === "message" && item.message.id === legacy.tripMessages.answered,
 			);
+			return reply?.kind === "message"
+				? reply.message.parts.filter((part) => part.type === "tool_call")
+				: [];
+		};
+
+		it("reads Markdown file tools with their file cards and recorded text", async () => {
+			const calls = await readRecordedToolCalls();
+			const write = calls.find(({ id }) => id === fileToolCalls.write);
+			const read = calls.find(({ id }) => id === fileToolCalls.read);
+			const list = calls.find(({ id }) => id === fileToolCalls.list);
 			const fileId = "00000006-0000-4000-8000-000000000001";
-			const writeInput = { fileId, baseVersion: 1, content: "artifactId" };
-			expect(write).toEqual({
+			const input = { fileId, baseVersion: 1, kind: "markdown", content: "artifactId document" };
+			const written = { fileId, kind: "markdown", title: "artifacts", version: 2 };
+			expect(write).toMatchObject({
 				tool: "file_write",
-				input: writeInput,
-				execution_input: writeInput,
-				output: { status: "written", fileId, kind: "document", title: "artifacts", version: 2 },
+				input,
+				output: { status: "written", ...written },
 			});
 			expect(read).toMatchObject({
 				tool: "file_read",
 				input: { fileId },
-				execution_input: null,
-				output: { fileId, title: "artifacts", content: "artifactId" },
+				output: { ...written, content: "artifactId" },
 			});
 			expect(list).toMatchObject({
 				tool: "file_list",
-				output: { files: [{ fileId, title: "artifacts" }] },
+				output: { files: [written] },
 			});
+			expect(filesWrittenBy(calls)).toEqual([{ type: "written_file", ...written }]);
+			expect(
+				await upgraded.rows("select execution_input from tool_call where id = $1", [
+					fileToolCalls.write,
+				]),
+			).toEqual([{ execution_input: input }]);
+		});
+
+		it("reads the link on a reply that started a chat", async () => {
+			const calls = await readRecordedToolCalls();
+			const started = calls.find(({ id }) => id === startedThreadCall);
+			expect(started).toMatchObject({ tool: "start_chat", status: "completed" });
+			expect(
+				Schema.decodeUnknownSync(chatsContracts["chats.startBriefedChat"].output)(started?.output),
+			).toEqual({ chat: { id: legacy.threads.askPlanner, title: "Ask Planner" } });
 		});
 
 		it("leaves the opener unknown when a workspace has no members", async () => {
