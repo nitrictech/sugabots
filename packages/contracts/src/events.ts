@@ -177,11 +177,10 @@ const eventPayloadSchemas = {
 	/** One of the member's tabs says what it is looking at, so their other tabs hold back notifications about it. */
 	presence: presenceSchema,
 	/**
-	 * The first event on a stream that resumes from nowhere, sent once
-	 * the server knows where in the stream it starts: everything after it
-	 * follows. A client fetches its view over REST on hearing it, holding the
-	 * events after it until that view arrives, so a change between its first
-	 * fetch and the stream starting is not lost.
+	 * Marks where live events begin when the client has no resume point or
+	 * replay ends with events the client cannot hear. Its cursor lets the
+	 * client resume from there. The client fetches its view over REST and
+	 * holds the events after `ready` until that view arrives.
 	 */
 	ready: nothing,
 	/**

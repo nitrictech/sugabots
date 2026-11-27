@@ -19,11 +19,11 @@ import { failureFromResponse } from "./errors.ts";
  * every thirty minutes on purpose. The loop below reconnects with
  * `Last-Event-ID` set to the last event that carried an id, and the server
  * replays what was missed. When it cannot resume from there, the server sends
- * `reset`. A connection with nothing to resume from starts with the server's
- * `ready`, sent once it knows where the stream starts. Either way the consumer
- * reloads what it shows, and the event's id is where the next connection
- * resumes. An event with an id that cannot be read yields a `reset` here, and
- * the next connection starts with `ready`.
+ * `reset`. The server sends `ready` before live events when the client has no
+ * resume point or replay ends with events the client cannot hear. On either
+ * event the consumer reloads what it shows, and the event's id is where the
+ * next connection resumes. An event with an id that cannot be read yields a
+ * `reset` here, and the next connection starts with `ready`.
  */
 
 export interface EventStream extends AsyncIterable<StreamEvent> {
