@@ -93,21 +93,8 @@ WITH "keeper" AS (
 )
 UPDATE "connection" SET "agent_id" = "keeper"."agent_id"
 FROM "keeper" WHERE "connection"."id" = "keeper"."connection_id";--> statement-breakpoint
--- A GitHub trigger needs an app in its automation's project. An app that
--- stays with a shared pod, or goes to a different bot, cannot start it.
-UPDATE "routine" SET "state" = 'paused'
-WHERE "state" = 'enabled' AND EXISTS (
-	SELECT 1 FROM "routine_trigger"
-	JOIN "connection" ON "connection"."id"::text = "routine_trigger"."settings"->>'connectionId'
-	WHERE "routine_trigger"."routine_id" = "routine"."id"
-		AND "routine_trigger"."kind" = 'github'
-		AND "connection"."agent_id" IS DISTINCT FROM "routine"."agent_id"
-);--> statement-breakpoint
--- A paused automation's routines have no next time.
-UPDATE "routine_trigger" SET "next_scheduled_at" = NULL
-FROM "routine"
-WHERE "routine"."id" = "routine_trigger"."routine_id" AND "routine"."state" = 'paused'
-	AND "routine_trigger"."next_scheduled_at" IS NOT NULL;--> statement-breakpoint
+-- A GitHub trigger can run only from its automation's own project's app.
+-- Keep its settings so a member can reconnect it if the app goes elsewhere.
 -- The `pod`'s other bots get copies of its MCP and HTTP connections. A GitHub
 -- connection is its own GitHub App, which can't be copied: they set up their own.
 INSERT INTO "connection" (

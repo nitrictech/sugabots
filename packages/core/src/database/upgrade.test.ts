@@ -58,7 +58,7 @@ import { viewDesktop } from "../operations/computers/view-desktop.ts";
 import { update as updateConnector } from "../operations/connectors/update.ts";
 import { servedOperations } from "../operations/testing.ts";
 import { usageMonth } from "../operations/workspace/usage-month.ts";
-import type { Principal } from "../principal.ts";
+import { authenticated, type Principal } from "../principal.ts";
 import { proveCanReachConnector } from "../proofs/can-use-connector.ts";
 import { proveCanRunAutomations } from "../proofs/project-permissions.ts";
 import { named } from "../proofs/proof.ts";
@@ -203,15 +203,19 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 						select workspace_id, id, 'Triage issues', 'Triage new issues', 'enabled'
 						from agent where id = any($1) returning id, workspace_id
 					)
-					insert into routine_trigger (workspace_id, routine_id, settings)
-					select workspace_id, id, $2 from added`,
+					insert into routine_trigger (workspace_id, routine_id, settings, next_scheduled_at)
+					select workspace_id, id, settings, next_scheduled_at from added
+					cross join (values
+						($2::jsonb, null::timestamptz),
+						('{"kind":"cron","cron":"0 9 * * *","timezone":"UTC"}'::jsonb, '2026-12-01 09:00Z'::timestamptz)
+					) as triggers(settings, next_scheduled_at)`,
 					[
 						[legacy.bots.planner, legacy.bots.budget],
 						{
 							kind: "github",
 							connectionId: legacy.familyGitHubConnector,
 							repository: "acme/web",
-							events: ["issues"],
+							events: ["issue_opened"],
 						},
 					],
 				);
@@ -420,7 +424,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			).toEqual([{ to_chat_id: legacy.threads.trip }]);
 		});
 
-		it("keeps the shared GitHub app in the converted project and pauses its old triggers", async () => {
+		it("keeps the shared GitHub app in the converted project and leaves the affected bots' routines enabled", async () => {
 			expect(
 				await upgraded.rows("select project_id from connector where id = $1", [
 					legacy.familyGitHubConnector,
@@ -436,9 +440,44 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					[legacy.familyGitHubConnector],
 				),
 			).toEqual([
-				{ state: "paused", default_of_bot_id: legacy.bots.planner },
-				{ state: "paused", default_of_bot_id: legacy.bots.budget },
+				{ state: "enabled", default_of_bot_id: legacy.bots.planner },
+				{ state: "enabled", default_of_bot_id: legacy.bots.budget },
 			]);
+			expect(
+				await upgraded.rows(
+					`select next_scheduled_at from automation_trigger
+					 join automation on automation.id = automation_trigger.automation_id
+					 where automation.name = 'Triage issues' and automation_trigger.kind = 'routine'`,
+				),
+			).toEqual([
+				{ next_scheduled_at: new Date("2026-12-01T09:00:00Z") },
+				{ next_scheduled_at: new Date("2026-12-01T09:00:00Z") },
+			]);
+
+			const body = JSON.stringify({
+				action: "opened",
+				repository: { full_name: "acme/web" },
+				sender: { login: "octocat" },
+				issue: { number: 3, title: "Login", html_url: "https://github.com/acme/web/issues/3" },
+			});
+			const connectorId = legacy.familyGitHubConnector;
+			const deliveryId = "new-issue-after-upgrade";
+			const principal = authenticated.webhookCall({
+				workspace: legacy.workspace,
+				source: { kind: "github", connector: connectorId, project: legacy.pods.family },
+			});
+			const call = await servedOperations({ runOn: upgraded.run });
+			expect(
+				await call(principal, "gitHubWebhooks.delivery", {
+					connectorId,
+					deliveryId,
+					event: "issues",
+					body,
+				}),
+			).toMatchObject({ activity: { event: "issue_opened", repository: "acme/web" } });
+			expect(
+				await upgraded.rows("select id from run where trigger_identity = $1", [deliveryId]),
+			).toEqual([]);
 		});
 
 		it("keeps the converted project's computer signed in to the shared GitHub repositories", async () => {
