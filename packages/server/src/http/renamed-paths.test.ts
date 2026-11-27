@@ -110,4 +110,30 @@ describe("an address given out before projects", () => {
 		expect(installed.status).toBe(302);
 		expect(gitHubAppInstalled.mock.calls[0]?.[1]).toEqual({ installationId: 7, state: "s-2" });
 	});
+
+	it.each(["/connections/github/made/", "/Connections/GitHub/Made", "//connections/github/made"])(
+		"matches %s as the router would have",
+		async (path) => {
+			const { app, gitHubAppMade } = oldPathsApp();
+
+			const made = await app.request(`${path}?code=the-code&state=s-1`, {
+				headers: signedInWith("good-token"),
+			});
+
+			expect(made.status).toBe(302);
+			expect(gitHubAppMade.mock.calls[0]?.[1]).toEqual({ code: "the-code", state: "s-1" });
+		},
+	);
+
+	it.each([`/hooks/triggers/${TRIGGER_ID}/`, `/Hooks/Routines/${TRIGGER_ID}`])(
+		"matches %s, under a renamed prefix, as the router would have",
+		async (path) => {
+			const { app, automationWebhook } = oldPathsApp();
+
+			const response = await app.request(path, fromAnotherSystem("{}"));
+
+			expect(response.status).toBe(202);
+			expect(automationWebhook.mock.calls[0]?.[1].triggerId).toBe(TRIGGER_ID);
+		},
+	);
 });
