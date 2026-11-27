@@ -1233,15 +1233,22 @@ it.skipIf(!process.env.DATABASE_URL)(
 			await withClient(url, async (client) => {
 				await client.query(legacyRows);
 				await client.query(legacyCyclicCollaboration);
-				await client.query("begin");
-				try {
-					await client.query("set local statement_timeout = '2s'");
-					await expect(client.query(migration)).rejects.toThrow(
-						`Collaboration chat ancestry has a cycle: ${migrationScale.cyclicChat}`,
-					);
-				} finally {
-					await client.query("rollback");
-				}
+				// A busy database can hold up the migration before it reaches the cycle.
+				await withClient(url, async (blocker) => {
+					await blocker.query("begin; lock table agent in access exclusive mode");
+					await client.query("begin");
+					try {
+						await client.query(`set local statement_timeout = ${UPGRADE_TIMEOUT_MS}`);
+						await Promise.all([
+							expect(client.query(migration)).rejects.toThrow(
+								`Collaboration chat ancestry has a cycle: ${migrationScale.cyclicChat}`,
+							),
+							blocker.query("select pg_sleep(2.1); commit"),
+						]);
+					} finally {
+						await client.query("rollback");
+					}
+				});
 				const { rows } = await client.query("select id from thread where id = $1", [
 					migrationScale.cyclicChat,
 				]);
@@ -1503,7 +1510,7 @@ function startServer(url: string, store: Store, root: string): Upgraded {
 }
 
 it.skipIf(!process.env.DATABASE_URL)(
-	"repairs 250 colliding names and handles in creation order and keeps handles valid",
+	"repairs colliding names and handles in creation order, including shared truncated prefixes",
 	async () => {
 		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "bot_names");
 		const migration = await readFile(
@@ -1520,7 +1527,7 @@ it.skipIf(!process.env.DATABASE_URL)(
 				insert into pod (id, workspace_id, kind, name, slug)
 				select ('10000000-0000-4000-8000-' || lpad(ordinal::text, 12, '0'))::uuid,
 					$1, 'shared', 'Shipping ' || ordinal, 'shipping-' || ordinal
-				from generate_series(1, 252) as ordinal
+				from generate_series(1, 1252) as ordinal
 			`,
 					[legacy.workspace],
 				);
@@ -1529,11 +1536,15 @@ it.skipIf(!process.env.DATABASE_URL)(
 				insert into agent (id, workspace_id, pod_id, name, handle, color, face, created_at)
 				select ('20000000-0000-4000-8000-' || lpad(ordinal::text, 12, '0'))::uuid, $1,
 					('10000000-0000-4000-8000-' || lpad(ordinal::text, 12, '0'))::uuid,
-					case when ordinal = 251 then 'Shipping 2' when ordinal = 252 then 'Reviewer' else 'Shipping' end,
+					case when ordinal = 251 then 'Shipping 2' when ordinal = 252 then 'Reviewer'
+						when ordinal > 252 then repeat('N', 62) || chr(97 + ((ordinal - 253) % 500) / 26) || chr(97 + (ordinal - 253) % 500 % 26)
+						else 'Shipping' end,
 					case when ordinal = 251 then 'shipping-2'
-						when ordinal = 252 then 'personal-assistant-' || repeat('1', 29) else 'shipping' end,
+						when ordinal = 252 then 'personal-assistant-' || repeat('1', 29)
+						when ordinal > 252 then repeat('h', 46) || chr(97 + ((ordinal - 253) % 500) / 26) || chr(97 + (ordinal - 253) % 500 % 26)
+						else 'shipping' end,
 					'sky', 'dot', '2026-10-01'::timestamptz + ordinal * interval '1 second'
-				from generate_series(1, 252) as ordinal
+				from generate_series(1, 1252) as ordinal
 			`,
 					[legacy.workspace],
 				);
@@ -1566,6 +1577,19 @@ it.skipIf(!process.env.DATABASE_URL)(
 				})),
 				{ name: "Shipping 2", handle: "shipping-2" },
 				{ name: "Reviewer", handle: `personal-assistant-${"1".repeat(27)}-2` },
+				...Array.from({ length: 500 }, (_, index) => ({
+					name:
+						"N".repeat(62) + String.fromCharCode(97 + Math.floor(index / 26), 97 + (index % 26)),
+					handle:
+						"h".repeat(46) + String.fromCharCode(97 + Math.floor(index / 26), 97 + (index % 26)),
+				})),
+				...Array.from({ length: 500 }, (_, index) => {
+					const suffix = String(index + 2);
+					return {
+						name: `${"N".repeat(63 - suffix.length)} ${suffix}`,
+						handle: `${"h".repeat(47 - suffix.length)}-${suffix}`,
+					};
+				}),
 			]);
 		} finally {
 			await dropDatabase(url);

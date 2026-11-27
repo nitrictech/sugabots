@@ -240,83 +240,101 @@ WHERE "routine"."id" = "routine_trigger"."routine_id" AND "agent"."id" = "routin
 -- address: the oldest keeps its own, and each other gets the lowest number from
 -- 2 that no bot has taken, shortened to fit (handles 48 characters, names 64).
 -- Group mentions and Personal Assistants' handles are reserved.
-CREATE INDEX "agent_handle_repair_idx" ON "agent" ("workspace_id", "handle")
-	WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL;--> statement-breakpoint
-CREATE INDEX "agent_name_repair_idx" ON "agent" ("workspace_id", lower("name"))
-	WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL;--> statement-breakpoint
+CREATE TEMP TABLE "agent_repair_taken" (
+	"workspace_id" uuid NOT NULL,
+	"value" text NOT NULL,
+	PRIMARY KEY ("workspace_id", "value")
+) ON COMMIT DROP;--> statement-breakpoint
 CREATE TEMP TABLE "agent_repair_suffix" (
 	"workspace_id" uuid NOT NULL,
-	"original" text NOT NULL,
-	"next_suffix" integer NOT NULL,
-	PRIMARY KEY ("workspace_id", "original")
+	"prefix" text NOT NULL,
+	"suffix_width" integer NOT NULL,
+	"next_suffix" bigint NOT NULL,
+	PRIMARY KEY ("workspace_id", "prefix", "suffix_width")
 ) ON COMMIT DROP;--> statement-breakpoint
 DO $$
 DECLARE
+	repair_handle boolean;
 	clashing record;
-	suffix_number integer;
+	separator text;
+	max_length integer;
+	candidate_base text;
+	rendered_prefix text;
+	prefix_key text;
+	suffix_number bigint;
+	width_limit bigint;
 	candidate text;
-	handle_base text;
 BEGIN
-	FOR clashing IN
-		SELECT "id", "workspace_id", "handle" FROM (
-			SELECT "id", "workspace_id", "handle", "created_at", row_number() OVER (
-				PARTITION BY "workspace_id", "handle" ORDER BY "created_at", "id"
-			) AS "rank"
-			FROM "agent" WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL
-		) AS "ranked"
-		WHERE "rank" > 1 OR "handle" IN ('here', 'channel') OR "handle" ~ '^personal-assistant(-[0-9]+)?$'
-		ORDER BY "created_at", "id"
-	LOOP
-		handle_base := CASE WHEN clashing.handle ~ '^personal-assistant(-[0-9]+)?$'
-			THEN clashing.handle || '-bot' ELSE clashing.handle END;
-		SELECT coalesce((
-			SELECT "next_suffix" FROM "agent_repair_suffix"
-			WHERE "workspace_id" = clashing.workspace_id AND "original" = clashing.handle
-		), 2) INTO suffix_number;
+	FOREACH repair_handle IN ARRAY ARRAY[true, false] LOOP
+		separator := CASE WHEN repair_handle THEN '-' ELSE ' ' END;
+		max_length := CASE WHEN repair_handle THEN 48 ELSE 64 END;
+		-- The oldest bot keeps each original unless the handle is reserved.
+		-- Reserved handles are never candidates, so taken values only grow.
+		INSERT INTO "agent_repair_taken"
+		SELECT DISTINCT "workspace_id", CASE WHEN repair_handle THEN "handle" ELSE lower("name") END
+		FROM "agent" WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL;
+		FOR clashing IN
+			SELECT "id", "workspace_id", "original" FROM (
+				SELECT "id", "workspace_id", "created_at",
+					CASE WHEN repair_handle THEN "handle" ELSE "name" END AS "original",
+					row_number() OVER (
+						PARTITION BY "workspace_id", CASE WHEN repair_handle THEN "handle" ELSE lower("name") END
+						ORDER BY "created_at", "id"
+					) AS "rank"
+				FROM "agent" WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL
+			) AS "ranked"
+			WHERE "rank" > 1 OR (repair_handle AND
+				("original" IN ('here', 'channel') OR "original" ~ '^personal-assistant(-[0-9]+)?$'))
+			ORDER BY "created_at", "id"
 		LOOP
-			candidate := rtrim(left(handle_base, 48 - length('-' || suffix_number)), '-') || '-' || suffix_number;
-			EXIT WHEN candidate NOT IN ('here', 'channel') AND candidate !~ '^personal-assistant(-[0-9]+)?$'
-			AND NOT EXISTS (
-				SELECT 1 FROM "agent"
-				WHERE "workspace_id" = clashing.workspace_id AND "handle" = candidate
-					AND "system_agent_key" IS NULL AND "assistant_of" IS NULL
-			);
-			suffix_number := suffix_number + 1;
+			candidate_base := CASE WHEN repair_handle AND clashing.original ~ '^personal-assistant(-[0-9]+)?$'
+				THEN clashing.original || '-bot' ELSE clashing.original END;
+			-- A wider suffix shortens the prefix. Originals with the same rendered
+			-- prefix at this width compete for the same numbers.
+			<<by_width>>
+			FOR width IN 1..10 LOOP
+				rendered_prefix := rtrim(left(candidate_base, max_length - 1 - width), separator);
+				prefix_key := CASE WHEN repair_handle THEN rendered_prefix ELSE lower(rendered_prefix) END;
+				width_limit := power(10, width)::bigint;
+				SELECT coalesce((
+					SELECT "next_suffix" FROM "agent_repair_suffix"
+					WHERE "workspace_id" = clashing.workspace_id AND "prefix" = prefix_key
+						AND "suffix_width" = width
+				), greatest(2, width_limit / 10)) INTO suffix_number;
+				CONTINUE WHEN suffix_number = width_limit;
+				WHILE suffix_number < width_limit LOOP
+					candidate := rendered_prefix || separator || suffix_number;
+					IF NOT repair_handle OR (
+						candidate NOT IN ('here', 'channel') AND candidate !~ '^personal-assistant(-[0-9]+)?$'
+					) THEN
+						INSERT INTO "agent_repair_taken" VALUES (
+							clashing.workspace_id, CASE WHEN repair_handle THEN candidate ELSE lower(candidate) END
+						) ON CONFLICT DO NOTHING;
+						EXIT WHEN FOUND;
+					END IF;
+					suffix_number := suffix_number + 1;
+				END LOOP;
+				INSERT INTO "agent_repair_suffix" VALUES (
+					clashing.workspace_id, prefix_key, width, least(suffix_number + 1, width_limit)
+				)
+				ON CONFLICT ("workspace_id", "prefix", "suffix_width") DO UPDATE
+					SET "next_suffix" = excluded."next_suffix";
+				IF suffix_number < width_limit THEN
+					IF repair_handle THEN
+						UPDATE "agent" SET "handle" = candidate WHERE "id" = clashing.id;
+					ELSE
+						UPDATE "agent" SET "name" = candidate WHERE "id" = clashing.id;
+					END IF;
+					EXIT by_width;
+				END IF;
+				IF width = 10 THEN
+					RAISE EXCEPTION 'Could not repair bot name or handle: %', clashing.id;
+				END IF;
+			END LOOP;
 		END LOOP;
-		UPDATE "agent" SET "handle" = candidate WHERE "id" = clashing.id;
-		INSERT INTO "agent_repair_suffix" VALUES (clashing.workspace_id, clashing.handle, suffix_number + 1)
-		ON CONFLICT ("workspace_id", "original") DO UPDATE SET "next_suffix" = excluded."next_suffix";
-	END LOOP;
-	TRUNCATE "agent_repair_suffix";
-	FOR clashing IN
-		SELECT "id", "workspace_id", "name" FROM (
-			SELECT "id", "workspace_id", "name", "created_at", row_number() OVER (
-				PARTITION BY "workspace_id", lower("name") ORDER BY "created_at", "id"
-			) AS "rank"
-			FROM "agent" WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL
-		) AS "ranked"
-		WHERE "rank" > 1 ORDER BY "created_at", "id"
-	LOOP
-		SELECT coalesce((
-			SELECT "next_suffix" FROM "agent_repair_suffix"
-			WHERE "workspace_id" = clashing.workspace_id AND "original" = lower(clashing.name)
-		), 2) INTO suffix_number;
-		LOOP
-			candidate := rtrim(left(clashing.name, 64 - length(' ' || suffix_number))) || ' ' || suffix_number;
-			EXIT WHEN NOT EXISTS (
-				SELECT 1 FROM "agent"
-				WHERE "workspace_id" = clashing.workspace_id AND lower("name") = lower(candidate)
-					AND "system_agent_key" IS NULL AND "assistant_of" IS NULL
-			);
-			suffix_number := suffix_number + 1;
-		END LOOP;
-		UPDATE "agent" SET "name" = candidate WHERE "id" = clashing.id;
-		INSERT INTO "agent_repair_suffix" VALUES (clashing.workspace_id, lower(clashing.name), suffix_number + 1)
-		ON CONFLICT ("workspace_id", "original") DO UPDATE SET "next_suffix" = excluded."next_suffix";
+		TRUNCATE "agent_repair_suffix", "agent_repair_taken";
 	END LOOP;
 END $$;--> statement-breakpoint
-DROP INDEX "agent_handle_repair_idx";--> statement-breakpoint
-DROP INDEX "agent_name_repair_idx";--> statement-breakpoint
 -- A `pod` of kind `shared` keeps its people and gains its bots, as projects
 -- have them, each added when it was made in the pod, so the first one added
 -- is the first one made.
