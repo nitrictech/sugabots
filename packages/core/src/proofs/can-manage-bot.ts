@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import type { Actor } from "../authorization/permissions.ts";
 import { query } from "../database/database.ts";
 import type { Principal } from "../principal.ts";
-import { type BotRecord, botRecord, managesBot, memberReachesBot } from "./facts.ts";
+import { type BotRecord, botRecord, managesBot, memberReachesBot, whoActs } from "./facts.ts";
 import { meetBot } from "./meet-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
@@ -34,7 +34,7 @@ const CanManageBotProof = defineProof("CanManageBot");
 
 export const proveCanManageBot = <P, B>(principal: Named<P, Principal>, botId: Named<B, string>) =>
 	Effect.gen(function* () {
-		const record = yield* query((db) => botRecord(db, botId.value));
+		const record = yield* query((db) => botRecord(db, botId.value, whoActs(principal.value)));
 		if (!record || record.systemBot)
 			return yield* Effect.fail(new ResourceHidden({ resource: "bot" }));
 		const met = yield* meetBot(principal.value, record);

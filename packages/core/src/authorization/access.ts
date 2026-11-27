@@ -122,15 +122,18 @@ function reachedBotFor(
 			and ${notBeingDeleted}
 			and case reach_bot.visibility
 				when 'public' then true
-				when 'private' then exists (
-					select 1
-					from ${botMember} as reach_bot_member
-					where reach_bot_member.bot_id = reach_bot.id
-						and reach_bot_member.member_id = ${outerColumn(memberId)}
-				)
+				when 'private' then ${isBotMember(sql`reach_bot.id`, memberId)}
 				when 'personal' then reach_bot.created_by_id = ${outerColumn(memberId)}
 				else false
 			end
+	)`;
+}
+
+export function isBotMember(botId: SQLWrapper, memberId: string | SQLWrapper): SQL<boolean> {
+	return sql<boolean>`exists (
+		select 1 from ${botMember} as reach_bot_member
+		where reach_bot_member.bot_id = ${outerColumn(botId)}
+			and reach_bot_member.member_id = ${outerColumn(memberId)}
 	)`;
 }
 

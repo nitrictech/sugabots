@@ -15,7 +15,7 @@ import { and, eq, type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { askerOf, type TurnFacts } from "../authentication/turn-facts.ts";
-import { botMemberIds } from "../authorization/access.ts";
+import { botMemberIds, isBotMember } from "../authorization/access.ts";
 import {
 	type Actor,
 	type BotFacts,
@@ -56,7 +56,7 @@ export interface MemberPlace {
 }
 
 /** A bot's place: its workspace, whether the project has it, and who it is for if it is personal. */
-export interface BotPlace extends BotFacts {
+export interface BotPlace extends Pick<BotFacts, "visibility" | "createdById"> {
 	readonly id: string;
 	readonly workspace: string;
 	readonly inProject: boolean;
@@ -134,14 +134,12 @@ const reachFactsWhere = (
 				defaultOfVisibility: defaultOfBot.visibility,
 				defaultOfCreatedBy: defaultOfBot.createdById,
 				defaultOfAssistantOf: defaultOfBot.assistantOf,
-				defaultOfMemberIds: botMemberIds(defaultOfBot.id),
+				defaultOfHasMember: memberId ? isBotMember(defaultOfBot.id, memberId) : sql<boolean>`false`,
 				role: membership.role,
 				projectMemberId: projectMember.id,
 				botWorkspace: actingBot.workspaceId,
 				botVisibility: actingBot.visibility,
 				botCreatedBy: actingBot.createdById,
-				botAssistantOf: actingBot.assistantOf,
-				botMemberIds: botMemberIds(actingBot.id),
 				botUsesComputer: actingBot.usesComputer,
 				botDeleting: botRemovalStarted(actingBot.id),
 				botInProject: sql<boolean>`exists (
@@ -188,7 +186,7 @@ const reachFactsWhere = (
 									visibility: row.defaultOfVisibility,
 									createdById: row.defaultOfCreatedBy,
 									assistantOf: row.defaultOfAssistantOf,
-									memberIds: row.defaultOfMemberIds,
+									privateMemberId: row.defaultOfHasMember ? memberId : null,
 								}
 							: null,
 				},
@@ -206,8 +204,6 @@ const reachFactsWhere = (
 								inProject: row.botInProject,
 								visibility: row.botVisibility,
 								createdById: row.botCreatedBy,
-								assistantOf: row.botAssistantOf,
-								memberIds: row.botMemberIds,
 								usesComputer: row.botUsesComputer ?? false,
 								deleting: row.botDeleting,
 							}
@@ -235,18 +231,19 @@ export const roleIn = (db: Executor, workspaceId: string, memberId: string) =>
 	});
 
 /** A bot as its managers and reachers are decided, with its workspace. */
-export interface BotRecord extends BotFacts {
+export type BotRecord = BotFacts & {
 	readonly id: string;
 	readonly workspace: string;
 	readonly systemBot: boolean;
 	readonly defaultProject: string | null;
 	readonly deleting: boolean;
-}
+};
 
 /** The bot `botId`, or `undefined` when there is none. */
-export const botRecord = (db: Executor, botId: string) =>
+export const botRecord = (db: Executor, botId: string, who?: { readonly member?: string }) =>
 	Effect.gen(function* () {
 		if (!isUuid(botId)) return undefined;
+		const memberId = who?.member && isUuid(who.member) ? who.member : null;
 		const [row] = yield* db
 			.select({
 				id: bot.id,
@@ -254,7 +251,8 @@ export const botRecord = (db: Executor, botId: string) =>
 				visibility: bot.visibility,
 				createdById: bot.createdById,
 				assistantOf: bot.assistantOf,
-				memberIds: botMemberIds(bot.id),
+				memberIds: who ? sql<string[]>`'[]'::json` : botMemberIds(bot.id),
+				hasMember: memberId ? isBotMember(bot.id, memberId) : sql<boolean>`false`,
 				systemBotKey: bot.systemBotKey,
 				defaultProject: project.id,
 				deleting: project.deleting,
@@ -273,7 +271,9 @@ export const botRecord = (db: Executor, botId: string) =>
 			visibility: row.visibility,
 			createdById: row.createdById,
 			assistantOf: row.assistantOf,
-			memberIds: row.memberIds,
+			...(who
+				? { privateMemberId: row.hasMember ? memberId : null }
+				: { memberIds: row.memberIds }),
 			systemBot: row.systemBotKey !== null,
 			defaultProject: row.defaultProject,
 			deleting: row.deleting ?? false,

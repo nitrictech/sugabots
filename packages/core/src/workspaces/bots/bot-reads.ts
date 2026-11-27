@@ -7,7 +7,7 @@ import {
 } from "@sugabots/contracts";
 import { and, asc, eq, inArray, isNotNull, isNull, not, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { botMemberIds, reachesBotFor } from "../../authorization/access.ts";
+import { isBotMember, reachesBotFor } from "../../authorization/access.ts";
 import { type Actor, managesEveryBot } from "../../authorization/permissions.ts";
 import { query } from "../../database/database.ts";
 import { bot, botMember, member, membership, projectBot } from "../../database/schema.ts";
@@ -82,10 +82,10 @@ export const botMembers = (botId: string) =>
 			.orderBy(asc(member.name)),
 	).pipe(Effect.map((rows): BotMember[] => rows));
 
-/** What a bot is shown with: its row, whether `actor` pinned it, its members, its default project and who added it. */
+/** What a bot is shown with: its row, whether `actor` pinned it, whether they belong to it, its default project and who added it. */
 const shownColumns = (actor: Actor) => ({
 	bot,
-	memberIds: botMemberIds(bot.id),
+	hasMember: sql<boolean>`case when ${bot.visibility} = 'private' then ${isBotMember(bot.id, actor.memberId)} else false end`,
 	pinned: pinnedBy(bot.id, actor.memberId),
 	defaultProjectId: defaultProjectIdOf(bot.id),
 	createdBy: creatorOf(bot),
@@ -94,7 +94,7 @@ const shownColumns = (actor: Actor) => ({
 function shownTo(
 	row: {
 		bot: typeof bot.$inferSelect;
-		memberIds: string[];
+		hasMember: boolean;
 		pinned: boolean;
 		defaultProjectId: string;
 		createdBy: NamedMember | null;
@@ -107,7 +107,7 @@ function shownTo(
 		toBot(
 			{
 				...shown,
-				memberIds: row.memberIds,
+				privateMemberId: row.hasMember ? actor.memberId : null,
 				defaultProjectId: row.defaultProjectId,
 				createdBy: row.createdBy,
 			},

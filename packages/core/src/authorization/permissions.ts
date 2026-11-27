@@ -147,17 +147,15 @@ export interface ProjectFacts {
 }
 
 /** What a decision about a bot needs to know about it. */
-export interface BotFacts {
+export type BotFacts = {
 	visibility: BotVisibility;
 	createdById: string | null;
-	/** On a private bot: its members, who reach it. Empty on any other. */
-	memberIds: readonly string[];
 	/**
 	 * On a Personal Assistant: the member it is for, who made it. Null for any
 	 * other bot. Whose it is, as for any bot, is `createdById`'s to say.
 	 */
 	assistantOf: string | null;
-}
+} & ({ readonly privateMemberId: string | null } | { readonly memberIds: readonly string[] });
 
 const ADMINISTRATOR_WORKSPACE_GRANTS: readonly WorkspacePermission[] = [
 	"workspace.read",
@@ -382,7 +380,9 @@ export function reachesBot(actor: Actor, bot: BotFacts): boolean {
 		case "public":
 			return true;
 		case "private":
-			return bot.memberIds.includes(actor.memberId);
+			return "privateMemberId" in bot
+				? bot.privateMemberId === actor.memberId
+				: bot.memberIds.includes(actor.memberId);
 		case "personal":
 			return personalBotCreator(bot) === actor.memberId;
 	}

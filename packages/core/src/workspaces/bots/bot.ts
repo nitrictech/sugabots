@@ -64,7 +64,7 @@ export function creatorOf(bot: {
  */
 export function toBot(
 	row: MemberFacingBotRow & {
-		memberIds: readonly string[];
+		privateMemberId: string | null;
 		defaultProjectId: string;
 		createdBy: NamedMember | null;
 	},

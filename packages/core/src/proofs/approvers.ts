@@ -185,7 +185,7 @@ export const approverStandingWhere = (
 		const reach = project ? yield* reachFacts(db, project, { member: memberId }) : undefined;
 		const place = reach?.member;
 		const reachesChat = reach !== undefined && memberReaches(place, reach.project);
-		const runBot = runBotId ? yield* botRecord(db, runBotId) : undefined;
+		const runBot = runBotId ? yield* botRecord(db, runBotId, { member: memberId }) : undefined;
 		const standing: ApproverStanding = {
 			member: memberId,
 			managedProjects: computerProjectId

@@ -6,7 +6,14 @@ import { type Database, query } from "../database/database.ts";
 import { project } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { Principal } from "../principal.ts";
-import { administers, type BotRecord, botRecord, memberReachesBot, restrictsBot } from "./facts.ts";
+import {
+	administers,
+	type BotRecord,
+	botRecord,
+	memberReachesBot,
+	restrictsBot,
+	whoActs,
+} from "./facts.ts";
 import { meetBot } from "./meet-bot.ts";
 import { defineProof, type Named, type Proof } from "./proof.ts";
 
@@ -76,7 +83,7 @@ export const proveCanRestrictBot = <P, B>(
 	botId: Named<B, string>,
 ) =>
 	Effect.gen(function* () {
-		const record = yield* query((db) => botRecord(db, botId.value));
+		const record = yield* query((db) => botRecord(db, botId.value, whoActs(principal.value)));
 		if (!record) return yield* Effect.fail(new ResourceHidden({ resource: "bot" }));
 		const actor = yield* restrictingAdmin(principal.value, record, "CanRestrictBot");
 		const proof: CanRestrictBot<P, B> = CanRestrictBotProof.prove([principal, botId], {
@@ -106,7 +113,9 @@ export const proveCanRestrictBotsProject = <P, J>(
 				)
 			: [];
 		const defaultOf = found?.bot;
-		const record = defaultOf ? yield* query((db) => botRecord(db, defaultOf)) : undefined;
+		const record = defaultOf
+			? yield* query((db) => botRecord(db, defaultOf, whoActs(principal.value)))
+			: undefined;
 		if (!record) return yield* Effect.fail(hidden);
 		// Whoever doesn't see the bot doesn't learn its project is a bot's.
 		const actor = yield* restrictingAdmin(principal.value, record, "CanRestrictBotsProject").pipe(

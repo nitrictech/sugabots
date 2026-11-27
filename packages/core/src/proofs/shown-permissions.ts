@@ -84,20 +84,13 @@ export function botPermissionsShown(
 	bot: BotFacts & { readonly id: string; readonly workspaceId: string },
 	defaultProject: string,
 ): BotPermissions {
-	const facts: BotFacts & { readonly id: string } = {
-		id: bot.id,
-		visibility: bot.visibility,
-		createdById: bot.createdById,
-		assistantOf: bot.assistantOf,
-		memberIds: bot.memberIds,
-	};
-	const memberFacing = { ...facts, systemBot: false };
-	const managesIt = managesBot(actor, facts);
+	const memberFacing = { ...bot, systemBot: false };
+	const managesIt = managesBot(actor, bot);
 	return {
 		update: managesIt,
 		delete: managesIt || restrictsBot(actor, memberFacing),
 		talk: memberReachesBot(actor, memberFacing),
-		manageMembers: mayOnBot(actor, "bot.members.manage", facts),
+		manageMembers: mayOnBot(actor, "bot.members.manage", bot),
 		// Nobody is in a default project: it is reached through its bot.
 		resources: resourcePermissionsShown(
 			{ actor, inProject: false },
@@ -107,7 +100,7 @@ export function botPermissionsShown(
 				leadBot: bot.id,
 				// Nobody finds or joins a default project, so this decides nothing.
 				visibility: "private",
-				defaultOf: facts,
+				defaultOf: bot,
 			},
 		),
 	};
