@@ -5,6 +5,7 @@ import {
 	Check,
 	ChevronDown,
 	Clock,
+	Hand,
 	LoaderCircle,
 	MessageSquare,
 	Reply,
@@ -29,7 +30,6 @@ import { outcomeOf, RunStatus } from "@/screens/AutomationRun.tsx";
 import { AutomationTriggerIcon } from "@/screens/AutomationTriggerIcon.tsx";
 import { ParticipantFaces } from "@/screens/ParticipantFaces.tsx";
 import { formatElapsed } from "@/screens/tool-activity.ts";
-import { AttentionDot } from "@/ui/attention-dot.tsx";
 import { Button } from "@/ui/button.tsx";
 import { IconButton } from "@/ui/icon-button.tsx";
 import { matchesSearch } from "@/ui/search-field.tsx";
@@ -45,8 +45,8 @@ const SHOW_CHAT_ACTION =
 const ENTRIES_SHOWN = 8;
 
 /**
- * A bot's or a project's work: the chats that need the viewer, then its
- * open chats and its automations' runs, each newest first under a heading
+ * A bot's or a project's work: its open chats, those that need the viewer
+ * among them, and its automations' runs, each newest first under a heading
  * that folds it away, and its resolved chats at the foot, folded until opened,
  * with `className` styling the scrolling part above them. `search` narrows every part to what has
  * it in a title or a name, and unfolds everything it finds. `work` is
@@ -71,11 +71,8 @@ export function OwnerWork({
 	// The run its feed is open at, marked in the list.
 	const runInView = useSearch({ strict: false, select: (params) => params.runChat });
 	const { chats, runs } = work;
-	const needsYou = chats.filter((row) => needsViewer(row) && chatMatches(row, search));
 	const open = chats
-		.filter(
-			(row) => row.chat.resolvedAt === null && !needsYou.includes(row) && chatMatches(row, search),
-		)
+		.filter((row) => row.chat.resolvedAt === null && chatMatches(row, search))
 		.toSorted((a, b) => lastMovedAt(b) - lastMovedAt(a));
 	// Newest first, as the API lists them.
 	const shownRuns = runs.filter((run) => matchesSearch([run.automationName], search));
@@ -83,26 +80,10 @@ export function OwnerWork({
 		.filter((row) => row.chat.resolvedAt !== null && chatMatches(row, search))
 		.toSorted((a, b) => lastMovedAt(b) - lastMovedAt(a));
 	const nothing =
-		!work.chatsFailed &&
-		needsYou.length === 0 &&
-		open.length === 0 &&
-		shownRuns.length === 0 &&
-		resolved.length === 0;
+		!work.chatsFailed && open.length === 0 && shownRuns.length === 0 && resolved.length === 0;
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className={cn("flex flex-col gap-3", className)}>
-				{needsYou.length > 0 && (
-					<section className="flex flex-col gap-1">
-						<h2 className="m-0 px-2 pb-1 font-normal text-subtle-foreground text-xs">Needs you</h2>
-						<ul className="m-0 flex list-none flex-col gap-px p-0">
-							{needsYou.map((row) => (
-								<li key={row.chat.id}>
-									<NeedsYouRow row={row} owner={owner} selected={row.chat.id === selectedChatId} />
-								</li>
-							))}
-						</ul>
-					</section>
-				)}
 				{/* Sized as a row of the sidebar, as the pages above it are. */}
 				{nothing && (
 					<p className="m-0 flex h-8 items-center gap-2.5 pr-1.5 pl-2 text-sm text-subtle-foreground">
@@ -296,42 +277,13 @@ type OwnerWorkList = {
 	automationFailing: boolean;
 };
 
-/** A chat waiting on the viewer, on one line: a dot, then its title. */
-function NeedsYouRow({
-	row,
-	owner,
-	selected,
-}: {
-	row: ListedChat;
-	owner: ResourceOwner;
-	selected: boolean;
-}) {
-	const hideSidebar = useHideSidebar();
-	return (
-		<OwnerLink
-			owner={owner}
-			to={{ page: "chat", chatId: row.chat.id }}
-			aria-current={selected ? "page" : undefined}
-			onDoubleClick={hideSidebar}
-			className={sidebarRow({ selected, radius: "md" })}
-		>
-			<span className="grid w-3 shrink-0 place-items-center">
-				<AttentionDot attention="needsYou" />
-			</span>
-			<span className="min-w-0 flex-1 truncate">{row.chat.title}</span>
-			<span className="sr-only">
-				{row.needsApproval ? ", needs your approval" : ", mentions you"}
-			</span>
-		</OwnerLink>
-	);
-}
-
 /**
  * One of the open chats, on three lines: how many messages it holds, with
- * when it last moved at the end; its title; then the faces of who is talking
- * in it, with what its bots are doing at the end, left out when there is
- * neither. Pointed at, Resolve takes the time's place, for a member who may
- * resolve it.
+ * when it last moved at the end, or Needs you while it waits on the viewer,
+ * or Working while a bot works in it; its title; then the faces of who is
+ * talking in it, with what its bots are doing at the end, left out when there
+ * is neither. Pointed at, Resolve takes the time's place, for a member who
+ * may resolve it.
  */
 function ChatEntry({
 	row,
@@ -355,9 +307,17 @@ function ChatEntry({
 			: members.map((member) => (member.id === memberId ? "You" : member.name)).join(", ");
 	const unread = row.unreadMessages > 0;
 	const movedAt = new Date(lastMovedAt(row));
-	// Working, it says so where the time is; waiting and replied go under the title.
+	const needsYou = needsViewer(row);
+	// Needing the viewer, or working, it says so where the time is; waiting and replied go under the title.
 	const working = row.status?.kind === "working" ? row.status : undefined;
-	const statusBelow = working ? undefined : row.status;
+	const inTimesPlace = needsYou ? (
+		<NeedsYouLabel approval={row.needsApproval} />
+	) : (
+		working && <ChatStatusLabel status={working} />
+	);
+	// Waiting on the viewer's approval is what Needs you already says.
+	const waitingOnViewer = needsYou && row.status?.kind === "waiting";
+	const statusBelow = working || waitingOnViewer ? undefined : row.status;
 	return (
 		// The row is its link; Resolve sits over the link's corner, as a button can't be inside a link.
 		<div className="group/chat relative">
@@ -383,14 +343,14 @@ function ChatEntry({
 				<span className="order-1 flex h-5 min-w-0 items-center justify-between gap-2">
 					<MessageCount count={row.messageCount} />
 					{/* Its place goes to Resolve while the row is pointed at, so it is held as wide as Resolve. */}
-					{working ? (
+					{inTimesPlace ? (
 						<span
 							className={cn(
 								"flex h-5 min-w-17 shrink-0 items-center justify-end",
 								mayResolve && HIDE_TIME_WHEN_ACTION_VISIBLE,
 							)}
 						>
-							<ChatStatusLabel status={working} />
+							{inTimesPlace}
 						</span>
 					) : (
 						<time
@@ -608,6 +568,26 @@ function ChatStatusLabel({ status }: { status: ChatStatus }) {
 				</span>
 			);
 	}
+}
+
+/**
+ * A chat waiting on the viewer, as its row says it: a waving hand and Needs
+ * you, in the colour the rail's dot for it has, telling a screen reader
+ * whether it waits on their approval or their reply.
+ */
+function NeedsYouLabel({ approval }: { approval: boolean }) {
+	return (
+		<span className="flex min-w-0 items-center gap-1 text-warning text-xs">
+			<Hand
+				aria-hidden
+				strokeWidth={2}
+				className="size-3 shrink-0 origin-bottom motion-safe:animate-wave"
+			/>
+			<span className="truncate">
+				Needs you<span className="sr-only">{approval ? " to approve" : " to reply"}</span>
+			</span>
+		</span>
+	);
 }
 
 /**
