@@ -64,7 +64,7 @@ import {
 	transition,
 	unfinishedCallsMessage,
 } from "./lifecycle.ts";
-import { type CallPlan, callPlanSchema } from "./loop-values.ts";
+import { approvalBindingSchema, type CallPlan, callPlanSchema } from "./loop-values.ts";
 import { answersAlone, lockOpening, type TurnRequest, TurnRequests } from "./requests.ts";
 import { ToolCallStore } from "./tool-calls/store.ts";
 import { WorkAdmission } from "./work-admission.ts";
@@ -195,13 +195,12 @@ export interface Interface {
 	readonly replyFiles: (turn: ReplyTurn) => Effect.Effect<readonly FilePart[]>;
 	/**
 	 * Parks an admitted turn until members decide its last step's approvals,
-	 * which must still match `bound` when they run. Returns `false` if asked to stop.
+	 * which must still match their recorded bindings when they run. Returns `false` if asked to stop.
 	 */
 	readonly suspend: <P, T>(
 		runsTurn: RunsTurn<P, T>,
 		admitted: WorkAdmission.ApprovalAdmission,
-		approvals: readonly ToolCallStore.PendingToolApproval[],
-		bound: readonly CheckpointApproval[],
+		approvals: readonly Omit<ToolCallStore.PendingToolApproval, "atOffset">[],
 	) => Effect.Effect<boolean, FenceRefusal>;
 	/** Completes the turn with its reply as it stands. */
 	readonly complete: <P, T>(
@@ -1076,7 +1075,7 @@ export const make = Effect.gen(function* () {
 			),
 		replyFiles: (reply) => operation("replyFiles", files.replyAttachments(reply.messageId)),
 
-		suspend: (runsTurn, admitted, approvals, bound) =>
+		suspend: (runsTurn, admitted, approvals) =>
 			operation(
 				"suspend",
 				transaction(
@@ -1099,7 +1098,12 @@ export const make = Effect.gen(function* () {
 						const checkpoint: TurnCheckpoint = {
 							...earlier,
 							reply,
-							approvals: [...bound],
+							approvals: approvals.map(({ approvalId, sdkToolCallId, tool, binding }) => ({
+								approvalId,
+								toolCallId: sdkToolCallId,
+								tool,
+								binding,
+							})),
 							waited: true,
 						};
 						yield* write(locked.id, decided.state, {
@@ -1698,17 +1702,6 @@ const ToolResultOutput = Schema.declare(
 		typeof value === "object" && value !== null && "type" in value,
 );
 
-/** What an approved call must still match when it runs (see `ToolCallStore.ApprovalBinding`). */
-const ApprovalBinding = Schema.Union([
-	Schema.Struct({
-		kind: Schema.Literal("connector"),
-		connectorId: Schema.String,
-		connectorRevision: Schema.Int,
-		remoteToolName: Schema.String,
-	}),
-	Schema.Struct({ kind: Schema.Literal("built-in") }),
-]);
-
 /**
  * A call the suspended turn waits on: the model's call `toolCallId`, to the
  * tool `tool` it waits for approval of, and what that must still match to run.
@@ -1717,9 +1710,8 @@ const CheckpointApproval = Schema.Struct({
 	approvalId: Schema.String,
 	toolCallId: Schema.String,
 	tool: Schema.String,
-	binding: ApprovalBinding,
+	binding: approvalBindingSchema,
 });
-type CheckpointApproval = typeof CheckpointApproval.Type;
 
 /** One of the last step's tool calls, with what the model is given back once it has it. */
 const StepCall = Schema.Struct({

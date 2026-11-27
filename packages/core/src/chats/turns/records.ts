@@ -560,7 +560,7 @@ export const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const pending = yield* Effect.forEach(approvals, (approval) =>
 					Effect.gen(function* () {
-						const call: ToolCallStore.PendingToolApproval = {
+						const call: Omit<ToolCallStore.PendingToolApproval, "atOffset"> = {
 							id: approval.reopenCallId ?? (yield* ids.next),
 							reopen: approval.reopenCallId !== undefined,
 							approvalId: yield* ids.next,
@@ -574,22 +574,11 @@ export const make = Effect.gen(function* () {
 							connectorAccess: approval.connectorAccess,
 							binding: approval.binding,
 							writeOrDelete: approval.writeOrDelete,
-							atOffset: 0,
 						};
 						return call;
 					}),
 				);
-				const suspended = yield* turns.suspend(
-					runsTurn,
-					admitted,
-					pending,
-					pending.map(({ approvalId, sdkToolCallId, tool, binding }) => ({
-						approvalId,
-						toolCallId: sdkToolCallId,
-						tool,
-						binding,
-					})),
-				);
+				const suspended = yield* turns.suspend(runsTurn, admitted, pending);
 				return suspended
 					? ({ _tag: "Waiting", approvals: pending.map(({ approvalId }) => approvalId) } as const)
 					: ({ _tag: "NotWaiting" } as const);

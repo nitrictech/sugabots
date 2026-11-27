@@ -38,6 +38,7 @@ import {
 	holdRunningTurn,
 	holdTurnForToolWrite,
 } from "../fence.ts";
+import type { ApprovalBinding } from "../loop-values.ts";
 import { mayRunTools } from "../lifecycle.ts";
 import { WorkAdmission } from "../work-admission.ts";
 import {
@@ -700,20 +701,6 @@ export const APPROVED_CALL_MISMATCH =
 export const APPROVED_CONNECTOR_CHANGED = "The connector's configuration changed after approval";
 export const APPROVED_TOOL_TURNED_OFF = "The tool was turned off after approval";
 
-/**
- * What an approved call must still match when it runs, beyond its tool and
- * input: for a connector's tool, the connector configured as it was when
- * the member allowed it. A built-in tool is the same tool wherever it runs.
- */
-export type ApprovalBinding =
-	| {
-			readonly kind: "connector";
-			readonly connectorId: string;
-			readonly connectorRevision: number;
-			readonly remoteToolName: string;
-	  }
-	| { readonly kind: "built-in" };
-
 /** A tool call a reply asked for, to be parked until a member decides it. */
 export interface PendingToolApproval {
 	id: string;
@@ -745,11 +732,6 @@ type BeganExecution =
  * round trip through text is what drops `undefined` and anything else JSON
  * cannot carry; the cut keeps the start, which is where a page's title and a
  * result list's first entries are.
- */
-/**
- * Whether a call's input is stored, and so shown on its approval card, in
- * full. A call whose input isn't can't be put to an approver, who would allow
- * what they can't see.
  */
 export function inputShownInFull(input: unknown): boolean {
 	return storedJsonText(input).length <= MAX_STORED_JSON_CHARACTERS;

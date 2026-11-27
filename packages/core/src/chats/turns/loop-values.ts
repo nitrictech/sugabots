@@ -97,7 +97,7 @@ export interface TurnCompaction {
  * input: for a connector's tool, the connector configured as it was when
  * the member allowed it. A built-in tool is the same tool wherever it runs.
  */
-const approvalBindingSchema = Schema.Union([
+export const approvalBindingSchema = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("connector"),
 		connectorId: Schema.String,

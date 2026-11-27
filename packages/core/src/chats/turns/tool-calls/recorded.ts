@@ -1,3 +1,4 @@
+import type { ApprovalBinding } from "../loop-values.ts";
 import { type UserText, userText } from "@sugabots/errors";
 import type { Tool } from "ai";
 import { Effect } from "effect";
@@ -22,9 +23,9 @@ export interface RecordingOptions {
 	/** Whether the tool may change something at the other end. Built-in tools do not. */
 	writeOrDelete?: boolean;
 	/** The tool the call is bound to: a connector's, as configured now; a built-in one when unset. */
-	binding?: ToolCallStore.ApprovalBinding;
+	binding?: ApprovalBinding;
 	/** For a call that waited for approval: what it must still match to run. */
-	approval?: { binding: ToolCallStore.ApprovalBinding };
+	approval?: { binding: ApprovalBinding };
 }
 
 /** What the model is told when a tool did not give a result, in place of the result. */

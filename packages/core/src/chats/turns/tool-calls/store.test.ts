@@ -1,3 +1,4 @@
+import type { ApprovalBinding } from "../loop-values.ts";
 import { ToolApprovalConflict, ToolApprovalNotFound } from "@sugabots/contracts/errors/approvals";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { userText } from "@sugabots/errors";
@@ -47,7 +48,6 @@ import {
 	APPROVED_CALL_MISMATCH,
 	APPROVED_CONNECTOR_CHANGED,
 	APPROVED_TOOL_TURNED_OFF,
-	type ApprovalBinding,
 	ToolCallStore,
 } from "./store.ts";
 
