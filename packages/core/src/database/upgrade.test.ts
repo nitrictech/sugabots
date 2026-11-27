@@ -1307,6 +1307,78 @@ function startServer(url: string, store: Store, root: string): Upgraded {
 	};
 }
 
+it.skipIf(!process.env.DATABASE_URL)(
+	"repairs 250 colliding names and handles in creation order and keeps handles valid",
+	async () => {
+		const url = upgradeDatabaseUrl(process.env.DATABASE_URL ?? "", "bot_names");
+		const migration = await readFile(
+			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
+			"utf8",
+		);
+		try {
+			await recreateDatabase(url);
+			await migrateTo(url, LAST_MAIN_MIGRATION);
+			await withClient(url, async (client) => {
+				await client.query(legacyRows);
+				await client.query(
+					`
+				insert into pod (id, workspace_id, kind, name, slug)
+				select ('10000000-0000-4000-8000-' || lpad(ordinal::text, 12, '0'))::uuid,
+					$1, 'shared', 'Shipping ' || ordinal, 'shipping-' || ordinal
+				from generate_series(1, 252) as ordinal
+			`,
+					[legacy.workspace],
+				);
+				await client.query(
+					`
+				insert into agent (id, workspace_id, pod_id, name, handle, color, face, created_at)
+				select ('20000000-0000-4000-8000-' || lpad(ordinal::text, 12, '0'))::uuid, $1,
+					('10000000-0000-4000-8000-' || lpad(ordinal::text, 12, '0'))::uuid,
+					case when ordinal = 251 then 'Shipping 2' when ordinal = 252 then 'Reviewer' else 'Shipping' end,
+					case when ordinal = 251 then 'shipping-2'
+						when ordinal = 252 then 'personal-assistant-' || repeat('1', 29) else 'shipping' end,
+					'sky', 'dot', '2026-10-01'::timestamptz + ordinal * interval '1 second'
+				from generate_series(1, 252) as ordinal
+			`,
+					[legacy.workspace],
+				);
+				await client.query("begin");
+				try {
+					await client.query(migration);
+					const {
+						rows: [stats],
+					} = await client.query<{ read: string }>(`
+						select seq_tup_read + idx_tup_fetch as read
+						from pg_stat_xact_user_tables where schemaname = 'public' and relname = 'bot'
+					`);
+					expect(Number(stats?.read)).toBeLessThan(1_000_000);
+					await client.query("commit");
+				} catch (error) {
+					await client.query("rollback");
+					throw error;
+				}
+			});
+			const { rows } = await withClient(url, (client) =>
+				client.query<{ name: string; handle: string }>(`
+					select name, handle from bot where id::text like '20000000-%' order by id
+				`),
+			);
+			expect(rows).toEqual([
+				{ name: "Shipping", handle: "shipping" },
+				...Array.from({ length: 249 }, (_, index) => ({
+					name: `Shipping ${index + 3}`,
+					handle: `shipping-${index + 3}`,
+				})),
+				{ name: "Shipping 2", handle: "shipping-2" },
+				{ name: "Reviewer", handle: `personal-assistant-${"1".repeat(27)}-2` },
+			]);
+		} finally {
+			await dropDatabase(url);
+		}
+	},
+	UPGRADE_TIMEOUT_MS,
+);
+
 /** Migrates the database at `url` through `last`, as an installation of `main` was. */
 async function migrateTo(url: string, last: string) {
 	const folder = await mkdtemp(join(tmpdir(), "migrations-"));
@@ -1325,7 +1397,7 @@ async function migrateTo(url: string, last: string) {
 }
 
 /** This worker's database with `_upgrade_<store>` on the end of its name, so workers never share one. */
-function upgradeDatabaseUrl(workerUrl: string, store: Store | "cycle"): string {
+function upgradeDatabaseUrl(workerUrl: string, store: Store | "cycle" | "bot_names"): string {
 	if (!workerUrl) return "";
 	const parsed = new URL(workerUrl);
 	parsed.pathname = `${parsed.pathname}_upgrade_${store}`;

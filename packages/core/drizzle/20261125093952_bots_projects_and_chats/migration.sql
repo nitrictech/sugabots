@@ -294,6 +294,16 @@ WHERE "routine"."id" = "routine_trigger"."routine_id" AND "agent"."id" = "routin
 -- address: the oldest keeps its own, and each other gets the lowest number from
 -- 2 that no bot has taken, shortened to fit (handles 48 characters, names 64).
 -- Group mentions and Personal Assistants' handles are reserved.
+CREATE INDEX "agent_handle_repair_idx" ON "agent" ("workspace_id", "handle")
+	WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL;--> statement-breakpoint
+CREATE INDEX "agent_name_repair_idx" ON "agent" ("workspace_id", lower("name"))
+	WHERE "system_agent_key" IS NULL AND "assistant_of" IS NULL;--> statement-breakpoint
+CREATE TEMP TABLE "agent_repair_suffix" (
+	"workspace_id" uuid NOT NULL,
+	"original" text NOT NULL,
+	"next_suffix" integer NOT NULL,
+	PRIMARY KEY ("workspace_id", "original")
+) ON COMMIT DROP;--> statement-breakpoint
 DO $$
 DECLARE
 	clashing record;
@@ -313,7 +323,10 @@ BEGIN
 	LOOP
 		handle_base := CASE WHEN clashing.handle ~ '^personal-assistant(-[0-9]+)?$'
 			THEN clashing.handle || '-bot' ELSE clashing.handle END;
-		suffix_number := 2;
+		SELECT coalesce((
+			SELECT "next_suffix" FROM "agent_repair_suffix"
+			WHERE "workspace_id" = clashing.workspace_id AND "original" = clashing.handle
+		), 2) INTO suffix_number;
 		LOOP
 			candidate := rtrim(left(handle_base, 48 - length('-' || suffix_number)), '-') || '-' || suffix_number;
 			EXIT WHEN candidate NOT IN ('here', 'channel') AND candidate !~ '^personal-assistant(-[0-9]+)?$'
@@ -325,7 +338,10 @@ BEGIN
 			suffix_number := suffix_number + 1;
 		END LOOP;
 		UPDATE "agent" SET "handle" = candidate WHERE "id" = clashing.id;
+		INSERT INTO "agent_repair_suffix" VALUES (clashing.workspace_id, clashing.handle, suffix_number + 1)
+		ON CONFLICT ("workspace_id", "original") DO UPDATE SET "next_suffix" = excluded."next_suffix";
 	END LOOP;
+	TRUNCATE "agent_repair_suffix";
 	FOR clashing IN
 		SELECT "id", "workspace_id", "name" FROM (
 			SELECT "id", "workspace_id", "name", "created_at", row_number() OVER (
@@ -335,7 +351,10 @@ BEGIN
 		) AS "ranked"
 		WHERE "rank" > 1 ORDER BY "created_at", "id"
 	LOOP
-		suffix_number := 2;
+		SELECT coalesce((
+			SELECT "next_suffix" FROM "agent_repair_suffix"
+			WHERE "workspace_id" = clashing.workspace_id AND "original" = lower(clashing.name)
+		), 2) INTO suffix_number;
 		LOOP
 			candidate := rtrim(left(clashing.name, 64 - length(' ' || suffix_number))) || ' ' || suffix_number;
 			EXIT WHEN NOT EXISTS (
@@ -346,8 +365,12 @@ BEGIN
 			suffix_number := suffix_number + 1;
 		END LOOP;
 		UPDATE "agent" SET "name" = candidate WHERE "id" = clashing.id;
+		INSERT INTO "agent_repair_suffix" VALUES (clashing.workspace_id, lower(clashing.name), suffix_number + 1)
+		ON CONFLICT ("workspace_id", "original") DO UPDATE SET "next_suffix" = excluded."next_suffix";
 	END LOOP;
 END $$;--> statement-breakpoint
+DROP INDEX "agent_handle_repair_idx";--> statement-breakpoint
+DROP INDEX "agent_name_repair_idx";--> statement-breakpoint
 -- A `pod` of kind `shared` keeps its people and gains its bots, as projects
 -- have them, each added when it was made in the pod, so the first one added
 -- is the first one made.
