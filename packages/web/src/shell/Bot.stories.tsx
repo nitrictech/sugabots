@@ -124,10 +124,11 @@ function moodLabel(mood: BotMood): string {
 }
 
 const moodOptions = botMoods.map((mood) => ({ value: mood, label: moodLabel(mood) }));
+const runningStoryTests = import.meta.env.MODE === "test";
 
 /** Lively shows every head shape alive, for trying each mood, how one eases into the next, and a hop. */
 export const Lively = meta.story({
-	globals: { liveliness: "sometimes" },
+	globals: { liveliness: runningStoryTests ? "off" : "sometimes" },
 	render: function Render() {
 		const faces = useRef<(LivelyFace | null)[]>([]);
 		const [mood, setMood] = useState<BotMood>("idle");
@@ -168,6 +169,16 @@ export const Lively = meta.story({
 				</div>
 			</div>
 		);
+	},
+	play: async ({ canvas, canvasElement, userEvent }) => {
+		if (!runningStoryTests) return;
+		const excited = canvas.getByRole("radio", { name: "Excited" });
+		await userEvent.click(excited);
+		await expect(excited).toBeChecked();
+		const repeatingAnimations = canvasElement
+			.getAnimations({ subtree: true })
+			.filter((animation) => animation.effect?.getTiming().iterations === Infinity);
+		await expect(repeatingAnimations).toHaveLength(0);
 	},
 });
 
