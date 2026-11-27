@@ -4,7 +4,6 @@ export * as WebhookAuthentication from "./webhook.ts";
 import { WebhookRefused } from "@sugabots/contracts/errors/automations";
 import { and, eq, isNull } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
-import { AutomationStore } from "../chats/automations/store.ts";
 import {
 	type Delivery,
 	deliveryAuthentic,
@@ -58,7 +57,6 @@ interface GitHubDelivery {
 export const make = Effect.gen(function* () {
 	const operation = yield* serviceOperations<Interface>("WebhookAuthentication");
 	const secrets = yield* Secrets.Service;
-	yield* AutomationStore.sealUnsealedWebhookSecrets(secrets);
 
 	/** The webhook trigger `triggerId` of an automation not deleted, with how it checks callers. */
 	const webhookTrigger = (triggerId: string) =>
@@ -92,7 +90,6 @@ export const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					const found = isUuid(triggerId) ? yield* webhookTrigger(triggerId) : undefined;
 					if (found?.settings.kind !== "webhook") return yield* new WebhookRefused();
-					if (found.secret === AutomationStore.UNSEALED_SECRET) return yield* new WebhookRefused();
 					const { secret, legacyBearerSecretDigest } = found;
 					const authentic =
 						secret !== null

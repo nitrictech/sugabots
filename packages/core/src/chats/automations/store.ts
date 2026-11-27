@@ -1,7 +1,6 @@
 export { AutomationNameTaken } from "@sugabots/contracts/errors/automations";
 export * as AutomationStore from "./store.ts";
 
-import { randomBytes } from "node:crypto";
 import { AutomationNameTaken } from "@sugabots/contracts/errors/automations";
 import type { UserText } from "@sugabots/errors";
 import { and, asc, eq, inArray, isNotNull, isNull, lte, notInArray, or, sql } from "drizzle-orm";
@@ -25,7 +24,6 @@ import {
 	project,
 } from "../../database/schema.ts";
 import type { DoesStoredWork } from "../../proofs/does-stored-work.ts";
-import type { Secrets } from "../../secrets/secrets.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { ChatEvents } from "../chat-events.ts";
 import { ChatEvent } from "../events.ts";
@@ -755,41 +753,3 @@ export const pauseDepartingMembersAutomations = (departing: {
 				),
 		);
 	});
-
-/**
- * What a migration writes as the secret of a webhook trigger whose secret it
- * couldn't keep (see "Fresh start requirements" in
- * `20261125093952_bots_projects_and_chats`): no key opens
- * it, so the trigger refuses every caller, and it is never null, which would
- * let anyone in.
- */
-export const UNSEALED_SECRET = "unsealed";
-
-/**
- * Gives each webhook trigger a migration left with {@link UNSEALED_SECRET} a random
- * secret sealed under the server's own key, which nobody knows, so its
- * secret can be shown and replaced like any other. It refuses every caller
- * until someone gives it a new secret.
- */
-export const sealUnsealedWebhookSecrets = (secrets: Secrets.Interface) =>
-	Effect.gen(function* () {
-		const unsealed = yield* query((db) =>
-			db
-				.select({ id: automationTrigger.id })
-				.from(automationTrigger)
-				.where(eq(automationTrigger.secretEncrypted, UNSEALED_SECRET)),
-		);
-		for (const { id } of unsealed) {
-			yield* query((db) =>
-				db
-					.update(automationTrigger)
-					.set({ secretEncrypted: secrets.encrypt(randomBytes(32).toString("base64url")) })
-					.where(
-						and(
-							eq(automationTrigger.id, id),
-							eq(automationTrigger.secretEncrypted, UNSEALED_SECRET),
-						),
-					),
-			);
-		}
-	}).pipe(Effect.orDie);
