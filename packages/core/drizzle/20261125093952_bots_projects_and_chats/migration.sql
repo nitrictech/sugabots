@@ -2515,21 +2515,29 @@ WHERE "prefix" LIKE 'threads/%';--> statement-breakpoint
 -- its asking bot's hand-back waits for.
 ALTER TABLE "turn" ADD COLUMN "retrying" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 CREATE TEMP TABLE "collaboration_move" ON COMMIT DROP AS
-WITH RECURSIVE above AS (
-	SELECT "chat_id", "parent_chat_id" AS "target_chat_id" FROM "collaboration"
+WITH RECURSIVE descendants AS (
+	SELECT child."chat_id", child."parent_chat_id" AS "target_chat_id"
+	FROM "collaboration" child
+	WHERE NOT EXISTS (SELECT 1 FROM "collaboration" parent WHERE parent."chat_id" = child."parent_chat_id")
 	UNION ALL
-	SELECT above."chat_id", up."parent_chat_id"
-	FROM above JOIN "collaboration" up ON up."chat_id" = above."target_chat_id"
+	SELECT child."chat_id", descendants."target_chat_id"
+	FROM descendants
+	CROSS JOIN LATERAL (
+		SELECT "chat_id" FROM "collaboration" WHERE "parent_chat_id" = descendants."chat_id"
+		-- Keep the parent index lookup for each chat when the tree is deep.
+		OFFSET 0
+	) child
 )
-CYCLE "target_chat_id" SET "is_cycle" USING "path"
-SELECT "chat_id", "target_chat_id", "is_cycle" FROM above
-WHERE "is_cycle" OR "target_chat_id" NOT IN (SELECT "chat_id" FROM "collaboration");--> statement-breakpoint
+SELECT "chat_id", "target_chat_id" FROM descendants;--> statement-breakpoint
+-- Each collaboration chat has one parent, so any chat the walk misses
+-- has a cycle in its ancestry.
 DO $$
 DECLARE
 	affected_chats uuid[];
 BEGIN
-	SELECT array_agg(DISTINCT "chat_id" ORDER BY "chat_id") INTO affected_chats
-	FROM "collaboration_move" WHERE "is_cycle";
+	SELECT array_agg(child."chat_id" ORDER BY child."chat_id") INTO affected_chats
+	FROM "collaboration" child
+	WHERE NOT EXISTS (SELECT 1 FROM "collaboration_move" moved WHERE moved."chat_id" = child."chat_id");
 	IF affected_chats IS NOT NULL THEN
 		RAISE EXCEPTION 'Collaboration chat ancestry has a cycle: %', array_to_string(affected_chats, ', ');
 	END IF;
