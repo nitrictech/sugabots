@@ -1,4 +1,3 @@
-import type { ApprovalBinding } from "../loop-values.ts";
 import { ToolApprovalConflict, ToolApprovalNotFound } from "@sugabots/contracts/errors/approvals";
 import { ActionForbidden, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { userText } from "@sugabots/errors";
@@ -25,6 +24,7 @@ import { Lanes } from "../../../workflows/lanes.ts";
 import { chatServicesForTests, lanesForTests } from "../../testing.ts";
 import { recordedCallOf } from "../../tools/recorded-call.ts";
 import { releaseParkedLanes } from "../cancel-sweep.ts";
+import type { ApprovalBinding } from "../loop-values.ts";
 import { MISSING_APPROVAL_RECORD, TurnRecords } from "../records.ts";
 import { TurnSignals } from "../signals.ts";
 import {
