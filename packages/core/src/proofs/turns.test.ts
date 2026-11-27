@@ -24,7 +24,7 @@ import { offeredTool } from "../chats/tools/connector-catalog.ts";
 import { Turns } from "../chats/turns/turns.ts";
 import { Computers } from "../computers/computers.ts";
 import { inMemoryComputers } from "../computers/testing.ts";
-import { query } from "../database/database.ts";
+import { Database, query } from "../database/database.ts";
 import {
 	computer,
 	computerProvider,
@@ -623,10 +623,17 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 				name: "list_routes",
 				readOnly: true,
 				destructive: null,
-				description: null,
+				description: "List delivery routes",
 			};
+			const invoices = Array.from({ length: 100 }, (_, index) => ({
+				...described,
+				name: `view_invoice_${index}`,
+				description: "View an invoice",
+			}));
 			const own = await seedConnector(a.workspace, a.pub.defaultProject, { tools: [described] });
-			const local = await seedConnector(a.workspace, a.project, { tools: [described] });
+			const local = await seedConnector(a.workspace, a.project, {
+				tools: [described, ...invoices],
+			});
 			await seedProjectBotConnector(a.workspace, a.project, a.pub.id, own);
 			const installed = await onDatabase((db) =>
 				db
@@ -635,14 +642,16 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 					.where(inArray(connector.id, [own, local])),
 			);
 			const tools = Object.fromEntries(
-				installed.map((row) =>
-					offeredTool(
-						{ ...row, connectorId: row.id },
-						described,
-						tool({
-							description: "List delivery routes",
-							inputSchema: jsonSchema({ type: "object" }),
-						}),
+				installed.flatMap((row) =>
+					row.tools.map((description) =>
+						offeredTool(
+							{ ...row, connectorId: row.id },
+							description,
+							tool({
+								description: description.description ?? "",
+								inputSchema: jsonSchema({ type: "object" }),
+							}),
+						),
 					),
 				),
 			);
@@ -671,14 +680,27 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 			);
 			const search = (query: string) =>
 				runOnPostgres(
-					searchTools
-						.run(acting, { query }, { kind: "request" })
-						.pipe(Effect.provideService(ConnectorCalls.Service, calls)),
+					Effect.gen(function* () {
+						const database = yield* Database;
+						let reads = 0;
+						const result = yield* searchTools.run(acting, { query }, { kind: "request" }).pipe(
+							Effect.provideService(ConnectorCalls.Service, calls),
+							Effect.provideService(Database, {
+								...database,
+								execute: (run) => {
+									reads += 1;
+									return database.execute(run);
+								},
+							}),
+						);
+						expect(reads).toBeLessThanOrEqual(10);
+						return result;
+					}),
 				);
-			const keyFor = (id: string) => {
+			const keyFor = (id: string, name = described.name) => {
 				const row = installed.find((row) => row.id === id);
 				if (!row) throw new Error("Expected an installed connector");
-				return connectorToolKey(row.handle, described.name);
+				return connectorToolKey(row.handle, name);
 			};
 			const ownTool = keyFor(own);
 			const localTool = keyFor(local);
@@ -707,6 +729,11 @@ describe("turns: steering, interrupting, running, ending and approvals", () => {
 					.where(eq(connector.id, local)),
 			);
 			expect(await search("list_routes")).toMatchObject({ tools: [] });
+			expect(await search("view_invoice_0")).toMatchObject({
+				tools: expect.arrayContaining([
+					expect.objectContaining({ tool: keyFor(local, "view_invoice_0") }),
+				]),
+			});
 			await onDatabase((db) =>
 				db
 					.update(connector)

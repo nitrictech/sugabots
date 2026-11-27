@@ -5,7 +5,7 @@ import {
 } from "@sugabots/contracts";
 import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { type Executor, query } from "../database/database.ts";
 import { connector, placedChat, projectBotConnector } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
@@ -20,7 +20,7 @@ import {
 	useTurnAdmission,
 	whoActs,
 } from "./facts.ts";
-import { defineProof, type Named, type Proof } from "./proof.ts";
+import { defineProof, type Named, named, type Proof } from "./proof.ts";
 
 export interface ReachesEnabledConnector<P, K> extends Proof<"ReachesEnabledConnector", [P, K]> {
 	readonly principal: Named<P, Principal>;
@@ -207,31 +207,81 @@ export const proveCanUseConnector = <P, K>(
 	principal: Named<P, Principal>,
 	connectorId: Named<K, string>,
 	tool: string,
-	listed?: {
-		readonly revision: number;
-		readonly described: Pick<ConnectorTool, "name" | "readOnly" | "destructive"> & {
-			readonly defaultAccess?: ConnectorAccess;
-		};
-	},
+	listed?: ListedTool,
 ) =>
 	Effect.gen(function* () {
-		const { row, reach, mayWrite } = yield* connectorReach(principal, connectorId);
-		if (listed && (listed.revision !== reach.revision || listed.described.name !== tool))
-			return yield* new ResourceHidden({ resource: "connector" });
-		const described = (row.kind === "mcp" ? listed?.described : undefined) ??
-			toolsOf(row).find((described) => described.name === tool) ?? {
-				name: tool,
-				description: null,
-				readOnly: null,
-				destructive: null,
-			};
-		const writeOrDelete = connectorToolWritesOrDeletes(described);
-		if (writeOrDelete && !mayWrite) return yield* new ActionForbidden({ proof: "CanUseConnector" });
+		const facts = yield* connectorReach(principal, connectorId);
+		const use = yield* Effect.fromResult(checkToolUse(facts, tool, listed));
 		const proof: CanUseConnector<P, K> = CanUseConnectorProof.prove([principal, connectorId], {
-			reach,
+			reach: facts.reach,
 			tool,
-			writeOrDelete,
-			access: toolAccessOf(row.toolAccess, described),
+			...use,
 		});
 		return proof;
 	});
+
+type ListedTool = {
+	readonly revision: number;
+	readonly described: Pick<ConnectorTool, "name" | "readOnly" | "destructive"> & {
+		readonly defaultAccess?: ConnectorAccess;
+	};
+};
+
+type OfferedConnectorTool = {
+	readonly connectorId: string;
+	readonly connectorRevision: number;
+	readonly remoteToolName: string;
+	readonly access: ConnectorAccess;
+	readonly described: ListedTool["described"];
+};
+
+export const filterAvailableConnectorTools = <P, Tool extends OfferedConnectorTool>(
+	principal: Named<P, Principal>,
+	tools: Readonly<Record<string, Tool>>,
+) =>
+	Effect.gen(function* () {
+		const byConnector = Map.groupBy(
+			Object.entries(tools).filter(([, offered]) => offered.access !== "off"),
+			([, offered]) => offered.connectorId,
+		);
+		const available = yield* Effect.forEach(byConnector, ([id, offers]) =>
+			named(id, (connector) =>
+				connectorReach(principal, connector).pipe(
+					Effect.map((facts) =>
+						offers.filter(([, offered]) => {
+							const use = checkToolUse(facts, offered.remoteToolName, {
+								revision: offered.connectorRevision,
+								described: offered.described,
+							});
+							return Result.isSuccess(use) && use.success.access !== "off";
+						}),
+					),
+					Effect.orElseSucceed(() => []),
+				),
+			),
+		);
+		return Object.fromEntries(available.flat());
+	});
+
+function checkToolUse(
+	{ row, mayWrite }: Pick<Effect.Success<ReturnType<typeof connectorReach>>, "row" | "mayWrite">,
+	tool: string,
+	listed?: ListedTool,
+): Result.Result<
+	Pick<CanUseConnector<unknown, unknown>, "writeOrDelete" | "access">,
+	ResourceHidden | ActionForbidden
+> {
+	if (listed && (listed.revision !== row.configurationRevision || listed.described.name !== tool))
+		return Result.fail(new ResourceHidden({ resource: "connector" }));
+	const described = (row.kind === "mcp" ? listed?.described : undefined) ??
+		toolsOf(row).find((described) => described.name === tool) ?? {
+			name: tool,
+			description: null,
+			readOnly: null,
+			destructive: null,
+		};
+	const writeOrDelete = connectorToolWritesOrDeletes(described);
+	if (writeOrDelete && !mayWrite)
+		return Result.fail(new ActionForbidden({ proof: "CanUseConnector" }));
+	return Result.succeed({ writeOrDelete, access: toolAccessOf(row.toolAccess, described) });
+}

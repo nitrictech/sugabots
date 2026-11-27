@@ -12,8 +12,10 @@ import { searchOfferedTools } from "../../chats/tools/tool-search/tool.ts";
 import type { Database } from "../../database/database.ts";
 import type { BotPrincipal } from "../../principal.ts";
 import type { Approved } from "../../proofs/approved.ts";
-import { type CanUseConnector, proveCanUseConnector } from "../../proofs/can-use-connector.ts";
-import { named } from "../../proofs/proof.ts";
+import {
+	type CanUseConnector,
+	filterAvailableConnectorTools,
+} from "../../proofs/can-use-connector.ts";
 import type { RunsTurn } from "../../proofs/runs-turn.ts";
 import { processLayer, Tier } from "../../tiers.ts";
 import { type ConnectorSessions, connectorSessions } from "./connector-sessions.ts";
@@ -161,20 +163,8 @@ export function from(discovery: ConnectorCatalog.Interface): Interface {
 				if (!turn || turn.executionNumber !== running.execution) {
 					return yield* new ResourceHidden({ resource: "connector" });
 				}
-				const available = yield* Effect.filter(
-					Object.entries(turn.tools).filter(([, offered]) => offered.access !== "off"),
-					([, offered]) =>
-						named(offered.connectorId, (connector) =>
-							proveCanUseConnector(running.principal, connector, offered.remoteToolName, {
-								revision: offered.connectorRevision,
-								described: offered.described,
-							}).pipe(Effect.map((use) => use.access !== "off")),
-						).pipe(Effect.orElseSucceed(() => false)),
-				);
-				return searchOfferedTools(
-					buildCatalog(Object.fromEntries(available), {}),
-					approved.input.query,
-				);
+				const available = yield* filterAvailableConnectorTools(running.principal, turn.tools);
+				return searchOfferedTools(buildCatalog(available, {}), approved.input.query);
 			}),
 		callTool: (turn, use, approved) =>
 			Effect.gen(function* () {
