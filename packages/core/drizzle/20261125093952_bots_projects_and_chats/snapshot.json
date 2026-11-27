@@ -15272,6 +15272,26 @@
         "n|col|public.notification_delivery.approval_call_id",
         "n|col|public.notification_delivery.approval_id"
       ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "notification_delivery",
+        "notification_delivery_approval_call_idx"
+      ],
+      "writes": [
+        "s|idx|public.notification_delivery_approval_call_idx",
+        "n|idx|public.notification_delivery_approval_call_idx",
+        "e|idx|public.notification_delivery_approval_call_idx",
+        "n|rel|public.notification_delivery_approval_call_idx"
+      ],
+      "reads": [
+        "n|tbl|public.notification_delivery",
+        "n|sch|public",
+        "n|col|public.notification_delivery.approval_call_id"
+      ]
     }
   ],
   "deltas": [
@@ -25215,6 +25235,30 @@
         "name": "notification_delivery_approval_whole",
         "value": "(\"approval_call_id\" is null) = (\"approval_id\" is null)",
         "entityType": "checks"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "notification_delivery",
+        "name": "notification_delivery_approval_call_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "approval_call_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": null,
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
       }
     }
   ]

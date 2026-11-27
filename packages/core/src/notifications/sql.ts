@@ -128,6 +128,7 @@ export const notificationDelivery = pgTable(
 		index("notification_delivery_unsent_idx")
 			.on(table.createdAt)
 			.where(sql`${table.sentAt} is null`),
+		index("notification_delivery_approval_call_idx").on(table.approvalCallId),
 		check(
 			"notification_delivery_approval_whole",
 			sql`(${table.approvalCallId} is null) = (${table.approvalId} is null)`,

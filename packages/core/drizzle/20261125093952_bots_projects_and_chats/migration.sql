@@ -3453,3 +3453,7 @@ INNER JOIN "project" own ON own."default_of_bot_id" = b."id"
 INNER JOIN "connector" c ON c."project_id" = own."id"
 WHERE b."in_shared_pod";--> statement-breakpoint
 ALTER TABLE "bot" DROP COLUMN "in_shared_pod";
+--> statement-breakpoint
+-- ## Approval notifications found by their call
+-- Deleting a tool call deletes the notifications asking to approve it.
+CREATE INDEX "notification_delivery_approval_call_idx" ON "notification_delivery" ("approval_call_id");
