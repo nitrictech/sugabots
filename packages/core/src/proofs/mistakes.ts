@@ -686,8 +686,9 @@ export const projectAutomationsServiceMistakes = named(
 			// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameB], "automations.createWithRoutine">'] Creating an automation with a routine requires approval for that call.
 			yield* automationsService.createWithRoutine(canManage, member, routine.timezone);
 
+			const { timezone } = routine;
 			// @ts-expect-error TS2740 [from type 'Approved<NameA, unknown, [NameB, NameC], "automations.updateInChat">'] Changing an automation from a chat requires approval for that call.
-			yield* automationsService.updateInChat(canManage, automation, target, member, routine.timezone);
+			yield* automationsService.updateInChat(canManage, automation, target, member, timezone);
 
 			yield* automationsService.create(canManage, member, settings);
 
