@@ -4,7 +4,7 @@ import {
 	connectorToolWritesOrDeletes,
 } from "@sugabots/contracts";
 import { ActionForbidden, BotCannotReach, ResourceHidden } from "@sugabots/contracts/errors/proofs";
-import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { Effect, Result } from "effect";
 import { type Executor, query } from "../database/database.ts";
 import { connector, placedChat, project, projectBotConnector, turn } from "../database/schema.ts";
@@ -106,6 +106,49 @@ function enabledConnectorRows(db: Executor, acting: Principal, selected: SQL | u
 		)
 		.where(and(eq(connector.enabled, true), selected));
 }
+
+/** Reports why the current connector settings forbid the recorded call, if they do. */
+export const checkConnectorCallSettings = (call: {
+	readonly turnId: string;
+	readonly connectorId: string;
+	readonly connectorRevision: number | null;
+	readonly remoteToolName: string | null;
+}) =>
+	Effect.gen(function* () {
+		const { connectorRevision, remoteToolName } = call;
+		if (connectorRevision === null || remoteToolName === null) return "connectorChanged";
+		const [current] = yield* query((db) =>
+			db
+				.select({ toolAccess: connector.toolAccess })
+				.from(turn)
+				.innerJoin(placedChat, eq(placedChat.id, turn.chatId))
+				.innerJoin(connector, eq(connector.workspaceId, placedChat.workspaceId))
+				.leftJoin(
+					projectBotConnector,
+					and(
+						eq(projectBotConnector.projectId, placedChat.projectId),
+						eq(projectBotConnector.connectorId, connector.id),
+						eq(projectBotConnector.botId, turn.botId),
+						eq(projectBotConnector.addressRevision, connector.addressRevision),
+					),
+				)
+				.where(
+					and(
+						eq(turn.id, call.turnId),
+						eq(connector.id, call.connectorId),
+						eq(connector.enabled, true),
+						eq(connector.configurationRevision, connectorRevision),
+						or(
+							eq(connector.projectId, placedChat.projectId),
+							isNotNull(projectBotConnector.connectorId),
+						),
+					),
+				)
+				.limit(1),
+		);
+		if (!current) return "connectorChanged";
+		return current.toolAccess[remoteToolName] === "off" ? "toolOff" : undefined;
+	});
 
 export const checkConnectorApprovalPermission = (
 	memberId: string,

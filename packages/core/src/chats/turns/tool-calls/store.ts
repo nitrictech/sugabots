@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { FileWritten, JsonValue, ToolApprovalStatus, ToolCallPart } from "@sugabots/contracts";
 import { ApprovalRefused } from "@sugabots/contracts/errors/proofs";
 import type { UserText } from "@sugabots/errors";
-import { and, desc, eq, exists, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, type SQL, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer } from "effect";
 import {
 	type Database,
@@ -16,15 +16,14 @@ import {
 } from "../../../database/database.ts";
 import {
 	chat,
-	connector,
 	member,
 	message,
-	projectBotConnector,
 	type ToolCallRow,
 	toolCall,
 	turn,
 } from "../../../database/schema.ts";
 import type { ResolvedTargets } from "../../../operations/operation.ts";
+import { checkConnectorCallSettings } from "../../../proofs/can-use-connector.ts";
 import type { RunsTurn } from "../../../proofs/runs-turn.ts";
 import { processLayer, Tier } from "../../../tiers.ts";
 import { ChatEvents } from "../../chat-events.ts";
@@ -513,8 +512,6 @@ export const make = Effect.gen(function* () {
 							db
 								.select({
 									messageId: message.id,
-									workspaceId: chat.workspaceId,
-									botId: turn.botId,
 									status: turn.status,
 									endRequested: turn.endRequested,
 								})
@@ -547,43 +544,14 @@ export const make = Effect.gen(function* () {
 							});
 						const { binding } = input;
 						if (binding.kind === "connector") {
-							const [approvedConnector] = yield* query((db) =>
-								db
-									.select({ toolAccess: connector.toolAccess })
-									.from(connector)
-									.where(
-										and(
-											eq(connector.id, binding.connectorId),
-											eq(connector.workspaceId, scope.workspaceId),
-											eq(connector.enabled, true),
-											or(
-												eq(connector.projectId, runsTurn.project),
-												exists(
-													db
-														.select({ connectorId: projectBotConnector.connectorId })
-														.from(projectBotConnector)
-														.where(
-															and(
-																eq(projectBotConnector.connectorId, connector.id),
-																eq(projectBotConnector.projectId, runsTurn.project),
-																eq(projectBotConnector.botId, scope.botId),
-																eq(projectBotConnector.addressRevision, connector.addressRevision),
-															),
-														),
-												),
-											),
-											eq(connector.configurationRevision, binding.connectorRevision),
-										),
-									)
-									.limit(1),
-							);
-							if (!approvedConnector) {
-								return yield* refuse(APPROVED_CONNECTOR_CHANGED);
-							}
-							// Choosing what bots may do with a tool leaves the revision alone, so
-							// a tool somebody turned off after the approval is caught here.
-							if (approvedConnector.toolAccess[binding.remoteToolName] === "off") {
-								return yield* refuse(APPROVED_TOOL_TURNED_OFF);
+							const refusal = yield* checkConnectorCallSettings({
+								...binding,
+								turnId: row.turnId,
+							});
+							if (refusal) {
+								return yield* refuse(
+									refusal === "toolOff" ? APPROVED_TOOL_TURNED_OFF : APPROVED_CONNECTOR_CHANGED,
+								);
 							}
 						}
 						if (!sameCallAsApproved(row, input)) {

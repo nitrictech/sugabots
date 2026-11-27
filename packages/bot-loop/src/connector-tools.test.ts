@@ -6,6 +6,7 @@ import {
 	seedMember,
 	seedMessage,
 	seedProject,
+	seedProjectBotConnector,
 	seedProjectChat,
 	seedTurnAnswering,
 	setRole,
@@ -15,7 +16,7 @@ import { CALL_TOOL } from "@sugabots/core/chats/tools/tool-search/tool";
 import { aChatWithConnectorAwaitingReply, runningTurns } from "@sugabots/core/chats/turns/testing";
 import { Turns } from "@sugabots/core/chats/turns/turns";
 import type { CommittedEvent } from "@sugabots/core/database/events/outbox";
-import { bot, connector, membership } from "@sugabots/core/database/schema";
+import { bot, connector, membership, projectBotConnector } from "@sugabots/core/database/schema";
 import { closeDatabase, onDatabase, runOnPostgres } from "@sugabots/core/database/testing";
 import { asMember } from "@sugabots/core/operations/chats/testing";
 import { authenticators, principals } from "@sugabots/core/proofs/world.test-support";
@@ -39,6 +40,7 @@ import {
 	calling,
 	callsOf,
 	failedCall,
+	parkedCallOf,
 	resumeAt,
 	scriptedSteps,
 	storedReply,
@@ -139,6 +141,61 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				status: "complete",
 				content: "I need approval. Wiped.",
 			});
+		});
+
+		it.each([
+			"connector disabled",
+			"off in the project",
+			"configuration changed",
+			"tool off",
+		] as const)("closes the approval and wakes the turn after %s", async (change) => {
+			let sourceChatId = chatId;
+			if (change === "off in the project") {
+				const projectId = await seedProject(workspaceId, { leadBotId: botId });
+				await seedProjectBotConnector(workspaceId, projectId, botId, connectorId);
+				const started = await chatsAs(adminId).startProjectChat({
+					projectId,
+					retryKey: crypto.randomUUID(),
+					message: "Remove outdated pages from the wiki.",
+				});
+				sourceChatId = started.chat.id;
+			}
+
+			const execute = vi.fn(async () => ({ removed: true }));
+			const { model, requests } = calling(CALL_TOOL, { tool: "wiki__wipe", arguments: {} });
+			const workflow = await loop.runWorkflow(sourceChatId, {
+				model,
+				connectorTools: wiki("ask", execute),
+			});
+			await workflow.suspended();
+			const { turnId, parked } = await parkedCallOf(workflow.executionId);
+			expect(parked).toMatchObject({ connectorId, approvalStatus: "pending" });
+
+			if (change === "off in the project") {
+				await onDatabase((db) =>
+					db.delete(projectBotConnector).where(eq(projectBotConnector.connectorId, connectorId)),
+				);
+			} else {
+				const changes = {
+					"connector disabled": { enabled: false },
+					"configuration changed": { configurationRevision: 2 },
+					"tool off": { toolAccess: { wipe: "off" as const } },
+				};
+				await onDatabase((db) =>
+					db.update(connector).set(changes[change]).where(eq(connector.id, connectorId)),
+				);
+			}
+
+			const error = "This approval was closed because the connector or its tool settings changed.";
+			await expect(
+				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
+			).rejects.toMatchObject({ userMessage: error });
+			await workflow.completed();
+			expect(await callsOf(turnId)).toMatchObject([
+				{ id: parked.id, status: "failed", approvalStatus: "denied", decidedById: null, error },
+			]);
+			expect(JSON.stringify(requests[1]?.continuationMessages)).toContain(error);
+			expect(execute).not.toHaveBeenCalled();
 		});
 
 		it("refuses a demoted asker's Allow for a pending connector write", async () => {

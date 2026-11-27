@@ -21,7 +21,10 @@ import { isBrowserTool } from "../chats/tools/browser/browser.ts";
 import type { Turns } from "../chats/turns/turns.ts";
 import type { Principal } from "../principal.ts";
 import { proveCanUseChatComputer } from "../proofs/can-use-computer.ts";
-import { checkConnectorApprovalPermission } from "../proofs/can-use-connector.ts";
+import {
+	checkConnectorApprovalPermission,
+	checkConnectorCallSettings,
+} from "../proofs/can-use-connector.ts";
 import { named } from "../proofs/proof.ts";
 import { processLayer, Tier } from "../tiers.ts";
 import { makeDecide } from "./approvals/decide.ts";
@@ -124,6 +127,9 @@ const checkApprovalPermission = (
 				turnId: call.turnId,
 				writeOrDelete: call.writeOrDelete,
 			});
+			if (yield* checkConnectorCallSettings({ ...call, connectorId: call.connectorId })) {
+				return "connectorChanged" as const;
+			}
 			if (call.approvalResolvedTargets && "computer" in call.approvalResolvedTargets) {
 				const principal = yield* principalForApprovalCheck(call.turnId, member, executionNumber);
 				yield* named(principal, principal.chat, (principal, chat) =>
