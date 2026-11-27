@@ -18,6 +18,7 @@ import {
 	isNotNull,
 	isNull,
 	ne,
+	notInArray,
 	or,
 	type SQL,
 	type SQLWrapper,
@@ -49,11 +50,18 @@ import {
 	project,
 	projectBot,
 	projectMember,
+	turn,
 	workspace,
 } from "../database/schema.ts";
 import { outerColumn } from "../database/sql.ts";
 import { isUuid } from "../ids/ids.ts";
-import type { BotPrincipal, Principal, TurnAdmission, TurnBounds } from "../principal.ts";
+import type {
+	AdmittedProject,
+	BotPrincipal,
+	Principal,
+	StoredTurnAdmission,
+	TurnBounds,
+} from "../principal.ts";
 
 /** A project as reach is decided: its workspace and lead bot, and on a bot's default project, that bot. */
 export interface ProjectFacts {
@@ -580,7 +588,6 @@ export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
 		if (asker !== undefined && !memberReaches(home.member, home.project)) return null;
 
 		const memberBounds = hasMemberBounds(facts, asker);
-		const mayBrief = facts.askedBy.kind === "member" && canWriteBrief(facts.reason);
 		const placedBots = memberBounds
 			? []
 			: yield* db
@@ -591,12 +598,6 @@ export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
 			? []
 			: [...new Set([facts.bot, home.project.leadBot, ...placedBots.map(({ id }) => id)])];
 
-		// A brief may go to a bot's default project outside the turn's chat bounds.
-		const projectScope = memberBounds
-			? undefined
-			: mayBrief
-				? isNotNull(project.defaultOfBotId)
-				: inArray(project.defaultOfBotId, chatProjectBotIds);
 		const places =
 			asker === undefined
 				? []
@@ -607,7 +608,10 @@ export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
 							eq(project.deleting, false),
 							ne(project.id, facts.project),
 							or(
-								and(reachesProjectFor(project.id, asker), projectScope),
+								and(
+									reachesProjectFor(project.id, asker),
+									memberBounds ? undefined : inArray(project.defaultOfBotId, chatProjectBotIds),
+								),
 								// A member in these bounds can manage a bot they cannot talk to.
 								memberBounds && home.member && administers(home.member.actor)
 									? and(ne(defaultOfBot.visibility, "personal"), isNull(defaultOfBot.systemBotKey))
@@ -616,7 +620,22 @@ export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
 						),
 						who,
 					);
-		const admission: TurnAdmission = {
+		const briefRecipients =
+			!memberBounds && facts.askedBy.kind === "member" && canWriteBrief(facts.reason)
+				? yield* db
+						.select({ id: project.defaultOfBotId })
+						.from(project)
+						.where(
+							and(
+								eq(project.workspaceId, facts.workspace),
+								eq(project.deleting, false),
+								isNotNull(project.defaultOfBotId),
+								notInArray(project.defaultOfBotId, chatProjectBotIds),
+								reachesProjectFor(project.id, facts.askedBy.member),
+							),
+						)
+				: [];
+		const admission: StoredTurnAdmission = {
 			role: home.member?.actor.workspaceRole ?? null,
 			chatProjectBotIds,
 			projects: Object.fromEntries(
@@ -630,6 +649,9 @@ export const captureTurnAdmission = (db: Executor, facts: TurnFacts) =>
 					},
 				]),
 			),
+			...(briefRecipients.length > 0 && {
+				briefRecipientBotIds: briefRecipients.flatMap(({ id }) => (id === null ? [] : [id])),
+			}),
 		};
 		return admission;
 	});
@@ -676,12 +698,19 @@ export const turnChatPlace = (db: Executor, facts: TurnFacts) =>
 		if (asker === undefined && (facts.askedBy.kind !== "automation" || !facts.run))
 			return undefined;
 		const place = yield* reachFacts(db, facts.project, {
-			...(asker && !facts.admission && { member: asker }),
+			...(asker && !facts.hasAdmission && { member: asker }),
 			bot: facts.bot,
 		});
 		if (!place) return undefined;
-		const admitted = facts.admission?.projects[facts.project];
-		if (facts.admission) {
+		if (facts.hasAdmission) {
+			const [admission] = yield* db
+				.select({
+					role: sql<WorkspaceRole | null>`${turn.admission} ->> 'role'`,
+					place: sql<AdmittedProject | null>`${turn.admission} -> 'projects' -> ${facts.project}::text`,
+				})
+				.from(turn)
+				.where(eq(turn.id, facts.turn));
+			const admitted = admission?.place;
 			if (!admitted?.botReaches || (asker !== undefined && !admitted.memberReaches))
 				return undefined;
 			return {
@@ -691,7 +720,7 @@ export const turnChatPlace = (db: Executor, facts: TurnFacts) =>
 					asker === undefined
 						? undefined
 						: {
-								actor: actorOf(asker, facts.admission.role ?? undefined),
+								actor: actorOf(asker, admission?.role ?? undefined),
 								inProject: admitted.inProject,
 							},
 			};

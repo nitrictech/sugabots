@@ -14,7 +14,7 @@ import type { TurnBounds } from "../principal.ts";
  */
 
 import type { RunTriggerKind } from "@sugabots/contracts";
-import { eq, sql } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { personalBotCreator } from "../authorization/permissions.ts";
@@ -31,7 +31,6 @@ import {
 	turn,
 } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
-import type { TurnAdmission } from "../principal.ts";
 
 export interface TurnFacts {
 	readonly turn: string;
@@ -40,7 +39,7 @@ export interface TurnFacts {
 	readonly bot: string;
 	readonly status: TurnStatus;
 	readonly retrying: boolean;
-	readonly admission: TurnAdmission | null;
+	readonly hasAdmission: boolean;
 	readonly reason: TurnReason | null;
 	/** The project the turn's chat is in; none for a chat in no project, such as a system chat. */
 	readonly project: string | null;
@@ -87,7 +86,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 				bot: turn.botId,
 				status: turn.status,
 				retrying: turn.retrying,
-				admission: turn.admission,
+				hasAdmission: isNotNull(turn.admission).mapWith(Boolean),
 				reason: turn.reason,
 				askerId: turn.askerId,
 				askedByAutomation: turn.askedByAutomation,
@@ -120,7 +119,7 @@ export const turnFacts = (db: Executor, turnId: string) =>
 			bot: row.bot,
 			status: row.status,
 			retrying: row.retrying,
-			admission: row.admission,
+			hasAdmission: row.hasAdmission,
 			reason: row.reason,
 			project: row.project,
 			inOwnChats: row.defaultOfBot === row.bot,

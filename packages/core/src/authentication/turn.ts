@@ -9,7 +9,7 @@ import {
 	type AutomationRun,
 	authenticated,
 	type BotForAsker,
-	type TurnAdmission,
+	type StoredTurnAdmission,
 } from "../principal.ts";
 import { captureTurnAdmission } from "../proofs/facts.ts";
 import { processLayer, Tier } from "../tiers.ts";
@@ -62,12 +62,14 @@ export const make = Effect.gen(function* () {
 					}
 					const mayResume =
 						(ACTIVE_TURN_STATUSES as readonly string[]).includes(facts.status) || facts.retrying;
-					const admission = mayResume
-						? (facts.admission ?? (yield* query((db) => captureTurnAdmission(db, facts))))
-						: null;
-					const execution = admission
-						? yield* newExecution(facts.turn, admission)
-						: { executionNumber: 0, admission: null };
+					const admission =
+						mayResume && !facts.hasAdmission
+							? yield* query((db) => captureTurnAdmission(db, facts))
+							: null;
+					const execution =
+						mayResume && (facts.hasAdmission || admission)
+							? yield* newExecution(facts.turn, admission)
+							: { executionNumber: 0, admission: null };
 					const asker = askerOf(facts);
 					if (asker !== undefined) {
 						return authenticated.botForAsker({
@@ -105,14 +107,16 @@ export const layerNoDeps = processLayer(Layer.effect(Service, make));
  * Raises the turn `turnId`'s execution number and returns it: the number of
  * the execution being authenticated, which every older one no longer is.
  */
-const newExecution = (turnId: string, admission: TurnAdmission) =>
+const newExecution = (turnId: string, admission: StoredTurnAdmission | null) =>
 	Effect.flatMap(
 		query((db) =>
 			db
 				.update(turn)
 				.set({
 					executionNumber: sql`${turn.executionNumber} + 1`,
-					admission: sql`coalesce(${turn.admission}, ${JSON.stringify(admission)}::jsonb)`,
+					...(admission && {
+						admission: sql`coalesce(${turn.admission}, ${JSON.stringify(admission)}::jsonb)`,
+					}),
 				})
 				.where(
 					and(
@@ -120,7 +124,12 @@ const newExecution = (turnId: string, admission: TurnAdmission) =>
 						or(inArray(turn.status, [...ACTIVE_TURN_STATUSES]), eq(turn.retrying, true)),
 					),
 				)
-				.returning({ executionNumber: turn.executionNumber, admission: turn.admission }),
+				.returning({
+					executionNumber: turn.executionNumber,
+					admission: sql<Omit<StoredTurnAdmission, "briefRecipientBotIds"> | null>`
+						${turn.admission} - 'briefRecipientBotIds'
+					`,
+				}),
 		),
 		([raised]) =>
 			raised

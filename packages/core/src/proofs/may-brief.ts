@@ -3,7 +3,7 @@ import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { asksBeforeAllTools, canWriteBrief, turnFacts } from "../authentication/turn-facts.ts";
 import { query } from "../database/database.ts";
-import { type BriefTurnRule, bot } from "../database/schema.ts";
+import { type BriefTurnRule, bot, turn as storedTurn } from "../database/schema.ts";
 import { isUuid } from "../ids/ids.ts";
 import type { BotForAsker, Principal } from "../principal.ts";
 import {
@@ -101,8 +101,8 @@ export const withBriefRecipient = <P, A, E, R>(
 				asker: acting.asker,
 				briefingBot: acting.bot,
 				turnRule,
-				project: destination.id,
-				projectName: destination.defaultOf ? null : destination.name,
+				project: destination.project,
+				projectName: destination.projectName,
 			});
 			return use(proof);
 		});
@@ -133,11 +133,14 @@ const resolveBrief = (acting: BotForAsker, record: BotRecord) =>
 			? (acting.admission.role ?? undefined)
 			: yield* query((db) => roleIn(db, record.workspace, acting.asker));
 		const admitted = botAtAdmission(acting, record);
-		if (!admitted || !memberReachesBot(actorOf(acting.asker, role), admitted))
+		const admittedToBrief =
+			!admitted && acting.admission && (yield* wasBriefRecipient(acting.turn, record.id));
+		if (!admittedToBrief && (!admitted || !memberReachesBot(actorOf(acting.asker, role), admitted)))
 			return yield* Effect.fail(hidden);
-		const destination = (yield* query((db) => projectHasBot(db, project, record.id)))
-			? project
-			: record.defaultProject;
+		const inTurnProject = yield* query((db) => projectHasBot(db, project, record.id));
+		if (!inTurnProject && admittedToBrief)
+			return { turn, destination: { project: record.defaultProject, projectName: null } };
+		const destination = inTurnProject ? project : record.defaultProject;
 		const live = yield* query((db) => reachFacts(db, destination, { member: acting.asker }));
 		const reach = live && useTurnAdmission(acting, live);
 		if (
@@ -147,5 +150,21 @@ const resolveBrief = (acting: BotForAsker, record: BotRecord) =>
 		) {
 			return yield* new ResourceHidden({ resource: "project" });
 		}
-		return { turn, destination: reach.project };
+		return {
+			turn,
+			destination: {
+				project: reach.project.id,
+				projectName: reach.project.defaultOf ? null : reach.project.name,
+			},
+		};
 	});
+
+const wasBriefRecipient = (turnId: string, botId: string) =>
+	query((db) =>
+		db
+			.select({
+				admitted: sql<boolean | null>`${storedTurn.admission} -> 'briefRecipientBotIds' ? ${botId}`,
+			})
+			.from(storedTurn)
+			.where(eq(storedTurn.id, turnId)),
+	).pipe(Effect.map(([row]) => row?.admitted ?? false));

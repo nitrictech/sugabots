@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { query, transaction } from "../database/database.ts";
-import { chat, message, systemChat } from "../database/schema.ts";
+import { chat, message, systemChat, turn } from "../database/schema.ts";
 import { closeDatabase, onDatabase, runOnPostgres } from "../database/testing.ts";
 import type { BotForAsker } from "../principal.ts";
 import {
@@ -83,9 +83,7 @@ describe("TurnAuthentication", () => {
 			chatId,
 			lead.id,
 			{ member: samId },
-			{
-				reason: "collaboration",
-			},
+			{ reason: "mention" },
 		);
 		const principal = await asBotForAsker(turnId);
 
@@ -93,6 +91,33 @@ describe("TurnAuthentication", () => {
 		expect(principal.admission?.projects[helper.defaultProject]).toBeDefined();
 		expect(principal.admission?.projects[unrelated.defaultProject]).toBeUndefined();
 		expect(principal.admission?.projects[otherProject]).toBeUndefined();
+	});
+
+	it("keeps a mention turn's project facts small in a workspace with 5,000 other bots", async () => {
+		const workspaceId = await seedWorkspace();
+		const asker = await seedMember(workspaceId, "editor");
+		const lead = await seedBot(workspaceId);
+		const source = await seedProjectChat(workspaceId, lead.defaultProject, asker);
+		await onDatabase((db) =>
+			db.execute(sql`
+				insert into bot (workspace_id, name, handle, color, eyes, visibility)
+				select ${workspaceId}::uuid, 'Other bot ' || number, 'other-bot-' || number, 'green', 'pill', 'public'
+				from generate_series(1, 5000) as series(number)
+			`),
+		);
+		const turnId = await seedTurnAnswering(source, lead.id, { member: asker });
+		const admitted = await asBotForAsker(turnId);
+		const resumed = await asBotForAsker(turnId);
+		const [size] = await onDatabase((db) =>
+			db
+				.select({ bytes: sql<number>`octet_length(${turn.admission}::text)` })
+				.from(turn)
+				.where(eq(turn.id, turnId)),
+		);
+		expect(Object.keys(admitted.admission?.projects ?? {})).toHaveLength(1);
+		expect(admitted.admission?.projects[lead.defaultProject]).toBeDefined();
+		expect(resumed.admission).toEqual(admitted.admission);
+		expect(size?.bytes).toBeLessThan(205_000);
 	});
 
 	it("stores only reached projects for a personal bot acting in member bounds", async () => {

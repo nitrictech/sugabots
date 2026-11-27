@@ -310,6 +310,49 @@ describe.skipIf(!process.env.DATABASE_URL)("a turn's briefs, against Postgres", 
 		).toEqual([]);
 	});
 
+	it("keeps the brief recipient admitted after Allow checks the asker's current access", async () => {
+		const asker = await seedMember(workspaceId, "editor");
+		const recipient = await seedBot(workspaceId, { createdById: adminId });
+		await onDatabase((db) =>
+			db.update(bot).set({ model: "m", handle: "report-writer" }).where(eq(bot.id, recipient.id)),
+		);
+		const started = await startBotChat(chatsAs(asker), {
+			botId,
+			messageId: crypto.randomUUID(),
+			content: "Ask the other bot to draft the report.",
+		});
+		const title = "Draft the report";
+		const ran = await loop.runTurn(
+			started.chat.id,
+			calling(START_CHAT_TOOL, { title, brief: "Summarize it.", with: "@report-writer" }),
+		);
+		const [parked] = await callsOf(ran.turnId);
+		if (!parked) throw new Error("No call waiting for approval");
+		const allow = () => chatsAs(asker).decide({ toolCallId: parked.id, decision: "allow_once" });
+		const setVisibility = (visibility: "private" | "public") =>
+			onDatabase((db) => db.update(bot).set({ visibility }).where(eq(bot.id, recipient.id)));
+
+		await setVisibility("private");
+		await expect(allow()).rejects.toMatchObject({ _tag: "ActionForbidden" });
+		expect(await callsOf(ran.turnId)).toMatchObject([{ approvalStatus: "pending" }]);
+
+		await setVisibility("public");
+		await allow();
+		await setVisibility("private");
+		expect(await resumeAt(ran, 1)).toEqual({ _tag: "Finished" });
+		expect(await callsOf(ran.turnId)).toMatchObject([
+			{ approvalStatus: "allowed", status: "completed" },
+		]);
+		expect(
+			await onDatabase((db) =>
+				db
+					.select({ project: placedChat.projectId })
+					.from(placedChat)
+					.where(and(eq(placedChat.workspaceId, workspaceId), eq(placedChat.title, title))),
+			),
+		).toEqual([{ project: recipient.defaultProject }]);
+	});
+
 	it.each([false, true])(
 		"closes a renamed recipient's brief approval and wakes its turn (handle reused: %s)",
 		async (reuseHandle) => {
