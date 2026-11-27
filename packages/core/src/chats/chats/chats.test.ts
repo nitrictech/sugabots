@@ -139,7 +139,7 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	 * straight to the database, so it holds no message and nobody has been
 	 * asked to answer.
 	 */
-	const namedChat = async (inProjectId: string, name: string) => {
+	const namedChat = async (inProjectId: string, name: string, createdAt?: Date) => {
 		const { id } = await onDatabase((db) =>
 			seedChat(db, {
 				workspaceId,
@@ -147,6 +147,8 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 				projectId: inProjectId,
 				title: name,
 				startedById: memberId,
+				createdAt,
+				updatedAt: createdAt,
 			}),
 		);
 		await onDatabase((db) => db.insert(chatParticipant).values({ chatId: id, memberId }));
@@ -1254,9 +1256,9 @@ describe.skipIf(!process.env.DATABASE_URL)("chats, against Postgres", async () =
 	});
 
 	it("lists the project's chats, the newest message first, by their names", async () => {
-		const general = await namedChat(projectId, "General");
-		const pricing = await namedChat(projectId, "Pricing");
-		await namedChat(projectId, "Launch");
+		const general = await namedChat(projectId, "General", new Date("2024-01-01T00:00:00Z"));
+		const pricing = await namedChat(projectId, "Pricing", new Date("2024-01-02T00:00:00Z"));
+		await namedChat(projectId, "Launch", new Date("2024-01-03T00:00:00Z"));
 
 		const listed = async () => (await chats.chats(projectId)).chats.map(({ chat }) => chat.title);
 		expect(await listed()).toEqual(["Launch", "Pricing", "General"]);
