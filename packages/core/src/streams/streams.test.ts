@@ -940,13 +940,17 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 				members: [world.vi],
 			});
 			await onDatabase((db) => db.update(bot).set({ model: "m" }).where(eq(bot.id, secret.id)));
-			const erin = await following(await signedIn.member(world.erin), "events.followWorkspace", {
+			const erin = await followingOnTestClock(
+				await signedIn.member(world.erin),
+				"events.followWorkspace",
+				{ workspace: world.workspace },
+			);
+			const viewer = await signedIn.member(world.vi);
+			const vi = await followingOnTestClock(viewer, "events.followWorkspace", {
 				workspace: world.workspace,
 			});
-			const viewer = await signedIn.member(world.vi);
-			const vi = await following(viewer, "events.followWorkspace", { workspace: world.workspace });
 			const chatId = await seedProjectChat(world.workspace, secret.defaultProject, world.ed);
-			const ownChat = await following(viewer, "events.followChat", { chatId });
+			const ownChat = await followingOnTestClock(viewer, "events.followChat", { chatId });
 
 			await call(await signedIn.member(world.ed), "bots.removeMember", {
 				botId: secret.id,
