@@ -278,6 +278,56 @@ describe.skipIf(!process.env.DATABASE_URL)("following streams, which prove again
 		expect(next !== "ended" && next.event).toEqual(changed);
 	});
 
+	it("does not query for unrelated events on a chat follower's workspace stream", async () => {
+		const workspace = await seedWorkspace();
+		const owner = await seedMember(workspace, "owner");
+		const lead = await seedBot(workspace, { createdById: owner });
+		const chatId = await seedProjectChat(workspace, lead.defaultProject, owner);
+		const workspaceFeed = workspaceStream(workspace);
+		const initialRead = Promise.withResolvers<void>();
+		const workspaceEventHandled = Promise.withResolvers<void>();
+		let reads = 0;
+		const { follow: start } = await servedRegistry({
+			clock,
+			eventStore: {
+				...stored,
+				following: (...args) => {
+					reads += 1;
+					initialRead.resolve();
+					return stored.following(...args);
+				},
+			},
+			bus: Layer.succeed(EventBus.Service, {
+				...bus,
+				async *subscribe(stream, options) {
+					for await (const delivery of bus.subscribe(stream, options)) {
+						yield delivery;
+						if (stream === workspaceFeed) workspaceEventHandled.resolve();
+					}
+				},
+			}),
+		});
+		const chat = await pastReady(start)(await signedIn.member(owner), "events.followChat", {
+			chatId,
+		});
+		await initialRead.promise;
+		const readsBefore = reads;
+
+		await commit(workspaceFeed, Audience.forWorkspace(streamEvent("chat.changed", { chatId })));
+		await workspaceEventHandled.promise;
+		const delta = streamEvent("message.delta", {
+			chatId,
+			messageId: randomUUID(),
+			offset: 0,
+			text: "Hello",
+			execution: 1,
+		});
+		await bus.publish(chatStream(chatId), delta);
+
+		expect(await chat.next()).toEqual({ event: delta });
+		expect(reads).toBe(readsBefore);
+	});
+
 	it("resumes from ready when the event table was empty", async () => {
 		const world = await staffed();
 		const ed = await signedIn.member(world.ed);

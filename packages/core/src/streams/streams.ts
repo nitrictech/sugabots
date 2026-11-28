@@ -514,8 +514,11 @@ export const make = Effect.gen(function* () {
 							const { event } = delivery;
 							const controls =
 								(listened === reach && event.type === "reach.changed") ||
-								(listened === own && event.type === "session.ended");
+								(listened === own &&
+									event.type === "session.ended" &&
+									endsSession(event, principal));
 							if (controls) life.onEvent(event, delivery.seq);
+							if (listened !== stream && !controls) return;
 							if (delivery.seq !== undefined) {
 								wakeToRead();
 							} else if (listened === stream && unstoredHeld < UNSTORED_HELD) {
