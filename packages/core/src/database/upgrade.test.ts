@@ -3073,14 +3073,20 @@ it.skipIf(!process.env.DATABASE_URL).each([
 			join(MIGRATIONS, "20261125093952_bots_projects_and_chats/migration.sql"),
 			"utf8",
 		);
-		const [beforeCleanup, cleanupSection, rewriteSection] = migration.split(
-			/(?=-- A finished asking reply|-- The other asking replies)/,
+		const statements = migration.split("--> statement-breakpoint");
+		const cleanupIndex = statements.findIndex((statement) =>
+			/DELETE FROM "message"\s+WHERE "message"\."parts" @> '\[\{"type": "collaboration"\}\]'/.test(
+				statement,
+			),
 		);
-		const cleanup = cleanupSection?.split("--> statement-breakpoint")[0];
-		const rewrite = rewriteSection?.split("--> statement-breakpoint")[0];
-		if (!beforeCleanup || !cleanup || !rewrite) {
+		const cleanup = statements[cleanupIndex];
+		const rewrite = statements
+			.slice(cleanupIndex + 1)
+			.find((statement) => statement.includes('UPDATE "message" SET "parts" ='));
+		if (!cleanup || !rewrite) {
 			throw new Error("The migration has no collaboration cleanup or reply rewrite");
 		}
+		const beforeCleanup = statements.slice(0, cleanupIndex).join("\n");
 		await recreateDatabase(url);
 		try {
 			await migrateTo(url, LAST_MAIN_MIGRATION);
