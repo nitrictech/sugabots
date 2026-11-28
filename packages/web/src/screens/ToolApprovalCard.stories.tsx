@@ -563,6 +563,39 @@ const askingToChangeRoutine = (routineChange: "add" | "replace") =>
 		},
 	});
 
+const replacingRoutine = askingToChangeRoutine("replace");
+
+/** A workspace time zone change closes the request to replace a routine. */
+export const RoutineTimeZoneChanged = meta.story({
+	globals: { ...PHONE, theme: "dark" },
+	args: {
+		call: {
+			...replacingRoutine,
+			status: "failed",
+			finishedAt: "2026-11-10T09:02:00.000Z",
+			approval: {
+				...replacingRoutine.approval,
+				id: "approval-routine",
+				approvers: "chat",
+				status: "denied",
+				decidedByName: null,
+				decidedAt: null,
+				closedBecause: "automationRoutineTimeZoneChanged",
+			},
+		},
+		connector: undefined,
+	},
+	play: async ({ canvas, userEvent }) => {
+		const outcome =
+			"This approval was closed because the workspace time zone changed. Ask Trip Planner to try again.";
+		await waitFor(() => expect(canvas.getByText(outcome)).toBeVisible());
+		await userEvent.click(canvas.getByRole("button", { name: "See request" }));
+		const review = await screen.findByRole("dialog");
+		await expect(review).toHaveTextContent(outcome);
+		await expect(screen.queryByRole("button", { name: /^Allow|^Deny/ })).toBeNull();
+	},
+});
+
 export const CreateWithRoutine = meta.story({
 	parameters: {
 		docs: {

@@ -21,7 +21,7 @@ export const makeControls = Effect.gen(function* () {
 	const turns = yield* TurnStore.Service;
 	const signals = yield* TurnSignals.Service;
 	return {
-		decide: (isMember, canDecide, shownApprovalId, decision, prepareDecision, checkConnector) =>
+		decide: (isMember, canDecide, shownApprovalId, decision, allow, checkConnector) =>
 			operation(
 				"decide",
 				Effect.gen(function* () {
@@ -48,8 +48,10 @@ export const makeControls = Effect.gen(function* () {
 							);
 							const approvalId = shownApprovalId;
 							const reason =
-								(yield* prepareDecision(canDecide, candidate.call, candidate.executionNumber)) ??
-								connectorConflict;
+								decision === "deny"
+									? undefined
+									: ((yield* allow(canDecide, candidate.call, candidate.executionNumber)) ??
+										connectorConflict);
 							if (reason) {
 								const conflict = new ToolApprovalConflict({ reason });
 								yield* toolCalls.withdrawPending(

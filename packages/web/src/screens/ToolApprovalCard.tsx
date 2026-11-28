@@ -346,7 +346,7 @@ export function ApprovalDestination({
 	if (waiting && connectorChanged) {
 		return (
 			<p className="m-0 pb-1.5 text-muted-foreground text-xs">
-				This connector changed after {botName} asked. Answering closes this request and tells{" "}
+				This connector changed after {botName} asked. Choosing Allow closes this request and tells{" "}
 				{botName} why. Ask {botName} to try again.
 			</p>
 		);

@@ -105,6 +105,22 @@ const closedBrief: AnsweredApproval = {
 	answer: { status: "closed", closedAt },
 };
 
+const botCannotJoinRequest = request("11", "failed", {
+	...pending,
+	status: "denied",
+	closedBecause: "botCanNoLongerJoinProject",
+});
+const botCannotJoin: AnsweredApproval = {
+	...botCannotJoinRequest,
+	call: {
+		...botCannotJoinRequest.call,
+		tool: "add_bot_to_project",
+		input: { projectId: revenue.id, botId: "0199a3a0-0000-7000-8000-000000000812" },
+		finishedAt: closedAt,
+	},
+	answer: { status: "closed", closedAt },
+};
+
 const hostApproval = request("04", "awaiting_approval", pending);
 const outside = {
 	...hostApproval,
@@ -177,7 +193,15 @@ const brief: ApprovalRequest = {
 
 const approvals: WorkspaceApprovals = {
 	waiting: [answerable, outside, withoutFields, brief],
-	answered: [answered, stopped, closedBrief, unavailable, blockedHost, switchedOffConnector],
+	answered: [
+		answered,
+		stopped,
+		closedBrief,
+		unavailable,
+		blockedHost,
+		switchedOffConnector,
+		botCannotJoin,
+	],
 };
 
 const meta = preview.meta({
@@ -402,5 +426,20 @@ export const ConnectorSwitchedOff = meta.story({
 			"whoever manages the connector can change its access in the connector's settings",
 		);
 		await expect(canvas.queryByText(/try again/)).toBeNull();
+	},
+});
+
+/** The bot became ineligible to join, and the closed request points to a public bot. */
+export const BotCanNoLongerJoinProject = meta.story({
+	globals: { theme: "light" },
+	render: at(botCannotJoin.call.id),
+	play: async ({ canvas }) => {
+		await expect(
+			await canvas.findByText(
+				"This approval was closed because that bot can't join this project. Ask Growth Desk to add a public bot.",
+			),
+		).toBeVisible();
+		await expect(canvas.getByRole("link", { name: "Open chat" })).toBeVisible();
+		await expect(canvas.queryByRole("button", { name: /^Allow|^Deny/ })).toBeNull();
 	},
 });

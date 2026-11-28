@@ -250,21 +250,20 @@ export type ApprovalCall = Pick<
 /** What members may do to a turn, once proved. */
 export interface ControlsInterface {
 	/**
-	 * Decides the approval `approvalId` of the tool call `canDecide` is about,
-	 * for the member `isMember` names, its approver. In one transaction, once
-	 * the call's turn is locked, it checks the pending approval and runs
-	 * `prepareDecision`. If either check returns a reason to close the approval,
-	 * it closes the request and wakes the turn before returning the conflict.
+	 * decide records and signals the member's decision in the same transaction.
 	 * On Allow, `checkConnector` checks the connector's server before the
-	 * transaction starts. An approval that is no longer current is not found.
-	 * An approval that already has a decision is a conflict.
+	 * transaction and `allow` checks the recorded call under the turn's lock.
+	 * If a check returns a reason, decide closes the request and wakes the turn
+	 * before returning the conflict. Deny records the member's denial.
+	 * An approval that is no longer current is not found. An approval that
+	 * already has a decision is a conflict.
 	 */
 	readonly decide: <P, X, R, ConnectorRequirements = never>(
 		isMember: IsMember<P>,
 		canDecide: CanDecide<P, X>,
 		approvalId: string,
 		decision: ToolApprovalDecision["decision"],
-		prepareDecision: (
+		allow: (
 			canDecide: CanDecide<P, X>,
 			call: ApprovalCall,
 			executionNumber: number,

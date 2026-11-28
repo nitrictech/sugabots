@@ -76,9 +76,8 @@ starts in the bot's own chats. A request to create or change a routine shows
 the time zone it will run in.
 
 If something the request depends on changed after the bot asked, choosing
-**Allow** closes the request and gives the reason. **Deny** also closes a
-connector request if the connector was switched off or its saved settings
-changed.
+**Allow** closes the request and gives the reason. Here's what can change
+while a request waits:
 
 - A connector or its tool settings changed, or the GitHub call would go to a different destination.
 - A connector or one of its tools was switched off. This includes a bot's own

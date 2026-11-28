@@ -144,15 +144,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 		});
 
 		it.each([
-			["connector deleted", "allow_once"],
-			["connector disabled", "allow_once"],
-			["connector disabled", "deny"],
-			["off in the project", "allow_once"],
-			["address changed in the project", "allow_once"],
-			["configuration changed", "allow_once"],
-			["tool off", "allow_once"],
-			["tool off by default", "allow_once"],
-		] as const)("closes after %s on %s", async (change, decision) => {
+			"connector deleted",
+			"connector disabled",
+			"off in the project",
+			"address changed in the project",
+			"configuration changed",
+			"tool off",
+			"tool off by default",
+		] as const)("closes the approval on Allow and wakes the turn after %s", async (change) => {
 			let sourceChatId = chatId;
 			if (change === "off in the project" || change === "address changed in the project") {
 				const projectId = await seedProject(workspaceId, { leadBotId: botId });
@@ -202,7 +201,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				? "This approval was closed because the connector or its tool is now off."
 				: "This approval was closed because the connector or its tool settings changed.";
 			await expect(
-				chatsAs(adminId).decide({ toolCallId: parked.id, decision }),
+				chatsAs(adminId).decide({ toolCallId: parked.id, decision: "allow_once" }),
 			).rejects.toMatchObject({
 				reason: switchedOff ? "connectorOff" : "connectorChanged",
 				userMessage: error,
@@ -1376,7 +1375,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			15_000,
 		);
 
-		it("tells the model a denied call was denied, without making it", async () => {
+		it("records a plain denial even after the connector was switched off", async () => {
 			const execute = vi.fn(async () => ({ removed: true }));
 			const { model, requests } = scriptedSteps(
 				{
@@ -1394,7 +1393,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
 			const [parked] = await callsOf(ran.turnId);
 			if (!parked) throw new Error("no call parked");
 
+			await onDatabase((db) =>
+				db.update(connector).set({ enabled: false }).where(eq(connector.id, connectorId)),
+			);
 			await chatsAs(adminId).decide({ toolCallId: parked.id, decision: "deny" });
+			expect(await callsOf(ran.turnId)).toMatchObject([
+				{
+					id: parked.id,
+					approvalStatus: "denied",
+					decidedById: adminId,
+					approvalClosedBecause: null,
+					error: null,
+				},
+			]);
 			const principal = await ran.authentication.authenticate(ran.turnId);
 			await ran.steps.step(ran.run.request, principal, { turnId: ran.turnId, attempt: 0, step: 1 });
 
