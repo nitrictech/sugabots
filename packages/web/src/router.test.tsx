@@ -67,7 +67,10 @@ describe("moving between pages on a phone", () => {
 });
 
 describe("a chat's address by its id alone", () => {
-	it("goes on to a project's chat, keeping the file it opens", async () => {
+	it.each([
+		{ path: "/suga/chats", focus: "file" },
+		{ path: "/suga/activity/launch", focus: "message" },
+	])("goes on from $path to a project's chat, keeping its $focus", async ({ path, focus }) => {
 		const project = projects[0];
 		if (!project) throw new Error("The fixtures have no project");
 		const chat = {
@@ -77,14 +80,24 @@ describe("a chat's address by its id alone", () => {
 			title: "Launch plan",
 		};
 		client.api.chats.get.mockReturnValue(Effect.succeed(chatDetails(triager, chat)));
-		const file = "0199a3a0-0000-7000-8000-0000000f0001";
+		const target = "0199a3a0-0000-7000-8000-0000000f0001";
 
-		const { router } = mount(`/suga/chats/${chat.id}?file=${file}`);
+		const { router } = mount(`${path}/${chat.id}?${focus}=${target}`);
 
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe(`/suga/projects/${project.slug}/${chat.id}`),
 		);
-		expect(router.state.location.search).toEqual({ file });
+		expect(router.state.location.search).toEqual({ [focus]: target });
 		expect(screen.queryByText("Chat not found")).toBeNull();
+	});
+
+	it("shows chat not found when an old notification names an unavailable chat", async () => {
+		const chatId = "0199a3a0-0000-7000-8000-0000000c0001";
+		mount(`/suga/activity/launch/${chatId}`);
+
+		await screen.findByText("Chat not found");
+		expect(client.api.chats.get).toHaveBeenCalledWith(
+			expect.objectContaining({ params: { chatId } }),
+		);
 	});
 });

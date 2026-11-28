@@ -26,6 +26,7 @@ import {
 	botsRoute,
 	chatByIdRoute,
 	chatRoute,
+	legacyNotificationChatRoute,
 } from "./routes/bots.tsx";
 import { gitHubSetupReturnRoute, signInReturnRoute } from "./routes/connector-returns.tsx";
 import {
@@ -141,6 +142,7 @@ const routeTree = rootRoute.addChildren([
 		projectsRoute,
 		botsRoute,
 		chatByIdRoute,
+		legacyNotificationChatRoute,
 		projectRoute.addChildren([
 			projectIndexRoute,
 			projectNewChatRoute,

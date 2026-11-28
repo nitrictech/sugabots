@@ -354,15 +354,19 @@ describe("a project's automation feed, at its own address", () => {
 		{
 			source: `/suga/projects/${project.slug}/automations/${automationId}`,
 			owner: "project",
+			search: "nestedChatPage",
 		},
 		{
 			source: `/suga/bots/${linear.handle}/automations/${automationId}`,
 			owner: "bot",
+			search: "nestedChatPage",
 		},
-		{ source: feedPage, owner: "project" },
-		{ source: botFeedPage, owner: "bot" },
-		{ source: `/suga/chats/${feedId}`, owner: "bot" },
-	])("opens the run from a legacy link at $source", async ({ source, owner }) => {
+		{ source: feedPage, owner: "project", search: "nestedChatPage" },
+		{ source: botFeedPage, owner: "bot", search: "nestedChatPage" },
+		{ source: `/suga/chats/${feedId}`, owner: "bot", search: "nestedChatPage" },
+		{ source: `/suga/activity/pricing/${feedId}`, owner: "project", search: "threadPage" },
+		{ source: `/suga/activity/pricing/${runChatId}`, owner: "bot", search: "threadPage" },
+	])("opens the run from a legacy link at $source", async ({ source, owner, search }) => {
 		const bot = owner === "bot" ? linear : undefined;
 		const projectId = bot?.defaultProjectId ?? project.id;
 		const botId = bot?.id ?? null;
@@ -394,17 +398,22 @@ describe("a project's automation feed, at its own address", () => {
 			}),
 		);
 		const details = chats[feedId] as ChatDetails;
-		client.api.chats.get.mockReturnValue(
+		client.api.chats.get.mockImplementation(({ params: { chatId } }) =>
 			Effect.succeed({
 				...details,
-				chat: { ...details.chat, projectId, botId },
+				chat: {
+					...details.chat,
+					projectId,
+					botId,
+					...(chatId === runChatId && { id: runChatId, kind: "run" }),
+				},
 				participants: [author],
 				projectBots: [author],
 				automation: details.automation && { ...details.automation, projectId },
 			}),
 		);
 		serveFeed([{ ...ranResult, author }]);
-		const { router } = mount(`${source}?nestedChatPage=${runChatId}`);
+		const { router } = mount(`${source}?${search}=${runChatId}`);
 
 		await waitFor(() =>
 			expect(router.state.location.href).toBe(`${destination}?runChat=${runChatId}`),

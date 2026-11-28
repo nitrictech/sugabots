@@ -18,6 +18,7 @@ import {
 	type Project,
 	type StartedChat,
 } from "@sugabots/contracts";
+import { isApiFailure } from "@sugabots/sdk";
 import {
 	type InfiniteData,
 	infiniteQueryOptions,
@@ -381,13 +382,15 @@ function useChatInProject(
  */
 export function useAnyChatLocation(chatId: string): {
 	found: ChatLocation | undefined;
+	destinationChatId: string | null;
 	isPending: boolean;
 	error: unknown;
 } {
 	const projects = useProjects();
 	const roster = useBots();
 	const opened = useQuery(chatQuery(chatId));
-	const details = opened.data?.chat;
+	const details = opened.isSuccess ? opened.data.chat : undefined;
+	const chatMissing = isApiFailure(opened.error) && opened.error._tag === "NotFound";
 	const project = details?.projectId
 		? projects.data?.find((one) => one.id === details.projectId)
 		: undefined;
@@ -395,8 +398,9 @@ export function useAnyChatLocation(chatId: string): {
 	const found: ChatLocation | undefined = project ? { project } : bot ? { bot } : undefined;
 	return {
 		found,
+		destinationChatId: details?.kind === "run" ? details.rootChatId : chatId,
 		isPending: opened.isPending || projects.isPending || roster.isPending,
-		error: opened.error ?? projects.error ?? roster.error,
+		error: chatMissing ? null : (opened.error ?? projects.error ?? roster.error),
 	};
 }
 

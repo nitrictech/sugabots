@@ -182,8 +182,9 @@ const CHECKED_WORDS: readonly CheckedWord[] = [
 	{
 		word: "thread",
 		// A web forum's, GitHub's comments on a pull request's code, and the old
-		// path under which upgraded computers kept files.
-		otherMeanings: /forum thread|review thread|reviewThreadId|\/workspace\/threads\b/g,
+		// path under which upgraded computers kept files. Sent notifications keep their query key.
+		otherMeanings:
+			/forum thread|review thread|reviewThreadId|\/workspace\/threads\b|\bthreadPage\b/g,
 	},
 	{ word: "conversation" },
 	{ word: "default bot" },

@@ -239,6 +239,7 @@ These identifiers keep their spelling for compatibility. Migrations, and the tes
 | The upgrade test's rows | `packages/core/src/database/upgrade.test*.ts` | It writes an installation as `main` left it, by `main`'s names, and checks what the migrations make of it. |
 | `/api/connections/oauth/callback` | Connector OAuth sign-in | Authorization servers keep this registered callback address when a member signs in again. |
 | Old webhook and GitHub app addresses | `packages/server/src/http/renamed-paths.ts` and its test | GitHub apps and webhook senders keep posting to the addresses they were given before the upgrade, so the server still answers them. |
+| `/activity/…` and `threadPage` | Notification links in `packages/web/src/routes/bots.tsx` and their tests | Notifications sent before the upgrade keep their original addresses and open the chat at the message or run they named. |
 | Old docs addresses | `packages/website/src/renamed-docs.ts` | Links and search results still point at the pages' old names, which redirect to the new ones. |
 | Old names in the upgrade notes | `packages/docs/content/upgrading-to-projects.mdx` | Operators upgrading need to read what pods, routines and connections became. |
 

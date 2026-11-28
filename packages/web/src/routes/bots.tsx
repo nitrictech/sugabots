@@ -4,6 +4,7 @@ import {
 	Link,
 	Navigate,
 	Outlet,
+	redirect,
 	useMatchRoute,
 	useSearch,
 } from "@tanstack/react-router";
@@ -238,20 +239,34 @@ export const chatByIdRoute = createRoute({
 	component: () => {
 		const { chat } = chatByIdRoute.useParams();
 		const search = useSearch({ strict: false }) as ChatSearch;
-		const { found, isPending, error } = useAnyChatLocation(chat);
+		const { found, destinationChatId, isPending, error } = useAnyChatLocation(chat);
 		if (isPending) return <Panes>{null}</Panes>;
-		if (!found) {
+		if (!found || !destinationChatId) {
 			return (
 				<Panes>
 					<EmptyState title={error ? "Could not load this chat" : "Chat not found"} />
 				</Panes>
 			);
 		}
-		if ("project" in found) {
-			return (
-				<Navigate {...chatLink({ project: found.project, chatId: chat })} search={search} replace />
-			);
-		}
-		return <Navigate {...chatLink({ bot: found.bot, chatId: chat })} search={search} replace />;
+		const focus = destinationChatId === chat ? search : { ...search, runChat: chat };
+		const destination =
+			"project" in found
+				? chatLink({ project: found.project, chatId: destinationChatId })
+				: chatLink({ bot: found.bot, chatId: destinationChatId });
+		return <Navigate {...destination} search={focus} replace />;
+	},
+});
+
+export const legacyNotificationChatRoute = createRoute({
+	getParentRoute: () => shellRoute,
+	path: "/activity/$place/$chat",
+	beforeLoad: ({ params: { workspace, chat }, location }) => {
+		const search: Record<string, unknown> = location.search;
+		throw redirect({
+			to: "/$workspace/chats/$chat",
+			params: { workspace, chat },
+			search: validateChatSearch({ ...search, runChat: search.threadPage }),
+			replace: true,
+		});
 	},
 });
