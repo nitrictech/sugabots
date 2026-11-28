@@ -22,6 +22,7 @@ import { chatServicesForTests } from "../testing.ts";
 import { aChatAwaitingReply, openTurn, runningTurns, runOver } from "../turns/testing.ts";
 
 const UNRELATED_MATCHES = 10_000;
+const DATABASE_HOOK_TIMEOUT_MS = 30_000;
 
 const searchReads = query((db) =>
 	db.execute<{ relname: string; read: string }>(
@@ -139,7 +140,7 @@ describe.skipIf(!process.env.DATABASE_URL)("searching within the reached workspa
 		const operations = await operationsForTests({ chats });
 		call = (principal, name, input) =>
 			withBoundedSearchReads(operations[name](principal, input, { kind: "request" }));
-	}, 30_000);
+	}, DATABASE_HOOK_TIMEOUT_MS);
 
 	afterAll(async () => {
 		try {
@@ -148,7 +149,7 @@ describe.skipIf(!process.env.DATABASE_URL)("searching within the reached workspa
 		} finally {
 			vi.unstubAllEnvs();
 		}
-	});
+	}, DATABASE_HOOK_TIMEOUT_MS);
 
 	it("counts unread mentions without reading matches from unrelated chats", async () => {
 		expect(await call(member, "chats.attention", { workspace: workspaceId })).toMatchObject({
