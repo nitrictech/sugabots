@@ -396,7 +396,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				).toHaveLength(1);
 			});
 
-			it("closes a private bot's approval to join a project that became public", async () => {
+			it.each([
+				{ change: "the project became public", startsPrivate: true },
+				{ change: "the bot became private", startsPrivate: false },
+			])("closes an add-bot approval when $change", async ({ startsPrivate }) => {
 				const editor = await seedMember(workspaceId, "editor");
 				const assistant = await seedBot(workspaceId, {
 					assistantOf: editor,
@@ -406,11 +409,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
 					db.update(bot).set({ model: "m" }).where(eq(bot.id, assistant.id)),
 				);
 				const other = await seedBot(workspaceId, {
-					visibility: "private",
-					createdById: editor,
-					members: [editor],
+					visibility: startsPrivate ? "private" : "public",
+					createdById: adminId,
+					members: startsPrivate ? [editor] : [],
 				});
-				const projectId = await seedProject(workspaceId, { leadBotId: botId, members: [editor] });
+				const projectId = await seedProject(workspaceId, {
+					leadBotId: botId,
+					members: [editor],
+					visibility: startsPrivate ? "private" : "public",
+				});
 				const member = chatsAs(editor);
 				const { chat } = await member.startProjectChat({
 					projectId: assistant.defaultProject,
@@ -422,10 +429,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
 				const [parked] = await callsOf(ran.turnId);
 				if (!parked) throw new Error("No call parked");
 				expect(parked).toMatchObject({ approvalStatus: "pending" });
-				await loop.call(await chatsAs(adminId).principal(), "projects.update", {
-					projectId,
-					changes: { visibility: "public" },
-				});
+				const admin = await chatsAs(adminId).principal();
+				if (startsPrivate) {
+					await loop.call(admin, "projects.update", {
+						projectId,
+						changes: { visibility: "public" },
+					});
+				} else {
+					await loop.call(admin, "bots.update", {
+						botId: other.id,
+						changes: { visibility: "private" },
+					});
+				}
 
 				await expect(
 					member.decide({ toolCallId: parked.id, decision: "allow_once" }),
@@ -444,6 +459,39 @@ describe.skipIf(!process.env.DATABASE_URL)(
 						},
 					],
 				});
+			});
+
+			it("closes a public project's approval when its proposed lead becomes private", async () => {
+				const { chat } = await assistantChat();
+				const input = { workspace: workspaceId, name: "Launch", leadBotId: botId };
+				const ran = await loop.runTurn(chat, { model: calling("create_project", input).model });
+				const [parked] = await callsOf(ran.turnId);
+				if (!parked) throw new Error("No call parked");
+				expect(parked).toMatchObject({ approvalStatus: "pending" });
+				const member = chatsAs(adminId);
+				await loop.call(await member.principal(), "bots.update", {
+					botId,
+					changes: { visibility: "private" },
+				});
+
+				await expect(
+					member.decide({ toolCallId: parked.id, decision: "allow_once" }),
+				).rejects.toMatchObject({
+					_tag: "ToolApprovalConflict",
+					reason: "botCanNoLongerLeadProject",
+				});
+				expect(await member.approvals(workspaceId)).toMatchObject({
+					waiting: [],
+					answered: [
+						{
+							call: {
+								id: parked.id,
+								approval: { closedBecause: "botCanNoLongerLeadProject", decidedAt: null },
+							},
+						},
+					],
+				});
+				expect(await projectsNamed(input.name)).toEqual([]);
 			});
 
 			it("searches a project joined by this turn, including after the turn resumes", async () => {

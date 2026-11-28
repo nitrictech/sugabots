@@ -70,6 +70,8 @@ export function closedApprovalMessage(call: ToolCallPart, botName: string): stri
 			return "This approval was closed because the automation was removed.";
 		case "botCanNoLongerJoinProject":
 			return `This approval was closed because that bot can't join this project. Ask ${botName} to add a public bot.`;
+		case "botCanNoLongerLeadProject":
+			return `This approval was closed because that bot can't lead the requested project. Ask ${botName} to use a different lead bot.`;
 		case "toolSwitchedOff":
 			return `This approval was closed because the tool is now off. Whoever manages ${botName} can turn it back on in its settings.`;
 		case "computerUseChanged":

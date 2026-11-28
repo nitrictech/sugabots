@@ -15,8 +15,8 @@ import {
 	type ProjectVisibility,
 } from "@sugabots/contracts";
 import {
-	BotNotPublic,
-	PersonalBotInProject,
+	type BotNotPublic,
+	type PersonalBotInProject,
 	ProjectGone,
 	ProjectHasPrivateBots,
 	ProjectSlugTaken,
@@ -29,7 +29,7 @@ import { isUniqueViolation } from "../../database/errors.ts";
 import type * as schema from "../../database/schema.ts";
 import { bot, membership, project, projectBot, projectMember } from "../../database/schema.ts";
 import { processLayer, Tier } from "../../tiers.ts";
-import { projectColorOf } from "./project.ts";
+import { checkProjectBotVisibility, projectColorOf } from "./project.ts";
 import { type LeadsProjects, refuseWhileLeading } from "./project-leads.ts";
 
 /**
@@ -172,9 +172,7 @@ export const make = Effect.gen(function* () {
 					);
 				return lockRows ? pair.for("share", { of: [bot, project] }) : pair;
 			});
-			if (pair?.botVisibility === "public") return;
-			if (pair?.botVisibility !== "private") return yield* new PersonalBotInProject();
-			if (pair.projectVisibility !== "private") return yield* new BotNotPublic();
+			yield* checkProjectBotVisibility(pair?.botVisibility, pair?.projectVisibility);
 		});
 
 	const addBot = (workspaceId: string, projectId: string, botId: string) =>

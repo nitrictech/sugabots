@@ -7,6 +7,7 @@ import { type Named, named } from "../../proofs/proof.ts";
 import { proveReachesBot } from "../../proofs/reaches-bot.ts";
 import { underWorkspaceLock } from "../../proofs/workspace-lock.ts";
 import { proveCanCreateProjects } from "../../proofs/workspace-permissions.ts";
+import { checkProjectBotVisibility } from "../../workspaces/projects/project.ts";
 import { Projects } from "../../workspaces/projects/projects.ts";
 import { workspaceIdOf } from "../../workspaces/workspace-reference.ts";
 import { defineOperation, unexpectedApprovalProof } from "../operation.ts";
@@ -29,6 +30,8 @@ export const create = defineOperation(
 							yield* proveInWorkspace(principal, workspace),
 						);
 						const lead = yield* proveReachesBot(principal, leadBot);
+						if (call.value.kind === "approvalCheck")
+							yield* checkProjectBotVisibility(lead.facts.visibility, input.visibility);
 						const approved = yield* proveApproved(
 							principal,
 							call,

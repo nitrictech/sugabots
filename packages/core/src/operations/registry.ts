@@ -221,10 +221,13 @@ const checkApprovalPermission = (
 			const computerConflict = computerApprovalFailure(result.failure);
 			if (computerConflict) return computerConflict;
 			if (
-				name === "projects.addBot" &&
-				(result.failure instanceof BotNotPublic || result.failure instanceof PersonalBotInProject)
-			)
-				return "botCanNoLongerJoinProject" as const;
+				result.failure instanceof BotNotPublic ||
+				result.failure instanceof PersonalBotInProject ||
+				(result.failure instanceof ResourceHidden && result.failure.resource === "bot")
+			) {
+				if (name === "projects.addBot") return "botCanNoLongerJoinProject" as const;
+				if (name === "projects.create") return "botCanNoLongerLeadProject" as const;
+			}
 			if (result.failure instanceof ToolSwitchedOff || result.failure instanceof WebToolOff)
 				return "toolSwitchedOff" as const;
 			if (name === "automations.updateInChat" && result.failure instanceof TriggerSetInSettings)

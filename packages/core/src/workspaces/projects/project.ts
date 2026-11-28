@@ -1,16 +1,33 @@
 import {
+	type BotVisibility,
 	DEFAULT_PROJECT_COLOR,
 	type Project,
 	type ProjectColor,
 	type ProjectPermissions,
+	type ProjectVisibility,
 	projectSlugSchema,
 	slugify,
 } from "@sugabots/contracts";
-import { UnusableProjectName } from "@sugabots/contracts/errors/projects";
+import {
+	BotNotPublic,
+	PersonalBotInProject,
+	UnusableProjectName,
+} from "@sugabots/contracts/errors/projects";
 import { Effect, Schema } from "effect";
 import type * as schema from "../../database/schema.ts";
 import type { MemberPlace, ProjectFacts } from "../../proofs/facts.ts";
 import { projectPermissionsShown } from "../../proofs/shown-permissions.ts";
+
+export function checkProjectBotVisibility(
+	botVisibility: BotVisibility | undefined,
+	projectVisibility: ProjectVisibility = "public",
+) {
+	if (botVisibility === undefined || botVisibility === "personal")
+		return Effect.fail(new PersonalBotInProject());
+	if (botVisibility === "private" && projectVisibility === "public")
+		return Effect.fail(new BotNotPublic());
+	return Effect.void;
+}
 
 /** The row as the API returns it: timestamps as ISO strings, no internals. */
 function toProject(
