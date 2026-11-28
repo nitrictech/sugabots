@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { NodeFileSystem } from "@effect/platform-node";
 import { PgClient } from "@effect/sql-pg";
 import { botUpdateSchema, filesWrittenBy, memberStream, streamEvent } from "@sugabots/contracts";
+import { AutomationRepositoryNotConnected } from "@sugabots/contracts/errors/automations";
 import { ResourceHidden } from "@sugabots/contracts/errors/proofs";
 import { automationsContracts } from "@sugabots/contracts/operations/automations";
 import { chatReadsContracts } from "@sugabots/contracts/operations/chat-reads";
@@ -2055,10 +2056,71 @@ it.skipIf(!process.env.DATABASE_URL)(
 			).toEqual([{ bot_id: youngerBotId }]);
 
 			const call = await servedOperations({ runOn: upgraded.run });
-			const input = { projectId: computer.project_id, connectorId };
+			const owner = await upgraded.signIn(legacy.members.pat);
+			const [address] = await upgraded.rows<{
+				projectId: string;
+				automationId: string;
+				triggerId: string;
+			}>(
+				`select project_id as "projectId", automation.id as "automationId",
+				 automation_trigger.id as "triggerId"
+				 from automation join automation_trigger on automation_trigger.automation_id = automation.id
+				 where automation.name = 'Review issues' and automation_trigger.kind = 'github'`,
+			);
+			if (!address) throw new Error("The upgraded GitHub trigger is missing");
+			const trigger = {
+				kind: "github" as const,
+				connectorId,
+				repository: "acme/web",
+				events: ["issue_opened", "issue_comment"] as const,
+			};
 			await expect(
-				call(await upgraded.signIn(legacy.members.pat), "connectors.get", input),
-			).resolves.toMatchObject({ id: connectorId });
+				call(owner, "automations.updateTrigger", { ...address, trigger }),
+			).resolves.toMatchObject({
+				automation: { triggers: [expect.objectContaining(trigger)] },
+			});
+			const editedDeliveryId = "personal-issue-after-edit";
+			await deliverGitHubIssue(upgraded, connectorId, editedDeliveryId);
+			expect(
+				await upgraded.rows("select bot_id from run where trigger_identity = $1", [
+					editedDeliveryId,
+				]),
+			).toEqual([{ bot_id: youngerBotId }]);
+
+			await upgraded.rows(
+				`update connector
+				 set settings = jsonb_set(settings, '{repositories}', (settings->'repositories') || $2::jsonb)
+				 where id = $1`,
+				[
+					connectorId,
+					JSON.stringify([
+						{
+							id: 102,
+							path: "acme/infra",
+							addedById: legacy.members.pat,
+							addedAt: "2026-10-02T09:01:00Z",
+						},
+					]),
+				],
+			);
+			await expect(
+				call(owner, "automations.updateTrigger", {
+					...address,
+					trigger: { ...trigger, repository: "acme/infra" },
+				}),
+			).rejects.toBeInstanceOf(AutomationRepositoryNotConnected);
+			await expect(
+				call(owner, "automations.addTrigger", {
+					projectId: address.projectId,
+					automationId: address.automationId,
+					trigger,
+				}),
+			).rejects.toBeInstanceOf(AutomationRepositoryNotConnected);
+
+			const input = { projectId: computer.project_id, connectorId };
+			await expect(call(owner, "connectors.get", input)).resolves.toMatchObject({
+				id: connectorId,
+			});
 			for (const outsider of [legacy.members.sam, legacy.members.ana]) {
 				await expect(
 					call(await upgraded.signIn(outsider), "connectors.get", input),

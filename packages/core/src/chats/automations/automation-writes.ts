@@ -137,9 +137,22 @@ export const makeAutomationWrites = Effect.gen(function* () {
 					};
 				}
 				case "github": {
-					const settings = yield* inProjectsConnector(project, input);
+					const saved = current?.settings;
+					const keptRepository =
+						current?.migratedGitHubConnectorId === input.connectorId &&
+						saved?.kind === "github" &&
+						saved.connectorId === input.connectorId &&
+						saved.repository.toLowerCase() === input.repository.toLowerCase()
+							? saved.repository
+							: undefined;
+					const repository = keptRepository ?? (yield* findConnectedRepository(project, input));
 					return {
-						values: { ...AutomationStore.NO_WEBHOOK_SECRET, settings, nextScheduledAt: null },
+						values: {
+							...AutomationStore.NO_WEBHOOK_SECRET,
+							settings: { ...input, repository, events: [...new Set(input.events)] },
+							nextScheduledAt: null,
+							migratedGitHubConnectorId: keptRepository === undefined ? null : input.connectorId,
+						},
 						secret: null,
 					};
 				}
@@ -529,18 +542,13 @@ const triggerIn = (scope: Scope, triggerId: string) =>
 	});
 
 /**
- * `trigger`'s settings, once its connector is one of the project's and
- * the repository one of the connector's, written as the connector has it,
- * since GitHub's names ignore case.
+ * findConnectedRepository returns the repository as the project's connector
+ * spells it, since GitHub's names ignore case.
  */
-const inProjectsConnector = (
+const findConnectedRepository = (
 	project: { id: string; workspaceId: string },
 	trigger: GitHubTrigger,
-): Effect.Effect<
-	Extract<schema.AutomationTriggerSettings, { kind: "github" }>,
-	AutomationRepositoryNotConnected,
-	Database
-> =>
+): Effect.Effect<string, AutomationRepositoryNotConnected, Database> =>
 	Effect.gen(function* () {
 		const [connected] = yield* query((db) =>
 			db
@@ -559,12 +567,7 @@ const inProjectsConnector = (
 			(one) => one.path.toLowerCase() === trigger.repository.toLowerCase(),
 		);
 		if (!found) return yield* new AutomationRepositoryNotConnected();
-		return {
-			kind: "github",
-			connectorId: trigger.connectorId,
-			repository: found.path,
-			events: [...new Set(trigger.events)],
-		};
+		return found.path;
 	});
 
 /** What a new webhook trigger checks its callers with until somebody chooses. */

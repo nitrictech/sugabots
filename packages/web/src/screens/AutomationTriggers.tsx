@@ -6,7 +6,7 @@ import {
 import { type ReactNode, useState } from "react";
 import type { TriggerKind } from "@/lib/automation-trigger-words.ts";
 import { failureMessage } from "@/lib/failure.ts";
-import { ownerName, type ResourceOwner, resourceProjectId } from "@/lib/resource-owner.tsx";
+import type { ResourceOwner } from "@/lib/resource-owner.tsx";
 import {
 	defaultSchedule,
 	type RoutineReading,
@@ -414,8 +414,7 @@ function DraftGroups({
 		case "github":
 			return (
 				<RepositoryGroups
-					projectId={resourceProjectId(owner)}
-					ownerName={ownerName(owner)}
+					owner={owner}
 					draft={draft.repository}
 					onChange={(repository) => onChange({ ...draft, repository })}
 				/>

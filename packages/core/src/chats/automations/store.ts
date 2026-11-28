@@ -326,7 +326,7 @@ export const make = Effect.gen(function* () {
 					query((db) =>
 						db
 							.update(automationTrigger)
-							.set({ ...values, migratedGitHubConnectorId: null })
+							.set({ migratedGitHubConnectorId: null, ...values })
 							.where(ofAutomation(scope, triggerId))
 							.returning(),
 					),
@@ -581,7 +581,8 @@ export const NO_WEBHOOK_SECRET = {
 
 /** Trigger settings with the webhook's secret or the routine's next time. */
 export type TriggerValues = Pick<schema.AutomationTriggerRow, "settings" | "nextScheduledAt"> &
-	WebhookSecretValues;
+	WebhookSecretValues &
+	Partial<Pick<schema.AutomationTriggerRow, "migratedGitHubConnectorId">>;
 
 /** The trigger `triggerId`, when it is one of the automation `scope` names, which hasn't been removed. */
 const ofAutomation = (scope: Scope, triggerId: string) =>

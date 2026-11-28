@@ -1,6 +1,6 @@
-import type { Automation, AutomationTriggerInput, Bot } from "@sugabots/contracts";
+import type { Automation, AutomationTriggerInput, Bot, ProjectChatList } from "@sugabots/contracts";
 import { automationTriggers, type TestAutomationTrigger } from "@sugabots/contracts/testing";
-import { HttpResponse, http } from "msw";
+import { delay, HttpResponse, http } from "msw";
 // A menu is portalled to the body, so reaching it means `screen` rather than the story's canvas.
 import { expect, screen, userEvent, waitFor, within } from "storybook/test";
 import preview from "#storybook/preview";
@@ -127,6 +127,32 @@ const pullRequestReviews = placed(10, "Pull request reviews", oncall, {
 	repository: "acme/web",
 	events: ["pull_request_opened", "pull_request_review"],
 });
+const PREVIOUS_GITHUB_CONNECTOR_ID = "0199b0f2-6a4e-7c1d-9a52-3c5e1f2d4b6b";
+const migratedRepository = placed(12, "Review web changes", oncall, {
+	kind: "github",
+	connectorId: PREVIOUS_GITHUB_CONNECTOR_ID,
+	repository: "acme/web",
+	events: ["pull_request_review"],
+});
+
+function migratedRepositoryAnswers() {
+	const item = { ...migratedRepository };
+	return [
+		...automationsAnswer([item]),
+		http.put(
+			`${API}/projects/:projectId/automations/${item.automation.id}/triggers/:triggerId`,
+			async ({ request }) => {
+				const { trigger } = (await request.json()) as { trigger: AutomationTriggerInput };
+				if (trigger.kind !== "github") return HttpResponse.json({}, { status: 400 });
+				item.automation = {
+					...item.automation,
+					triggers: automationTriggers(item.automation.id, trigger),
+				};
+				return HttpResponse.json({ automation: item.automation, secrets: [] });
+			},
+		),
+	];
+}
 
 /** Each project's GitHub app, installed on `acme`, working on `acme/web` and `acme/infra`. */
 const projectRepositories = [
@@ -220,13 +246,14 @@ function automationsAnswer(items: BotsAutomation[]) {
 							title: automation.name,
 							createdAt: automation.createdAt,
 							updatedAt: automation.updatedAt,
-							hostBotId: bot.id,
+							projectId: automation.projectId,
+							botId: bot.id,
 							automationId: automation.id,
 						},
 						mentionsYou: false,
 						status: { failing: false, latestRun: null },
 					})),
-			}),
+			} satisfies ProjectChatList),
 		),
 		http.get(`${API}/chats/:chatId`, ({ params }) => {
 			const one = items.find((item) => feedId(item) === params.chatId);
@@ -472,6 +499,27 @@ export const Webhook = meta.story({
 		await expect(secret).toHaveValue("whsec_Jx7KpQ2mVt9RbL4nYc8WfD3hGs6AzE1u");
 		await expect(secret).toHaveAttribute("type", "password");
 		await expect(dialog.getByRole("button", { name: "Copy signing secret" })).toBeInTheDocument();
+	},
+});
+
+/** Source and Auth stay locked while the saved secret loads. */
+export const WebhookSecretLoading = meta.story({
+	globals: { ...PHONE, theme: "light" },
+	beforeEach({ msw }) {
+		msw.use(
+			http.get(
+				`${API}/projects/:projectId/automations/${incidentIntake.automation.id}/triggers/:triggerId/secret`,
+				() => delay("infinite"),
+			),
+		);
+	},
+	render: () => <StoryApp path={feedPath(incidentIntake)} />,
+	play: async ({ canvas }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		await expect(dialog.getByRole("status")).toHaveTextContent("Loading…");
+		await expect(dialog.getByRole("button", { name: "Source: Generic" })).toBeDisabled();
+		await expect(dialog.getByRole("button", { name: "Auth: HMAC" })).toBeDisabled();
+		await expect(dialog.getByRole("button", { name: "Done" })).toBeEnabled();
 	},
 });
 
@@ -721,6 +769,54 @@ export const RepositoryTrigger = meta.story({
 			await dialog.findByRole("switch", { name: "A pull request is reviewed" }),
 		).toBeChecked();
 		await expect(dialog.getByRole("switch", { name: "Checks fail" })).not.toBeChecked();
+	},
+});
+
+/** An upgraded trigger still shows its repository and lets members change events without a new app. */
+export const RepositoryFromPreviousApp = meta.story({
+	globals: { ...PHONE, theme: "light" },
+	beforeEach({ msw }) {
+		msw.use(
+			...migratedRepositoryAnswers(),
+			http.get(`${API}/projects/:projectId/connectors`, () => HttpResponse.json([])),
+		);
+	},
+	render: () => <StoryApp path={feedPath(migratedRepository)} />,
+	play: async ({ canvas, userEvent }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		await waitFor(() => expect(dialog.getByText(/previous GitHub app/)).toBeVisible());
+		await expect(dialog.getByText("acme/web")).toBeVisible();
+		await expect(dialog.getByRole("link", { name: "Connectors page" })).toBeVisible();
+		await expect(dialog.getByRole("switch", { name: "A pull request is reviewed" })).toBeChecked();
+		await userEvent.click(dialog.getByRole("switch", { name: "Checks fail" }));
+		await userEvent.click(dialog.getByRole("button", { name: "Save" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		const reopened = within(await openFirstTrigger(canvas));
+		await waitFor(() => expect(reopened.getByText(/previous GitHub app/)).toBeVisible());
+		await expect(reopened.getByRole("switch", { name: "Checks fail" })).toBeChecked();
+	},
+});
+
+/** The current repository is shown separately when the bot has another app, even for the same repository. */
+export const RepositoryFromPreviousAppWithReplacement = meta.story({
+	globals: { theme: "dark" },
+	beforeEach({ msw }) {
+		msw.use(...migratedRepositoryAnswers(), ...projectRepositories);
+	},
+	render: () => <StoryApp path={feedPath(migratedRepository)} />,
+	play: async ({ canvas, userEvent }) => {
+		const dialog = within(await openFirstTrigger(canvas));
+		await waitFor(() => expect(dialog.getByText(/previous GitHub app/)).toBeVisible());
+		await expect(dialog.getByText("Current repository")).toBeVisible();
+		await expect(dialog.getByRole("switch", { name: "A pull request is reviewed" })).toBeChecked();
+		await waitFor(() => expect(dialog.getByText(/Pick one of .* to switch apps/)).toBeVisible());
+		await expect(dialog.getByRole("button", { name: "acme/web" })).toBeVisible();
+		await userEvent.click(dialog.getByRole("switch", { name: "Checks fail" }));
+		await userEvent.click(dialog.getByRole("button", { name: "Save" }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		const reopened = within(await openFirstTrigger(canvas));
+		await waitFor(() => expect(reopened.getByText(/previous GitHub app/)).toBeVisible());
+		await expect(reopened.getByRole("switch", { name: "Checks fail" })).toBeChecked();
 	},
 });
 

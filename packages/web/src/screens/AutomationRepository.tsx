@@ -4,6 +4,12 @@ import { REPOSITORY_EVENT_LABELS } from "@/lib/automation-trigger-words.ts";
 import { useConnectors } from "@/lib/connectors.ts";
 import { failureMessage } from "@/lib/failure.ts";
 import { useConnectorRepositories } from "@/lib/github-connectors.ts";
+import {
+	OwnerLink,
+	ownerName,
+	type ResourceOwner,
+	resourceProjectId,
+} from "@/lib/resource-owner.tsx";
 import { Alert } from "@/ui/alert.tsx";
 import { Note } from "@/ui/note.tsx";
 import { SettingsGroup, SettingsRow } from "@/ui/settings-page.tsx";
@@ -37,62 +43,87 @@ export function repositoryTrigger(draft: RepositoryDraft) {
 export const PICK_AN_EVENT_NOTE = "Pick at least one thing for it to run on.";
 
 /**
- * The repository and events groups, for an automation in the project
- * `projectId`, a bot's default one or one members made, called `ownerName`.
- * Its GitHub app's repositories are the ones to choose from.
+ * RepositoryGroups shows the saved repository, events and any repositories
+ * the automation's owner can switch to.
  */
 export function RepositoryGroups({
-	projectId,
-	ownerName,
+	owner,
 	draft,
 	onChange,
 }: {
-	projectId: string;
-	ownerName: string;
+	owner: ResourceOwner;
 	draft: RepositoryDraft;
 	onChange: (draft: RepositoryDraft) => void;
 }) {
+	const projectId = resourceProjectId(owner);
+	const name = ownerName(owner);
 	const connectors = useConnectors(projectId);
 	const connectorId = connectors.data?.find((one) => one.kind === "github")?.id;
 	const { repositories } = useConnectorRepositories(projectId, connectorId);
 	if (connectors.isPending) return null;
 	if (connectors.isError) return <Alert>{failureMessage(connectors.error)}</Alert>;
-	if (connectorId && repositories.isPending) return null;
-	if (repositories.isError) return <Alert>{failureMessage(repositories.error)}</Alert>;
-	const choices = connectorId ? (repositories.data?.repositories ?? []) : [];
-	if (!connectorId || choices.length === 0) {
-		return (
-			<Note>
-				{ownerName} isn't connected to any GitHub repositories yet. Someone who manages its
-				connectors can connect GitHub on its Connectors page.
-			</Note>
-		);
-	}
 	const chosen = draft.repository;
+	const usesDifferentApp = chosen !== undefined && chosen.connectorId !== connectorId;
+	if (!usesDifferentApp && connectorId && repositories.isPending) return null;
+	if (!usesDifferentApp && repositories.isError)
+		return <Alert>{failureMessage(repositories.error)}</Alert>;
+	const choices = connectorId ? (repositories.data?.repositories ?? []) : [];
+	const connectGitHubNote = (
+		<Note>
+			{name} has no GitHub repositories to choose from. Someone who manages its connectors can add
+			one on the{" "}
+			<OwnerLink owner={owner} to={{ page: "connectors" }} className="text-link underline">
+				Connectors page
+			</OwnerLink>
+			.
+		</Note>
+	);
+	if (!usesDifferentApp && choices.length === 0) {
+		return connectGitHubNote;
+	}
+	const switchAppNote =
+		choices.length > 0 ? ` Pick one of ${name}'s repositories to switch apps.` : "";
+	const repositoryNote = usesDifferentApp
+		? `This trigger is still set to use its previous GitHub app.${switchAppNote}`
+		: `${name}'s repositories.`;
 	const isChosen = (choice: (typeof choices)[number]) =>
-		connectorId === chosen?.connectorId &&
+		chosen !== undefined &&
+		connectorId === chosen.connectorId &&
 		choice.repository.toLowerCase() === chosen.repository.toLowerCase();
 	return (
 		<>
-			<SettingsGroup label="Repository" note={`${ownerName}'s repositories.`}>
-				{choices.map((choice) => (
+			<SettingsGroup label="Repository" note={repositoryNote}>
+				{usesDifferentApp && (
 					<SettingsRow
-						key={choice.repository}
-						label={<span className="font-mono text-xs">{choice.repository}</span>}
-						trailing={
-							isChosen(choice) ? (
-								<Check aria-hidden size={16} strokeWidth={2.4} className="text-link" />
-							) : undefined
-						}
-						onClick={() =>
-							onChange({
-								...draft,
-								repository: { connectorId, repository: choice.repository },
-							})
-						}
+						label={<span className="font-mono text-xs">{chosen.repository}</span>}
+						sub="Current repository"
 					/>
-				))}
+				)}
+				{connectorId &&
+					choices.map((choice) => (
+						<SettingsRow
+							key={choice.repository}
+							label={<span className="font-mono text-xs">{choice.repository}</span>}
+							trailing={
+								isChosen(choice) ? (
+									<Check aria-hidden size={16} strokeWidth={2.4} className="text-link" />
+								) : undefined
+							}
+							onClick={() =>
+								onChange({
+									...draft,
+									repository: { connectorId, repository: choice.repository },
+								})
+							}
+						/>
+					))}
 			</SettingsGroup>
+			{usesDifferentApp && repositories.isError && (
+				<Alert>{failureMessage(repositories.error)}</Alert>
+			)}
+			{usesDifferentApp &&
+				(!connectorId || (repositories.isSuccess && choices.length === 0)) &&
+				connectGitHubNote}
 			<SettingsGroup
 				label="Runs when"
 				note={
