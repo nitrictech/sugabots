@@ -15697,6 +15697,26 @@
         "n|tbl|public.automation_trigger",
         "n|sch|public"
       ]
+    },
+    {
+      "statementType": "create_index",
+      "statementTarget": [
+        "index",
+        "public",
+        "automation_trigger",
+        "automation_trigger_migrated_github_connector_idx"
+      ],
+      "writes": [
+        "s|idx|public.automation_trigger_migrated_github_connector_idx",
+        "n|idx|public.automation_trigger_migrated_github_connector_idx",
+        "e|idx|public.automation_trigger_migrated_github_connector_idx",
+        "n|rel|public.automation_trigger_migrated_github_connector_idx"
+      ],
+      "reads": [
+        "n|tbl|public.automation_trigger",
+        "n|sch|public",
+        "n|col|public.automation_trigger.migrated_github_connector_id"
+      ]
     }
   ],
   "deltas": [
@@ -26162,6 +26182,30 @@
         "generated": null,
         "identity": null,
         "entityType": "columns"
+      }
+    },
+    {
+      "op": "create",
+      "row": {
+        "schema": "public",
+        "table": "automation_trigger",
+        "name": "automation_trigger_migrated_github_connector_idx",
+        "nameExplicit": true,
+        "columns": [
+          {
+            "value": "migrated_github_connector_id",
+            "isExpression": false,
+            "asc": true,
+            "nullsFirst": false,
+            "opclass": null
+          }
+        ],
+        "isUnique": false,
+        "where": "\"migrated_github_connector_id\" is not null",
+        "with": "",
+        "method": "btree",
+        "concurrently": false,
+        "entityType": "indexes"
       }
     }
   ]

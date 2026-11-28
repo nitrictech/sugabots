@@ -13,6 +13,7 @@ import type { RepositoryActivity } from "../../providers/connectors/github/githu
 import { defaultProjectOf } from "../../workspaces/projects/project-reads.ts";
 import { chatServicesForTests } from "../testing.ts";
 import { Automations } from "./automations.ts";
+import { findGitHubTriggers } from "./connector-events.ts";
 import { anAutomationAdmin, automationsAs } from "./testing.ts";
 
 const opened: RepositoryActivity = {
@@ -142,6 +143,55 @@ describe.skipIf(!process.env.DATABASE_URL)("connector automations, against Postg
 				),
 		);
 		expect(ran).toEqual([{ automationId: ours.automation.id }]);
+	});
+
+	it("finds a project's GitHub trigger without scanning other projects' triggers", async () => {
+		await repositoryAutomation("acme/web", ["pull_request_opened"]);
+		const other = await anotherBotOf(admin);
+		const otherConnectorId = await gitHubConnectorWith(
+			admin.workspaceId,
+			other.projectId,
+			"acme/web",
+		);
+		const { automation } = await repositoryAutomation("acme/web", ["pull_request_opened"], {
+			projectId: other.projectId,
+			connectorId: otherConnectorId,
+		});
+		await onDatabase((db) =>
+			db.execute(sql`
+				insert into automation_trigger (workspace_id, automation_id, settings)
+				select workspace_id, automation_id, settings
+				from automation_trigger cross join generate_series(1, 50000)
+				where automation_id = ${automation.id}
+			`),
+		);
+		await onDatabase((db) => db.execute(sql`analyze automation, automation_trigger, connector`));
+
+		const [explained] = await onDatabase((db) =>
+			db.execute<{
+				"QUERY PLAN": [
+					{
+						Plan: {
+							"Actual Rows": number;
+							"Shared Hit Blocks": number;
+							"Shared Read Blocks": number;
+						};
+					},
+				];
+			}>(
+				sql`explain (analyze, buffers, timing off, format json) ${findGitHubTriggers(db, {
+					workspaceId: admin.workspaceId,
+					connectorId,
+					repository: opened.repository,
+					event: opened.event,
+				}).getSQL(true)}`,
+				"objects",
+			),
+		);
+		const plan = explained?.["QUERY PLAN"][0].Plan;
+		if (!plan) throw new Error("Postgres did not return a plan for GitHub trigger lookup");
+		expect(plan["Actual Rows"]).toBe(1);
+		expect(plan["Shared Hit Blocks"] + plan["Shared Read Blocks"]).toBeLessThan(100);
 	});
 });
 

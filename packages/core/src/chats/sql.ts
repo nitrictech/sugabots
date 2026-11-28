@@ -138,6 +138,9 @@ export const automationTrigger = pgTable(
 			sql`${table.kind} = 'routine' or ${table.nextScheduledAt} is null`,
 		),
 		index("automation_trigger_automation_idx").on(table.automationId, table.createdAt),
+		index("automation_trigger_migrated_github_connector_idx")
+			.on(table.migratedGitHubConnectorId)
+			.where(sql`${table.migratedGitHubConnectorId} is not null`),
 		index("automation_trigger_due_idx")
 			.on(table.nextScheduledAt, table.id)
 			.where(sql`${table.nextScheduledAt} is not null`),

@@ -1193,7 +1193,7 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 			).toEqual([{ project_id: legacy.pods.family }]);
 			expect(
 				await upgraded.rows(
-					`select automation.state, project.default_of_bot_id
+					`select automation.state, project.default_of_bot_id, automation_trigger.migrated_github_connector_id
 					 from automation_trigger join automation on automation.id = automation_trigger.automation_id
 					 join project on project.id = automation.project_id
 					 where automation_trigger.kind = 'github' and automation.name = 'Triage issues'
@@ -1202,8 +1202,16 @@ describe.skipIf(!process.env.DATABASE_URL).for<Store>(["postgres", "filesystem"]
 					[legacy.familyGitHubConnector],
 				),
 			).toEqual([
-				{ state: "enabled", default_of_bot_id: legacy.bots.planner },
-				{ state: "enabled", default_of_bot_id: legacy.bots.budget },
+				{
+					state: "enabled",
+					default_of_bot_id: legacy.bots.planner,
+					migrated_github_connector_id: legacy.familyGitHubConnector,
+				},
+				{
+					state: "enabled",
+					default_of_bot_id: legacy.bots.budget,
+					migrated_github_connector_id: legacy.familyGitHubConnector,
+				},
 			]);
 			expect(
 				await upgraded.rows(

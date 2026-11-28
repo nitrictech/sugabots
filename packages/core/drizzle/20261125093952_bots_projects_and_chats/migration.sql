@@ -3415,4 +3415,5 @@ ALTER TABLE "automation_trigger" DROP CONSTRAINT "automation_trigger_digest_vali
 ALTER TABLE "automation_trigger" ADD COLUMN "migrated_github_connector_id" uuid;--> statement-breakpoint
 UPDATE "automation_trigger" AS trigger SET "migrated_github_connector_id" = saved."connector_id"
 FROM "migrated_github_trigger" AS saved
-WHERE trigger."id" = saved."trigger_id";
+WHERE trigger."id" = saved."trigger_id";--> statement-breakpoint
+CREATE INDEX "automation_trigger_migrated_github_connector_idx" ON "automation_trigger" ("migrated_github_connector_id") WHERE "migrated_github_connector_id" IS NOT NULL;
