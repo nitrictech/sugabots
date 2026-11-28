@@ -1,7 +1,7 @@
 import { createMCPClient, type ListToolsResult } from "@ai-sdk/mcp";
 import type { ConnectorTool } from "@sugabots/contracts";
 import { type UserText, userText } from "@sugabots/errors";
-import type { JSONSchema7, Tool, ToolExecutionOptions } from "ai";
+import { type JSONSchema7, jsonSchema, type Tool, type ToolExecutionOptions } from "ai";
 import { VERSION } from "../../version.ts";
 import { type EgressHttpClient, EgressRefused } from "../network/egress.ts";
 import { upstreamErrorText } from "../upstream-error-text.ts";
@@ -60,6 +60,7 @@ export interface ServerSession {
 }
 
 const SERVER_TIMEOUT_MS = 15_000;
+const MAX_TOOL_LIST_PAGES = 32;
 export const SERVER_CLOSE_TIMEOUT_MS = 2_000;
 
 /** The JSON-RPC error a server answers with when it does not speak the protocol version asked for. */
@@ -103,37 +104,32 @@ export async function connectServer(
 		if (!isServerError(cause) || cause.code !== UNSUPPORTED_PROTOCOL_VERSION) throw cause;
 		return open(false);
 	});
-	const runnable = new WeakMap<ServerListing, Record<string, Tool>>();
 	return {
 		list: async () => {
-			const listed = await client.listTools({ options: { timeout: SERVER_TIMEOUT_MS } });
-			const callable = client.toolsFromDefinitions(listed);
-			const tools = listed.tools.flatMap((definition) => {
-				const tool = callable[definition.name];
-				return tool
-					? [
-							{
-								described: {
-									name: definition.name,
-									description: definition.description ?? null,
-									readOnly: definition.annotations?.readOnlyHint ?? null,
-									destructive: definition.annotations?.destructiveHint ?? null,
-								},
-								inputSchema: definition.inputSchema as JSONSchema7,
-								tool: { inputSchema: tool.inputSchema },
-							},
-						]
-					: [];
-			});
-			return { tools, definitions: listed, instructions: client.instructions };
+			const signal = AbortSignal.timeout(SERVER_TIMEOUT_MS);
+			const definitions: ServerToolDefinitions = [];
+			let cursor: string | undefined;
+			for (let page = 0; page < MAX_TOOL_LIST_PAGES; page++) {
+				const listed = await client.listTools({
+					params: cursor === undefined ? undefined : { cursor },
+					options: { signal, timeout: SERVER_TIMEOUT_MS },
+				});
+				for (const definition of listed.tools) definitions.push(definition);
+				cursor = listed.nextCursor;
+				if (cursor === undefined) {
+					return {
+						tools: definitions.map(describeTool),
+						definitions: { tools: definitions },
+						instructions: client.instructions,
+					};
+				}
+			}
+			throw new Error(`The MCP server listed more than ${MAX_TOOL_LIST_PAGES} pages of tools`);
 		},
 		run: async (listing, name, input, options) => {
-			let tools = runnable.get(listing);
-			if (!tools) {
-				tools = client.toolsFromDefinitions(listing.definitions);
-				runnable.set(listing, tools);
-			}
-			const execute = tools[name]?.execute;
+			const definition = listing.definitions.tools.findLast((tool) => tool.name === name);
+			if (!definition) throw new Error(`The listing has no tool called ${name}`);
+			const execute = client.toolsFromDefinitions({ tools: [definition] })[name]?.execute;
 			if (!execute) throw new Error(`The listing has no tool called ${name}`);
 			try {
 				return await execute(input, options);
@@ -152,6 +148,28 @@ export async function connectServer(
 			closeSignal = signal;
 			await client.close();
 			if (closeError) throw closeError.cause;
+		},
+	};
+}
+
+function describeTool(definition: ServerToolDefinitions[number]): ServerTool {
+	const inputSchema = definition.inputSchema as JSONSchema7;
+	return {
+		described: {
+			name: definition.name,
+			description: definition.description ?? null,
+			readOnly: definition.annotations?.readOnlyHint ?? null,
+			destructive: definition.annotations?.destructiveHint ?? null,
+		},
+		inputSchema,
+		get tool() {
+			return {
+				inputSchema: jsonSchema({
+					...inputSchema,
+					properties: inputSchema.properties ?? {},
+					additionalProperties: false,
+				}),
+			};
 		},
 	};
 }

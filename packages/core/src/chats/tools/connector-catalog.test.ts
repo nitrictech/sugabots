@@ -8,6 +8,8 @@ import {
 	seedWorkspace,
 } from "../../authentication/seed.test-support.ts";
 import { closeDatabase, runOnPostgres, servedOnPostgres } from "../../database/testing.ts";
+import { proveCanReachConnector } from "../../proofs/can-use-connector.ts";
+import { named } from "../../proofs/proof.ts";
 import { authenticators, principals } from "../../proofs/world.test-support.ts";
 import { ConnectorStore } from "../../providers/connectors/connector-store.ts";
 import { Egress } from "../../providers/network/egress.ts";
@@ -16,6 +18,78 @@ import { ConnectorCatalog } from "./connector-catalog.ts";
 import { NO_TURN } from "./testing.ts";
 
 afterAll(closeDatabase);
+
+it("offers tools on later MCP pages and invalidates approval when a later page changes", async () => {
+	const workspaceId = await seedWorkspace();
+	const admin = await seedMember(workspaceId, "admin");
+	const bot = await seedBot(workspaceId, { createdById: admin });
+	const projectId = bot.defaultProject;
+	const chatId = await seedProjectChat(workspaceId, projectId, admin);
+	const principal = await principals(await authenticators()).botFor(admin, bot.id, chatId);
+	const store = await runOnPostgres(
+		ConnectorStore.Service.pipe(Effect.provide(ConnectorStore.layer)),
+	);
+	const connector = await runOnPostgres(
+		store.create(workspaceId, projectId, admin, {
+			name: "Wiki",
+			url: "https://wiki.example.com/mcp",
+			kind: "mcp",
+		}),
+	);
+	let publishDescription = "Publishes a draft.";
+	const fetchMcp: typeof fetch = async (input, init) => {
+		const request = new Request(input, init);
+		if (request.method === "GET") return new Response(null, { status: 405 });
+		const { id, method, params } = (await request.json()) as {
+			id?: number;
+			method: string;
+			params?: { cursor?: string };
+		};
+		const reply = (result: unknown) => Response.json({ jsonrpc: "2.0", id, result });
+		if (method === "initialize") {
+			return reply({
+				protocolVersion: "2025-11-25",
+				serverInfo: { name: "Wiki", version: "1" },
+				capabilities: { tools: {} },
+			});
+		}
+		if (method === "tools/list") {
+			const inputSchema = { type: "object" };
+			return params?.cursor === "drafts"
+				? reply({ tools: [{ name: "publish", description: publishDescription, inputSchema }] })
+				: reply({ tools: [{ name: "lookup", inputSchema }], nextCursor: "drafts" });
+		}
+		if (id === undefined) return new Response(null, { status: 202 });
+		return Response.json({
+			jsonrpc: "2.0",
+			id,
+			error: { code: -32601, message: "Method not found" },
+		});
+	};
+	const catalog = ConnectorCatalog.from({
+		connectors: store,
+		httpClients: { for: () => fetchMcp },
+	});
+	const offered = await runOnPostgres(
+		catalog.forTurn(workspaceId, { projectId, ownProjectId: null }, { ...NO_TURN, principal }),
+	);
+	try {
+		expect(Object.keys(offered.tools)).toEqual(["wiki__lookup", "wiki__publish"]);
+		const canStillApprove = () =>
+			runOnPostgres(
+				named(principal, connector.id, (acting, id) =>
+					proveCanReachConnector(acting, id).pipe(
+						Effect.flatMap((reach) => catalog.checkApproval(reach, "lookup", {}, null)),
+					),
+				),
+			);
+		await expect(canStillApprove()).resolves.toBe(true);
+		publishDescription = "Publishes a draft and notifies its readers.";
+		await expect(canStillApprove()).resolves.toBe(false);
+	} finally {
+		await offered.close();
+	}
+});
 
 it("excludes a switched-off built-in connector from a turn’s tools and addable connectors", async () => {
 	const workspaceId = await seedWorkspace();

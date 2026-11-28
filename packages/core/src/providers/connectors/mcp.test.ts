@@ -2,8 +2,26 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { listServerTools } from "./mcp.ts";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { connectServer, listServerTools } from "./mcp.ts";
+
+const { builtTools } = vi.hoisted(() => ({ builtTools: vi.fn() }));
+
+vi.mock("@ai-sdk/mcp", async (importOriginal) => {
+	const sdk = await importOriginal<typeof import("@ai-sdk/mcp")>();
+	return {
+		...sdk,
+		createMCPClient: async (...args: Parameters<typeof sdk.createMCPClient>) => {
+			const client = await sdk.createMCPClient(...args);
+			const build = client.toolsFromDefinitions.bind(client);
+			vi.spyOn(client, "toolsFromDefinitions").mockImplementation((definitions, options) => {
+				builtTools(definitions.tools.map(({ name }) => name));
+				return build(definitions, options);
+			});
+			return client;
+		},
+	};
+});
 
 /**
  * The tool lister against a real MCP server in this process, so the whole
@@ -74,6 +92,32 @@ afterAll(async () => {
 });
 
 describe("listing a server's tools", () => {
+	it("builds only the selected SDK tool when calling from a listing", async () => {
+		const session = await connectServer(
+			{ url, headers: { "x-fixture-key": "open-sesame" } },
+			fetch,
+		);
+		try {
+			builtTools.mockClear();
+			const listing = await session.list();
+			const result = await session.run(
+				listing,
+				"wipe",
+				{},
+				{
+					toolCallId: "wipe-1",
+					messages: [],
+					context: undefined,
+				},
+			);
+
+			expect(result).toMatchObject({ content: [{ type: "text", text: "gone" }] });
+			expect(builtTools.mock.calls).toEqual([[["wipe"]]]);
+		} finally {
+			await session.close();
+		}
+	});
+
 	it("sends the secret header and reads back each tool as the server described it", async () => {
 		const found = await listServerTools(
 			{ url, headers: { "x-fixture-key": "open-sesame" } },
